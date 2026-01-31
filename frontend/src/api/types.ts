@@ -102,6 +102,7 @@ export interface Stream {
   thumbnail_url?: string;
   tags: StreamTag[];
   participants: Singer[];  // 參與者
+  channel_owner?: Singer;  // 頻道擁有者
   is_processed: boolean;   // 處理完成
   is_hidden: boolean;      // 隱藏
   created_at: string;

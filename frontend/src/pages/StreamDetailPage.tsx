@@ -540,6 +540,7 @@ export default function StreamDetailPage() {
   const [participants, setParticipants] = useState<Singer[]>([]);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editableStreamInfo, setEditableStreamInfo] = useState<EditableStreamInfo | null>(null);
+  const [vocalistPopupSingers, setVocalistPopupSingers] = useState<Singer[] | null>(null);
 
   const { data: stream, isLoading } = useQuery({
     queryKey: ['stream', id],
@@ -547,6 +548,13 @@ export default function StreamDetailPage() {
     enabled: !!id,
     staleTime: 0, // 確保每次進入頁面都重新載入
   });
+
+  // 當 stream 資料載入後，設置頻道擁有者
+  useEffect(() => {
+    if (stream?.channel_owner) {
+      setChannelOwner(stream.channel_owner);
+    }
+  }, [stream]);
 
   // 更新 Stream 資訊
   const updateStreamMutation = useMutation({
@@ -719,8 +727,22 @@ export default function StreamDetailPage() {
           isHidden: stream.is_hidden,
         });
 
-        // 設定參與者列表
-        setParticipants(stream.participants || []);
+        // 設定參與者列表（包括表演中的所有歌唱者）
+        const allSingers = new Map<string, Singer>();
+        
+        // 先添加stream.participants
+        (stream.participants || []).forEach(p => allSingers.set(p.id, p));
+        
+        // 再添加所有performances中的歌唱者
+        if (stream.performances.length > 0) {
+          stream.performances.forEach(perf => {
+            perf.singers.forEach(singer => {
+              allSingers.set(singer.id, singer);
+            });
+          });
+        }
+        
+        setParticipants(Array.from(allSingers.values()));
 
         // 載入現有セトリ
         if (stream.performances.length > 0) {
@@ -1192,6 +1214,63 @@ export default function StreamDetailPage() {
         />
       )}
 
+      {/* Vocalist Popup */}
+      {vocalistPopupSingers && (
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+          onClick={() => setVocalistPopupSingers(null)}
+        >
+          <div 
+            className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-bold text-gray-900">ボーカル一覧</h3>
+              <button
+                onClick={() => setVocalistPopupSingers(null)}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="space-y-2 max-h-96 overflow-y-auto">
+              {vocalistPopupSingers.map((singer) => (
+                <Link
+                  key={singer.id}
+                  to={`/singers/${singer.id}`}
+                  className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 transition-colors"
+                  onClick={() => setVocalistPopupSingers(null)}
+                >
+                  <img
+                    src={
+                      singer.photo_url ||
+                      `https://holodex.net/statics/channelImg/${singer.id}/50.png`
+                    }
+                    alt={singer.name}
+                    className="w-12 h-12 rounded-full border-2 border-gray-200"
+                    onError={(e) => {
+                      e.currentTarget.onerror = null;
+                      e.currentTarget.src = `https://holodex.net/statics/channelImg/${singer.id}/50.png`;
+                    }}
+                  />
+                  <div className="flex-1">
+                    <div className="font-medium text-gray-900">{singer.name}</div>
+                    {singer.english_name && (
+                      <div className="text-sm text-gray-500">{singer.english_name}</div>
+                    )}
+                  </div>
+                  <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                </Link>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Setlist Section - Unified View */}
       <div>
         <div className="flex justify-between items-center mb-4">
@@ -1232,26 +1311,7 @@ export default function StreamDetailPage() {
         {isEditing ? (
           /* Editable Setlist */
           <div className="bg-white rounded-lg shadow-sm border p-6">
-            {/* Channel Owner Info */}
-            {channelOwner && (
-              <div className="mb-4 p-3 bg-gray-50 rounded-lg flex items-center gap-3">
-                {channelOwner.photo_url && (
-                  <img
-                    src={channelOwner.photo_url}
-                    alt={channelOwner.name}
-                    className="w-10 h-10 rounded-full"
-                    onError={(e) => {
-                      e.currentTarget.onerror = null;
-                      e.currentTarget.src = `https://holodex.net/statics/channelImg/${channelOwner.id}/50.png`;
-                    }}
-                  />
-                )}
-                <div>
-                  <p className="text-sm text-gray-500">デフォルト歌手</p>
-                  <p className="font-medium text-gray-900">{channelOwner.name}</p>
-                </div>
-              </div>
-            )}
+            {/* Editable songs list will default to channel owner as vocalist */}
 
             {editableSongs.length > 0 ? (
               <div className="space-y-4">
@@ -1405,13 +1465,72 @@ export default function StreamDetailPage() {
                       </div>
                     </div>
 
-                    {/* Singer Info */}
-                    {channelOwner && song.singerIds.includes(channelOwner.id) && (
-                      <div className="mt-4 flex items-center gap-2 text-sm text-gray-600">
-                        <span>歌手:</span>
-                        <span className="font-medium">{channelOwner.name}</span>
+                    {/* Vocalist (ボーカル) Selection */}
+                    <div className="mt-4">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        ボーカル
+                      </label>
+                      <div className="space-y-2">
+                        {/* Display selected vocalists */}
+                        {song.singerIds.length > 0 && (
+                          <div className="flex flex-wrap gap-2 mb-2">
+                            {song.singerIds
+                              .slice()
+                              .sort((a, b) => {
+                                // 頻道擁有者排在最前面
+                                if (channelOwner && a === channelOwner.id) return -1;
+                                if (channelOwner && b === channelOwner.id) return 1;
+                                return 0;
+                              })
+                              .map((singerId) => {
+                              const singer = participants.find((p) => p.id === singerId);
+                              return singer ? (
+                                <div
+                                  key={singerId}
+                                  className="flex items-center gap-2 px-3 py-1 bg-indigo-100 text-indigo-700 rounded-full text-sm"
+                                >
+                                  {singer.photo_url && (
+                                    <img
+                                      src={singer.photo_url}
+                                      alt={singer.name}
+                                      className="w-5 h-5 rounded-full"
+                                      onError={(e) => {
+                                        e.currentTarget.onerror = null;
+                                        e.currentTarget.src = `https://holodex.net/statics/channelImg/${singer.id}/50.png`;
+                                      }}
+                                    />
+                                  )}
+                                  <span>{singer.name}</span>
+                                  <button
+                                    onClick={() => {
+                                      const newSingerIds = song.singerIds.filter((id) => id !== singerId);
+                                      handleSongChange(index, 'singerIds', newSingerIds);
+                                    }}
+                                    className="ml-1 text-indigo-600 hover:text-indigo-800"
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+                              ) : null;
+                            })}
+                          </div>
+                        )}
+                        {/* Vocalist search input */}
+                        <SingerSearchInput
+                          onSelectSinger={(singer) => {
+                            if (!song.singerIds.includes(singer.id)) {
+                              handleSongChange(index, 'singerIds', [...song.singerIds, singer.id]);
+                              // 如果歌手不在participants中，加入
+                              if (!participants.find(p => p.id === singer.id)) {
+                                setParticipants([...participants, singer]);
+                              }
+                            }
+                          }}
+                          excludeIds={song.singerIds}
+                          placeholder="ボーカルを検索して追加..."
+                        />
                       </div>
-                    )}
+                    </div>
                   </div>
                 ))}
 
@@ -1463,11 +1582,8 @@ export default function StreamDetailPage() {
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-12">
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24">
                       #
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-14">
-                      Art
                     </th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-32">
                       時間
@@ -1478,8 +1594,11 @@ export default function StreamDetailPage() {
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       アーティスト
                     </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-40">
                       タグ
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-32">
+                      ボーカル
                     </th>
                     <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-20">
                       再生
@@ -1487,62 +1606,124 @@ export default function StreamDetailPage() {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {stream.performances.map((perf, index) => (
-                    <tr key={perf.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-4 text-sm text-gray-500">{index + 1}</td>
-                      <td className="px-4 py-2">
-                        {perf.arts ? (
-                          <img
-                            src={perf.arts}
-                            alt={perf.song_name}
-                            className="w-10 h-10 object-cover rounded shadow-sm"
-                          />
-                        ) : (
-                          <div className="w-10 h-10 bg-gray-100 rounded flex items-center justify-center">
-                            <svg className="w-5 h-5 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
-                            </svg>
+                  {stream.performances.map((perf, index) => {
+                    const singerCount = perf.singers?.length || 0;
+                    const showCount = singerCount > 3;
+                    // 排序歌手：頻道所有者優先
+                    const sortedSingers = perf.singers?.sort((a, b) => {
+                      if (channelOwner && a.id === channelOwner.id) return -1;
+                      if (channelOwner && b.id === channelOwner.id) return 1;
+                      return 0;
+                    }) || [];
+                    const displaySingers = showCount ? sortedSingers.slice(0, 3) : sortedSingers;
+                    
+                    return (
+                      <tr key={perf.id} className="hover:bg-gray-50">
+                        {/* # with Art thumbnail */}
+                        <td className="px-4 py-4">
+                          <div className="relative w-16 h-16">
+                            {perf.arts ? (
+                              <img
+                                src={perf.arts}
+                                alt={perf.song_name}
+                                className="w-16 h-16 object-cover rounded-lg shadow-sm"
+                              />
+                            ) : (
+                              <div className="w-16 h-16 bg-gray-100 rounded-lg flex items-center justify-center">
+                                <svg className="w-8 h-8 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                                </svg>
+                              </div>
+                            )}
+                            {/* Index badge */}
+                            <div className="absolute top-0 left-0 bg-indigo-600 text-white text-xs font-bold rounded-tl-lg rounded-br-lg px-2 py-0.5">
+                              #{index + 1}
+                            </div>
                           </div>
-                        )}
-                      </td>
-                      <td className="px-4 py-4 text-sm text-gray-500 font-mono">
-                        {formatTime(perf.start_seconds)}
-                        {perf.end_seconds > 0 && (
-                          <span className="text-gray-400"> ~ {formatTime(perf.end_seconds)}</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-4">
-                        <Link
-                          to={`/songs/${perf.song_id}`}
-                          className="text-indigo-600 hover:text-indigo-900 font-medium"
-                        >
-                          {perf.song_name}
-                        </Link>
-                      </td>
-                      <td className="px-4 py-4 text-sm text-gray-500">
-                        {perf.original_artist}
-                      </td>
-                      <td className="px-4 py-4">
-                        <div className="flex flex-wrap gap-1">
-                          {perf.tags.map((tag) => (
-                            <Tag key={tag.id} label={tag.display_name} color={tag.color} />
-                          ))}
-                        </div>
-                      </td>
-                      <td className="px-4 py-4 text-right">
-                        <a
-                          href={perf.youtube_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-red-100 text-red-600 hover:bg-red-200 transition-colors"
-                        >
-                          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                            <path d="M8 5v14l11-7z" />
-                          </svg>
-                        </a>
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                        <td className="px-4 py-4 text-sm text-gray-500 font-mono">
+                          {formatTime(perf.start_seconds)}
+                          {perf.end_seconds > 0 && (
+                            <span className="text-gray-400"> ~ {formatTime(perf.end_seconds)}</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-4">
+                          <Link
+                            to={`/songs/${perf.song_id}`}
+                            className="text-indigo-600 hover:text-indigo-900 font-medium"
+                          >
+                            {perf.song_name}
+                          </Link>
+                        </td>
+                        <td className="px-4 py-4 text-sm text-gray-500">
+                          {perf.original_artist}
+                        </td>
+                        <td className="px-4 py-4">
+                          <div className="flex flex-wrap gap-1">
+                            {perf.tags.map((tag) => (
+                              <Tag key={tag.id} label={tag.display_name} color={tag.color} />
+                            ))}
+                          </div>
+                        </td>
+                        {/* Singer avatars */}
+                        <td className="px-4 py-4">
+                          {singerCount === 0 ? (
+                            <span className="text-sm text-gray-400">なし</span>
+                          ) : (
+                            <div className="flex items-center relative h-8">
+                              {displaySingers?.map((singer, singerIndex) => (
+                                <Link
+                                  key={singer.id}
+                                  to={`/singers/${singer.id}`}
+                                  title={singer.name}
+                                  className="relative -ml-2 first:ml-0 hover:z-50"
+                                  style={{
+                                    zIndex: displaySingers.length - singerIndex,
+                                  }}
+                                >
+                                  <img
+                                    src={
+                                      singer.photo_url ||
+                                      `https://holodex.net/statics/channelImg/${singer.id}/50.png`
+                                    }
+                                    alt={singer.name}
+                                    className="w-8 h-8 rounded-full border-2 border-white shadow-sm hover:shadow-md transition-shadow"
+                                    onError={(e) => {
+                                      e.currentTarget.onerror = null;
+                                      e.currentTarget.src = `https://holodex.net/statics/channelImg/${singer.id}/50.png`;
+                                    }}
+                                  />
+                                </Link>
+                              ))}
+                              {showCount && (
+                                <button
+                                  onClick={() => setVocalistPopupSingers(sortedSingers)}
+                                  title={perf.singers
+                                    ?.map((s) => s.name)
+                                    .join(', ')}
+                                  className="relative -ml-2 w-8 h-8 rounded-full bg-gray-300 border-2 border-white flex items-center justify-center text-xs font-bold text-gray-700 cursor-pointer hover:bg-gray-400 transition-colors"
+                                >
+                                  +{singerCount - 3}
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-4 py-4 text-right">
+                          <a
+                            href={perf.youtube_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-red-100 text-red-600 hover:bg-red-200 transition-colors"
+                          >
+                            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                              <path d="M8 5v14l11-7z" />
+                            </svg>
+                          </a>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

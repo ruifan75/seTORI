@@ -42,7 +42,8 @@ func (s *StreamService) GetAll(page, limit int) (*dto.StreamListResponse, error)
 	for i, stream := range streams {
 		tags, _ := s.streamRepo.GetTags(stream.ID)
 		participants, _ := s.streamRepo.GetSingers(stream.ID)
-		streamResponses[i] = s.toStreamResponse(stream, tags, participants)
+		channelOwner, _ := s.streamRepo.GetChannelOwner(stream.ID)
+		streamResponses[i] = s.toStreamResponse(stream, tags, participants, channelOwner)
 	}
 
 	totalPages := (total + limit - 1) / limit
@@ -70,7 +71,8 @@ func (s *StreamService) GetByID(id string) (*dto.StreamDetailResponse, error) {
 
 	tags, _ := s.streamRepo.GetTags(stream.ID)
 	participants, _ := s.streamRepo.GetSingers(stream.ID)
-	streamResp := s.toStreamResponse(*stream, tags, participants)
+	channelOwner, _ := s.streamRepo.GetChannelOwner(stream.ID)
+	streamResp := s.toStreamResponse(*stream, tags, participants, channelOwner)
 
 	// 取得演出清單
 	performances, err := s.perfRepo.FindByStreamID(id)
@@ -90,7 +92,7 @@ func (s *StreamService) GetByID(id string) (*dto.StreamDetailResponse, error) {
 }
 
 // toStreamResponse 轉換 Model 到 DTO
-func (s *StreamService) toStreamResponse(stream models.Stream, tags []models.StreamTag, participants []models.Singer) dto.StreamResponse {
+func (s *StreamService) toStreamResponse(stream models.Stream, tags []models.StreamTag, participants []models.Singer, channelOwner *models.Singer) dto.StreamResponse {
 	resp := dto.StreamResponse{
 		ID:          stream.ID,
 		Title:       stream.Title,
@@ -136,6 +138,26 @@ func (s *StreamService) toStreamResponse(stream models.Stream, tags []models.Str
 		if singer.Organization.Valid {
 			resp.Participants[i].Organization = &singer.Organization.String
 		}
+	}
+
+	// 轉換頻道擁有者
+	if channelOwner != nil {
+		ownerResp := dto.SingerResponse{
+			ID:        channelOwner.ID,
+			Name:      channelOwner.Name,
+			CreatedAt: channelOwner.CreatedAt,
+			UpdatedAt: channelOwner.UpdatedAt,
+		}
+		if channelOwner.EnglishName.Valid {
+			ownerResp.EnglishName = &channelOwner.EnglishName.String
+		}
+		if channelOwner.PhotoURL.Valid {
+			ownerResp.PhotoURL = &channelOwner.PhotoURL.String
+		}
+		if channelOwner.Organization.Valid {
+			ownerResp.Organization = &channelOwner.Organization.String
+		}
+		resp.ChannelOwner = &ownerResp
 	}
 
 	return resp

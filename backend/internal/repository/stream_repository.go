@@ -283,6 +283,26 @@ func (r *StreamRepository) GetSingers(streamID string) ([]models.Singer, error) 
 	return singers, nil
 }
 
+// GetChannelOwner 取得此直播的頻道擁有者
+func (r *StreamRepository) GetChannelOwner(streamID string) (*models.Singer, error) {
+	query := `
+		SELECT s.id, s.name, s.english_name, s.photo_url, s.organization, s.created_at, s.updated_at
+		FROM singers s
+		JOIN stream_singers ss ON s.id = ss.singer_id
+		WHERE ss.stream_id = $1 AND ss.is_owner = TRUE
+		LIMIT 1`
+
+	var s models.Singer
+	err := r.db.QueryRow(query, streamID).Scan(&s.ID, &s.Name, &s.EnglishName, &s.PhotoURL, &s.Organization, &s.CreatedAt, &s.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil // 沒有設定頻道擁有者
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get channel owner: %w", err)
+	}
+	return &s, nil
+}
+
 // AddSinger 為直播添加參與者
 func (r *StreamRepository) AddSinger(streamID, singerID string, isOwner bool) error {
 	query := `INSERT INTO stream_singers (stream_id, singer_id, is_owner) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`
@@ -378,8 +398,8 @@ func (r *StreamRepository) SetTags(streamID string, tagIDs []string) error {
 
 // StreamFilter 用於篩選歌回的選項
 type StreamFilter struct {
-	ProcessedOnly   *bool // nil=全部, true=只看已處理, false=只看未處理
-	HiddenFilter    *bool // nil=全部, true=只看隱藏, false=不顯示隱藏（預設）
+	ProcessedOnly *bool // nil=全部, true=只看已處理, false=只看未處理
+	HiddenFilter  *bool // nil=全部, true=只看隱藏, false=不顯示隱藏（預設）
 }
 
 // FindBySingerID 取得演唱者參與的歌回（支援分頁和篩選）

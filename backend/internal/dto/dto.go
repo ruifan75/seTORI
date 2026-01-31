@@ -116,6 +116,7 @@ type StreamResponse struct {
 	ThumbnailURL    *string             `json:"thumbnail_url,omitempty"`
 	Tags            []StreamTagResponse `json:"tags"`
 	Participants    []SingerResponse    `json:"participants"`
+	ChannelOwner    *SingerResponse     `json:"channel_owner,omitempty"` // 頻道擁有者
 	IsProcessed     bool                `json:"is_processed"`
 	IsHidden        bool                `json:"is_hidden"`
 	CreatedAt       time.Time           `json:"created_at"`
@@ -167,19 +168,19 @@ type PerformanceResponse struct {
 
 // 用於歌曲詳情頁的反向查詢
 type SongPerformanceResponse struct {
-	ID             uuid.UUID                `json:"id"`
-	StreamID       string                   `json:"stream_id"`
-	StreamTitle    string                   `json:"stream_title"`
-	StreamDate     string                   `json:"stream_date"`
-	ThumbnailURL   *string                  `json:"thumbnail_url,omitempty"`
-	SongID         uuid.UUID                `json:"song_id,omitempty"`
-	SongName       string                   `json:"song_name,omitempty"`
-	StartSeconds   int                      `json:"start_seconds"`
-	EndSeconds     int                      `json:"end_seconds"`
-	Tags           []PerformanceTagResponse `json:"tags"`
-	Singers        []SingerResponse         `json:"singers"`
-	YouTubeURL     string                   `json:"youtube_url"`
-	CreatedAt      time.Time                `json:"created_at"`
+	ID           uuid.UUID                `json:"id"`
+	StreamID     string                   `json:"stream_id"`
+	StreamTitle  string                   `json:"stream_title"`
+	StreamDate   string                   `json:"stream_date"`
+	ThumbnailURL *string                  `json:"thumbnail_url,omitempty"`
+	SongID       uuid.UUID                `json:"song_id,omitempty"`
+	SongName     string                   `json:"song_name,omitempty"`
+	StartSeconds int                      `json:"start_seconds"`
+	EndSeconds   int                      `json:"end_seconds"`
+	Tags         []PerformanceTagResponse `json:"tags"`
+	Singers      []SingerResponse         `json:"singers"`
+	YouTubeURL   string                   `json:"youtube_url"`
+	CreatedAt    time.Time                `json:"created_at"`
 }
 
 type SongPerformanceListResponse struct {
@@ -235,8 +236,8 @@ type SongSuggestion struct {
 type LoadHolodexSongsResponse struct {
 	StreamID     string           `json:"stream_id"`
 	StreamTitle  string           `json:"stream_title"`
-	ChannelOwner SingerResponse   `json:"channel_owner"`   // 頻道擁有者
-	Participants []SingerResponse `json:"participants"`    // 所有參與者（包含頻道擁有者）
+	ChannelOwner SingerResponse   `json:"channel_owner"` // 頻道擁有者
+	Participants []SingerResponse `json:"participants"`  // 所有參與者（包含頻道擁有者）
 	Songs        []SongSuggestion `json:"songs"`
 }
 
