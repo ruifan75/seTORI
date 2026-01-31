@@ -21,7 +21,7 @@ func NewStreamService(streamRepo *repository.StreamRepository, perfRepo *reposit
 	}
 }
 
-// GetAll 取得歌回列表
+// GetAll 取得歌回列表（預設不顯示隱藏的）
 func (s *StreamService) GetAll(page, limit int) (*dto.StreamListResponse, error) {
 	if page < 1 {
 		page = 1
@@ -31,7 +31,8 @@ func (s *StreamService) GetAll(page, limit int) (*dto.StreamListResponse, error)
 	}
 	offset := (page - 1) * limit
 
-	streams, total, err := s.streamRepo.FindAll(limit, offset)
+	// 預設不顯示隱藏的歌回
+	streams, total, err := s.streamRepo.FindAll(limit, offset, false)
 	if err != nil {
 		return nil, fmt.Errorf("get streams: %w", err)
 	}
@@ -91,11 +92,13 @@ func (s *StreamService) GetByID(id string) (*dto.StreamDetailResponse, error) {
 // toStreamResponse 轉換 Model 到 DTO
 func (s *StreamService) toStreamResponse(stream models.Stream, tags []models.StreamTag, participants []models.Singer) dto.StreamResponse {
 	resp := dto.StreamResponse{
-		ID:         stream.ID,
-		Title:      stream.Title,
-		StreamDate: stream.StreamDate.Format("2006-01-02"),
-		CreatedAt:  stream.CreatedAt,
-		UpdatedAt:  stream.UpdatedAt,
+		ID:          stream.ID,
+		Title:       stream.Title,
+		StreamDate:  stream.StreamDate.Format("2006-01-02"),
+		IsProcessed: stream.IsProcessed,
+		IsHidden:    stream.IsHidden,
+		CreatedAt:   stream.CreatedAt,
+		UpdatedAt:   stream.UpdatedAt,
 	}
 
 	if stream.DurationSeconds.Valid {
@@ -212,6 +215,16 @@ func (s *StreamService) Update(id string, req *dto.UpdateStreamRequest) (*dto.St
 			return nil, fmt.Errorf("invalid date format: %w", err)
 		}
 		stream.StreamDate = date
+	}
+
+	// 更新處理狀態
+	if req.IsProcessed != nil {
+		stream.IsProcessed = *req.IsProcessed
+	}
+
+	// 更新隱藏狀態
+	if req.IsHidden != nil {
+		stream.IsHidden = *req.IsHidden
 	}
 
 	// 更新 Stream

@@ -116,6 +116,8 @@ type StreamResponse struct {
 	ThumbnailURL    *string             `json:"thumbnail_url,omitempty"`
 	Tags            []StreamTagResponse `json:"tags"`
 	Participants    []SingerResponse    `json:"participants"`
+	IsProcessed     bool                `json:"is_processed"`
+	IsHidden        bool                `json:"is_hidden"`
 	CreatedAt       time.Time           `json:"created_at"`
 	UpdatedAt       time.Time           `json:"updated_at"`
 }
@@ -135,6 +137,8 @@ type UpdateStreamRequest struct {
 	StreamDate     *string  `json:"stream_date,omitempty"`
 	TagIDs         []string `json:"tag_ids,omitempty"`
 	ParticipantIDs []string `json:"participant_ids,omitempty"`
+	IsProcessed    *bool    `json:"is_processed,omitempty"`
+	IsHidden       *bool    `json:"is_hidden,omitempty"`
 }
 
 // ========== 演出 ==========

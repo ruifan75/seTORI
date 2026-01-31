@@ -77,9 +77,15 @@ func (r *PerformanceRepository) FindByStreamID(streamID string) ([]PerformanceWi
 }
 
 // FindBySongID 根據 Song ID 取得所有演出（反向查詢核心功能）
+// 只顯示非隱藏的 Stream 中的演出
 func (r *PerformanceRepository) FindBySongID(songID uuid.UUID, limit, offset int) ([]PerformanceWithDetails, int, error) {
 	var total int
-	err := r.db.QueryRow("SELECT COUNT(*) FROM performances WHERE song_id = $1", songID).Scan(&total)
+	err := r.db.QueryRow(`
+		SELECT COUNT(*)
+		FROM performances p
+		JOIN streams st ON p.stream_id = st.id
+		WHERE p.song_id = $1 AND st.is_hidden = FALSE
+	`, songID).Scan(&total)
 	if err != nil {
 		return nil, 0, fmt.Errorf("count performances: %w", err)
 	}
@@ -90,7 +96,7 @@ func (r *PerformanceRepository) FindBySongID(songID uuid.UUID, limit, offset int
 		       st.title AS stream_title, st.stream_date, st.thumbnail_url
 		FROM performances p
 		JOIN streams st ON p.stream_id = st.id
-		WHERE p.song_id = $1
+		WHERE p.song_id = $1 AND st.is_hidden = FALSE
 		ORDER BY st.stream_date DESC
 		LIMIT $2 OFFSET $3`
 
@@ -342,13 +348,15 @@ func (r *PerformanceRepository) DeleteByStreamID(streamID string) error {
 }
 
 // FindBySingerID 根據演唱者 ID 取得所有演出（支援分頁）
+// 只顯示非隱藏的 Stream 中的演出
 func (r *PerformanceRepository) FindBySingerID(singerID string, limit, offset int) ([]PerformanceWithDetails, int, error) {
 	var total int
 	err := r.db.QueryRow(`
 		SELECT COUNT(DISTINCT p.id)
 		FROM performances p
 		JOIN performance_singers ps ON p.id = ps.performance_id
-		WHERE ps.singer_id = $1
+		JOIN streams st ON p.stream_id = st.id
+		WHERE ps.singer_id = $1 AND st.is_hidden = FALSE
 	`, singerID).Scan(&total)
 	if err != nil {
 		return nil, 0, fmt.Errorf("count performances: %w", err)
@@ -363,7 +371,7 @@ func (r *PerformanceRepository) FindBySingerID(singerID string, limit, offset in
 		JOIN performance_singers ps ON p.id = ps.performance_id
 		JOIN streams st ON p.stream_id = st.id
 		JOIN songs s ON p.song_id = s.id
-		WHERE ps.singer_id = $1
+		WHERE ps.singer_id = $1 AND st.is_hidden = FALSE
 		ORDER BY st.stream_date DESC, p.start_seconds ASC
 		LIMIT $2 OFFSET $3`
 

@@ -16,19 +16,35 @@ func NewStreamRepository(db *sql.DB) *StreamRepository {
 	return &StreamRepository{db: db}
 }
 
-// FindAll 取得所有歌回（支援分頁）
-func (r *StreamRepository) FindAll(limit, offset int) ([]models.Stream, int, error) {
+// FindAll 取得所有歌回（支援分頁，預設不顯示隱藏的）
+func (r *StreamRepository) FindAll(limit, offset int, includeHidden bool) ([]models.Stream, int, error) {
 	var total int
-	err := r.db.QueryRow("SELECT COUNT(*) FROM streams").Scan(&total)
+	var countQuery string
+	if includeHidden {
+		countQuery = "SELECT COUNT(*) FROM streams"
+	} else {
+		countQuery = "SELECT COUNT(*) FROM streams WHERE is_hidden = FALSE"
+	}
+	err := r.db.QueryRow(countQuery).Scan(&total)
 	if err != nil {
 		return nil, 0, fmt.Errorf("count streams: %w", err)
 	}
 
-	query := `
-		SELECT id, title, stream_date, duration_seconds, thumbnail_url, holodex_data, holodex_hash, created_at, updated_at
-		FROM streams
-		ORDER BY stream_date DESC
-		LIMIT $1 OFFSET $2`
+	var query string
+	if includeHidden {
+		query = `
+			SELECT id, title, stream_date, duration_seconds, thumbnail_url, holodex_data, holodex_hash, is_processed, is_hidden, created_at, updated_at
+			FROM streams
+			ORDER BY stream_date DESC
+			LIMIT $1 OFFSET $2`
+	} else {
+		query = `
+			SELECT id, title, stream_date, duration_seconds, thumbnail_url, holodex_data, holodex_hash, is_processed, is_hidden, created_at, updated_at
+			FROM streams
+			WHERE is_hidden = FALSE
+			ORDER BY stream_date DESC
+			LIMIT $1 OFFSET $2`
+	}
 
 	rows, err := r.db.Query(query, limit, offset)
 	if err != nil {
@@ -40,7 +56,7 @@ func (r *StreamRepository) FindAll(limit, offset int) ([]models.Stream, int, err
 	for rows.Next() {
 		var s models.Stream
 		err := rows.Scan(&s.ID, &s.Title, &s.StreamDate, &s.DurationSeconds,
-			&s.ThumbnailURL, &s.HolodexData, &s.HolodexHash, &s.CreatedAt, &s.UpdatedAt)
+			&s.ThumbnailURL, &s.HolodexData, &s.HolodexHash, &s.IsProcessed, &s.IsHidden, &s.CreatedAt, &s.UpdatedAt)
 		if err != nil {
 			return nil, 0, fmt.Errorf("scan stream: %w", err)
 		}
@@ -53,13 +69,13 @@ func (r *StreamRepository) FindAll(limit, offset int) ([]models.Stream, int, err
 // FindByID 根據 Video ID 取得歌回
 func (r *StreamRepository) FindByID(id string) (*models.Stream, error) {
 	query := `
-		SELECT id, title, stream_date, duration_seconds, thumbnail_url, holodex_data, holodex_hash, created_at, updated_at
+		SELECT id, title, stream_date, duration_seconds, thumbnail_url, holodex_data, holodex_hash, is_processed, is_hidden, created_at, updated_at
 		FROM streams WHERE id = $1`
 
 	var s models.Stream
 	err := r.db.QueryRow(query, id).Scan(
 		&s.ID, &s.Title, &s.StreamDate, &s.DurationSeconds,
-		&s.ThumbnailURL, &s.HolodexData, &s.HolodexHash, &s.CreatedAt, &s.UpdatedAt)
+		&s.ThumbnailURL, &s.HolodexData, &s.HolodexHash, &s.IsProcessed, &s.IsHidden, &s.CreatedAt, &s.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -90,15 +106,25 @@ func (r *StreamRepository) Update(s *models.Stream) error {
 	query := `
 		UPDATE streams
 		SET title = $2, stream_date = $3, duration_seconds = $4, thumbnail_url = $5,
-		    holodex_data = $6, holodex_hash = $7, updated_at = NOW()
+		    holodex_data = $6, holodex_hash = $7, is_processed = $8, is_hidden = $9, updated_at = NOW()
 		WHERE id = $1
 		RETURNING updated_at`
 
 	err := r.db.QueryRow(query, s.ID, s.Title, s.StreamDate, s.DurationSeconds,
-		s.ThumbnailURL, s.HolodexData, s.HolodexHash).
+		s.ThumbnailURL, s.HolodexData, s.HolodexHash, s.IsProcessed, s.IsHidden).
 		Scan(&s.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("update stream: %w", err)
+	}
+	return nil
+}
+
+// UpdateStatus 更新歌回狀態（處理完成/隱藏）
+func (r *StreamRepository) UpdateStatus(id string, isProcessed, isHidden bool) error {
+	query := `UPDATE streams SET is_processed = $2, is_hidden = $3, updated_at = NOW() WHERE id = $1`
+	_, err := r.db.Exec(query, id, isProcessed, isHidden)
+	if err != nil {
+		return fmt.Errorf("update stream status: %w", err)
 	}
 	return nil
 }
@@ -139,7 +165,7 @@ func (r *StreamRepository) Delete(id string) error {
 // FindByDateRange 根據日期範圍取得歌回
 func (r *StreamRepository) FindByDateRange(start, end time.Time) ([]models.Stream, error) {
 	query := `
-		SELECT id, title, stream_date, duration_seconds, thumbnail_url, holodex_data, holodex_hash, created_at, updated_at
+		SELECT id, title, stream_date, duration_seconds, thumbnail_url, holodex_data, holodex_hash, is_processed, is_hidden, created_at, updated_at
 		FROM streams
 		WHERE stream_date >= $1 AND stream_date <= $2
 		ORDER BY stream_date DESC`
@@ -154,7 +180,7 @@ func (r *StreamRepository) FindByDateRange(start, end time.Time) ([]models.Strea
 	for rows.Next() {
 		var s models.Stream
 		err := rows.Scan(&s.ID, &s.Title, &s.StreamDate, &s.DurationSeconds,
-			&s.ThumbnailURL, &s.HolodexData, &s.HolodexHash, &s.CreatedAt, &s.UpdatedAt)
+			&s.ThumbnailURL, &s.HolodexData, &s.HolodexHash, &s.IsProcessed, &s.IsHidden, &s.CreatedAt, &s.UpdatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("scan stream: %w", err)
 		}
@@ -350,28 +376,61 @@ func (r *StreamRepository) SetTags(streamID string, tagIDs []string) error {
 	return nil
 }
 
-// FindBySingerID 取得演唱者參與的歌回（支援分頁）
-func (r *StreamRepository) FindBySingerID(singerID string, limit, offset int) ([]models.Stream, int, error) {
+// StreamFilter 用於篩選歌回的選項
+type StreamFilter struct {
+	ProcessedOnly   *bool // nil=全部, true=只看已處理, false=只看未處理
+	HiddenFilter    *bool // nil=全部, true=只看隱藏, false=不顯示隱藏（預設）
+}
+
+// FindBySingerID 取得演唱者參與的歌回（支援分頁和篩選）
+func (r *StreamRepository) FindBySingerID(singerID string, limit, offset int, filter *StreamFilter) ([]models.Stream, int, error) {
+	// 建構 WHERE 條件
+	whereClause := "ss.singer_id = $1"
+	args := []interface{}{singerID}
+	argIndex := 2
+
+	if filter != nil {
+		if filter.ProcessedOnly != nil {
+			whereClause += fmt.Sprintf(" AND s.is_processed = $%d", argIndex)
+			args = append(args, *filter.ProcessedOnly)
+			argIndex++
+		}
+		if filter.HiddenFilter != nil {
+			if *filter.HiddenFilter {
+				// 只看隱藏的
+				whereClause += fmt.Sprintf(" AND s.is_hidden = $%d", argIndex)
+				args = append(args, true)
+			} else {
+				// 不顯示隱藏的
+				whereClause += fmt.Sprintf(" AND s.is_hidden = $%d", argIndex)
+				args = append(args, false)
+			}
+			argIndex++
+		}
+	}
+
 	var total int
-	err := r.db.QueryRow(`
+	countQuery := fmt.Sprintf(`
 		SELECT COUNT(DISTINCT s.id)
 		FROM streams s
 		JOIN stream_singers ss ON s.id = ss.stream_id
-		WHERE ss.singer_id = $1
-	`, singerID).Scan(&total)
+		WHERE %s
+	`, whereClause)
+	err := r.db.QueryRow(countQuery, args...).Scan(&total)
 	if err != nil {
 		return nil, 0, fmt.Errorf("count streams: %w", err)
 	}
 
-	query := `
-		SELECT s.id, s.title, s.stream_date, s.duration_seconds, s.thumbnail_url, s.holodex_data, s.holodex_hash, s.created_at, s.updated_at
+	query := fmt.Sprintf(`
+		SELECT s.id, s.title, s.stream_date, s.duration_seconds, s.thumbnail_url, s.holodex_data, s.holodex_hash, s.is_processed, s.is_hidden, s.created_at, s.updated_at
 		FROM streams s
 		JOIN stream_singers ss ON s.id = ss.stream_id
-		WHERE ss.singer_id = $1
+		WHERE %s
 		ORDER BY s.stream_date DESC
-		LIMIT $2 OFFSET $3`
+		LIMIT $%d OFFSET $%d`, whereClause, argIndex, argIndex+1)
 
-	rows, err := r.db.Query(query, singerID, limit, offset)
+	args = append(args, limit, offset)
+	rows, err := r.db.Query(query, args...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("query streams: %w", err)
 	}
@@ -381,7 +440,7 @@ func (r *StreamRepository) FindBySingerID(singerID string, limit, offset int) ([
 	for rows.Next() {
 		var s models.Stream
 		err := rows.Scan(&s.ID, &s.Title, &s.StreamDate, &s.DurationSeconds,
-			&s.ThumbnailURL, &s.HolodexData, &s.HolodexHash, &s.CreatedAt, &s.UpdatedAt)
+			&s.ThumbnailURL, &s.HolodexData, &s.HolodexHash, &s.IsProcessed, &s.IsHidden, &s.CreatedAt, &s.UpdatedAt)
 		if err != nil {
 			return nil, 0, fmt.Errorf("scan stream: %w", err)
 		}

@@ -118,8 +118,16 @@ export const singerApi = {
     return data;
   },
 
-  getStreams: async (id: string, page = 1, limit = 20): Promise<StreamListResponse> => {
+  getStreams: async (
+    id: string,
+    page = 1,
+    limit = 20,
+    processed?: 'all' | 'true' | 'false',
+    hidden?: 'all' | 'true' | 'false'
+  ): Promise<StreamListResponse> => {
     const params = new URLSearchParams({ page: String(page), limit: String(limit) });
+    if (processed) params.set('processed', processed);
+    if (hidden) params.set('hidden', hidden);
     const { data } = await api.get(`/api/singers/${id}/streams?${params}`);
     return data;
   },

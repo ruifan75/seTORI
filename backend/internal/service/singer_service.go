@@ -96,11 +96,17 @@ func (s *SingerService) GetByID(id string) (*dto.SingerDetailResponse, error) {
 	}, nil
 }
 
-// GetStreams 取得演唱者參與的歌回
-func (s *SingerService) GetStreams(singerID string, page, limit int) (*dto.StreamListResponse, error) {
+// GetStreams 取得演唱者參與的歌回（支援篩選）
+func (s *SingerService) GetStreams(singerID string, page, limit int, processedFilter, hiddenFilter *bool) (*dto.StreamListResponse, error) {
 	offset := (page - 1) * limit
 
-	streams, total, err := s.streamRepo.FindBySingerID(singerID, limit, offset)
+	// 建構篩選條件
+	filter := &repository.StreamFilter{
+		ProcessedOnly: processedFilter,
+		HiddenFilter:  hiddenFilter,
+	}
+
+	streams, total, err := s.streamRepo.FindBySingerID(singerID, limit, offset, filter)
 	if err != nil {
 		return nil, fmt.Errorf("get streams: %w", err)
 	}
@@ -189,11 +195,13 @@ func (s *SingerService) toSingerResponse(singer models.Singer) dto.SingerRespons
 // toStreamResponse 轉換 Model 到 DTO
 func (s *SingerService) toStreamResponse(stream models.Stream, tags []models.StreamTag, participants []models.Singer) dto.StreamResponse {
 	resp := dto.StreamResponse{
-		ID:         stream.ID,
-		Title:      stream.Title,
-		StreamDate: stream.StreamDate.Format("2006-01-02"),
-		CreatedAt:  stream.CreatedAt,
-		UpdatedAt:  stream.UpdatedAt,
+		ID:          stream.ID,
+		Title:       stream.Title,
+		StreamDate:  stream.StreamDate.Format("2006-01-02"),
+		IsProcessed: stream.IsProcessed,
+		IsHidden:    stream.IsHidden,
+		CreatedAt:   stream.CreatedAt,
+		UpdatedAt:   stream.UpdatedAt,
 	}
 
 	if stream.DurationSeconds.Valid {

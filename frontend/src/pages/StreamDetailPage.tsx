@@ -24,6 +24,8 @@ interface EditableStreamInfo {
   streamDate: string;
   tagIds: string[];
   participantIds: string[];
+  isProcessed: boolean;
+  isHidden: boolean;
 }
 
 // 預設的演出標籤
@@ -713,6 +715,8 @@ export default function StreamDetailPage() {
           streamDate: stream.stream_date,
           tagIds: stream.tags.map((t) => t.id),
           participantIds: stream.participants?.map((p) => p.id) || [],
+          isProcessed: stream.is_processed,
+          isHidden: stream.is_hidden,
         });
 
         // 設定參與者列表
@@ -865,32 +869,88 @@ export default function StreamDetailPage() {
         stream_date: editableStreamInfo.streamDate,
         tag_ids: editableStreamInfo.tagIds,
         participant_ids: editableStreamInfo.participantIds,
+        is_processed: editableStreamInfo.isProcessed,
+        is_hidden: editableStreamInfo.isHidden,
       });
     }
 
-    // 然後更新 setlist
-    const performances: CreatePerformanceItem[] = editableSongs.map((song) => ({
-      name: song.name,
-      name_reading: song.nameReading,
-      original_artist: song.artist,
-      original_artist_reading: song.artistReading,
-      start_seconds: song.start,
-      end_seconds: song.end,
-      tags: song.tags,
-      singer_ids: song.singerIds,
-      art_url: song.artUrl || undefined,
-      itunes_id: song.itunesId || undefined,
-    }));
-    createPerformancesMutation.mutate(performances);
+    // 如果有歌曲，更新 setlist
+    if (editableSongs.length > 0) {
+      const performances: CreatePerformanceItem[] = editableSongs.map((song) => ({
+        name: song.name,
+        name_reading: song.nameReading,
+        original_artist: song.artist,
+        original_artist_reading: song.artistReading,
+        start_seconds: song.start,
+        end_seconds: song.end,
+        tags: song.tags,
+        singer_ids: song.singerIds,
+        art_url: song.artUrl || undefined,
+        itunes_id: song.itunesId || undefined,
+      }));
+      createPerformancesMutation.mutate(performances);
+    } else {
+      // 沒有歌曲時，只保存 Stream 資訊並關閉編輯模式
+      showToast('歌枠情報を保存しました', 'success');
+      setIsEditing(false);
+      setEditableStreamInfo(null);
+      queryClient.invalidateQueries({ queryKey: ['stream', id] });
+    }
   };
 
-  // 切換直播標籤
+  // 自動保存 Stream 資訊（用於標籤、參與者、狀態等）
+  const autoSaveStreamInfo = async (info: Partial<EditableStreamInfo>) => {
+    try {
+      const updateData = {
+        tag_ids: info.tagIds,
+        participant_ids: info.participantIds,
+        is_processed: info.isProcessed,
+        is_hidden: info.isHidden,
+      };
+      await updateStreamMutation.mutateAsync(updateData as UpdateStreamRequest);
+      showToast('更新しました', 'success');
+    } catch (err) {
+      showToast(`更新エラー: ${err instanceof Error ? err.message : '未知のエラー'}`, 'error');
+    }
+  };
+
+  // 切換直播標籤並自動保存
   const toggleStreamTag = (tagId: string) => {
     if (!editableStreamInfo) return;
     const newTagIds = editableStreamInfo.tagIds.includes(tagId)
       ? editableStreamInfo.tagIds.filter((id) => id !== tagId)
       : [...editableStreamInfo.tagIds, tagId];
-    setEditableStreamInfo({ ...editableStreamInfo, tagIds: newTagIds });
+    const updatedInfo = { ...editableStreamInfo, tagIds: newTagIds };
+    setEditableStreamInfo(updatedInfo);
+    // 自動保存
+    autoSaveStreamInfo({ tagIds: newTagIds });
+  };
+
+  // 自動保存參與者變更
+  const updateParticipantsAndSave = (newParticipantIds: string[]) => {
+    if (!editableStreamInfo) return;
+    const updatedInfo = { ...editableStreamInfo, participantIds: newParticipantIds };
+    setEditableStreamInfo(updatedInfo);
+    // 自動保存
+    autoSaveStreamInfo({ participantIds: newParticipantIds });
+  };
+
+  // 自動保存處理完成狀態
+  const updateIsProcessedAndSave = (isProcessed: boolean) => {
+    if (!editableStreamInfo) return;
+    const updatedInfo = { ...editableStreamInfo, isProcessed };
+    setEditableStreamInfo(updatedInfo);
+    // 自動保存
+    autoSaveStreamInfo({ isProcessed });
+  };
+
+  // 自動保存隱藏狀態
+  const updateIsHiddenAndSave = (isHidden: boolean) => {
+    if (!editableStreamInfo) return;
+    const updatedInfo = { ...editableStreamInfo, isHidden };
+    setEditableStreamInfo(updatedInfo);
+    // 自動保存
+    autoSaveStreamInfo({ isHidden });
   };
 
   if (isLoading) {
@@ -997,7 +1057,7 @@ export default function StreamDetailPage() {
                           <button
                             onClick={() => {
                               const newIds = editableStreamInfo.participantIds.filter((id) => id !== singer.id);
-                              setEditableStreamInfo({ ...editableStreamInfo, participantIds: newIds });
+                              updateParticipantsAndSave(newIds);
                             }}
                             className="ml-1 text-indigo-600 hover:text-indigo-800"
                             title="削除"
@@ -1017,14 +1077,37 @@ export default function StreamDetailPage() {
                       if (!participants.find((p) => p.id === singer.id)) {
                         setParticipants((prev) => [...prev, singer]);
                       }
-                      // 添加到選擇的 ID 列表
-                      setEditableStreamInfo({
-                        ...editableStreamInfo,
-                        participantIds: [...editableStreamInfo.participantIds, singer.id],
-                      });
+                      // 添加到選擇的 ID 列表並自動保存
+                      updateParticipantsAndSave([...editableStreamInfo.participantIds, singer.id]);
                     }}
                     placeholder="チャンネル名を入力して参加者を追加..."
                   />
+                </div>
+
+                {/* Status Checkboxes */}
+                <div className="mt-4 flex flex-wrap gap-4">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={editableStreamInfo.isProcessed}
+                      onChange={(e) =>
+                        updateIsProcessedAndSave(e.target.checked)
+                      }
+                      className="w-4 h-4 text-green-600 border-gray-300 rounded focus:ring-green-500"
+                    />
+                    <span className="text-sm font-medium text-gray-700">処理完了</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={editableStreamInfo.isHidden}
+                      onChange={(e) =>
+                        updateIsHiddenAndSave(e.target.checked)
+                      }
+                      className="w-4 h-4 text-red-600 border-gray-300 rounded focus:ring-red-500"
+                    />
+                    <span className="text-sm font-medium text-gray-700">非表示</span>
+                  </label>
                 </div>
               </>
             ) : (
@@ -1352,8 +1435,20 @@ export default function StreamDetailPage() {
                 </div>
               </div>
             ) : (
-              <div className="text-center py-8 text-gray-500">
-                上のボタンから楽曲データを読み込んでください
+              <div className="space-y-4">
+                <div className="text-center py-8 text-gray-500">
+                  上のボタンから楽曲データを読み込んでください
+                </div>
+                {/* Save button for stream info only (no songs) */}
+                <div className="flex justify-end pt-4 border-t">
+                  <button
+                    onClick={handleConfirm}
+                    disabled={updateStreamMutation.isPending}
+                    className="px-6 py-2 bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50"
+                  >
+                    {updateStreamMutation.isPending ? '処理中...' : '変更を保存'}
+                  </button>
+                </div>
               </div>
             )}
           </div>

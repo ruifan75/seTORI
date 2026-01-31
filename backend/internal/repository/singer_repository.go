@@ -129,11 +129,14 @@ func (r *SingerRepository) Delete(id string) error {
 	return nil
 }
 
-// GetStreamCount 取得演唱者參與的直播數量
+// GetStreamCount 取得演唱者參與的直播數量（只計算非隱藏的 Stream）
 func (r *SingerRepository) GetStreamCount(singerID string) (int, error) {
 	var count int
 	err := r.db.QueryRow(`
-		SELECT COUNT(DISTINCT stream_id) FROM stream_singers WHERE singer_id = $1
+		SELECT COUNT(DISTINCT ss.stream_id)
+		FROM stream_singers ss
+		JOIN streams st ON ss.stream_id = st.id
+		WHERE ss.singer_id = $1 AND st.is_hidden = FALSE
 	`, singerID).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("count streams: %w", err)
@@ -141,11 +144,15 @@ func (r *SingerRepository) GetStreamCount(singerID string) (int, error) {
 	return count, nil
 }
 
-// GetPerformanceCount 取得演唱者的演出數量
+// GetPerformanceCount 取得演唱者的演出數量（只計算非隱藏的 Stream）
 func (r *SingerRepository) GetPerformanceCount(singerID string) (int, error) {
 	var count int
 	err := r.db.QueryRow(`
-		SELECT COUNT(*) FROM performance_singers WHERE singer_id = $1
+		SELECT COUNT(*)
+		FROM performance_singers ps
+		JOIN performances p ON ps.performance_id = p.id
+		JOIN streams st ON p.stream_id = st.id
+		WHERE ps.singer_id = $1 AND st.is_hidden = FALSE
 	`, singerID).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("count performances: %w", err)

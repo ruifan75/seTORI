@@ -417,7 +417,31 @@ func (r *Router) handleGetSingerStreams(w http.ResponseWriter, req *http.Request
 		limit = 20
 	}
 
-	result, err := r.singerService.GetStreams(id, page, limit)
+	// 解析篩選參數
+	var processedFilter, hiddenFilter *bool
+
+	// processed: "all" (nil), "true", "false"
+	if processedStr := req.URL.Query().Get("processed"); processedStr != "" && processedStr != "all" {
+		processed := processedStr == "true"
+		processedFilter = &processed
+	}
+
+	// hidden: "all", "true" (只看隱藏), "false" (不顯示隱藏，預設)
+	hiddenStr := req.URL.Query().Get("hidden")
+	if hiddenStr == "" {
+		// 預設不顯示隱藏的
+		hidden := false
+		hiddenFilter = &hidden
+	} else if hiddenStr == "true" {
+		hidden := true
+		hiddenFilter = &hidden
+	} else if hiddenStr == "false" {
+		hidden := false
+		hiddenFilter = &hidden
+	}
+	// hiddenStr == "all" 時，hiddenFilter 保持 nil
+
+	result, err := r.singerService.GetStreams(id, page, limit, processedFilter, hiddenFilter)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return

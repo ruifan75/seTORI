@@ -102,6 +102,8 @@ export interface Stream {
   thumbnail_url?: string;
   tags: StreamTag[];
   participants: Singer[];  // 參與者
+  is_processed: boolean;   // 處理完成
+  is_hidden: boolean;      // 隱藏
   created_at: string;
   updated_at: string;
 }
@@ -116,6 +118,8 @@ export interface UpdateStreamRequest {
   stream_date?: string;
   tag_ids?: string[];
   participant_ids?: string[];
+  is_processed?: boolean;
+  is_hidden?: boolean;
 }
 
 // ========== 演出 ==========

@@ -153,10 +153,15 @@ func (r *SongRepository) Delete(id uuid.UUID) error {
 	return nil
 }
 
-// GetPerformanceCount 取得歌曲的演出次數
+// GetPerformanceCount 取得歌曲的演出次數（只計算非隱藏的 Stream）
 func (r *SongRepository) GetPerformanceCount(songID uuid.UUID) (int, error) {
 	var count int
-	err := r.db.QueryRow("SELECT COUNT(*) FROM performances WHERE song_id = $1", songID).Scan(&count)
+	err := r.db.QueryRow(`
+		SELECT COUNT(*)
+		FROM performances p
+		JOIN streams st ON p.stream_id = st.id
+		WHERE p.song_id = $1 AND st.is_hidden = FALSE
+	`, songID).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("get performance count: %w", err)
 	}

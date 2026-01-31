@@ -30,6 +30,11 @@ func main() {
 	}
 	defer db.Close()
 
+	// 執行數據庫遷移
+	if err := database.RunMigrations(db); err != nil {
+		log.Fatalf("數據庫遷移失敗: %v", err)
+	}
+
 	// 設定路由
 	router := handler.NewRouter(db, cfg)
 

@@ -50,6 +50,8 @@ type Stream struct {
 	ThumbnailURL    sql.NullString `json:"thumbnail_url"`
 	HolodexData     []byte         `json:"holodex_data"` // JSONB
 	HolodexHash     sql.NullString `json:"holodex_hash"`
+	IsProcessed     bool           `json:"is_processed"` // 處理完成
+	IsHidden        bool           `json:"is_hidden"`    // 隱藏
 	CreatedAt       time.Time      `json:"created_at"`
 	UpdatedAt       time.Time      `json:"updated_at"`
 }

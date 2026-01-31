@@ -7,6 +7,8 @@ import Pagination from '../components/ui/Pagination';
 import Tag from '../components/ui/Tag';
 
 type TabType = 'streams' | 'performances';
+type ProcessedFilter = 'all' | 'true' | 'false';
+type HiddenFilter = 'all' | 'true' | 'false';
 
 export default function SingerDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -14,6 +16,9 @@ export default function SingerDetailPage() {
   const [activeTab, setActiveTab] = useState<TabType>('streams');
   const [streamPage, setStreamPage] = useState(1);
   const [perfPage, setPerfPage] = useState(1);
+  // Filter states - 預設不顯示隱藏的
+  const [processedFilter, setProcessedFilter] = useState<ProcessedFilter>('all');
+  const [hiddenFilter, setHiddenFilter] = useState<HiddenFilter>('false');
 
   // Singer detail
   const { data: singer, isLoading: singerLoading } = useQuery({
@@ -24,8 +29,8 @@ export default function SingerDetailPage() {
 
   // Streams
   const { data: streams, isLoading: streamsLoading } = useQuery({
-    queryKey: ['singerStreams', id, streamPage],
-    queryFn: () => singerApi.getStreams(id!, streamPage, 20),
+    queryKey: ['singerStreams', id, streamPage, processedFilter, hiddenFilter],
+    queryFn: () => singerApi.getStreams(id!, streamPage, 20, processedFilter, hiddenFilter),
     enabled: !!id && activeTab === 'streams',
   });
 
@@ -169,6 +174,44 @@ export default function SingerDetailPage() {
       {/* Tab Content */}
       {activeTab === 'streams' && (
         <div className="space-y-4">
+          {/* Filter Controls */}
+          <div className="bg-white rounded-lg shadow-sm border p-4">
+            <div className="flex flex-wrap gap-4 items-center">
+              {/* Processed Filter */}
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-gray-700">処理状態:</span>
+                <select
+                  value={processedFilter}
+                  onChange={(e) => {
+                    setProcessedFilter(e.target.value as ProcessedFilter);
+                    setStreamPage(1);
+                  }}
+                  className="text-sm border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                >
+                  <option value="all">すべて</option>
+                  <option value="false">未処理</option>
+                  <option value="true">処理済み</option>
+                </select>
+              </div>
+              {/* Hidden Filter */}
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-gray-700">表示:</span>
+                <select
+                  value={hiddenFilter}
+                  onChange={(e) => {
+                    setHiddenFilter(e.target.value as HiddenFilter);
+                    setStreamPage(1);
+                  }}
+                  className="text-sm border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                >
+                  <option value="false">非表示を除く</option>
+                  <option value="all">すべて表示</option>
+                  <option value="true">非表示のみ</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
           {streamsLoading ? (
             <Loading />
           ) : streams?.streams.length === 0 ? (
@@ -182,7 +225,9 @@ export default function SingerDetailPage() {
                   <Link
                     key={stream.id}
                     to={`/streams/${stream.id}`}
-                    className="bg-white rounded-lg shadow-sm border overflow-hidden hover:shadow-md transition-shadow flex"
+                    className={`bg-white rounded-lg shadow-sm border overflow-hidden hover:shadow-md transition-shadow flex ${
+                      stream.is_hidden ? 'opacity-60' : ''
+                    }`}
                   >
                     {/* Thumbnail */}
                     <div className="relative w-48 flex-shrink-0">
@@ -200,6 +245,19 @@ export default function SingerDetailPage() {
                           </svg>
                         </div>
                       )}
+                      {/* Status badges */}
+                      <div className="absolute top-2 left-2 flex flex-col gap-1">
+                        {stream.is_processed && (
+                          <span className="px-2 py-0.5 bg-green-500 text-white text-xs font-medium rounded">
+                            処理済み
+                          </span>
+                        )}
+                        {stream.is_hidden && (
+                          <span className="px-2 py-0.5 bg-gray-500 text-white text-xs font-medium rounded">
+                            非表示
+                          </span>
+                        )}
+                      </div>
                     </div>
                     {/* Content */}
                     <div className="p-4 flex-1">
