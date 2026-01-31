@@ -44,12 +44,16 @@ func (s *PerformanceService) CreatePerformances(streamID string, items []dto.Cre
 			return nil, fmt.Errorf("find or create song: %w", err)
 		}
 
-		// 2. 如果有 iTunes ID 且歌曲是新建的或還沒有這個 iTunes ID，建立關聯
+		// 2. 如果有 iTunes ID，確保新增 iTunes ID 與歌曲的關聯
 		if item.ItunesID != nil && *item.ItunesID > 0 {
-			// 檢查這個 iTunes ID 是否已經關聯到這首歌
+			// 檢查這個 iTunes ID 是否已經被其他歌曲關聯
 			existingItunes, _ := s.songItunesRepo.FindByItunesID(*item.ItunesID)
+
+			// 只有在以下情況才新增：
+			// 1. iTunes ID 還沒有被關聯到任何歌曲，或
+			// 2. iTunes ID 已關聯到其他歌曲（這種情況不應該發生，但為安全起見檢查）
 			if existingItunes == nil {
-				// 新增 iTunes ID 關聯
+				// iTunes ID 未被關聯，新增關聯
 				songItunes := &models.SongITunes{
 					SongID:    song.ID,
 					ITunesID:  *item.ItunesID,
@@ -59,6 +63,9 @@ func (s *PerformanceService) CreatePerformances(streamID string, items []dto.Cre
 					// 記錄錯誤但不中斷
 					fmt.Printf("create song itunes error: %v\n", err)
 				}
+			} else if existingItunes.SongID != song.ID {
+				// iTunes ID 關聯到不同的歌曲（這可能表示重複的歌曲，記錄警告）
+				fmt.Printf("warning: iTunes ID %d already associated with different song\n", *item.ItunesID)
 			}
 		}
 

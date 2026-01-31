@@ -13,6 +13,7 @@ import (
 	"github.com/ruifan75/setori/internal/dto"
 	"github.com/ruifan75/setori/internal/repository"
 	"github.com/ruifan75/setori/internal/service"
+	"github.com/ruifan75/setori/pkg/itunes"
 )
 
 // Router HTTP 路由器
@@ -107,6 +108,10 @@ func (r *Router) setupRoutes() {
 
 	// AI normalization (for direct editing flow)
 	r.mux.HandleFunc("POST /api/ai/normalize", r.handleBatchAINormalization)
+
+	// iTunes API
+	r.mux.HandleFunc("GET /api/itunes/search", r.handleItunesSearch)
+	r.mux.HandleFunc("GET /api/itunes/{id}", r.handleItunesQueryByID)
 }
 
 // ServeHTTP 實作 http.Handler 介面
@@ -666,6 +671,48 @@ func (r *Router) handleBatchAINormalization(w http.ResponseWriter, req *http.Req
 	result, err := r.normalizationService.BatchAINormalization(batchReq.Items)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, result)
+}
+
+// ========== iTunes API Handlers ==========
+
+func (r *Router) handleItunesSearch(w http.ResponseWriter, req *http.Request) {
+	term := req.URL.Query().Get("term")
+
+	if term == "" {
+		respondError(w, http.StatusBadRequest, "検索キーワードが必要です")
+		return
+	}
+
+	itunesClient := itunes.NewClient()
+	result, err := itunesClient.Search(term)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	respondJSON(w, http.StatusOK, result)
+}
+
+func (r *Router) handleItunesQueryByID(w http.ResponseWriter, req *http.Request) {
+	idStr := req.PathValue("id")
+	if idStr == "" {
+		respondError(w, http.StatusBadRequest, "iTunes IDが必要です")
+		return
+	}
+
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "無効な iTunes ID")
+		return
+	}
+
+	itunesClient := itunes.NewClient()
+	result, err := itunesClient.QueryByID(id)
+	if err != nil {
+		respondError(w, http.StatusNotFound, err.Error())
 		return
 	}
 

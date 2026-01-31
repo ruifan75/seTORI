@@ -21,6 +21,8 @@ import type {
   CreatePerformancesResponse,
   BatchAINormalizationRequest,
   BatchAINormalizationResponse,
+  ITunesSearchResponse,
+  ITunesQueryResult,
 } from './types';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080';
@@ -201,6 +203,23 @@ export const aiApi = {
   // 批量 AI 正規化
   normalize: async (req: BatchAINormalizationRequest): Promise<BatchAINormalizationResponse> => {
     const { data } = await api.post('/api/ai/normalize', req);
+    return data;
+  },
+};
+
+// ========== iTunes API ==========
+
+export const itunesApi = {
+  // 搜尋 iTunes
+  search: async (songName: string): Promise<ITunesSearchResponse> => {
+    const params = new URLSearchParams({ term: songName });
+    const { data } = await api.get(`/api/itunes/search?${params}`);
+    return data;
+  },
+
+  // 查詢 iTunes ID 取得詳細資訊
+  queryById: async (itunesId: number): Promise<ITunesQueryResult> => {
+    const { data } = await api.get(`/api/itunes/${itunesId}`);
     return data;
   },
 };

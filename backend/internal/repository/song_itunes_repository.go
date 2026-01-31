@@ -104,6 +104,15 @@ func (r *SongItunesRepository) Delete(id uuid.UUID) error {
 	return nil
 }
 
+// DeleteBySongID 刪除某歌曲的所有 iTunes ID 關聯
+func (r *SongItunesRepository) DeleteBySongID(songID uuid.UUID) error {
+	_, err := r.db.Exec("DELETE FROM song_itunes WHERE song_id = $1", songID)
+	if err != nil {
+		return fmt.Errorf("delete song itunes by song id: %w", err)
+	}
+	return nil
+}
+
 // SetPrimary 設定主要 iTunes ID（會先將同歌曲的其他設為非主要）
 func (r *SongItunesRepository) SetPrimary(songID uuid.UUID, itunesID int64) error {
 	tx, err := r.db.Begin()

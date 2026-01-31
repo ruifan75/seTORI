@@ -48,6 +48,31 @@ export interface UpdateSongRequest {
   original_artist: string;
   original_artist_reading?: string;
   arts?: string;
+  itunes_ids?: Array<{ itunes_id: number; is_primary: boolean }>;
+}
+
+// ========== iTunes API ==========
+
+export interface ITunesSearchResult {
+  itunes_id: number;
+  collection_name: string;
+  track_name: string;
+  artist_name: string;
+  artwork_url: string;
+  country: string;
+}
+
+export interface ITunesSearchResponse {
+  results: ITunesSearchResult[];
+}
+
+export interface ITunesQueryResult {
+  itunes_id: number;
+  collection_name: string;
+  track_name: string;
+  artist_name: string;
+  artwork_url: string;
+  country: string;
 }
 
 // ========== 演唱者 ==========

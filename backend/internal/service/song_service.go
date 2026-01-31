@@ -154,6 +154,26 @@ func (s *SongService) Create(req *dto.CreateSongRequest) (*dto.SongResponse, err
 		return nil, fmt.Errorf("create song: %w", err)
 	}
 
+	// 處理 iTunes IDs - 如果只有一個，自動設為 Primary
+	if len(req.ItunesIds) > 0 {
+		for i, itunesItem := range req.ItunesIds {
+			// 如果只有一個 iTunes ID，設為 Primary；否則遵循請求中的設定
+			isPrimary := itunesItem.IsPrimary
+			if len(req.ItunesIds) == 1 {
+				isPrimary = true
+			}
+
+			err = s.songItunesRepo.Create(&models.SongITunes{
+				SongID:    song.ID,
+				ITunesID:  itunesItem.ItunesID,
+				IsPrimary: isPrimary,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("create song itunes record %d: %w", i, err)
+			}
+		}
+	}
+
 	resp := s.toSongResponse(*song, 0)
 	return &resp, nil
 }
@@ -190,6 +210,25 @@ func (s *SongService) Update(id uuid.UUID, req *dto.UpdateSongRequest) (*dto.Son
 	err = s.songRepo.Update(song)
 	if err != nil {
 		return nil, fmt.Errorf("update song: %w", err)
+	}
+
+	// 處理 iTunes IDs - 先刪除舊的，再添加新的
+	if len(req.ItunesIds) > 0 {
+		// 刪除現有的 iTunes 關聯
+		_ = s.songItunesRepo.DeleteBySongID(song.ID)
+
+		// 添加新的 iTunes 關聯
+		for _, item := range req.ItunesIds {
+			songItunes := &models.SongITunes{
+				SongID:    song.ID,
+				ITunesID:  item.ItunesID,
+				IsPrimary: item.IsPrimary,
+			}
+			_ = s.songItunesRepo.Create(songItunes)
+		}
+	} else {
+		// 如果沒有傳送 iTunes IDs，也要刪除現有的
+		_ = s.songItunesRepo.DeleteBySongID(song.ID)
 	}
 
 	count, _ := s.songRepo.GetPerformanceCount(song.ID)

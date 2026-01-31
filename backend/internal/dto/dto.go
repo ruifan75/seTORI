@@ -48,19 +48,26 @@ type SongListResponse struct {
 }
 
 type CreateSongRequest struct {
-	Name                  string  `json:"name"`
-	NameReading           *string `json:"name_reading,omitempty"`
-	OriginalArtist        string  `json:"original_artist"`
-	OriginalArtistReading *string `json:"original_artist_reading,omitempty"`
-	Arts                  *string `json:"arts,omitempty"`
+	Name                  string       `json:"name"`
+	NameReading           *string      `json:"name_reading,omitempty"`
+	OriginalArtist        string       `json:"original_artist"`
+	OriginalArtistReading *string      `json:"original_artist_reading,omitempty"`
+	Arts                  *string      `json:"arts,omitempty"`
+	ItunesIds             []ItunesItem `json:"itunes_ids,omitempty"`
+}
+
+type ItunesItem struct {
+	ItunesID  int64 `json:"itunes_id"`
+	IsPrimary bool  `json:"is_primary"`
 }
 
 type UpdateSongRequest struct {
-	Name                  string  `json:"name"`
-	NameReading           *string `json:"name_reading,omitempty"`
-	OriginalArtist        string  `json:"original_artist"`
-	OriginalArtistReading *string `json:"original_artist_reading,omitempty"`
-	Arts                  *string `json:"arts,omitempty"`
+	Name                  string       `json:"name"`
+	NameReading           *string      `json:"name_reading,omitempty"`
+	OriginalArtist        string       `json:"original_artist"`
+	OriginalArtistReading *string      `json:"original_artist_reading,omitempty"`
+	Arts                  *string      `json:"arts,omitempty"`
+	ItunesIds             []ItunesItem `json:"itunes_ids,omitempty"`
 }
 
 // ========== 演唱者 ==========

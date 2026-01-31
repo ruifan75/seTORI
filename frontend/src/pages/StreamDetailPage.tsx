@@ -321,187 +321,6 @@ function SingerSearchInput({ onSelectSinger, excludeIds = [], placeholder }: Sin
   );
 }
 
-// 歌曲編輯 Modal 的 Props
-interface SongEditModalProps {
-  song: EditableSong;
-  onClose: () => void;
-  onSave: (updatedSong: Partial<EditableSong>) => void;
-  onUpdateExisting: (songId: string, data: UpdateSongRequest) => Promise<void>;
-}
-
-// 歌曲編輯 Modal 組件
-function SongEditModal({ song, onClose, onSave, onUpdateExisting }: SongEditModalProps) {
-  const [name, setName] = useState(song.name);
-  const [nameReading, setNameReading] = useState(song.nameReading);
-  const [artist, setArtist] = useState(song.artist);
-  const [artistReading, setArtistReading] = useState(song.artistReading);
-  const [artUrl, setArtUrl] = useState(song.artUrl || '');
-  const [isSaving, setIsSaving] = useState(false);
-  const { showToast } = useToast();
-
-  const handleSave = async () => {
-    // 檢查名稱或藝人是否有變更
-    const nameChanged = name !== song.originalName || artist !== song.originalArtist;
-
-    if (song.matchedSongId && !nameChanged) {
-      // 更新現有歌曲
-      setIsSaving(true);
-      try {
-        await onUpdateExisting(song.matchedSongId, {
-          name,
-          name_reading: nameReading || undefined,
-          original_artist: artist,
-          original_artist_reading: artistReading || undefined,
-          arts: artUrl || undefined,
-        });
-        onSave({
-          name,
-          nameReading,
-          artist,
-          artistReading,
-          artUrl: artUrl || null,
-          originalName: name,
-          originalArtist: artist,
-        });
-        showToast('楽曲情報を更新しました', 'success');
-        onClose();
-      } catch (err) {
-        showToast(`更新エラー: ${(err as Error).message}`, 'error');
-      } finally {
-        setIsSaving(false);
-      }
-    } else {
-      // 名稱/藝人有變更，變成新歌曲
-      onSave({
-        name,
-        nameReading,
-        artist,
-        artistReading,
-        artUrl: artUrl || null,
-        matchedSongId: null, // 重設為新歌曲
-        originalName: name,
-        originalArtist: artist,
-      });
-      onClose();
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-lg mx-4">
-        <div className="p-6">
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="text-lg font-bold text-gray-900">楽曲情報を編集</h3>
-            <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-
-          {/* Song ID Status */}
-          <div className="mb-4 p-3 rounded-lg bg-gray-50">
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-500">Song ID:</span>
-              {song.matchedSongId ? (
-                <a
-                  href={`/songs/${song.matchedSongId}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-sm font-mono text-indigo-600 hover:underline"
-                >
-                  {song.matchedSongId.slice(0, 8)}...
-                </a>
-              ) : (
-                <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs font-medium rounded">New</span>
-              )}
-            </div>
-            {song.matchedSongId && (name !== song.originalName || artist !== song.originalArtist) && (
-              <p className="mt-2 text-xs text-amber-600">
-                ※ 楽曲名またはアーティストを変更すると、新規楽曲として登録されます
-              </p>
-            )}
-          </div>
-
-          {/* Art Preview */}
-          {artUrl && (
-            <div className="mb-4 flex justify-center">
-              <img src={artUrl} alt="Album art" className="w-24 h-24 object-cover rounded-lg shadow" />
-            </div>
-          )}
-
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">楽曲名</label>
-              <input
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">楽曲名 (読み)</label>
-              <input
-                type="text"
-                value={nameReading}
-                onChange={(e) => setNameReading(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                placeholder="ひらがなで入力"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">アーティスト</label>
-              <input
-                type="text"
-                value={artist}
-                onChange={(e) => setArtist(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">アーティスト (読み)</label>
-              <input
-                type="text"
-                value={artistReading}
-                onChange={(e) => setArtistReading(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                placeholder="ひらがなで入力"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">アートワーク URL</label>
-              <input
-                type="text"
-                value={artUrl}
-                onChange={(e) => setArtUrl(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                placeholder="https://..."
-              />
-            </div>
-          </div>
-
-          <div className="mt-6 flex justify-end gap-3">
-            <button
-              onClick={onClose}
-              className="px-4 py-2 text-gray-700 font-medium rounded-lg hover:bg-gray-100 transition-colors"
-            >
-              キャンセル
-            </button>
-            <button
-              onClick={handleSave}
-              disabled={isSaving || !name || !artist}
-              className="px-4 py-2 bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50"
-            >
-              {isSaving ? '保存中...' : '保存'}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function formatTime(seconds: number): string {
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
@@ -538,7 +357,6 @@ export default function StreamDetailPage() {
   const [editableSongs, setEditableSongs] = useState<EditableSong[]>([]);
   const [channelOwner, setChannelOwner] = useState<Singer | null>(null);
   const [participants, setParticipants] = useState<Singer[]>([]);
-  const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editableStreamInfo, setEditableStreamInfo] = useState<EditableStreamInfo | null>(null);
   const [vocalistPopupSingers, setVocalistPopupSingers] = useState<Singer[] | null>(null);
 
@@ -871,18 +689,6 @@ export default function StreamDetailPage() {
     ]);
   };
 
-  const handleSongEditSave = (index: number, updates: Partial<EditableSong>) => {
-    setEditableSongs((prev) => {
-      const updated = [...prev];
-      updated[index] = { ...updated[index], ...updates };
-      return updated;
-    });
-  };
-
-  const handleUpdateExistingSong = async (songId: string, data: UpdateSongRequest) => {
-    await updateSongMutation.mutateAsync({ songId, data });
-  };
-
   const handleConfirm = async () => {
     // 先更新 Stream 資訊（如果有變更）
     if (editableStreamInfo) {
@@ -1204,15 +1010,7 @@ export default function StreamDetailPage() {
         </div>
       </div>
 
-      {/* Song Edit Modal */}
-      {editingIndex !== null && editableSongs[editingIndex] && (
-        <SongEditModal
-          song={editableSongs[editingIndex]}
-          onClose={() => setEditingIndex(null)}
-          onSave={(updates) => handleSongEditSave(editingIndex, updates)}
-          onUpdateExisting={handleUpdateExistingSong}
-        />
-      )}
+      {/* Song Edit Modal - Removed */}
 
       {/* Vocalist Popup */}
       {vocalistPopupSingers && (
@@ -1365,15 +1163,7 @@ export default function StreamDetailPage() {
                                 iTunes
                               </a>
                             )}
-                            <button
-                              onClick={() => setEditingIndex(index)}
-                              className="text-gray-400 hover:text-indigo-600"
-                              title="楽曲情報を編集"
-                            >
-                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                              </svg>
-                            </button>
+                            {/* Removed edit song button */}
                           </div>
                         </div>
                       </div>
