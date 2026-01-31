@@ -63,10 +63,34 @@ export default function SongDetailPage() {
               <p className="text-gray-500 mt-1">{song.name_reading}</p>
             )}
             <p className="text-xl text-gray-600 mt-2">{song.original_artist}</p>
-            <div className="mt-4">
+            <div className="mt-4 flex flex-wrap items-center gap-2">
               <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-indigo-100 text-indigo-800">
                 歌唱回数: {song.performance_count}回
               </span>
+              {/* iTunes/Apple Music Links */}
+              {song.itunes_ids && song.itunes_ids.length > 0 && (
+                <>
+                  {song.itunes_ids.map((itunes) => (
+                    <a
+                      key={itunes.itunes_id}
+                      href={`https://music.apple.com/song/${itunes.itunes_id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium transition-colors ${
+                        itunes.is_primary
+                          ? 'bg-pink-500 text-white hover:bg-pink-600'
+                          : 'bg-pink-100 text-pink-700 hover:bg-pink-200'
+                      }`}
+                      title={itunes.collection_name ? `${itunes.collection_name}${itunes.country ? ` (${itunes.country})` : ''}` : 'Apple Musicで開く'}
+                    >
+                      <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm4.586 14.424c-.161.27-.47.405-.747.405a.93.93 0 01-.464-.124c-1.278-.77-2.89-1.187-4.549-1.187-1.66 0-3.271.416-4.549 1.187a.93.93 0 01-.464.124c-.277 0-.586-.135-.747-.405-.27-.452-.111-1.039.346-1.301 1.499-.9 3.371-1.39 5.414-1.39s3.915.49 5.414 1.39c.457.262.616.849.346 1.301zm1.21-2.778c-.187.312-.524.493-.863.493a.996.996 0 01-.512-.143c-1.575-.94-3.492-1.44-5.421-1.44-1.93 0-3.847.5-5.421 1.44a.996.996 0 01-.512.143c-.34 0-.676-.181-.863-.493-.312-.52-.13-1.203.395-1.513 1.789-1.068 3.988-1.635 6.401-1.635s4.612.567 6.401 1.635c.525.31.707.993.395 1.513zm1.39-3.178c-.214.357-.595.565-.985.565a1.13 1.13 0 01-.584-.164C15.64 9.573 13.87 8.999 12 8.999s-3.64.574-5.617 1.87a1.13 1.13 0 01-.584.164c-.39 0-.771-.208-.985-.565-.357-.595-.148-1.37.452-1.72C7.488 7.308 9.691 6.55 12 6.55s4.512.758 6.734 2.198c.6.35.809 1.125.452 1.72z"/>
+                      </svg>
+                      {itunes.is_primary ? 'Apple Music' : `iTunes ${itunes.country || ''}`}
+                    </a>
+                  ))}
+                </>
+              )}
             </div>
           </div>
         </div>

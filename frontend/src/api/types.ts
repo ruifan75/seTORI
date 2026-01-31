@@ -9,6 +9,13 @@ export interface PaginationResponse {
 
 // ========== 歌曲 ==========
 
+export interface SongItunes {
+  itunes_id: number;
+  collection_name?: string;
+  country?: string;
+  is_primary: boolean;
+}
+
 export interface Song {
   id: string;
   name: string;
@@ -17,6 +24,7 @@ export interface Song {
   original_artist_reading?: string;
   arts?: string;
   performance_count: number;
+  itunes_ids?: SongItunes[];
   created_at: string;
   updated_at: string;
 }

@@ -11,14 +11,20 @@ import (
 )
 
 type SongService struct {
-	songRepo *repository.SongRepository
-	perfRepo *repository.PerformanceRepository
+	songRepo       *repository.SongRepository
+	perfRepo       *repository.PerformanceRepository
+	songItunesRepo *repository.SongItunesRepository
 }
 
-func NewSongService(songRepo *repository.SongRepository, perfRepo *repository.PerformanceRepository) *SongService {
+func NewSongService(
+	songRepo *repository.SongRepository,
+	perfRepo *repository.PerformanceRepository,
+	songItunesRepo *repository.SongItunesRepository,
+) *SongService {
 	return &SongService{
-		songRepo: songRepo,
-		perfRepo: perfRepo,
+		songRepo:       songRepo,
+		perfRepo:       perfRepo,
+		songItunesRepo: songItunesRepo,
 	}
 }
 
@@ -230,6 +236,26 @@ func (s *SongService) toSongResponse(song models.Song, count int) dto.SongRespon
 	}
 	if song.Arts.Valid {
 		resp.Arts = &song.Arts.String
+	}
+
+	// 取得 iTunes IDs
+	if s.songItunesRepo != nil {
+		itunesRecords, _ := s.songItunesRepo.FindBySongID(song.ID)
+		if len(itunesRecords) > 0 {
+			resp.ItunesIDs = make([]dto.SongItunesResponse, len(itunesRecords))
+			for i, rec := range itunesRecords {
+				resp.ItunesIDs[i] = dto.SongItunesResponse{
+					ItunesID:  rec.ITunesID,
+					IsPrimary: rec.IsPrimary,
+				}
+				if rec.CollectionName.Valid {
+					resp.ItunesIDs[i].CollectionName = &rec.CollectionName.String
+				}
+				if rec.Country.Valid {
+					resp.ItunesIDs[i].Country = &rec.Country.String
+				}
+			}
+		}
 	}
 
 	return resp

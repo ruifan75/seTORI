@@ -22,16 +22,24 @@ type PaginationResponse struct {
 
 // ========== 歌曲 ==========
 
+type SongItunesResponse struct {
+	ItunesID       int64   `json:"itunes_id"`
+	CollectionName *string `json:"collection_name,omitempty"`
+	Country        *string `json:"country,omitempty"`
+	IsPrimary      bool    `json:"is_primary"`
+}
+
 type SongResponse struct {
-	ID                    uuid.UUID `json:"id"`
-	Name                  string    `json:"name"`
-	NameReading           *string   `json:"name_reading,omitempty"`
-	OriginalArtist        string    `json:"original_artist"`
-	OriginalArtistReading *string   `json:"original_artist_reading,omitempty"`
-	Arts                  *string   `json:"arts,omitempty"`
-	PerformanceCount      int       `json:"performance_count"`
-	CreatedAt             time.Time `json:"created_at"`
-	UpdatedAt             time.Time `json:"updated_at"`
+	ID                    uuid.UUID            `json:"id"`
+	Name                  string               `json:"name"`
+	NameReading           *string              `json:"name_reading,omitempty"`
+	OriginalArtist        string               `json:"original_artist"`
+	OriginalArtistReading *string              `json:"original_artist_reading,omitempty"`
+	Arts                  *string              `json:"arts,omitempty"`
+	PerformanceCount      int                  `json:"performance_count"`
+	ItunesIDs             []SongItunesResponse `json:"itunes_ids,omitempty"`
+	CreatedAt             time.Time            `json:"created_at"`
+	UpdatedAt             time.Time            `json:"updated_at"`
 }
 
 type SongListResponse struct {

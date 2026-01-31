@@ -40,7 +40,7 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	songItunesRepo := repository.NewSongItunesRepository(db)
 
 	// 建立 services
-	songService := service.NewSongService(songRepo, perfRepo)
+	songService := service.NewSongService(songRepo, perfRepo, songItunesRepo)
 	streamService := service.NewStreamService(streamRepo, perfRepo)
 	singerService := service.NewSingerService(singerRepo, streamRepo, perfRepo)
 	holodexService := service.NewHolodexService(cfg.HolodexAPIKey, cfg.YouTubeAPIKey, streamRepo, singerRepo)
