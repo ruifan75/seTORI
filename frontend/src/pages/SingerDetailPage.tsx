@@ -1,0 +1,323 @@
+import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useParams, Link } from 'react-router-dom';
+import { singerApi, holodexApi } from '../api/client';
+import Loading from '../components/ui/Loading';
+import Pagination from '../components/ui/Pagination';
+import Tag from '../components/ui/Tag';
+
+type TabType = 'streams' | 'performances';
+
+export default function SingerDetailPage() {
+  const { id } = useParams<{ id: string }>();
+  const queryClient = useQueryClient();
+  const [activeTab, setActiveTab] = useState<TabType>('streams');
+  const [streamPage, setStreamPage] = useState(1);
+  const [perfPage, setPerfPage] = useState(1);
+
+  // Singer detail
+  const { data: singer, isLoading: singerLoading } = useQuery({
+    queryKey: ['singer', id],
+    queryFn: () => singerApi.get(id!),
+    enabled: !!id,
+  });
+
+  // Streams
+  const { data: streams, isLoading: streamsLoading } = useQuery({
+    queryKey: ['singerStreams', id, streamPage],
+    queryFn: () => singerApi.getStreams(id!, streamPage, 20),
+    enabled: !!id && activeTab === 'streams',
+  });
+
+  // Performances
+  const { data: performances, isLoading: perfsLoading } = useQuery({
+    queryKey: ['singerPerformances', id, perfPage],
+    queryFn: () => singerApi.getPerformances(id!, perfPage, 20),
+    enabled: !!id && activeTab === 'performances',
+  });
+
+  // Sync mutation
+  const syncMutation = useMutation({
+    mutationFn: () => holodexApi.syncChannel({ channel_id: id! }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['singer', id] });
+      queryClient.invalidateQueries({ queryKey: ['singerStreams', id] });
+    },
+  });
+
+  const formatTime = (seconds: number) => {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    if (h > 0) {
+      return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+    }
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  };
+
+  if (singerLoading) {
+    return <Loading />;
+  }
+
+  if (!singer) {
+    return (
+      <div className="text-center py-12 text-gray-500">
+        チャンネルが見つかりません
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="bg-white rounded-lg shadow-sm border p-6">
+        <div className="flex items-start gap-6">
+          {singer.photo_url ? (
+            <img
+              src={singer.photo_url}
+              alt={singer.name}
+              className="w-24 h-24 rounded-full object-cover"
+              onError={(e) => {
+                e.currentTarget.onerror = null;
+                e.currentTarget.src = `https://holodex.net/statics/channelImg/${singer.id}/50.png`;
+              }}
+            />
+          ) : (
+            <div className="w-24 h-24 rounded-full bg-gray-200 flex items-center justify-center">
+              <svg className="w-12 h-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+              </svg>
+            </div>
+          )}
+          <div className="flex-1">
+            <h1 className="text-2xl font-bold text-gray-900">{singer.name}</h1>
+            {singer.english_name && (
+              <p className="text-gray-500 mt-1">{singer.english_name}</p>
+            )}
+            {singer.organization && (
+              <span className="inline-block mt-2 px-3 py-1 bg-purple-100 text-purple-700 text-sm rounded-full">
+                {singer.organization}
+              </span>
+            )}
+            <div className="flex gap-4 mt-4 text-sm text-gray-600">
+              <div>
+                <span className="font-medium text-gray-900">{singer.stream_count}</span> 歌枠
+              </div>
+              <div>
+                <span className="font-medium text-gray-900">{singer.performance_count}</span> 曲
+              </div>
+            </div>
+          </div>
+          <div className="flex gap-3">
+            <a
+              href={`https://www.youtube.com/channel/${singer.id}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors flex items-center gap-2"
+            >
+              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
+              </svg>
+              YouTube
+            </a>
+            <button
+              onClick={() => syncMutation.mutate()}
+              disabled={syncMutation.isPending}
+              className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+            >
+              <svg className={`w-5 h-5 ${syncMutation.isPending ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              {syncMutation.isPending ? '同期中...' : '同期'}
+            </button>
+          </div>
+        </div>
+
+        {syncMutation.isSuccess && (
+          <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg text-green-700 text-sm">
+            同期完了: {syncMutation.data.synced_count} 件の歌枠を同期しました
+          </div>
+        )}
+      </div>
+
+      {/* Tabs */}
+      <div className="border-b border-gray-200">
+        <nav className="-mb-px flex gap-6">
+          <button
+            onClick={() => setActiveTab('streams')}
+            className={`py-3 px-1 border-b-2 font-medium text-sm ${
+              activeTab === 'streams'
+                ? 'border-indigo-500 text-indigo-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            歌枠一覧
+          </button>
+          <button
+            onClick={() => setActiveTab('performances')}
+            className={`py-3 px-1 border-b-2 font-medium text-sm ${
+              activeTab === 'performances'
+                ? 'border-indigo-500 text-indigo-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            歌唱曲一覧
+          </button>
+        </nav>
+      </div>
+
+      {/* Tab Content */}
+      {activeTab === 'streams' && (
+        <div className="space-y-4">
+          {streamsLoading ? (
+            <Loading />
+          ) : streams?.streams.length === 0 ? (
+            <div className="text-center py-12 text-gray-500">
+              まだ歌枠がありません。上のボタンで同期してください。
+            </div>
+          ) : (
+            <>
+              <div className="grid gap-4">
+                {streams?.streams.map((stream) => (
+                  <Link
+                    key={stream.id}
+                    to={`/streams/${stream.id}`}
+                    className="bg-white rounded-lg shadow-sm border overflow-hidden hover:shadow-md transition-shadow flex"
+                  >
+                    {/* Thumbnail */}
+                    <div className="relative w-48 flex-shrink-0">
+                      {stream.thumbnail_url ? (
+                        <img
+                          src={stream.thumbnail_url}
+                          alt={stream.title}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <div className="w-full h-full bg-gray-200 flex items-center justify-center">
+                          <svg className="w-12 h-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                        </div>
+                      )}
+                    </div>
+                    {/* Content */}
+                    <div className="p-4 flex-1">
+                      <h3 className="font-medium text-gray-900 line-clamp-2">{stream.title}</h3>
+                      <p className="text-sm text-gray-500 mt-1">{stream.stream_date}</p>
+                      {stream.tags.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-2">
+                          {stream.tags.map((tag) => (
+                            <Tag key={tag.id} label={tag.display_name} color={tag.color} />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </Link>
+                ))}
+              </div>
+
+              {streams && (
+                <Pagination
+                  page={streamPage}
+                  totalPages={streams.pagination.total_pages}
+                  onPageChange={setStreamPage}
+                />
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {activeTab === 'performances' && (
+        <div className="space-y-4">
+          {perfsLoading ? (
+            <Loading />
+          ) : performances?.performances.length === 0 ? (
+            <div className="text-center py-12 text-gray-500">
+              まだ歌唱記録がありません
+            </div>
+          ) : (
+            <>
+              <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        楽曲
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        歌枠
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        日付
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        時間
+                      </th>
+                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-20">
+                        再生
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {performances?.performances.map((perf) => (
+                      <tr key={perf.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-4">
+                          {perf.song_id ? (
+                            <Link
+                              to={`/songs/${perf.song_id}`}
+                              className="text-indigo-600 hover:text-indigo-900 font-medium"
+                            >
+                              {perf.song_name}
+                            </Link>
+                          ) : (
+                            <span className="text-gray-900">{perf.song_name}</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-4">
+                          <Link
+                            to={`/streams/${perf.stream_id}`}
+                            className="text-gray-600 hover:text-gray-900 text-sm line-clamp-1"
+                          >
+                            {perf.stream_title}
+                          </Link>
+                        </td>
+                        <td className="px-4 py-4 text-sm text-gray-500">
+                          {perf.stream_date}
+                        </td>
+                        <td className="px-4 py-4 text-sm text-gray-500 font-mono">
+                          {formatTime(perf.start_seconds)}
+                        </td>
+                        <td className="px-4 py-4 text-right">
+                          <a
+                            href={perf.youtube_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-red-100 text-red-600 hover:bg-red-200 transition-colors"
+                          >
+                            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                              <path d="M8 5v14l11-7z" />
+                            </svg>
+                          </a>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {performances && (
+                <Pagination
+                  page={perfPage}
+                  totalPages={performances.pagination.total_pages}
+                  onPageChange={setPerfPage}
+                />
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
