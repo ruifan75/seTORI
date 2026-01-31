@@ -132,8 +132,8 @@ func (r *StreamRepository) UpdateStatus(id string, isProcessed, isHidden bool) e
 // Upsert 建立或更新歌回（用於 Holodex 同步）
 func (r *StreamRepository) Upsert(s *models.Stream) error {
 	query := `
-		INSERT INTO streams (id, title, stream_date, duration_seconds, thumbnail_url, holodex_data, holodex_hash)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO streams (id, title, stream_date, duration_seconds, thumbnail_url, holodex_data, holodex_hash, is_hidden)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		ON CONFLICT (id) DO UPDATE SET
 			title = EXCLUDED.title,
 			stream_date = EXCLUDED.stream_date,
@@ -141,11 +141,12 @@ func (r *StreamRepository) Upsert(s *models.Stream) error {
 			thumbnail_url = EXCLUDED.thumbnail_url,
 			holodex_data = EXCLUDED.holodex_data,
 			holodex_hash = EXCLUDED.holodex_hash,
+			is_hidden = EXCLUDED.is_hidden,
 			updated_at = NOW()
 		RETURNING created_at, updated_at`
 
 	err := r.db.QueryRow(query, s.ID, s.Title, s.StreamDate, s.DurationSeconds,
-		s.ThumbnailURL, s.HolodexData, s.HolodexHash).
+		s.ThumbnailURL, s.HolodexData, s.HolodexHash, s.IsHidden).
 		Scan(&s.CreatedAt, &s.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("upsert stream: %w", err)

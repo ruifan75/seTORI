@@ -18,7 +18,7 @@ export default function SingersPage() {
   });
 
   const syncMutation = useMutation({
-    mutationFn: (channelId: string) => holodexApi.syncChannel({ channel_id: channelId }),
+    mutationFn: (channelId: string) => singerApi.create({ id: channelId, name: '' }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['singers'] });
       setShowAddModal(false);
@@ -174,7 +174,7 @@ export default function SingersPage() {
                   disabled={syncMutation.isPending || !channelInput.trim()}
                   className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50"
                 >
-                  {syncMutation.isPending ? '同期中...' : '追加して同期'}
+                  {syncMutation.isPending ? '追加中...' : 'チャンネルを追加'}
                 </button>
               </div>
             </form>

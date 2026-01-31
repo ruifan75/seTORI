@@ -66,8 +66,39 @@ type SyncResult struct {
 	Skipped     []string
 }
 
-// SyncChannel 同步頻道的所有歌回資料
-func (s *HolodexService) SyncChannel(channelID string, limit int) (*dto.SyncHolodexResponse, error) {
+// SyncChannelInfo 只同步頻道資訊，不同步直播
+func (s *HolodexService) SyncChannelInfo(channelID string) error {
+	channel, err := s.client.GetChannel(channelID)
+	if err != nil {
+		return fmt.Errorf("get channel: %w", err)
+	}
+
+	// Upsert Singer
+	singer := &models.Singer{
+		ID:   channel.ID,
+		Name: channel.Name,
+	}
+	if channel.EnglishName != "" {
+		singer.EnglishName = sql.NullString{String: channel.EnglishName, Valid: true}
+	}
+	// 優先使用 YouTube 大頭貼
+	photoURL := s.getChannelPhotoURL(channel.ID, channel.Photo)
+	if photoURL != "" {
+		singer.PhotoURL = sql.NullString{String: photoURL, Valid: true}
+	}
+	if channel.Org != "" {
+		singer.Organization = sql.NullString{String: channel.Org, Valid: true}
+	}
+
+	if err := s.singerRepo.Upsert(singer); err != nil {
+		return fmt.Errorf("upsert singer: %w", err)
+	}
+
+	return nil
+}
+
+// SyncChannel 同步頻道的所有直播
+func (s *HolodexService) SyncChannel(channelID string, limit int, forceUpdate bool) (*dto.SyncHolodexResponse, error) {
 	// 先同步頻道資訊
 	channel, err := s.client.GetChannel(channelID)
 	if err != nil {
@@ -106,9 +137,9 @@ func (s *HolodexService) SyncChannel(channelID string, limit int) (*dto.SyncHolo
 	offset := 0
 
 	for {
-		videos, err := s.client.GetSingingStreams(channelID, pageSize, offset)
+		videos, err := s.client.GetAllStreams(channelID, pageSize, offset)
 		if err != nil {
-			return nil, fmt.Errorf("get singing streams: %w", err)
+			return nil, fmt.Errorf("get all streams: %w", err)
 		}
 
 		// 沒有更多資料時結束
@@ -117,7 +148,7 @@ func (s *HolodexService) SyncChannel(channelID string, limit int) (*dto.SyncHolo
 		}
 
 		for _, video := range videos {
-			syncStatus, err := s.syncVideo(video, channelID)
+			syncStatus, err := s.syncVideo(video, channelID, forceUpdate)
 			if err != nil {
 				// 記錄錯誤但繼續處理
 				result.Skipped = append(result.Skipped, video.ID)
@@ -148,15 +179,15 @@ func (s *HolodexService) SyncChannel(channelID string, limit int) (*dto.SyncHolo
 }
 
 // syncVideo 同步單一影片
-func (s *HolodexService) syncVideo(video holodex.Video, channelID string) (string, error) {
+func (s *HolodexService) syncVideo(video holodex.Video, channelID string, forceUpdate bool) (string, error) {
 	// 檢查是否已存在
 	existing, err := s.streamRepo.FindByID(video.ID)
 	if err != nil {
 		return "", fmt.Errorf("find stream: %w", err)
 	}
 
-	// 如果已存在，跳過
-	if existing != nil {
+	// 如果已存在且非強制更新模式，跳過
+	if existing != nil && !forceUpdate {
 		return "skipped", nil
 	}
 
@@ -176,12 +207,16 @@ func (s *HolodexService) syncVideo(video holodex.Video, channelID string) (strin
 		streamDate, _ = time.Parse(time.RFC3339, video.PublishedAt)
 	}
 
+	// 非 singing 的影片預設為 hidden
+	isHidden := video.TopicID != "singing"
+
 	stream := &models.Stream{
 		ID:          video.ID,
 		Title:       video.Title,
 		StreamDate:  streamDate,
 		HolodexData: holodexJSON,
 		HolodexHash: sql.NullString{String: hashStr, Valid: true},
+		IsHidden:    isHidden,
 	}
 
 	if video.Duration > 0 {
@@ -290,7 +325,8 @@ func (s *HolodexService) SyncVideo(videoID string) (*dto.SyncHolodexResponse, er
 		Skipped:    []string{},
 	}
 
-	syncStatus, err := s.syncVideo(*video, channelID)
+	// 單一影片同步時，總是強制更新
+	syncStatus, err := s.syncVideo(*video, channelID, true)
 	if err != nil {
 		return nil, fmt.Errorf("sync video: %w", err)
 	}

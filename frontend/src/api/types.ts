@@ -204,6 +204,7 @@ export interface SongPerformanceListResponse {
 export interface SyncHolodexRequest {
   channel_id: string;
   limit?: number;
+  force_update?: boolean;
 }
 
 export interface SyncHolodexResponse {

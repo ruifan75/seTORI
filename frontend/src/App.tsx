@@ -9,7 +9,6 @@ import StreamsPage from './pages/StreamsPage';
 import StreamDetailPage from './pages/StreamDetailPage';
 import SingersPage from './pages/SingersPage';
 import SingerDetailPage from './pages/SingerDetailPage';
-import SyncPage from './pages/admin/SyncPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -34,7 +33,7 @@ function App() {
               <Route path="streams/:id" element={<StreamDetailPage />} />
               <Route path="singers" element={<SingersPage />} />
               <Route path="singers/:id" element={<SingerDetailPage />} />
-              <Route path="admin/sync" element={<SyncPage />} />
+
             </Route>
           </Routes>
         </BrowserRouter>

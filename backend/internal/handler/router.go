@@ -497,15 +497,17 @@ func (r *Router) handleCreateSinger(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// 從 Holodex 同步頻道
-	result, err := r.holodexService.SyncChannel(singerReq.ID, 0)
-	if err != nil {
+	// 只同步頻道資訊，不同步直播
+	if err := r.holodexService.SyncChannelInfo(singerReq.ID); err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	// 返回同步結果
-	respondJSON(w, http.StatusCreated, result)
+	// 返回成功訊息
+	respondJSON(w, http.StatusCreated, map[string]string{
+		"message": "チャンネルを追加しました",
+		"id":      singerReq.ID,
+	})
 }
 
 // ========== Holodex Sync Handlers ==========
@@ -527,7 +529,7 @@ func (r *Router) handleSyncHolodex(w http.ResponseWriter, req *http.Request) {
 		limit = 50
 	}
 
-	result, err := r.holodexService.SyncChannel(syncReq.ChannelID, limit)
+	result, err := r.holodexService.SyncChannel(syncReq.ChannelID, limit, syncReq.ForceUpdate)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return

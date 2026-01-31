@@ -199,8 +199,9 @@ type SongPerformanceListResponse struct {
 // ========== Holodex 同步 ==========
 
 type SyncHolodexRequest struct {
-	ChannelID string `json:"channel_id"`
-	Limit     int    `json:"limit,omitempty"` // 同步多少筆（預設 50）
+	ChannelID   string `json:"channel_id"`
+	Limit       int    `json:"limit,omitempty"`        // 同步多少筆（預設 50）
+	ForceUpdate bool   `json:"force_update,omitempty"` // 強制更新所有資料
 }
 
 type SyncHolodexResponse struct {

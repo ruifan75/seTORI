@@ -29,51 +29,51 @@ func NewClient(apiKey string) *Client {
 
 // Video 影片資料
 type Video struct {
-	ID               string    `json:"id"`
-	Title            string    `json:"title"`
-	Type             string    `json:"type"`
-	TopicID          string    `json:"topic_id"`
-	PublishedAt      string    `json:"published_at"`
-	AvailableAt      string    `json:"available_at"`
-	Duration         int       `json:"duration"`
-	Status           string    `json:"status"`
-	StartScheduled   string    `json:"start_scheduled"`
-	StartActual      string    `json:"start_actual"`
-	EndActual        string    `json:"end_actual"`
-	LiveViewers      int       `json:"live_viewers"`
-	Description      string    `json:"description"`
-	SongCount        int       `json:"songcount"`
-	ChannelID        string    `json:"channel_id"`
-	Channel          *Channel  `json:"channel"`
-	Songs            []Song    `json:"songs"`
-	Comments         []Comment `json:"comments"`
-	Mentions         []Channel `json:"mentions"` // 參與者（被提及的頻道）
+	ID             string    `json:"id"`
+	Title          string    `json:"title"`
+	Type           string    `json:"type"`
+	TopicID        string    `json:"topic_id"`
+	PublishedAt    string    `json:"published_at"`
+	AvailableAt    string    `json:"available_at"`
+	Duration       int       `json:"duration"`
+	Status         string    `json:"status"`
+	StartScheduled string    `json:"start_scheduled"`
+	StartActual    string    `json:"start_actual"`
+	EndActual      string    `json:"end_actual"`
+	LiveViewers    int       `json:"live_viewers"`
+	Description    string    `json:"description"`
+	SongCount      int       `json:"songcount"`
+	ChannelID      string    `json:"channel_id"`
+	Channel        *Channel  `json:"channel"`
+	Songs          []Song    `json:"songs"`
+	Comments       []Comment `json:"comments"`
+	Mentions       []Channel `json:"mentions"` // 參與者（被提及的頻道）
 }
 
 // Channel 頻道資料
 type Channel struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	EnglishName  string `json:"english_name"`
-	Type         string `json:"type"`
-	Photo        string `json:"photo"`
-	Org          string `json:"org"`
-	Suborg       string `json:"suborg"`
-	VideoCount   int    `json:"video_count"`
-	Subscriber   int    `json:"subscriber_count"`
-	ClipCount    int    `json:"clip_count"`
-	Description  string `json:"description"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	EnglishName string `json:"english_name"`
+	Type        string `json:"type"`
+	Photo       string `json:"photo"`
+	Org         string `json:"org"`
+	Suborg      string `json:"suborg"`
+	VideoCount  int    `json:"video_count"`
+	Subscriber  int    `json:"subscriber_count"`
+	ClipCount   int    `json:"clip_count"`
+	Description string `json:"description"`
 }
 
 // Song 歌曲資料（來自 Holodex）
 type Song struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
+	ID             string `json:"id"`
+	Name           string `json:"name"`
 	OriginalArtist string `json:"original_artist"`
-	ArtURL       string `json:"art"`
-	ITunesID     int64  `json:"itunesid"`
-	Start        int    `json:"start"`
-	End          int    `json:"end"`
+	ArtURL         string `json:"art"`
+	ITunesID       int64  `json:"itunesid"`
+	Start          int    `json:"start"`
+	End            int    `json:"end"`
 }
 
 // Comment 評論資料
@@ -157,11 +157,10 @@ func (c *Client) SearchVideos(query string, topic string, limit int) ([]Video, e
 	return videos, nil
 }
 
-// GetSingingStreams 取得歌回（topic=singing）
-func (c *Client) GetSingingStreams(channelID string, limit int, offset int) ([]Video, error) {
+// GetAllStreams 取得所有直播影片
+func (c *Client) GetAllStreams(channelID string, limit int, offset int) ([]Video, error) {
 	params := url.Values{}
 	params.Set("channel_id", channelID)
-	params.Set("topic", "singing")
 	params.Set("type", "stream")
 	params.Set("limit", fmt.Sprintf("%d", limit))
 	params.Set("offset", fmt.Sprintf("%d", offset))
@@ -171,7 +170,7 @@ func (c *Client) GetSingingStreams(channelID string, limit int, offset int) ([]V
 	var videos []Video
 	err := c.get("/videos", params, &videos)
 	if err != nil {
-		return nil, fmt.Errorf("get singing streams: %w", err)
+		return nil, fmt.Errorf("get all streams: %w", err)
 	}
 
 	return videos, nil
