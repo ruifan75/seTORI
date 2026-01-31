@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/ruifan75/setori/internal/dto"
 	"github.com/ruifan75/setori/internal/models"
@@ -197,7 +198,7 @@ func (s *SingerService) toStreamResponse(stream models.Stream, tags []models.Str
 	resp := dto.StreamResponse{
 		ID:          stream.ID,
 		Title:       stream.Title,
-		StreamDate:  stream.StreamDate.Format("2006-01-02"),
+		StreamDate:  stream.StreamDate.Format(time.RFC3339),
 		IsProcessed: stream.IsProcessed,
 		IsHidden:    stream.IsHidden,
 		CreatedAt:   stream.CreatedAt,

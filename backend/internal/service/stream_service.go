@@ -96,7 +96,7 @@ func (s *StreamService) toStreamResponse(stream models.Stream, tags []models.Str
 	resp := dto.StreamResponse{
 		ID:          stream.ID,
 		Title:       stream.Title,
-		StreamDate:  stream.StreamDate.Format("2006-01-02"),
+		StreamDate:  stream.StreamDate.Format(time.RFC3339),
 		IsProcessed: stream.IsProcessed,
 		IsHidden:    stream.IsHidden,
 		CreatedAt:   stream.CreatedAt,
@@ -232,9 +232,14 @@ func (s *StreamService) Update(id string, req *dto.UpdateStreamRequest) (*dto.St
 
 	// 更新日期
 	if req.StreamDate != nil && *req.StreamDate != "" {
-		date, err := time.Parse("2006-01-02", *req.StreamDate)
+		// 嘗試解析 RFC3339 格式（完整時間），失敗則嘗試日期格式
+		date, err := time.Parse(time.RFC3339, *req.StreamDate)
 		if err != nil {
-			return nil, fmt.Errorf("invalid date format: %w", err)
+			// 如果不是 RFC3339，嘗試解析為日期格式
+			date, err = time.Parse("2006-01-02", *req.StreamDate)
+			if err != nil {
+				return nil, fmt.Errorf("parse stream date: %w", err)
+			}
 		}
 		stream.StreamDate = date
 	}

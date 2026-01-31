@@ -941,7 +941,17 @@ export default function StreamDetailPage() {
             ) : (
               <>
                 <h1 className="text-2xl font-bold text-gray-900">{stream.title}</h1>
-                <p className="text-gray-500 mt-2">{stream.stream_date}</p>
+                <p className="text-gray-500 mt-2">
+                  {new Date(stream.stream_date).toLocaleString('ja-JP', {
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    hour12: false
+                  })}
+                </p>
 
                 {/* Tags */}
                 {stream.tags.length > 0 && (

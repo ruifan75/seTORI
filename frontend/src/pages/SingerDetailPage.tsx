@@ -262,7 +262,17 @@ export default function SingerDetailPage() {
                     {/* Content */}
                     <div className="p-4 flex-1">
                       <h3 className="font-medium text-gray-900 line-clamp-2">{stream.title}</h3>
-                      <p className="text-sm text-gray-500 mt-1">{stream.stream_date}</p>
+                      <p className="text-sm text-gray-500 mt-1">
+                        {new Date(stream.stream_date).toLocaleString('ja-JP', {
+                          year: 'numeric',
+                          month: '2-digit',
+                          day: '2-digit',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                          second: '2-digit',
+                          hour12: false,
+                        })}
+                      </p>
                       {stream.tags.length > 0 && (
                         <div className="flex flex-wrap gap-1 mt-2">
                           {stream.tags.map((tag) => (
@@ -342,7 +352,19 @@ export default function SingerDetailPage() {
                           </Link>
                         </td>
                         <td className="px-4 py-4 text-sm text-gray-500">
-                          {perf.stream_date}
+                          {(() => {
+                            const streamDate = new Date(perf.stream_date);
+                            const singTime = new Date(streamDate.getTime() + perf.start_seconds * 1000);
+                            return singTime.toLocaleString('ja-JP', {
+                              year: 'numeric',
+                              month: '2-digit',
+                              day: '2-digit',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                              second: '2-digit',
+                              hour12: false,
+                            });
+                          })()}
                         </td>
                         <td className="px-4 py-4 text-sm text-gray-500 font-mono">
                           {formatTime(perf.start_seconds)}

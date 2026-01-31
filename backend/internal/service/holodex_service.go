@@ -149,6 +149,17 @@ func (s *HolodexService) SyncChannel(channelID string, limit int) (*dto.SyncHolo
 
 // syncVideo 同步單一影片
 func (s *HolodexService) syncVideo(video holodex.Video, channelID string) (string, error) {
+	// 檢查是否已存在
+	existing, err := s.streamRepo.FindByID(video.ID)
+	if err != nil {
+		return "", fmt.Errorf("find stream: %w", err)
+	}
+
+	// 如果已存在，跳過
+	if existing != nil {
+		return "skipped", nil
+	}
+
 	// 計算 Holodex 資料的 hash
 	holodexJSON, err := json.Marshal(video)
 	if err != nil {
@@ -157,35 +168,12 @@ func (s *HolodexService) syncVideo(video holodex.Video, channelID string) (strin
 	hash := sha256.Sum256(holodexJSON)
 	hashStr := hex.EncodeToString(hash[:])
 
-	// 檢查是否已存在且未更新
-	changed, err := s.streamRepo.CheckHashChanged(video.ID, hashStr)
-	if err != nil {
-		return "", fmt.Errorf("check hash: %w", err)
-	}
-
-	// 即使 hash 未變，也要檢查 stream_singers 是否需要更新
-	if !changed {
-		// 檢查是否有參與者資料
-		existingSingers, _ := s.streamRepo.GetSingers(video.ID)
-		if len(existingSingers) > 0 {
-			// 已有參與者資料，可以跳過
-			return "skipped", nil
-		}
-		// 沒有參與者資料，繼續處理以補充 stream_singers
-	}
-
 	// 解析日期
 	var streamDate time.Time
 	if video.AvailableAt != "" {
 		streamDate, _ = time.Parse(time.RFC3339, video.AvailableAt)
 	} else if video.PublishedAt != "" {
 		streamDate, _ = time.Parse(time.RFC3339, video.PublishedAt)
-	}
-
-	// 檢查是否為新資料
-	existing, err := s.streamRepo.FindByID(video.ID)
-	if err != nil {
-		return "", fmt.Errorf("find stream: %w", err)
 	}
 
 	stream := &models.Stream{

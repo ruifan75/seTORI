@@ -73,7 +73,17 @@ export default function StreamsPage() {
                       <h3 className="font-medium text-gray-900 line-clamp-2 group-hover:text-indigo-600 transition-colors">
                         {stream.title}
                       </h3>
-                      <p className="text-sm text-gray-500 mt-1">{stream.stream_date}</p>
+                      <p className="text-sm text-gray-500 mt-1">
+                        {new Date(stream.stream_date).toLocaleString('ja-JP', {
+                          year: 'numeric',
+                          month: '2-digit',
+                          day: '2-digit',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                          second: '2-digit',
+                          hour12: false
+                        })}
+                      </p>
 
                       {/* Tags */}
                       {stream.tags.length > 0 && (

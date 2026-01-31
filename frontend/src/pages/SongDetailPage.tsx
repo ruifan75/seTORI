@@ -573,7 +573,21 @@ export default function SongDetailPage() {
                           >
                             {perf.stream_title}
                           </Link>
-                          <p className="text-sm text-gray-500 mt-1">{perf.stream_date}</p>
+                          <p className="text-sm text-gray-500 mt-1">
+                            {(() => {
+                              const streamDate = new Date(perf.stream_date);
+                              const singTime = new Date(streamDate.getTime() + perf.start_seconds * 1000);
+                              return singTime.toLocaleString('ja-JP', {
+                                year: 'numeric',
+                                month: '2-digit',
+                                day: '2-digit',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                                second: '2-digit',
+                                hour12: false,
+                              });
+                            })()}
+                          </p>
                         </div>
                         <a
                           href={perf.youtube_url}
