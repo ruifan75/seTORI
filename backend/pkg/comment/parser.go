@@ -8,11 +8,12 @@ import (
 
 // ParsedSong 解析後的歌曲資訊
 type ParsedSong struct {
-	Start           int    // 開始秒數
-	End             int    // 結束秒數（0 表示未知）
-	Name            string // 歌曲名稱
-	OriginalArtist  string // 原唱藝人
-	OriginalComment string // 原始 comment 文本
+	Start              int    // 開始秒數
+	End                int    // 結束秒數（0 表示未知）
+	Name               string // 歌曲名稱
+	OriginalArtist     string // 原唱藝人
+	OriginalComment    string // 原始 comment 文本
+	IsEndTimeEstimated bool   // 結束時間是否為估計值
 }
 
 // 時間戳正則表達式
@@ -62,11 +63,12 @@ func ParseComment(line string) *ParsedSong {
 			name, artist := parseSongAndArtist(songPart)
 
 			return &ParsedSong{
-				Start:           startTime,
-				End:             endTime,
-				Name:            name,
-				OriginalArtist:  artist,
-				OriginalComment: line,
+				Start:              startTime,
+				End:                endTime,
+				Name:               name,
+				OriginalArtist:     artist,
+				OriginalComment:    line,
+				IsEndTimeEstimated: false,
 			}
 		}
 	}
@@ -79,11 +81,12 @@ func ParseComment(line string) *ParsedSong {
 			name, artist := parseSongAndArtist(songPart)
 
 			return &ParsedSong{
-				Start:           startTime,
-				End:             0, // 未知
-				Name:            name,
-				OriginalArtist:  artist,
-				OriginalComment: line,
+				Start:              startTime,
+				End:                0, // 未知
+				Name:               name,
+				OriginalArtist:     artist,
+				OriginalComment:    line,
+				IsEndTimeEstimated: true,
 			}
 		}
 	}

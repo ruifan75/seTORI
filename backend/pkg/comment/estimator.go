@@ -45,6 +45,7 @@ func EstimateEndTimes(songs []ParsedSong, totalDuration int) []ParsedSong {
 				}
 
 				result[i].End = estimatedEnd
+				result[i].IsEndTimeEstimated = true
 			} else {
 				// 最後一首歌
 				if totalDuration > 0 && totalDuration > result[i].Start {
@@ -55,9 +56,11 @@ func EstimateEndTimes(songs []ParsedSong, totalDuration int) []ParsedSong {
 						estimatedEnd = result[i].Start + DefaultSongDuration
 					}
 					result[i].End = estimatedEnd
+					result[i].IsEndTimeEstimated = true
 				} else {
 					// 使用預設長度
 					result[i].End = result[i].Start + DefaultSongDuration
+					result[i].IsEndTimeEstimated = true
 				}
 			}
 		}

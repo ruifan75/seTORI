@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, Link } from 'react-router-dom';
 import { streamApi, performanceApi, commentApi, aiApi, songApi, singerApi } from '../api/client';
-import type { Singer, CreatePerformanceItem, AINormalizationItem, UpdateSongRequest, Song, UpdateStreamRequest } from '../api/types';
+import type { Singer, CreatePerformanceItem, AINormalizationItem, Song, UpdateStreamRequest } from '../api/types';
 import Loading from '../components/ui/Loading';
 import Tag from '../components/ui/Tag';
 import { useToast } from '../components/ui/Toast';
@@ -55,6 +55,11 @@ interface EditableSong {
   itunesId: number | null; // Holodex 提供的 iTunes ID
   originalName: string; // 追蹤原始名稱（用於判斷是否有修改）
   originalArtist: string; // 追蹤原始藝人
+  // AI 正規化追蹤
+  aiNormalizedName?: string; // AI 修改前的名稱（如果有被 AI 修改）
+  aiNormalizedArtist?: string; // AI 修改前的藝人（如果有被 AI 修改）
+  // 時間估計標記
+  isEndTimeEstimated?: boolean; // 結束時間是否為估計值
 }
 
 // 歌曲搜尋輸入元件的 Props
@@ -421,6 +426,10 @@ export default function StreamDetailPage() {
         itunesId: song.itunes_id || null,
         originalName: song.name,
         originalArtist: song.original_artist,
+        // Holodex 的資料不需要標記 AI 或估計
+        aiNormalizedName: undefined,
+        aiNormalizedArtist: undefined,
+        isEndTimeEstimated: false,
       }));
       setEditableSongs(songs);
       showToast(`Holodexから${songs.length}曲を読み込みました`, 'success');
@@ -455,6 +464,9 @@ export default function StreamDetailPage() {
         itunesId: null,
         originalName: song.name,
         originalArtist: song.original_artist,
+        aiNormalizedName: undefined,
+        aiNormalizedArtist: undefined,
+        isEndTimeEstimated: song.is_end_time_estimated,
       }));
       setEditableSongs(songs);
       showToast(`コメントから${songs.length}曲を検出しました`, 'success');
@@ -489,14 +501,22 @@ export default function StreamDetailPage() {
         const updated = [...prev];
         for (const suggestion of data.suggestions) {
           if (suggestion.index < updated.length) {
+            const current = updated[suggestion.index];
+            // 檢查是否有被 AI 修改
+            const nameChanged = current.name !== suggestion.normalized_name;
+            const artistChanged = current.artist !== suggestion.original_artist;
+            
             updated[suggestion.index] = {
-              ...updated[suggestion.index],
+              ...current,
               name: suggestion.normalized_name,
               nameReading: suggestion.normalized_name_reading,
               artist: suggestion.original_artist,
               artistReading: suggestion.original_artist_reading,
               tags: suggestion.tags,
               matchedSongId: suggestion.matched_song_id || null,
+              // 保留 AI 修改前的值
+              aiNormalizedName: nameChanged ? current.name : undefined,
+              aiNormalizedArtist: artistChanged ? current.artist : undefined,
               // 更新原始值以追蹤後續變更
               originalName: suggestion.normalized_name,
               originalArtist: suggestion.original_artist,
@@ -510,12 +530,6 @@ export default function StreamDetailPage() {
     onError: (err: Error) => {
       showToast(`AI正規化エラー: ${err.message}`, 'error');
     },
-  });
-
-  // 更新現有歌曲
-  const updateSongMutation = useMutation({
-    mutationFn: ({ songId, data }: { songId: string; data: UpdateSongRequest }) =>
-      songApi.update(songId, data),
   });
 
   const loadFromHolodex = () => {
@@ -579,6 +593,10 @@ export default function StreamDetailPage() {
             itunesId: null, // 現有 performance 不會有 iTunes ID
             originalName: perf.song_name,
             originalArtist: perf.original_artist,
+            // 現有資料沒有 AI 修改或估計時間的標記
+            aiNormalizedName: undefined,
+            aiNormalizedArtist: undefined,
+            isEndTimeEstimated: false,
           }));
           setEditableSongs(songs);
         }
@@ -1183,6 +1201,15 @@ export default function StreamDetailPage() {
                           onSelectSong={(selectedSong) => handleSelectExistingSong(index, selectedSong)}
                           placeholder="楽曲名を入力して検索"
                         />
+                        {/* AI 正規化差異顯示 */}
+                        {song.aiNormalizedName && (
+                          <div className="mt-1 text-sm">
+                            <span className="text-gray-500">AI修正:</span>{' '}
+                            <span className="line-through text-gray-400">{song.aiNormalizedName}</span>
+                            {' → '}
+                            <span className="text-blue-600 font-medium">{song.name}</span>
+                          </div>
+                        )}
                       </div>
 
                       {/* Artist */}
@@ -1197,6 +1224,15 @@ export default function StreamDetailPage() {
                           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                           placeholder="アーティスト名を入力"
                         />
+                        {/* AI 正規化差異顯示 */}
+                        {song.aiNormalizedArtist && (
+                          <div className="mt-1 text-sm">
+                            <span className="text-gray-500">AI修正:</span>{' '}
+                            <span className="line-through text-gray-400">{song.aiNormalizedArtist}</span>
+                            {' → '}
+                            <span className="text-blue-600 font-medium">{song.artist}</span>
+                          </div>
+                        )}
                       </div>
 
                       {/* Start Time */}
@@ -1222,9 +1258,20 @@ export default function StreamDetailPage() {
                           type="text"
                           value={song.end ? formatTimeInput(song.end) : ''}
                           onChange={(e) => handleTimeChange(index, 'end', e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent font-mono"
+                          className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent font-mono ${
+                            song.isEndTimeEstimated ? 'border-orange-300 bg-orange-50' : 'border-gray-300'
+                          }`}
                           placeholder="0:00"
                         />
+                        {/* 估計時間警告 */}
+                        {song.isEndTimeEstimated && (
+                          <div className="mt-1 flex items-center gap-1 text-xs text-orange-600">
+                            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                            </svg>
+                            <span>推定時間（コメントから算出）- 要確認</span>
+                          </div>
+                        )}
                       </div>
                     </div>
 

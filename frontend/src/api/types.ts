@@ -223,6 +223,7 @@ export interface CommentSong {
   name: string;
   original_artist: string;
   original_comment: string;
+  is_end_time_estimated: boolean;
 }
 
 export interface AnalyzeCommentsResponse {

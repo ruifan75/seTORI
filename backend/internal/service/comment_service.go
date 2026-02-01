@@ -57,11 +57,12 @@ func (s *CommentService) AnalyzeComments(videoID string) (*dto.AnalyzeCommentsRe
 	songDTOs := make([]dto.CommentSong, len(validSongs))
 	for i, song := range validSongs {
 		songDTOs[i] = dto.CommentSong{
-			Start:           song.Start,
-			End:             song.End,
-			Name:            song.Name,
-			OriginalArtist:  song.OriginalArtist,
-			OriginalComment: song.OriginalComment,
+			Start:              song.Start,
+			End:                song.End,
+			Name:               song.Name,
+			OriginalArtist:     song.OriginalArtist,
+			OriginalComment:    song.OriginalComment,
+			IsEndTimeEstimated: song.IsEndTimeEstimated,
 		}
 	}
 

@@ -214,11 +214,12 @@ type SyncHolodexResponse struct {
 // ========== Comment 分析 ==========
 
 type CommentSong struct {
-	Start           int    `json:"start"`
-	End             int    `json:"end"`
-	Name            string `json:"name"`
-	OriginalArtist  string `json:"original_artist"`
-	OriginalComment string `json:"original_comment"`
+	Start              int    `json:"start"`
+	End                int    `json:"end"`
+	Name               string `json:"name"`
+	OriginalArtist     string `json:"original_artist"`
+	OriginalComment    string `json:"original_comment"`
+	IsEndTimeEstimated bool   `json:"is_end_time_estimated"`
 }
 
 type AnalyzeCommentsResponse struct {

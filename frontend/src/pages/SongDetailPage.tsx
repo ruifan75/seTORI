@@ -597,7 +597,7 @@ export default function SongDetailPage() {
                   {/* 既有的 iTunes */}
                   {(editedSong.itunes_ids || []).length > 0 && (
                     <div className="mb-4 space-y-2">
-                      {editedSong.itunes_ids.map((itunes) => {
+                      {(editedSong.itunes_ids || []).map((itunes) => {
                         const detail = itunesDetails[itunes.itunes_id];
                         return (
                           <div key={itunes.itunes_id} className="flex items-center gap-3 p-2 bg-gray-50 rounded-lg">

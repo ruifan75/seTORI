@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router-dom';
-import { singerApi, holodexApi } from '../api/client';
+import { singerApi } from '../api/client';
 import Loading from '../components/ui/Loading';
 import Pagination from '../components/ui/Pagination';
 
@@ -18,7 +18,7 @@ export default function SingersPage() {
   });
 
   const syncMutation = useMutation({
-    mutationFn: (channelId: string) => singerApi.create({ id: channelId, name: '' }),
+    mutationFn: (channelId: string) => singerApi.create(channelId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['singers'] });
       setShowAddModal(false);
