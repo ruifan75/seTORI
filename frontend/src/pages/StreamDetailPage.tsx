@@ -491,19 +491,48 @@ function formatTime(seconds: number): string {
 }
 
 function parseTime(timeStr: string): number {
-  const parts = timeStr.split(':').map(Number);
+  if (!timeStr || timeStr.trim() === '') {
+    return 0;
+  }
+  
+  const parts = timeStr.split(':').map(s => {
+    const num = parseInt(s, 10);
+    return isNaN(num) ? 0 : num;
+  });
+  
   if (parts.length === 3) {
     return parts[0] * 3600 + parts[1] * 60 + parts[2];
   } else if (parts.length === 2) {
     return parts[0] * 60 + parts[1];
+  } else if (parts.length === 1) {
+    // 如果只有一個數字，視為秒數
+    return parts[0];
   }
   return 0;
 }
 
 function formatTimeInput(seconds: number): string {
-  const m = Math.floor(seconds / 60);
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
   const s = seconds % 60;
+  
+  if (h > 0) {
+    return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  }
   return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+function formatStreamDate(dateStr: string): string {
+  // 將 ISO 格式的日期轉換為本地時區的格式
+  const date = new Date(dateStr);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  const seconds = String(date.getSeconds()).padStart(2, '0');
+  
+  return `${year}/${month}/${day} ${hours}:${minutes}:${seconds}`;
 }
 
 export default function StreamDetailPage() {
@@ -687,11 +716,14 @@ export default function StreamDetailPage() {
       return;
     }
 
+    // 按開始時間排序
+    const sortedSongs = [...stream.holodex_timeline_songs].sort((a, b) => a.start_seconds - b.start_seconds);
+    
     // 從已載入的 stream 資料中讀取
-    setHolodexTimelineSongs(stream.holodex_timeline_songs);
+    setHolodexTimelineSongs(sortedSongs);
 
     // 轉換為可編輯歌曲
-    const songs: EditableSong[] = stream.holodex_timeline_songs.map((song, index) => ({
+    const songs: EditableSong[] = sortedSongs.map((song, index) => ({
       id: `holodex-${index}`,
       name: song.name,
       nameReading: '',
@@ -720,12 +752,15 @@ export default function StreamDetailPage() {
       return;
     }
 
+    // 按開始時間排序
+    const sortedSongs = [...stream.comment_timeline_songs].sort((a, b) => a.start - b.start);
+    
     // 從已載入的 stream 資料中讀取
-    setCommentTimelineSongs(stream.comment_timeline_songs);
+    setCommentTimelineSongs(sortedSongs);
 
     // 轉換為可編輯歌曲
     const defaultSingerIds = channelOwner ? [channelOwner.id] : [];
-    const songs: EditableSong[] = stream.comment_timeline_songs.map((song, index) => ({
+    const songs: EditableSong[] = sortedSongs.map((song, index) => ({
       id: `comment-${index}`,
       name: song.name,
       nameReading: '',
@@ -911,8 +946,12 @@ export default function StreamDetailPage() {
   };
 
   const handleTimeChange = (index: number, field: 'start' | 'end', timeStr: string) => {
+    // 允許用戶自由輸入，只在失去焦點時解析
+    // 直接更新顯示值，延遲解析
     const seconds = parseTime(timeStr);
-    handleSongChange(index, field, seconds);
+    if (!isNaN(seconds)) {
+      handleSongChange(index, field, seconds);
+    }
   };
 
   const toggleTag = (index: number, tagId: string) => {
@@ -1124,7 +1163,7 @@ export default function StreamDetailPage() {
                 {/* Title - Read Only */}
                 <h1 className="text-2xl font-bold text-gray-900">{stream.title}</h1>
                 {/* Date - Read Only */}
-                <p className="text-gray-500 mt-2">{stream.stream_date}</p>
+                <p className="text-gray-500 mt-2">{formatStreamDate(stream.stream_date)}</p>
 
                 {/* Editable Tags */}
                 <div className="mt-4">
@@ -1598,9 +1637,16 @@ export default function StreamDetailPage() {
                         </label>
                         <div className="flex gap-2">
                           <input
+                            key={`start-${song.id}-${song.start}`}
                             type="text"
-                            value={formatTimeInput(song.start)}
-                            onChange={(e) => handleTimeChange(index, 'start', e.target.value)}
+                            defaultValue={formatTimeInput(song.start)}
+                            onBlur={(e) => handleTimeChange(index, 'start', e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                handleTimeChange(index, 'start', e.currentTarget.value);
+                                e.currentTarget.blur();
+                              }
+                            }}
                             className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent font-mono"
                             placeholder="0:00"
                           />
@@ -1623,9 +1669,16 @@ export default function StreamDetailPage() {
                         </label>
                         <div className="flex gap-2">
                           <input
+                            key={`end-${song.id}-${song.end}`}
                             type="text"
-                            value={song.end ? formatTimeInput(song.end) : ''}
-                            onChange={(e) => handleTimeChange(index, 'end', e.target.value)}
+                            defaultValue={song.end ? formatTimeInput(song.end) : ''}
+                            onBlur={(e) => handleTimeChange(index, 'end', e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                handleTimeChange(index, 'end', e.currentTarget.value);
+                                e.currentTarget.blur();
+                              }
+                            }}
                             className={`flex-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent font-mono ${
                               song.isEndTimeEstimated ? 'border-orange-300 bg-orange-50' : 'border-gray-300'
                             }`}
