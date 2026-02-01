@@ -53,11 +53,15 @@ func (s *PerformanceService) CreatePerformances(streamID string, items []dto.Cre
 			// 1. iTunes ID 還沒有被關聯到任何歌曲，或
 			// 2. iTunes ID 已關聯到其他歌曲（這種情況不應該發生，但為安全起見檢查）
 			if existingItunes == nil {
+				// 檢查該歌曲是否已經有其他 iTunes ID
+				existingSongItunes, _ := s.songItunesRepo.FindBySongID(song.ID)
+				isPrimary := isNewSong || len(existingSongItunes) == 0 // 新歌曲或該歌曲還沒有任何 iTunes ID 時設為主要
+
 				// iTunes ID 未被關聯，新增關聯
 				songItunes := &models.SongITunes{
 					SongID:    song.ID,
 					ITunesID:  *item.ItunesID,
-					IsPrimary: isNewSong, // 如果是新歌曲，設為主要
+					IsPrimary: isPrimary,
 				}
 				if err := s.songItunesRepo.Create(songItunes); err != nil {
 					// 記錄錯誤但不中斷
