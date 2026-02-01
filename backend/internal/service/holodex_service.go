@@ -623,86 +623,100 @@ func (s *HolodexService) SyncSetoriToHolodex(streamID string) (*dto.SyncHolodexR
 				if s.songRepo != nil {
 					song, err := s.songRepo.FindByID(perf.SongID)
 					if err == nil && song != nil {
-						// 取得 iTunes 資訊
+						// 取得 iTunes 資訊（只使用 primary iTunes ID）
 						if s.songItunesRepo != nil {
 							itunesRecords, err := s.songItunesRepo.FindBySongID(perf.SongID)
 							if err == nil && len(itunesRecords) > 0 {
-								for _, itunesRecord := range itunesRecords {
-									// 從 iTunes 取得完整資訊
-									var itunesInfo *itunes.QueryResponse
-									itunesInfo, err := s.itunesClient.QueryByID(itunesRecord.ITunesID)
-
-									// 構造完整的 request
-									requestData := map[string]interface{}{
-										"itunesid":        itunesRecord.ITunesID,
-										"start":           perf.StartSeconds,
-										"end":             perf.EndSeconds,
-										"name":            song.Name,
-										"original_artist": song.OriginalArtist,
-										"video_id":        streamID,
-										"channel_id":      channelID,
-										"available_at":    stream.StreamDate.Format(time.RFC3339),
+								// 只使用 primary iTunes ID
+								var primaryItunes models.SongITunes
+								foundPrimary := false
+								for _, record := range itunesRecords {
+									if record.IsPrimary {
+										primaryItunes = record
+										foundPrimary = true
+										break
 									}
+								}
 
-									// 如果有 iTunes 資訊，添加完整的 song 物件和 URL
-									if err == nil && itunesInfo != nil {
-										songObj := map[string]interface{}{
-											"trackId":         itunesInfo.ItunesID,
-											"trackTimeMillis": itunesInfo.TrackTimeMillis,
-											"collectionName":  itunesInfo.CollectionName,
-											"artistName":      itunesInfo.ArtistName,
-											"trackName":       itunesInfo.TrackName,
-											"artworkUrl100":   itunesInfo.ArtworkURL,
-											"trackViewUrl":    itunesInfo.TrackViewURL,
-										}
-										requestData["song"] = songObj
-										requestData["amUrl"] = itunesInfo.TrackViewURL
-										requestData["art"] = itunesInfo.ArtworkURL
+								// 如果沒有標記為 primary 的，使用第一筆
+								if !foundPrimary {
+									primaryItunes = itunesRecords[0]
+								}
+
+								// 從 iTunes 取得完整資訊
+								var itunesInfo *itunes.QueryResponse
+								itunesInfo, err := s.itunesClient.QueryByID(primaryItunes.ITunesID)
+
+								// 構造完整的 request
+								requestData := map[string]interface{}{
+									"itunesid":        primaryItunes.ITunesID,
+									"start":           perf.StartSeconds,
+									"end":             perf.EndSeconds,
+									"name":            song.Name,
+									"original_artist": song.OriginalArtist,
+									"video_id":        streamID,
+									"channel_id":      channelID,
+									"available_at":    stream.StreamDate.Format(time.RFC3339),
+								}
+
+								// 如果有 iTunes 資訊，添加完整的 song 物件和 URL
+								if err == nil && itunesInfo != nil {
+									songObj := map[string]interface{}{
+										"trackId":         itunesInfo.ItunesID,
+										"trackTimeMillis": itunesInfo.TrackTimeMillis,
+										"collectionName":  itunesInfo.CollectionName,
+										"artistName":      itunesInfo.ArtistName,
+										"trackName":       itunesInfo.TrackName,
+										"artworkUrl100":   itunesInfo.ArtworkURL,
+										"trackViewUrl":    itunesInfo.TrackViewURL,
 									}
+									requestData["song"] = songObj
+									requestData["amUrl"] = itunesInfo.TrackViewURL
+									requestData["art"] = itunesInfo.ArtworkURL
+								}
 
-									// 添加 channel 資訊
-									if channelName != "" {
-										channelObj := map[string]interface{}{
-											"name":         channelName,
-											"english_name": channelEnglishName,
-										}
-										requestData["channel"] = channelObj
+								// 添加 channel 資訊
+								if channelName != "" {
+									channelObj := map[string]interface{}{
+										"name":         channelName,
+										"english_name": channelEnglishName,
 									}
+									requestData["channel"] = channelObj
+								}
 
-									// 發送請求到 Holodex API
-									requestJSON, err := json.Marshal(requestData)
-									if err != nil {
-										errors = append(errors, fmt.Sprintf("%s: marshal error: %v", song.Name, err))
-										continue
-									}
+								// 發送請求到 Holodex API
+								requestJSON, err := json.Marshal(requestData)
+								if err != nil {
+									errors = append(errors, fmt.Sprintf("%s: marshal error: %v", song.Name, err))
+									continue
+								}
 
-									req, err := http.NewRequest("PUT", "https://holodex.net/api/v2/songs", bytes.NewBuffer(requestJSON))
-									if err != nil {
-										errors = append(errors, fmt.Sprintf("%s: create request error: %v", song.Name, err))
-										continue
-									}
+								req, err := http.NewRequest("PUT", "https://holodex.net/api/v2/songs", bytes.NewBuffer(requestJSON))
+								if err != nil {
+									errors = append(errors, fmt.Sprintf("%s: create request error: %v", song.Name, err))
+									continue
+								}
 
-									req.Header.Set("Content-Type", "application/json")
-									req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", s.editorToken))
-									req.Header.Set("Origin", "https://holodex.net")
+								req.Header.Set("Content-Type", "application/json")
+								req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", s.editorToken))
+								req.Header.Set("Origin", "https://holodex.net")
 
-									client := &http.Client{Timeout: 30 * time.Second}
-									resp, err := client.Do(req)
-									if err != nil {
-										errors = append(errors, fmt.Sprintf("%s: request error: %v", song.Name, err))
-										continue
-									}
-									defer resp.Body.Close()
+								client := &http.Client{Timeout: 30 * time.Second}
+								resp, err := client.Do(req)
+								if err != nil {
+									errors = append(errors, fmt.Sprintf("%s: request error: %v", song.Name, err))
+									continue
+								}
+								defer resp.Body.Close()
 
-									body, _ := io.ReadAll(resp.Body)
-									if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-										log.Printf("✓ Synced: %s (iTunes: %d)", song.Name, itunesRecord.ITunesID)
-										syncedCount++
-									} else {
-										errMsg := fmt.Sprintf("%s: API error %d: %s", song.Name, resp.StatusCode, string(body))
-										log.Printf("✗ %s", errMsg)
-										errors = append(errors, errMsg)
-									}
+								body, _ := io.ReadAll(resp.Body)
+								if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+									log.Printf("✓ Synced: %s (iTunes: %d)", song.Name, primaryItunes.ITunesID)
+									syncedCount++
+								} else {
+									errMsg := fmt.Sprintf("%s: API error %d: %s", song.Name, resp.StatusCode, string(body))
+									log.Printf("✗ %s", errMsg)
+									errors = append(errors, errMsg)
 								}
 							}
 						}
