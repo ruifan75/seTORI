@@ -84,6 +84,7 @@ export interface ITunesQueryResult {
   artist_name: string;
   artwork_url: string;
   track_view_url: string;
+  track_time_millis: number;
   country: string;
 }
 

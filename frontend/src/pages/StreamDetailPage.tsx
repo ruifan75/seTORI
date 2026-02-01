@@ -2,11 +2,11 @@ import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, Link } from 'react-router-dom';
 import { streamApi, performanceApi, aiApi, songApi, singerApi, itunesApi, holodexApi } from '../api/client';
-import type { Singer, CreatePerformanceItem, AINormalizationItem, Song, UpdateStreamRequest, SongEndTimeEstimateRequest, EstimateEndTimesRequest, ITunesSearchResult, CommentSong, SongSuggestion } from '../api/types';
+import type { Singer, CreatePerformanceItem, AINormalizationItem, Song, UpdateStreamRequest, ITunesSearchResult, CommentSong, SongSuggestion } from '../api/types';
 import Loading from '../components/ui/Loading';
 import Tag from '../components/ui/Tag';
 import { useToast } from '../components/ui/Toast';
-import YoutubePlayer, { youtubePlayerSeekTo } from '../components/YoutubePlayer';
+import YoutubePlayer, { youtubePlayerSeekTo, youtubePlayerGetCurrentTime } from '../components/YoutubePlayer';
 
 // 預設的直播類型標籤
 const STREAM_TAGS = [
@@ -54,6 +54,7 @@ interface EditableSong {
   matchedSongId: string | null; // 配對到的歌曲 ID，null 表示要新增
   artUrl: string | null; // 封面圖 URL
   itunesId: number | null; // Holodex 提供的 iTunes ID
+  trackDuration: number | null; // iTunes 歌曲長度（秒）
   originalName: string; // 追蹤原始名稱（用於判斷是否有修改）
   originalArtist: string; // 追蹤原始藝人
   // AI 正規化追蹤
@@ -196,6 +197,11 @@ function SongSearchInput({ value, onChange, onSelectSong, placeholder }: SongSea
         value={value}
         onChange={handleInputChange}
         onFocus={() => {
+          if (value.trim().length > 0) {
+            setSearchQuery(value);
+            setIsOpen(true);
+            return;
+          }
           if (dbSuggestions.length > 0 || itunesSuggestions.length > 0) setIsOpen(true);
         }}
         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
@@ -522,6 +528,20 @@ function formatTimeInput(seconds: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
+// 格式化時長，顯示為 "+MM:SS" 或 "+H:MM:SS"
+function formatDuration(seconds: number | null): string {
+  if (seconds === null || seconds === 0) return '+??:??';
+  
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  
+  if (h > 0) {
+    return `+${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  }
+  return `+${m}:${s.toString().padStart(2, '0')}`;
+}
+
 function formatStreamDate(dateStr: string): string {
   // 將 ISO 格式的日期轉換為本地時區的格式
   const date = new Date(dateStr);
@@ -547,6 +567,19 @@ export default function StreamDetailPage() {
   const [channelOwner, setChannelOwner] = useState<Singer | null>(null);
   const [participants, setParticipants] = useState<Singer[]>([]);
   const [editableStreamInfo, setEditableStreamInfo] = useState<EditableStreamInfo | null>(null);
+  const [currentPlayerTime, setCurrentPlayerTime] = useState<number | null>(null);
+
+  const fetchTrackDurationByItunesId = async (itunesId: number): Promise<number | null> => {
+    try {
+      const result = await itunesApi.queryById(itunesId);
+      if (result && result.track_time_millis) {
+        return Math.round(result.track_time_millis / 1000);
+      }
+    } catch (error) {
+      console.error('Failed to fetch iTunes duration:', error);
+    }
+    return null;
+  };
   const [vocalistPopupSingers, setVocalistPopupSingers] = useState<Singer[] | null>(null);
 
   const { data: stream, isLoading } = useQuery({
@@ -558,23 +591,21 @@ export default function StreamDetailPage() {
 
   // 當 stream 資料載入後，設置頻道擁有者和 timeline 資料
   useEffect(() => {
-    if (stream?.channel_owner) {
-      setChannelOwner(stream.channel_owner);
-    }
-    // 載入儲存的 timeline 資料
-    if (stream?.holodex_timeline_songs) {
-      setHolodexTimelineSongs(stream.holodex_timeline_songs);
-    }
-    if (stream?.comment_timeline_songs) {
-      setCommentTimelineSongs(stream.comment_timeline_songs);
-    }
+    setChannelOwner(stream?.channel_owner || null);
+    // 載入儲存的 timeline 資料（沒有時也清空）
+    setHolodexTimelineSongs(stream?.holodex_timeline_songs || []);
+    setCommentTimelineSongs(stream?.comment_timeline_songs || []);
   }, [stream]);
 
+  // 定期更新播放器當前時間（每秒）
   useEffect(() => {
-    // 切換 stream 時清空 timeline
-    setHolodexTimelineSongs([]);
-    setCommentTimelineSongs([]);
-  }, [id]);
+    const interval = setInterval(() => {
+      const time = youtubePlayerGetCurrentTime();
+      setCurrentPlayerTime(time);
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, []);
 
   // 更新 Stream 資訊
   const updateStreamMutation = useMutation({
@@ -608,24 +639,35 @@ export default function StreamDetailPage() {
       aiApi.normalize({ items }),
     onSuccess: async (data) => {
       // AI 結果を反映
-      const updated: EditableSong[] = [];
+      const updated: EditableSong[] = [...editableSongs];
       
-      for (const suggestion of data.suggestions) {
-        if (suggestion.index < editableSongs.length) {
-          const current = editableSongs[suggestion.index];
+      await Promise.all(
+        data.suggestions.map(async (suggestion) => {
+          if (suggestion.index >= updated.length) return;
+          const current = updated[suggestion.index];
           // 檢查是否有被 AI 修改
           const nameChanged = current.name !== suggestion.normalized_name;
           const artistChanged = current.artist !== suggestion.original_artist;
           
           let artUrl = current.artUrl;
+          let itunesId = current.itunesId ?? null;
+          let trackDuration = current.trackDuration ?? null;
           
-          // 如果有 matched_song_id 且沒有 art，則獲取 song 的 art
-          if (suggestion.matched_song_id && !artUrl) {
+          if (suggestion.matched_song_id) {
             try {
               const song = await songApi.get(suggestion.matched_song_id);
-              artUrl = song.arts || null;
+              if (!artUrl) {
+                artUrl = song.arts || null;
+              }
+              const songItunesId = song.itunes_ids && song.itunes_ids.length > 0
+                ? Number(song.itunes_ids[0].itunes_id)
+                : null;
+              if (songItunesId) {
+                itunesId = songItunesId;
+                trackDuration = await fetchTrackDurationByItunesId(songItunesId);
+              }
             } catch (err) {
-              // 忽略錯誤，使用原有的 artUrl
+              // 忽略錯誤，使用原有的 artUrl / itunesId / trackDuration
             }
           }
           
@@ -638,6 +680,8 @@ export default function StreamDetailPage() {
             tags: suggestion.tags,
             matchedSongId: suggestion.matched_song_id || null,
             artUrl,
+            itunesId,
+            trackDuration,
             // 保留 AI 修改前的值
             aiNormalizedName: nameChanged ? current.name : undefined,
             aiNormalizedArtist: artistChanged ? current.artist : undefined,
@@ -645,38 +689,14 @@ export default function StreamDetailPage() {
             originalName: suggestion.normalized_name,
             originalArtist: suggestion.original_artist,
           };
-        }
-      }
+        })
+      );
       
       setEditableSongs(updated);
       showToast(`${data.suggestions.length}曲のAI正規化が完了しました`, 'success');
     },
     onError: (err: Error) => {
       showToast(`AI正規化エラー: ${err.message}`, 'error');
-    },
-  });
-
-  // 推算結束時間
-  const estimateEndTimesMutation = useMutation({
-    mutationFn: (req: EstimateEndTimesRequest) =>
-      streamApi.estimateEndTimes(id!, req),
-    onSuccess: (data) => {
-      setEditableSongs((prev) => {
-        const updated = [...prev];
-        for (let i = 0; i < data.estimates.length && i < updated.length; i++) {
-          const estimate = data.estimates[i];
-          updated[i] = {
-            ...updated[i],
-            end: estimate.estimated_end,
-            isEndTimeEstimated: estimate.is_end_time_estimated,
-          };
-        }
-        return updated;
-      });
-      showToast('結束時間の推算が完了しました', 'success');
-    },
-    onError: (err: Error) => {
-      showToast(`推算エラー: ${err.message}`, 'error');
     },
   });
 
@@ -736,6 +756,7 @@ export default function StreamDetailPage() {
       matchedSongId: null,
       artUrl: song.art_url || null,
       itunesId: song.itunes_id || null,
+      trackDuration: null,
       originalName: song.name,
       originalArtist: song.original_artist,
       aiNormalizedName: undefined,
@@ -773,6 +794,7 @@ export default function StreamDetailPage() {
       matchedSongId: null,
       artUrl: null,
       itunesId: null,
+      trackDuration: null,
       originalName: song.name,
       originalArtist: song.original_artist,
       aiNormalizedName: undefined,
@@ -781,26 +803,6 @@ export default function StreamDetailPage() {
     }));
     setEditableSongs(songs);
     showToast(`コメントから${songs.length}曲を読み込みました`, 'success');
-  };
-
-  const estimateEndTimes = () => {
-    if (!stream) return;
-    
-    const songs: SongEndTimeEstimateRequest[] = editableSongs.map((song, index) => ({
-      start: song.start,
-      end: song.end,
-      name: song.name,
-      artist: song.artist,
-      itunes_id: song.itunesId || undefined,
-      next_start: index + 1 < editableSongs.length ? editableSongs[index + 1].start : undefined,
-      stream_end: stream.duration_seconds || undefined,
-    }));
-
-    estimateEndTimesMutation.mutate({
-      songs,
-      stream_end: stream.duration_seconds || 0,
-      stream_title: stream.title,
-    });
   };
 
   const toggleEditing = () => {
@@ -854,6 +856,7 @@ export default function StreamDetailPage() {
             matchedSongId: perf.song_id,
             artUrl: perf.arts || null,
             itunesId: null, // 現有 performance 不會有 iTunes ID
+            trackDuration: null,
             originalName: perf.song_name,
             originalArtist: perf.original_artist,
             // 現有資料沒有 AI 修改或估計時間的標記
@@ -878,7 +881,7 @@ export default function StreamDetailPage() {
     aiNormalizeMutation.mutate(items);
   };
 
-  const handleSongChange = (index: number, field: keyof EditableSong, value: string | number | string[] | null) => {
+  const handleSongChange = (index: number, field: keyof EditableSong, value: string | number | string[] | boolean | null) => {
     setEditableSongs((prev) => {
       const updated = [...prev];
       const song = updated[index];
@@ -904,20 +907,23 @@ export default function StreamDetailPage() {
   };
 
   // 選擇搜尋到的歌曲
-  const handleSelectExistingSong = (index: number, song: Song) => {
+  const handleSelectExistingSong = async (index: number, song: Song) => {
+    const itunesId = song.itunes_ids && song.itunes_ids.length > 0 ? song.itunes_ids[0].itunes_id : null;
+    const trackDuration = itunesId ? await fetchTrackDurationByItunesId(Number(itunesId)) : null;
+
     setEditableSongs((prev) => {
       const updated = [...prev];
       
       // 檢查是否是從 iTunes 選擇的（id 為空）
       if (!song.id) {
         // 從 iTunes 選擇：填入基本資訊和 iTunes ID
-        const itunesId = song.itunes_ids && song.itunes_ids.length > 0 ? song.itunes_ids[0].itunes_id : null;
         updated[index] = {
           ...updated[index],
           name: song.name,
           artist: song.original_artist,
           artUrl: song.arts || null,
           itunesId: itunesId ? Number(itunesId) : null,
+          trackDuration: trackDuration,
           matchedSongId: null, // 這是新歌曲
           originalName: song.name,
           originalArtist: song.original_artist,
@@ -925,7 +931,6 @@ export default function StreamDetailPage() {
         showToast(`iTunes から「${song.name}」を選択しました`, 'success');
       } else {
         // 從 DB 選擇：填入完整資訊
-        const itunesId = song.itunes_ids && song.itunes_ids.length > 0 ? song.itunes_ids[0].itunes_id : null;
         updated[index] = {
           ...updated[index],
           name: song.name,
@@ -934,6 +939,7 @@ export default function StreamDetailPage() {
           artistReading: song.original_artist_reading || '',
           artUrl: song.arts || null,
           itunesId: itunesId ? Number(itunesId) : null,
+          trackDuration: trackDuration,
           matchedSongId: song.id,
           originalName: song.name,
           originalArtist: song.original_artist,
@@ -990,6 +996,7 @@ export default function StreamDetailPage() {
         matchedSongId: null,
         artUrl: null,
         itunesId: null,
+        trackDuration: null,
         originalName: '',
         originalArtist: '',
       },
@@ -1459,23 +1466,20 @@ export default function StreamDetailPage() {
           {isEditing && (
             <div className="flex justify-between items-center gap-2">
               <div className="flex flex-wrap gap-2">
-                {!stream?.holodex_timeline_songs || stream.holodex_timeline_songs.length === 0 ? (
-                  <button
-                    onClick={() => syncToHolodexMutation.mutate()}
-                    disabled={syncToHolodexMutation.isPending}
-                    className="px-3 py-1.5 text-sm bg-red-600 text-white font-medium rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50"
-                  >
-                    {syncToHolodexMutation.isPending ? 'Holodex へ同期中...' : 'seTORI から Holodex へ同期'}
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => syncVideoMutation.mutate()}
-                    disabled={syncVideoMutation.isPending}
-                    className="px-3 py-1.5 text-sm bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
-                  >
-                    {syncVideoMutation.isPending ? '同期中...' : 'Holodex から同期'}
-                  </button>
-                )}
+                <button
+                  onClick={() => syncVideoMutation.mutate()}
+                  disabled={syncVideoMutation.isPending}
+                  className="px-3 py-1.5 text-sm bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
+                >
+                  {syncVideoMutation.isPending ? '同期中...' : 'Holodex から同期'}
+                </button>
+                <button
+                  onClick={() => syncToHolodexMutation.mutate()}
+                  disabled={syncToHolodexMutation.isPending}
+                  className="px-3 py-1.5 text-sm bg-red-600 text-white font-medium rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50"
+                >
+                  {syncToHolodexMutation.isPending ? 'Holodex へ同期中...' : 'seTORI から Holodex へ同期'}
+                </button>
                 <button
                   onClick={loadFromHolodex}
                   disabled={!stream?.holodex_timeline_songs || stream.holodex_timeline_songs.length === 0}
@@ -1491,22 +1495,13 @@ export default function StreamDetailPage() {
                   コメント データを読み込む
                 </button>
                 {editableSongs.length > 0 && (
-                  <>
-                    <button
-                      onClick={runAINormalization}
-                      disabled={aiNormalizeMutation.isPending}
-                      className="px-3 py-1.5 text-sm bg-purple-600 text-white font-medium rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50"
-                    >
-                      {aiNormalizeMutation.isPending ? 'AI処理中...' : 'AI正規化'}
-                    </button>
-                    <button
-                      onClick={estimateEndTimes}
-                      disabled={estimateEndTimesMutation.isPending}
-                      className="px-3 py-1.5 text-sm bg-orange-600 text-white font-medium rounded-lg hover:bg-orange-700 transition-colors disabled:opacity-50"
-                    >
-                      {estimateEndTimesMutation.isPending ? '推算中...' : '結束時間を推算'}
-                    </button>
-                  </>
+                  <button
+                    onClick={runAINormalization}
+                    disabled={aiNormalizeMutation.isPending}
+                    className="px-3 py-1.5 text-sm bg-purple-600 text-white font-medium rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50"
+                  >
+                    {aiNormalizeMutation.isPending ? 'AI処理中...' : 'AI正規化'}
+                  </button>
                 )}
               </div>
               <div className="flex gap-2 shrink-0">
@@ -1647,9 +1642,21 @@ export default function StreamDetailPage() {
                                 e.currentTarget.blur();
                               }
                             }}
-                            className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent font-mono"
+                            className="w-32 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent font-mono"
                             placeholder="0:00"
                           />
+                          <button
+                            onClick={() => {
+                              const currentTime = youtubePlayerGetCurrentTime();
+                              if (currentTime !== null) {
+                                handleSongChange(index, 'start', Math.floor(currentTime));
+                              }
+                            }}
+                            className="px-3 py-2 bg-blue-100 text-blue-600 rounded-lg hover:bg-blue-200 transition-colors font-mono text-sm whitespace-nowrap min-w-[5.5rem]"
+                            title="現在の再生時間を設定"
+                          >
+                            {currentPlayerTime !== null ? formatTimeInput(Math.floor(currentPlayerTime)) : '--:--'}
+                          </button>
                           <button
                             onClick={() => youtubePlayerSeekTo(song.start)}
                             className="px-3 py-2 bg-red-100 text-red-600 rounded-lg hover:bg-red-200 transition-colors"
@@ -1679,21 +1686,66 @@ export default function StreamDetailPage() {
                                 e.currentTarget.blur();
                               }
                             }}
-                            className={`flex-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent font-mono ${
+                            className={`w-32 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent font-mono ${
                               song.isEndTimeEstimated ? 'border-orange-300 bg-orange-50' : 'border-gray-300'
                             }`}
-                            placeholder={song.end === 0 ? "「結束時間を推算」で自動計算" : "0:00"}
+                            placeholder={song.end === 0 ? "歌曲長度ボタンで自動設定" : "0:00"}
                           />
+                          {/* 時長按鈕 */}
+                          <button
+                            onClick={() => {
+                              if (song.trackDuration) {
+                                const newEnd = song.start + song.trackDuration;
+                                handleSongChange(index, 'end', newEnd);
+                                handleSongChange(index, 'isEndTimeEstimated', false);
+                              }
+                            }}
+                            disabled={!song.trackDuration}
+                            className={`px-3 py-2 rounded-lg font-mono text-sm font-medium transition-colors whitespace-nowrap min-w-[5.5rem] ${
+                              song.trackDuration
+                                ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                                : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                            }`}
+                            title={song.trackDuration ? 'iTunes歌曲長度を適用' : '歌曲長度情報なし'}
+                          >
+                            {formatDuration(song.trackDuration)}
+                          </button>
+                          <button
+                            onClick={() => {
+                              const currentTime = youtubePlayerGetCurrentTime();
+                              if (currentTime !== null) {
+                                handleSongChange(index, 'end', Math.floor(currentTime));
+                              }
+                            }}
+                            className="px-3 py-2 bg-blue-100 text-blue-600 rounded-lg hover:bg-blue-200 transition-colors font-mono text-sm whitespace-nowrap min-w-[5.5rem]"
+                            title="現在の再生時間を設定"
+                          >
+                            {currentPlayerTime !== null ? formatTimeInput(Math.floor(currentPlayerTime)) : '--:--'}
+                          </button>
                           {song.end > 0 && (
-                            <button
-                              onClick={() => youtubePlayerSeekTo(song.end)}
-                              className="px-3 py-2 bg-red-100 text-red-600 rounded-lg hover:bg-red-200 transition-colors"
-                              title="終了時間から再生"
-                            >
-                              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                                <path d="M8 5v14l11-7z" />
-                              </svg>
-                            </button>
+                            <>
+                              <button
+                                onClick={() => youtubePlayerSeekTo(Math.max(song.end - 3, 0))}
+                                className="px-3 py-2 bg-red-100 text-red-600 rounded-lg hover:bg-red-200 transition-colors"
+                                title="終了時間の3秒前から再生"
+                              >
+                                <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="M6 8a7 7 0 1 1 1.2 8.8" />
+                                  <polyline points="6 3 6 8 11 8" />
+                                  <text x="12" y="15" textAnchor="middle" fontSize="8" fontWeight="bold" fill="currentColor" stroke="none">3</text>
+                                </svg>
+                                <span className="sr-only">-3s</span>
+                              </button>
+                              <button
+                                onClick={() => youtubePlayerSeekTo(song.end)}
+                                className="px-3 py-2 bg-red-100 text-red-600 rounded-lg hover:bg-red-200 transition-colors"
+                                title="終了時間から再生"
+                              >
+                                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                                  <path d="M8 5v14l11-7z" />
+                                </svg>
+                              </button>
+                            </>
                           )}
                         </div>
                         {/* 沒有結束時間的提示 */}
@@ -1702,7 +1754,7 @@ export default function StreamDetailPage() {
                             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
                               <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
                             </svg>
-                            <span>未設定 - ボタンをクリックして推算してください</span>
+                            <span>未設定 - 右の+ボタンで自動設定</span>
                           </div>
                         )}
                         {/* 估計時間警告 */}

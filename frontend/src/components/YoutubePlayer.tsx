@@ -85,3 +85,11 @@ export const youtubePlayerSeekTo = (seconds: number) => {
     }
   }
 };
+
+// 取得當前播放時間（秒）
+export const youtubePlayerGetCurrentTime = (): number | null => {
+  if (playerInstance && playerInstance.getCurrentTime) {
+    return playerInstance.getCurrentTime();
+  }
+  return null;
+};
