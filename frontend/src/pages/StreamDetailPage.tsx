@@ -6,6 +6,7 @@ import type { Singer, CreatePerformanceItem, AINormalizationItem, Song, UpdateSt
 import Loading from '../components/ui/Loading';
 import Tag from '../components/ui/Tag';
 import { useToast } from '../components/ui/Toast';
+import YoutubePlayer, { youtubePlayerSeekTo } from '../components/YoutubePlayer';
 
 // 預設的直播類型標籤
 const STREAM_TAGS = [
@@ -1030,6 +1031,9 @@ export default function StreamDetailPage() {
     autoSaveStreamInfo({ isHidden });
   };
 
+  // YouTube 播放器實例（必須在任何條件判斷之前）
+  const playerInstanceRef = useRef<any>(null);
+
   if (isLoading) {
     return <Loading />;
   }
@@ -1046,36 +1050,18 @@ export default function StreamDetailPage() {
 
   return (
     <div className="space-y-6">
-      {/* Stream Header */}
+      {/* Stream Header with YouTube Player */}
       <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
         <div className="md:flex">
-          {/* Thumbnail */}
-          <a
-            href={youtubeUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="block md:w-96 flex-shrink-0 relative group"
-          >
-            {stream.thumbnail_url ? (
-              <img
-                src={stream.thumbnail_url}
-                alt={stream.title}
-                className="w-full h-56 md:h-full object-cover"
-              />
-            ) : (
-              <div className="w-full h-56 md:h-full bg-gray-200 flex items-center justify-center">
-                <span className="text-gray-400">No Image</span>
-              </div>
-            )}
-            {/* Play overlay */}
-            <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 flex items-center justify-center transition-all">
-              <div className="w-16 h-16 rounded-full bg-red-600 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                <svg className="w-8 h-8 text-white ml-1" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M8 5v14l11-7z" />
-                </svg>
-              </div>
-            </div>
-          </a>
+          {/* YouTube Player - Replaces Thumbnail */}
+          <div className="w-full md:w-1/2 flex-shrink-0 bg-black aspect-video">
+            <YoutubePlayer
+              videoId={stream.id}
+              onReady={(player) => {
+                playerInstanceRef.current = player;
+              }}
+            />
+          </div>
 
           {/* Content */}
           <div className="p-6 flex-1">
@@ -1480,13 +1466,24 @@ export default function StreamDetailPage() {
                         <label className="block text-sm font-medium text-gray-700 mb-1">
                           開始時間
                         </label>
-                        <input
-                          type="text"
-                          value={formatTimeInput(song.start)}
-                          onChange={(e) => handleTimeChange(index, 'start', e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent font-mono"
-                          placeholder="0:00"
-                        />
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={formatTimeInput(song.start)}
+                            onChange={(e) => handleTimeChange(index, 'start', e.target.value)}
+                            className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent font-mono"
+                            placeholder="0:00"
+                          />
+                          <button
+                            onClick={() => youtubePlayerSeekTo(song.start)}
+                            className="px-3 py-2 bg-red-100 text-red-600 rounded-lg hover:bg-red-200 transition-colors"
+                            title="この時間から再生"
+                          >
+                            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                              <path d="M8 5v14l11-7z" />
+                            </svg>
+                          </button>
+                        </div>
                       </div>
 
                       {/* End Time */}
@@ -1494,15 +1491,28 @@ export default function StreamDetailPage() {
                         <label className="block text-sm font-medium text-gray-700 mb-1">
                           終了時間 <span className="text-gray-400">(任意)</span>
                         </label>
-                        <input
-                          type="text"
-                          value={song.end ? formatTimeInput(song.end) : ''}
-                          onChange={(e) => handleTimeChange(index, 'end', e.target.value)}
-                          className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent font-mono ${
-                            song.isEndTimeEstimated ? 'border-orange-300 bg-orange-50' : 'border-gray-300'
-                          }`}
-                          placeholder={song.end === 0 ? "「結束時間を推算」で自動計算" : "0:00"}
-                        />
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={song.end ? formatTimeInput(song.end) : ''}
+                            onChange={(e) => handleTimeChange(index, 'end', e.target.value)}
+                            className={`flex-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent font-mono ${
+                              song.isEndTimeEstimated ? 'border-orange-300 bg-orange-50' : 'border-gray-300'
+                            }`}
+                            placeholder={song.end === 0 ? "「結束時間を推算」で自動計算" : "0:00"}
+                          />
+                          {song.end > 0 && (
+                            <button
+                              onClick={() => youtubePlayerSeekTo(song.end)}
+                              className="px-3 py-2 bg-red-100 text-red-600 rounded-lg hover:bg-red-200 transition-colors"
+                              title="終了時間から再生"
+                            >
+                              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                                <path d="M8 5v14l11-7z" />
+                              </svg>
+                            </button>
+                          )}
+                        </div>
                         {/* 沒有結束時間的提示 */}
                         {song.end === 0 && (
                           <div className="mt-1 flex items-center gap-1 text-xs text-gray-500">
@@ -1792,16 +1802,15 @@ export default function StreamDetailPage() {
                           )}
                         </td>
                         <td className="px-4 py-4 text-right">
-                          <a
-                            href={perf.youtube_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
+                          <button
+                            onClick={() => youtubePlayerSeekTo(perf.start_seconds)}
                             className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-red-100 text-red-600 hover:bg-red-200 transition-colors"
+                            title={`${perf.song_name} を再生`}
                           >
                             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
                               <path d="M8 5v14l11-7z" />
                             </svg>
-                          </a>
+                          </button>
                         </td>
                       </tr>
                     );
