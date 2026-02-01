@@ -509,8 +509,7 @@ func (s *HolodexService) loadAndSaveComments(videoID string) {
 
 	// 解析評論（使用 comment package）
 	parsedSongs := comment.ParseComments(comments)
-	filteredSongs := comment.FilterSongs(parsedSongs)
-	dedupedSongs := comment.DeduplicateSongs(filteredSongs)
+	dedupedSongs := comment.DeduplicateSongs(parsedSongs)
 	validSongs := comment.ValidateSongs(dedupedSongs)
 
 	// 轉換為 DTO

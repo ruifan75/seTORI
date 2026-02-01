@@ -34,11 +34,8 @@ func (s *CommentService) AnalyzeComments(videoID string) (*dto.AnalyzeCommentsRe
 	// 解析評論
 	parsedSongs := comment.ParseComments(comments)
 
-	// 過濾非歌曲項目
-	filteredSongs := comment.FilterSongs(parsedSongs)
-
-	// 去重
-	dedupedSongs := comment.DeduplicateSongs(filteredSongs)
+	// 去重（移除過濾步驟，因為需要人工審核）
+	dedupedSongs := comment.DeduplicateSongs(parsedSongs)
 
 	// 驗證（不推算結束時間，由前端在需要時請求）
 	validSongs := comment.ValidateSongs(dedupedSongs)
