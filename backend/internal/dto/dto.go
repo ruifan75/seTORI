@@ -116,18 +116,20 @@ type StreamTagResponse struct {
 }
 
 type StreamResponse struct {
-	ID              string              `json:"id"`
-	Title           string              `json:"title"`
-	StreamDate      string              `json:"stream_date"`
-	DurationSeconds *int32              `json:"duration_seconds,omitempty"`
-	ThumbnailURL    *string             `json:"thumbnail_url,omitempty"`
-	Tags            []StreamTagResponse `json:"tags"`
-	Participants    []SingerResponse    `json:"participants"`
-	ChannelOwner    *SingerResponse     `json:"channel_owner,omitempty"` // 頻道擁有者
-	IsProcessed     bool                `json:"is_processed"`
-	IsHidden        bool                `json:"is_hidden"`
-	CreatedAt       time.Time           `json:"created_at"`
-	UpdatedAt       time.Time           `json:"updated_at"`
+	ID                   string              `json:"id"`
+	Title                string              `json:"title"`
+	StreamDate           string              `json:"stream_date"`
+	DurationSeconds      *int32              `json:"duration_seconds,omitempty"`
+	ThumbnailURL         *string             `json:"thumbnail_url,omitempty"`
+	Tags                 []StreamTagResponse `json:"tags"`
+	Participants         []SingerResponse    `json:"participants"`
+	ChannelOwner         *SingerResponse     `json:"channel_owner,omitempty"` // 頻道擁有者
+	IsProcessed          bool                `json:"is_processed"`
+	IsHidden             bool                `json:"is_hidden"`
+	HolodexTimelineSongs []SongSuggestion    `json:"holodex_timeline_songs,omitempty"` // 從 holodex_data 解析
+	CommentTimelineSongs []CommentSong       `json:"comment_timeline_songs,omitempty"` // 從 comment_data 解析
+	CreatedAt            time.Time           `json:"created_at"`
+	UpdatedAt            time.Time           `json:"updated_at"`
 }
 
 type StreamListResponse struct {
@@ -205,10 +207,14 @@ type SyncHolodexRequest struct {
 }
 
 type SyncHolodexResponse struct {
-	SyncedCount int      `json:"synced_count"`
-	NewStreams  []string `json:"new_streams"`
-	Updated     []string `json:"updated"`
-	Skipped     []string `json:"skipped"`
+	SyncedCount  int      `json:"synced_count"`
+	TotalStreams int      `json:"total_streams"` // 總共要處理的 stream 數量
+	Processed    int      `json:"processed"`     // 已處理的數量
+	NewStreams   []string `json:"new_streams"`
+	Updated      []string `json:"updated"`
+	Skipped      []string `json:"skipped"`
+	InProgress   bool     `json:"in_progress"`       // 是否還在進行中
+	Message      string   `json:"message,omitempty"` // 狀態訊息
 }
 
 // ========== Comment 分析 ==========

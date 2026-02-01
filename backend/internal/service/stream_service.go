@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -158,6 +159,54 @@ func (s *StreamService) toStreamResponse(stream models.Stream, tags []models.Str
 			ownerResp.Organization = &channelOwner.Organization.String
 		}
 		resp.ChannelOwner = &ownerResp
+	}
+
+	// 解析並加入 Holodex timeline 資料（從完整的 Video JSON 中提取 songs）
+	if len(stream.HolodexData) > 0 {
+		// HolodexData 存的是完整的 holodex.Video 物件
+		var video struct {
+			Songs []struct {
+				Name           string `json:"name"`
+				OriginalArtist string `json:"original_artist"`
+				ArtURL         string `json:"art"`
+				ITunesID       int64  `json:"itunesid"`
+				Start          int    `json:"start"`
+				End            int    `json:"end"`
+			} `json:"songs"`
+		}
+		if err := json.Unmarshal(stream.HolodexData, &video); err == nil && len(video.Songs) > 0 {
+			holodexSongs := make([]dto.SongSuggestion, len(video.Songs))
+			for i, song := range video.Songs {
+				holodexSongs[i] = dto.SongSuggestion{
+					Name:           song.Name,
+					OriginalArtist: song.OriginalArtist,
+					StartSeconds:   song.Start,
+					EndSeconds:     song.End,
+					Tags:           []string{},
+					SingerIDs:      []string{},
+				}
+				if song.ArtURL != "" {
+					holodexSongs[i].ArtURL = &song.ArtURL
+				}
+				if song.ITunesID > 0 {
+					itunesID := song.ITunesID
+					holodexSongs[i].ItunesID = &itunesID
+				}
+				// 如果沒有結束時間，使用下一首的開始時間
+				if holodexSongs[i].EndSeconds == 0 && i+1 < len(video.Songs) {
+					holodexSongs[i].EndSeconds = video.Songs[i+1].Start
+				}
+			}
+			resp.HolodexTimelineSongs = holodexSongs
+		}
+	}
+
+	// 解析並加入 Comment timeline 資料
+	if len(stream.CommentData) > 0 {
+		var commentSongs []dto.CommentSong
+		if err := json.Unmarshal(stream.CommentData, &commentSongs); err == nil {
+			resp.CommentTimelineSongs = commentSongs
+		}
 	}
 
 	return resp

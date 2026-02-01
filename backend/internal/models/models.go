@@ -48,8 +48,9 @@ type Stream struct {
 	StreamDate      time.Time      `json:"stream_date"`
 	DurationSeconds sql.NullInt32  `json:"duration_seconds"`
 	ThumbnailURL    sql.NullString `json:"thumbnail_url"`
-	HolodexData     []byte         `json:"holodex_data"` // JSONB
+	HolodexData     []byte         `json:"holodex_data"` // JSONB - Holodex songs data
 	HolodexHash     sql.NullString `json:"holodex_hash"`
+	CommentData     []byte         `json:"comment_data"` // JSONB - Comment analyzed songs data
 	IsProcessed     bool           `json:"is_processed"` // 處理完成
 	IsHidden        bool           `json:"is_hidden"`    // 隱藏
 	CreatedAt       time.Time      `json:"created_at"`

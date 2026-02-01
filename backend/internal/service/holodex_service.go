@@ -12,6 +12,7 @@ import (
 	"github.com/ruifan75/setori/internal/dto"
 	"github.com/ruifan75/setori/internal/models"
 	"github.com/ruifan75/setori/internal/repository"
+	"github.com/ruifan75/setori/pkg/comment"
 	"github.com/ruifan75/setori/pkg/holodex"
 	"github.com/ruifan75/setori/pkg/youtube"
 )
@@ -99,6 +100,8 @@ func (s *HolodexService) SyncChannelInfo(channelID string) error {
 
 // SyncChannel 同步頻道的所有直播
 func (s *HolodexService) SyncChannel(channelID string, limit int, forceUpdate bool) (*dto.SyncHolodexResponse, error) {
+	log.Printf("開始同步頻道: %s", channelID)
+
 	// 先同步頻道資訊
 	channel, err := s.client.GetChannel(channelID)
 	if err != nil {
@@ -130,11 +133,13 @@ func (s *HolodexService) SyncChannel(channelID string, limit int, forceUpdate bo
 		NewStreams: []string{},
 		Updated:    []string{},
 		Skipped:    []string{},
+		InProgress: true,
 	}
 
 	// 分頁取得所有歌回
 	const pageSize = 50
 	offset := 0
+	totalVideos := 0
 
 	for {
 		videos, err := s.client.GetAllStreams(channelID, pageSize, offset)
@@ -147,10 +152,17 @@ func (s *HolodexService) SyncChannel(channelID string, limit int, forceUpdate bo
 			break
 		}
 
-		for _, video := range videos {
+		totalVideos += len(videos)
+		result.TotalStreams = totalVideos
+
+		for i, video := range videos {
+			result.Processed = offset + i + 1
+			log.Printf("處理中 [%d/%d]: %s - %s", result.Processed, result.TotalStreams, video.ID, video.Title)
+
 			syncStatus, err := s.syncVideo(video, channelID, forceUpdate)
 			if err != nil {
 				// 記錄錯誤但繼續處理
+				log.Printf("同步失敗 (video: %s): %v", video.ID, err)
 				result.Skipped = append(result.Skipped, video.ID)
 				continue
 			}
@@ -174,6 +186,11 @@ func (s *HolodexService) SyncChannel(channelID string, limit int, forceUpdate bo
 
 		offset += pageSize
 	}
+
+	result.InProgress = false
+	result.Message = fmt.Sprintf("同步完成: %d 個新增, %d 個更新, %d 個跳過",
+		len(result.NewStreams), len(result.Updated), len(result.Skipped))
+	log.Printf("頻道同步完成: %s - %s", channelID, result.Message)
 
 	return result, nil
 }
@@ -280,8 +297,13 @@ func (s *HolodexService) syncVideo(video holodex.Video, channelID string, forceU
 		fmt.Printf("set stream singers error: %v\n", err)
 	}
 
-	// 不再自動將歌曲加入正規化佇列
-	// 使用者會在 stream 頁面手動觸發讀取和正規化
+	// 同步時 HolodexData 已經包含完整的 video 資料（包括 songs）
+	// 不需要額外儲存，stream_service 會在需要時從 HolodexData 解析
+
+	// 同步時自動分析並儲存 Comment 資料
+	if existing == nil || forceUpdate {
+		s.loadAndSaveComments(video.ID)
+	}
 
 	if existing == nil {
 		return "new", nil
@@ -430,6 +452,9 @@ func (s *HolodexService) LoadHolodexSongs(videoID string) (*dto.LoadHolodexSongs
 		}
 	}
 
+	// 注意：不再儲存到資料庫，因為 HolodexData 已在 sync 時儲存完整的 Video JSON
+	// 這個 API 主要用於即時載入和返回資料給前端
+
 	return &dto.LoadHolodexSongsResponse{
 		StreamID:     video.ID,
 		StreamTitle:  video.Title,
@@ -452,4 +477,52 @@ func (s *HolodexService) GetVideoComments(videoID string) ([]string, error) {
 	}
 
 	return comments, nil
+}
+
+// loadAndSaveComments 內部使用，載入並儲存 Comment 資料到資料庫（忽略錯誤）
+func (s *HolodexService) loadAndSaveComments(videoID string) {
+	// 獲取評論
+	comments, err := s.GetVideoComments(videoID)
+	if err != nil {
+		log.Printf("get comments error (video: %s): %v", videoID, err)
+		return
+	}
+
+	// 解析評論（使用 comment package）
+	parsedSongs := comment.ParseComments(comments)
+	filteredSongs := comment.FilterSongs(parsedSongs)
+	dedupedSongs := comment.DeduplicateSongs(filteredSongs)
+	validSongs := comment.ValidateSongs(dedupedSongs)
+
+	// 轉換為 DTO
+	songDTOs := make([]dto.CommentSong, len(validSongs))
+	for i, song := range validSongs {
+		songDTOs[i] = dto.CommentSong{
+			Start:              song.Start,
+			End:                song.End,
+			Name:               song.Name,
+			OriginalArtist:     song.OriginalArtist,
+			OriginalComment:    song.OriginalComment,
+			IsEndTimeEstimated: song.IsEndTimeEstimated,
+		}
+	}
+
+	// 儲存到資料庫
+	commentDataJSON, err := json.Marshal(songDTOs)
+	if err != nil {
+		log.Printf("marshal comment data error (video: %s): %v", videoID, err)
+		return
+	}
+
+	stream, err := s.streamRepo.FindByID(videoID)
+	if err != nil {
+		log.Printf("find stream error (video: %s): %v", videoID, err)
+		return
+	}
+	if stream != nil {
+		stream.CommentData = commentDataJSON
+		if err := s.streamRepo.Update(stream); err != nil {
+			log.Printf("update stream comment data error (video: %s): %v", videoID, err)
+		}
+	}
 }

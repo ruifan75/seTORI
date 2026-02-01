@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, Link } from 'react-router-dom';
-import { streamApi, performanceApi, commentApi, aiApi, songApi, singerApi, itunesApi } from '../api/client';
-import type { Singer, CreatePerformanceItem, AINormalizationItem, Song, UpdateStreamRequest, SongEndTimeEstimateRequest, EstimateEndTimesRequest, ITunesSearchResult } from '../api/types';
+import { streamApi, performanceApi, aiApi, songApi, singerApi, itunesApi } from '../api/client';
+import type { Singer, CreatePerformanceItem, AINormalizationItem, Song, UpdateStreamRequest, SongEndTimeEstimateRequest, EstimateEndTimesRequest, ITunesSearchResult, CommentSong, SongSuggestion } from '../api/types';
 import Loading from '../components/ui/Loading';
 import Tag from '../components/ui/Tag';
 import { useToast } from '../components/ui/Toast';
@@ -513,6 +513,8 @@ export default function StreamDetailPage() {
 
   const [isEditing, setIsEditing] = useState(false);
   const [editableSongs, setEditableSongs] = useState<EditableSong[]>([]);
+  const [holodexTimelineSongs, setHolodexTimelineSongs] = useState<SongSuggestion[]>([]);
+  const [commentTimelineSongs, setCommentTimelineSongs] = useState<CommentSong[]>([]);
   const [channelOwner, setChannelOwner] = useState<Singer | null>(null);
   const [participants, setParticipants] = useState<Singer[]>([]);
   const [editableStreamInfo, setEditableStreamInfo] = useState<EditableStreamInfo | null>(null);
@@ -525,12 +527,25 @@ export default function StreamDetailPage() {
     staleTime: 0, // 確保每次進入頁面都重新載入
   });
 
-  // 當 stream 資料載入後，設置頻道擁有者
+  // 當 stream 資料載入後，設置頻道擁有者和 timeline 資料
   useEffect(() => {
     if (stream?.channel_owner) {
       setChannelOwner(stream.channel_owner);
     }
+    // 載入儲存的 timeline 資料
+    if (stream?.holodex_timeline_songs) {
+      setHolodexTimelineSongs(stream.holodex_timeline_songs);
+    }
+    if (stream?.comment_timeline_songs) {
+      setCommentTimelineSongs(stream.comment_timeline_songs);
+    }
   }, [stream]);
+
+  useEffect(() => {
+    // 切換 stream 時清空 timeline
+    setHolodexTimelineSongs([]);
+    setCommentTimelineSongs([]);
+  }, [id]);
 
   // 更新 Stream 資訊
   const updateStreamMutation = useMutation({
@@ -540,92 +555,6 @@ export default function StreamDetailPage() {
     },
     onError: (err: Error) => {
       showToast(`更新エラー: ${err.message}`, 'error');
-    },
-  });
-
-  // Holodex から歌曲を読み込む
-  const loadHolodexMutation = useMutation({
-    mutationFn: () => performanceApi.loadHolodexSongs(id!),
-    onSuccess: (data) => {
-      if (data.songs.length === 0) {
-        showToast('Holodexに楽曲データがありませんでした', 'info');
-        return;
-      }
-      // 保存頻道擁有者和所有參與者
-      setChannelOwner(data.channel_owner);
-      setParticipants(data.participants || [data.channel_owner]);
-
-      // 更新可編輯的直播資訊中的參與者
-      if (editableStreamInfo) {
-        setEditableStreamInfo({
-          ...editableStreamInfo,
-          participantIds: (data.participants || [data.channel_owner]).map(p => p.id),
-        });
-      }
-
-      // 轉換為可編輯歌曲
-      const songs: EditableSong[] = data.songs.map((song, index) => ({
-        id: `holodex-${index}`,
-        name: song.name,
-        nameReading: '',
-        artist: song.original_artist,
-        artistReading: '',
-        start: song.start_seconds,
-        end: song.end_seconds,
-        tags: song.tags,
-        singerIds: song.singer_ids,
-        matchedSongId: null,
-        artUrl: song.art_url || null,
-        itunesId: song.itunes_id || null,
-        originalName: song.name,
-        originalArtist: song.original_artist,
-        // Holodex 的資料不需要標記 AI 或估計
-        aiNormalizedName: undefined,
-        aiNormalizedArtist: undefined,
-        isEndTimeEstimated: false,
-      }));
-      setEditableSongs(songs);
-      showToast(`Holodexから${songs.length}曲を読み込みました`, 'success');
-    },
-    onError: (err: Error) => {
-      showToast(`Holodex読み込みエラー: ${err.message}`, 'error');
-    },
-  });
-
-  // Comment 分析
-  const analyzeCommentsMutation = useMutation({
-    mutationFn: () => commentApi.analyze(id!),
-    onSuccess: (data) => {
-      if (data.songs.length === 0) {
-        showToast('コメントから楽曲が見つかりませんでした', 'info');
-        return;
-      }
-      // 轉換為可編輯歌曲（預設演唱者為頻道擁有者）
-      const defaultSingerIds = channelOwner ? [channelOwner.id] : [];
-      const songs: EditableSong[] = data.songs.map((song, index) => ({
-        id: `comment-${index}`,
-        name: song.name,
-        nameReading: '',
-        artist: song.original_artist,
-        artistReading: '',
-        start: song.start,
-        end: song.end,
-        tags: [],
-        singerIds: defaultSingerIds,
-        matchedSongId: null,
-        artUrl: null,
-        itunesId: null,
-        originalName: song.name,
-        originalArtist: song.original_artist,
-        aiNormalizedName: undefined,
-        aiNormalizedArtist: undefined,
-        isEndTimeEstimated: song.is_end_time_estimated,
-      }));
-      setEditableSongs(songs);
-      showToast(`コメントから${songs.length}曲を検出しました`, 'success');
-    },
-    onError: (err: Error) => {
-      showToast(`コメント分析エラー: ${err.message}`, 'error');
     },
   });
 
@@ -723,11 +652,70 @@ export default function StreamDetailPage() {
   });
 
   const loadFromHolodex = () => {
-    loadHolodexMutation.mutate();
+    if (!stream?.holodex_timeline_songs || stream.holodex_timeline_songs.length === 0) {
+      showToast('Holodexデータがありません', 'info');
+      return;
+    }
+
+    // 從已載入的 stream 資料中讀取
+    setHolodexTimelineSongs(stream.holodex_timeline_songs);
+
+    // 轉換為可編輯歌曲
+    const songs: EditableSong[] = stream.holodex_timeline_songs.map((song, index) => ({
+      id: `holodex-${index}`,
+      name: song.name,
+      nameReading: '',
+      artist: song.original_artist,
+      artistReading: '',
+      start: song.start_seconds,
+      end: song.end_seconds,
+      tags: song.tags,
+      singerIds: song.singer_ids,
+      matchedSongId: null,
+      artUrl: song.art_url || null,
+      itunesId: song.itunes_id || null,
+      originalName: song.name,
+      originalArtist: song.original_artist,
+      aiNormalizedName: undefined,
+      aiNormalizedArtist: undefined,
+      isEndTimeEstimated: false,
+    }));
+    setEditableSongs(songs);
+    showToast(`Holodexから${songs.length}曲を読み込みました`, 'success');
   };
 
   const loadFromComments = () => {
-    analyzeCommentsMutation.mutate();
+    if (!stream?.comment_timeline_songs || stream.comment_timeline_songs.length === 0) {
+      showToast('コメントデータがありません', 'info');
+      return;
+    }
+
+    // 從已載入的 stream 資料中讀取
+    setCommentTimelineSongs(stream.comment_timeline_songs);
+
+    // 轉換為可編輯歌曲
+    const defaultSingerIds = channelOwner ? [channelOwner.id] : [];
+    const songs: EditableSong[] = stream.comment_timeline_songs.map((song, index) => ({
+      id: `comment-${index}`,
+      name: song.name,
+      nameReading: '',
+      artist: song.original_artist,
+      artistReading: '',
+      start: song.start,
+      end: song.end,
+      tags: [],
+      singerIds: defaultSingerIds,
+      matchedSongId: null,
+      artUrl: null,
+      itunesId: null,
+      originalName: song.name,
+      originalArtist: song.original_artist,
+      aiNormalizedName: undefined,
+      aiNormalizedArtist: undefined,
+      isEndTimeEstimated: song.is_end_time_estimated,
+    }));
+    setEditableSongs(songs);
+    showToast(`コメントから${songs.length}曲を読み込みました`, 'success');
   };
 
   const estimateEndTimes = () => {
@@ -1048,14 +1036,59 @@ export default function StreamDetailPage() {
 
   const youtubeUrl = `https://www.youtube.com/watch?v=${stream.id}`;
 
+  const setoriTimeline = stream.performances.map((perf) => {
+    const end = perf.end_seconds > 0 ? perf.end_seconds : perf.start_seconds;
+    return {
+      id: perf.id,
+      start: perf.start_seconds,
+      end,
+      label: perf.song_name,
+      artist: perf.original_artist,
+    };
+  });
+
+  const holodexTimeline = holodexTimelineSongs.map((song, index) => {
+    const end = song.end_seconds > 0 ? song.end_seconds : song.start_seconds;
+    return {
+      id: `holodex-${index}`,
+      start: song.start_seconds,
+      end,
+      label: song.name,
+      artist: song.original_artist || '',
+    };
+  });
+
+  const commentTimeline = commentTimelineSongs.map((song, index) => {
+    const end = song.end > 0 ? song.end : song.start;
+    return {
+      id: `comment-${index}`,
+      start: song.start,
+      end,
+      label: song.name,
+      artist: song.original_artist || '',
+    };
+  });
+
+  const timelineDuration = Math.max(
+    stream.duration_seconds || 0,
+    ...setoriTimeline.map((s) => s.end),
+    ...holodexTimeline.map((s) => s.end),
+    ...commentTimeline.map((s) => s.end),
+    1,
+  );
+
+  const getTimelineLeft = (start: number) => (start / timelineDuration) * 100;
+  const getTimelineWidth = (start: number, end: number) =>
+    Math.max(((end - start) / timelineDuration) * 100, 0.4);
+
   return (
     <>
-      <div className="flex flex-col min-[1300px]:flex-row gap-6 w-full h-[calc(100vh-6rem)] overflow-hidden">
+      <div className="flex flex-col min-[1300px]:flex-row gap-6 w-full h-full min-h-0 overflow-hidden">
       {/* Left Column - Stream Info + YouTube Player */}
-      <div className="w-full min-[1300px]:basis-2/5 min-[1300px]:shrink-0 min-w-0 flex flex-row min-[1300px]:flex-col gap-6 shrink-0 min-[1300px]:h-full">
-        {/* Stream Header */}
-        <div className="flex-1 min-w-0 min-[1300px]:flex-1 min-[1300px]:min-h-0 bg-white rounded-lg shadow-sm border overflow-hidden">
-          <div className="p-6 min-[1300px]:h-full min-[1300px]:overflow-y-auto">
+      <div className="w-full min-[1300px]:basis-2/5 min-[1300px]:shrink-0 min-[1300px]:self-stretch flex flex-row min-[1300px]:grid min-[1300px]:grid-rows-[2fr_3fr] gap-4 min-h-0 min-[1300px]:overflow-hidden shrink-0 max-h-[40vh] min-[1300px]:max-h-none">
+        {/* Stream Header - 40% */}
+        <div className="flex-1 min-w-0 bg-white rounded-lg shadow-sm border overflow-y-auto min-h-0">
+          <div className="p-6">
             {isEditing && editableStreamInfo ? (
               <>
                 {/* Title - Read Only */}
@@ -1245,9 +1278,9 @@ export default function StreamDetailPage() {
           </div>
         </div>
 
-        {/* YouTube Player */}
-        <div className="flex-1 min-w-0 min-[1300px]:flex-1 min-[1300px]:min-h-0 bg-white rounded-lg shadow-sm border overflow-hidden">
-          <div className="bg-black aspect-video min-[1300px]:h-full">
+        {/* Player + Timeline - 60% */}
+        <div className="flex-1 min-w-0 bg-white rounded-lg shadow-sm border flex flex-col min-h-0">
+          <div className="bg-black flex-1 min-h-[280px] flex items-center overflow-hidden">
             <YoutubePlayer
               videoId={stream.id}
               onReady={(player) => {
@@ -1255,57 +1288,159 @@ export default function StreamDetailPage() {
               }}
             />
           </div>
+
+          <div className="border-t py-3 px-0 shrink-0">
+            <div className="space-y-2 px-3">
+              <div className="relative h-3 bg-gray-100 rounded-none">
+                {setoriTimeline.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => youtubePlayerSeekTo(item.start)}
+                    className="absolute top-0 h-full rounded bg-indigo-500/80 hover:bg-indigo-600 transition-colors group"
+                    style={{
+                      left: `${getTimelineLeft(item.start)}%`,
+                      width: `${getTimelineWidth(item.start, item.end)}%`,
+                    }}
+                  >
+                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block z-50 pointer-events-none">
+                      <div className="bg-gray-900 text-white text-xs rounded-lg p-2 shadow-lg whitespace-nowrap">
+                        <div className="font-semibold">{item.label}</div>
+                        {item.artist && <div className="text-gray-300">{item.artist}</div>}
+                        <div className="text-gray-400 mt-1">
+                          {formatTime(item.start)} - {formatTime(item.end)}
+                        </div>
+                        <div className="text-indigo-400 text-[10px] mt-1">seTORI</div>
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+              <div className="relative h-3 bg-gray-100 rounded-none">
+                {holodexTimeline.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => youtubePlayerSeekTo(item.start)}
+                    className="absolute top-0 h-full rounded bg-blue-500/70 hover:bg-blue-600 transition-colors group"
+                    style={{
+                      left: `${getTimelineLeft(item.start)}%`,
+                      width: `${getTimelineWidth(item.start, item.end)}%`,
+                    }}
+                  >
+                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block z-50 pointer-events-none">
+                      <div className="bg-gray-900 text-white text-xs rounded-lg p-2 shadow-lg whitespace-nowrap">
+                        <div className="font-semibold">{item.label}</div>
+                        {item.artist && <div className="text-gray-300">{item.artist}</div>}
+                        <div className="text-gray-400 mt-1">
+                          {formatTime(item.start)} - {formatTime(item.end)}
+                        </div>
+                        <div className="text-blue-400 text-[10px] mt-1">Holodex</div>
+                      </div>
+                    </div>
+                  </button>
+                ))}
+                {commentTimeline.map((item) => {
+                  const isPoint = item.end <= item.start;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => youtubePlayerSeekTo(item.start)}
+                      className={
+                        isPoint
+                          ? 'absolute top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-orange-500 group'
+                          : 'absolute top-0 h-full rounded bg-orange-500/70 hover:bg-orange-600 transition-colors group'
+                      }
+                      style={{
+                        left: `${getTimelineLeft(item.start)}%`,
+                        width: isPoint ? undefined : `${getTimelineWidth(item.start, item.end)}%`,
+                      }}
+                    >
+                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block z-50 pointer-events-none">
+                        <div className="bg-gray-900 text-white text-xs rounded-lg p-2 shadow-lg whitespace-nowrap">
+                          <div className="font-semibold">{item.label}</div>
+                          {item.artist && <div className="text-gray-300">{item.artist}</div>}
+                          <div className="text-gray-400 mt-1">
+                            {formatTime(item.start)}{!isPoint && ` - ${formatTime(item.end)}`}
+                          </div>
+                          <div className="text-orange-400 text-[10px] mt-1">Comment</div>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
       {/* Right Column - Setlist */}
-      <div className="w-full min-[1300px]:basis-3/5 min-[1300px]:shrink-0 min-w-0 flex-1 min-h-0 min-[1300px]:h-full min-[1300px]:pr-2 flex flex-col">
+      <div className="w-full min-[1300px]:basis-3/5 min-[1300px]:shrink-0 min-w-0 min-h-0 min-[1300px]:self-stretch min-[1300px]:pr-6 flex flex-col">
         {/* Setlist Section - Unified View */}
-        <div className="flex justify-between items-center mb-4 flex-none">
+        <div className="flex flex-col gap-3 mb-4 flex-none shrink-0">
           <h2 className="text-2xl font-bold text-gray-900">
             セットリスト ({isEditing ? editableSongs.length : stream.performances.length}曲)
           </h2>
 
           {/* Edit Mode Actions */}
           {isEditing && (
-            <div className="flex flex-wrap gap-3">
-              <button
-                onClick={loadFromHolodex}
-                disabled={loadHolodexMutation.isPending}
-                className="px-4 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
-              >
-                {loadHolodexMutation.isPending ? '読み込み中...' : 'Holodexから同期'}
-              </button>
-              <button
-                onClick={loadFromComments}
-                disabled={analyzeCommentsMutation.isPending}
-                className="px-4 py-2 bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
-              >
-                {analyzeCommentsMutation.isPending ? '分析中...' : 'コメントから読み込む'}
-              </button>
-              {editableSongs.length > 0 && (
-                <>
-                  <button
-                    onClick={runAINormalization}
-                    disabled={aiNormalizeMutation.isPending}
-                    className="px-4 py-2 bg-purple-600 text-white font-medium rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50"
-                  >
-                    {aiNormalizeMutation.isPending ? 'AI処理中...' : 'AI正規化'}
-                  </button>
-                  <button
-                    onClick={estimateEndTimes}
-                    disabled={estimateEndTimesMutation.isPending}
-                    className="px-4 py-2 bg-orange-600 text-white font-medium rounded-lg hover:bg-orange-700 transition-colors disabled:opacity-50"
-                  >
-                    {estimateEndTimesMutation.isPending ? '推算中...' : '結束時間を推算'}
-                  </button>
-                </>
-              )}
+            <div className="flex justify-between items-center gap-2">
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={loadFromHolodex}
+                  disabled={!stream?.holodex_timeline_songs || stream.holodex_timeline_songs.length === 0}
+                  className="px-3 py-1.5 text-sm bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+                >
+                  Holodex データを読み込む
+                </button>
+                <button
+                  onClick={loadFromComments}
+                  disabled={!stream?.comment_timeline_songs || stream.comment_timeline_songs.length === 0}
+                  className="px-3 py-1.5 text-sm bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
+                >
+                  コメント データを読み込む
+                </button>
+                {editableSongs.length > 0 && (
+                  <>
+                    <button
+                      onClick={runAINormalization}
+                      disabled={aiNormalizeMutation.isPending}
+                      className="px-3 py-1.5 text-sm bg-purple-600 text-white font-medium rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50"
+                    >
+                      {aiNormalizeMutation.isPending ? 'AI処理中...' : 'AI正規化'}
+                    </button>
+                    <button
+                      onClick={estimateEndTimes}
+                      disabled={estimateEndTimesMutation.isPending}
+                      className="px-3 py-1.5 text-sm bg-orange-600 text-white font-medium rounded-lg hover:bg-orange-700 transition-colors disabled:opacity-50"
+                    >
+                      {estimateEndTimesMutation.isPending ? '推算中...' : '結束時間を推算'}
+                    </button>
+                  </>
+                )}
+              </div>
+              <div className="flex gap-2 shrink-0">
+                <button
+                  onClick={toggleEditing}
+                  className="px-3 py-1.5 text-sm bg-gray-200 text-gray-700 font-medium rounded-lg hover:bg-gray-300 transition-colors"
+                >
+                  キャンセル
+                </button>
+                <button
+                  onClick={handleConfirm}
+                  disabled={createPerformancesMutation.isPending || updateStreamMutation.isPending}
+                  className="px-3 py-1.5 text-sm bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50"
+                >
+                  {createPerformancesMutation.isPending || updateStreamMutation.isPending ? '処理中...' : '変更を保存'}
+                </button>
+              </div>
             </div>
           )}
         </div>
 
-        <div className="flex-1 min-h-0 overflow-y-auto">
+        <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
         {isEditing ? (
           /* Editable Setlist */
           <div className="bg-white rounded-lg shadow-sm border p-6">
@@ -1579,33 +1714,10 @@ export default function StreamDetailPage() {
                 >
                   + 楽曲を追加
                 </button>
-
-                {/* Confirm Button */}
-                <div className="flex justify-end pt-4 border-t">
-                  <button
-                    onClick={handleConfirm}
-                    disabled={createPerformancesMutation.isPending || updateStreamMutation.isPending}
-                    className="px-6 py-2 bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50"
-                  >
-                    {createPerformancesMutation.isPending || updateStreamMutation.isPending ? '処理中...' : '変更を保存'}
-                  </button>
-                </div>
               </div>
             ) : (
-              <div className="space-y-4">
-                <div className="text-center py-8 text-gray-500">
-                  上のボタンから楽曲データを読み込んでください
-                </div>
-                {/* Save button for stream info only (no songs) */}
-                <div className="flex justify-end pt-4 border-t">
-                  <button
-                    onClick={handleConfirm}
-                    disabled={updateStreamMutation.isPending}
-                    className="px-6 py-2 bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50"
-                  >
-                    {updateStreamMutation.isPending ? '処理中...' : '変更を保存'}
-                  </button>
-                </div>
+              <div className="text-center py-8 text-gray-500">
+                上のボタンから楽曲データを読み込んでください
               </div>
             )}
           </div>
@@ -1617,7 +1729,7 @@ export default function StreamDetailPage() {
             </div>
           ) : (
             <div className="bg-white rounded-lg shadow-sm border">
-              <div className="max-h-[calc(100vh-14rem)] overflow-x-auto overflow-y-auto">
+              <div className="overflow-x-auto min-[1300px]:max-h-[calc(100vh-14rem)] min-[1300px]:overflow-y-auto">
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50 sticky top-0 z-10">
                   <tr>

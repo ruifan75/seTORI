@@ -142,6 +142,8 @@ export interface Stream {
   channel_owner?: Singer;  // 頻道擁有者
   is_processed: boolean;   // 處理完成
   is_hidden: boolean;      // 隱藏
+  holodex_timeline_songs?: SongSuggestion[];  // Holodex timeline 資料
+  comment_timeline_songs?: CommentSong[];     // Comment timeline 資料
   created_at: string;
   updated_at: string;
 }
@@ -221,9 +223,13 @@ export interface SyncHolodexRequest {
 
 export interface SyncHolodexResponse {
   synced_count: number;
+  total_streams: number;
+  processed: number;
   new_streams: string[];
   updated: string[];
   skipped: string[];
+  in_progress: boolean;
+  message?: string;
 }
 
 // ========== Comment 分析 ==========

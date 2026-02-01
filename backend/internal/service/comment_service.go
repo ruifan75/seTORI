@@ -56,6 +56,9 @@ func (s *CommentService) AnalyzeComments(videoID string) (*dto.AnalyzeCommentsRe
 		}
 	}
 
+	// 注意：不再儲存到資料庫，CommentData 已在 sync 時由 loadAndSaveComments 儲存
+	// 這個 API 主要用於即時分析和返回資料給前端
+
 	return &dto.AnalyzeCommentsResponse{
 		Songs:       songDTOs,
 		RawComments: comments,

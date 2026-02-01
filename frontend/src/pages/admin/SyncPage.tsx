@@ -15,7 +15,8 @@ export default function SyncPage() {
       force_update: syncMode === 'all'
     }),
     onSuccess: (data) => {
-      showToast(`同期完了: ${data.synced_count}件`, 'success');
+      const message = data.message || `同期完了: ${data.synced_count}件 (新規: ${data.new_streams.length}, 更新: ${data.updated.length})`;
+      showToast(message, 'success');
     },
     onError: (err: Error) => {
       showToast(`同期エラー: ${err.message}`, 'error');
@@ -96,6 +97,19 @@ export default function SyncPage() {
           </button>
         </form>
 
+        {/* Progress - 由於 API 是同步的，無法顯示即時進度 */}
+        {syncChannelMutation.isPending && (
+          <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+            <h3 className="font-medium text-blue-800 mb-2">同期中...</h3>
+            <p className="text-sm text-blue-700">
+              データを同期しています。しばらくお待ちください...
+            </p>
+            <div className="mt-2 w-full bg-blue-200 rounded-full h-2">
+              <div className="bg-blue-600 h-2 rounded-full animate-pulse w-full" />
+            </div>
+          </div>
+        )}
+
         {/* Result */}
         {syncChannelMutation.isSuccess && (
           <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-lg">
@@ -105,6 +119,9 @@ export default function SyncPage() {
               <li>新規: {syncChannelMutation.data.new_streams.length}</li>
               <li>更新: {syncChannelMutation.data.updated.length}</li>
               <li>スキップ: {syncChannelMutation.data.skipped.length}</li>
+              {syncChannelMutation.data.message && (
+                <li className="mt-2 pt-2 border-t border-green-300">{syncChannelMutation.data.message}</li>
+              )}
             </ul>
           </div>
         )}

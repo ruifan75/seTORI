@@ -16,9 +16,9 @@ export default function Layout() {
   const isStreamDetail = location.pathname.startsWith('/streams/');
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="h-screen bg-gray-50 flex flex-col overflow-hidden">
       {/* Header */}
-      <header className="bg-white shadow-sm border-b">
+      <header className="bg-white shadow-sm border-b shrink-0">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             {/* Logo */}
@@ -70,15 +70,15 @@ export default function Layout() {
       <main
         className={
           isStreamDetail
-            ? 'w-full max-w-none px-2 sm:px-4 lg:px-6 py-6'
-            : 'max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8'
+            ? 'flex-1 w-full max-w-none px-2 sm:px-4 lg:px-6 py-6 overflow-hidden min-h-0'
+            : 'flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 overflow-y-auto'
         }
       >
         <Outlet />
       </main>
 
       {/* Footer */}
-      <footer className="bg-white border-t mt-auto">
+      <footer className="bg-white border-t shrink-0">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <p className="text-center text-sm text-gray-500">
             seTORI - VTuber 歌枠セットリスト

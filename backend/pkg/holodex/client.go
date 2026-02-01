@@ -7,14 +7,17 @@ import (
 	"net/http"
 	"net/url"
 	"time"
+
+	"github.com/ruifan75/setori/pkg/ratelimit"
 )
 
 const baseURL = "https://holodex.net/api/v2"
 
 // Client Holodex API 客戶端
 type Client struct {
-	apiKey     string
-	httpClient *http.Client
+	apiKey      string
+	httpClient  *http.Client
+	rateLimiter *ratelimit.RateLimiter
 }
 
 // NewClient 建立新的 Holodex 客戶端
@@ -24,6 +27,8 @@ func NewClient(apiKey string) *Client {
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
+		// Holodex API 限制: 80 requests per 2 minutes
+		rateLimiter: ratelimit.NewRateLimiter(75, 2*time.Minute), // 設定 75 避免邊界情況
 	}
 }
 
@@ -178,6 +183,9 @@ func (c *Client) GetAllStreams(channelID string, limit int, offset int) ([]Video
 
 // get 執行 GET 請求
 func (c *Client) get(endpoint string, params url.Values, result interface{}) error {
+	// 使用 rate limiter 等待直到可以發送請求
+	c.rateLimiter.Wait()
+
 	reqURL := baseURL + endpoint
 	if params != nil {
 		reqURL += "?" + params.Encode()
