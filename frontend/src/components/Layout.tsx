@@ -13,6 +13,7 @@ const adminItems = [
 
 export default function Layout() {
   const location = useLocation();
+  const isStreamDetail = location.pathname.startsWith('/streams/');
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -66,7 +67,13 @@ export default function Layout() {
       </header>
 
       {/* Main content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main
+        className={
+          isStreamDetail
+            ? 'w-full max-w-none px-2 sm:px-4 lg:px-6 py-6'
+            : 'max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8'
+        }
+      >
         <Outlet />
       </main>
 
