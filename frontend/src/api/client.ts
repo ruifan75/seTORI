@@ -176,6 +176,11 @@ export const holodexApi = {
     const { data } = await api.post(`/api/sync/holodex/video/${videoId}`);
     return data;
   },
+
+  syncSetoriToHolodex: async (streamId: string): Promise<SyncHolodexResponse> => {
+    const { data } = await api.post(`/api/sync/holodex/to-holodex/${streamId}`);
+    return data;
+  },
 };
 
 // ========== Comment 分析 API ==========

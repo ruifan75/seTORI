@@ -14,14 +14,20 @@ import (
 	"github.com/ruifan75/setori/internal/repository"
 	"github.com/ruifan75/setori/pkg/comment"
 	"github.com/ruifan75/setori/pkg/holodex"
+	"github.com/ruifan75/setori/pkg/itunes"
 	"github.com/ruifan75/setori/pkg/youtube"
 )
 
 type HolodexService struct {
-	client        *holodex.Client
-	youtubeClient *youtube.Client
-	streamRepo    *repository.StreamRepository
-	singerRepo    *repository.SingerRepository
+	client         *holodex.Client
+	youtubeClient  *youtube.Client
+	itunesClient   *itunes.Client
+	streamRepo     *repository.StreamRepository
+	singerRepo     *repository.SingerRepository
+	perfRepo       *repository.PerformanceRepository
+	songRepo       *repository.SongRepository
+	songItunesRepo *repository.SongItunesRepository
+	editorToken    string
 }
 
 func NewHolodexService(
@@ -29,13 +35,23 @@ func NewHolodexService(
 	youtubeAPIKey string,
 	streamRepo *repository.StreamRepository,
 	singerRepo *repository.SingerRepository,
+	editorToken string,
 ) *HolodexService {
 	return &HolodexService{
 		client:        holodex.NewClient(holodexAPIKey),
 		youtubeClient: youtube.NewClient(youtubeAPIKey),
+		itunesClient:  itunes.NewClient(),
 		streamRepo:    streamRepo,
 		singerRepo:    singerRepo,
+		editorToken:   editorToken,
 	}
+}
+
+// SetRepositories 設定額外的 repositories（用於 SyncSetoriToHolodex）
+func (s *HolodexService) SetRepositoriesWithSongItunes(perfRepo *repository.PerformanceRepository, songRepo *repository.SongRepository, songItunesRepo *repository.SongItunesRepository) {
+	s.perfRepo = perfRepo
+	s.songRepo = songRepo
+	s.songItunesRepo = songItunesRepo
 }
 
 // getChannelPhotoURL 嘗試從 YouTube 取得頻道大頭貼，若失敗則使用 Holodex，最後使用 Holodex 靜態圖片
@@ -525,4 +541,175 @@ func (s *HolodexService) loadAndSaveComments(videoID string) {
 			log.Printf("update stream comment data error (video: %s): %v", videoID, err)
 		}
 	}
+}
+
+// SyncSetoriToHolodex 將 seTORI 的資料同步到 Holodex（當 Holodex 沒有資料時）
+// 目前只印出 request 內容，不執行實際的 API 呼叫
+func (s *HolodexService) SyncSetoriToHolodex(streamID string) (*dto.SyncHolodexResponse, error) {
+	// 1. 取得 stream 資訊
+	stream, err := s.streamRepo.FindByID(streamID)
+	if err != nil {
+		return nil, fmt.Errorf("find stream: %w", err)
+	}
+	if stream == nil {
+		return nil, fmt.Errorf("stream not found: %s", streamID)
+	}
+
+	// 2. 檢查是否已有實際的 Holodex 資料（有歌曲列表）
+	hasHolodexData := false
+	if len(stream.HolodexData) > 0 {
+		var video struct {
+			Songs []interface{} `json:"songs"`
+		}
+		if err := json.Unmarshal(stream.HolodexData, &video); err == nil && len(video.Songs) > 0 {
+			hasHolodexData = true
+		}
+	}
+
+	if hasHolodexData {
+		return nil, fmt.Errorf("stream already has Holodex data with songs")
+	}
+
+	// 3. 檢查 editor token 是否配置
+	if s.editorToken == "" || s.editorToken == "your-holodex-editor-token-here" {
+		return nil, fmt.Errorf("Holodex editor token not configured")
+	}
+
+	log.Printf("=== DEBUG: SyncSetoriToHolodex Request ===")
+	log.Printf("Stream ID: %s", streamID)
+	log.Printf("Stream Title: %s", stream.Title)
+	log.Printf("Stream Date: %v", stream.StreamDate)
+	log.Printf("Editor Token: %s", maskToken(s.editorToken))
+
+	// 4. 取得頻道資訊（從 HolodexData 中解析，或使用第一個 singer 作為備用）
+	var channelID, channelName, channelEnglishName string
+
+	// 首先嘗試從 HolodexData 取得 channel ID
+	if len(stream.HolodexData) > 0 {
+		var video struct {
+			ChannelID string `json:"channel_id"`
+			Channel   struct {
+				ID          string `json:"id"`
+				Name        string `json:"name"`
+				EnglishName string `json:"english_name"`
+			} `json:"channel"`
+		}
+		if err := json.Unmarshal(stream.HolodexData, &video); err == nil {
+			if video.Channel.ID != "" {
+				channelID = video.Channel.ID
+				channelName = video.Channel.Name
+				channelEnglishName = video.Channel.EnglishName
+			} else if video.ChannelID != "" {
+				channelID = video.ChannelID
+			}
+		}
+	}
+
+	// 如果沒有 channel name，從資料庫查詢
+	if (channelName == "" || channelEnglishName == "") && channelID != "" {
+		if s.singerRepo != nil {
+			if singer, err := s.singerRepo.FindByID(channelID); err == nil && singer != nil {
+				channelName = singer.Name
+				channelEnglishName = singer.EnglishName.String
+			}
+		}
+	}
+
+	log.Printf("Channel ID: %s, Name: %s", channelID, channelName)
+
+	// 5. 取得 performances 和對應的 song 資訊
+	if s.perfRepo != nil {
+		perfs, err := s.perfRepo.FindByStreamID(streamID)
+		if err == nil && len(perfs) > 0 {
+			log.Printf("Found %d performances:", len(perfs))
+
+			for _, perf := range perfs {
+				if s.songRepo != nil {
+					song, err := s.songRepo.FindByID(perf.SongID)
+					if err == nil && song != nil {
+						log.Printf("  - Performance: %s (%.0fs - %.0fs)",
+							song.Name,
+							float64(perf.StartSeconds),
+							float64(perf.EndSeconds))
+
+						// 取得 iTunes 資訊
+						if s.songItunesRepo != nil {
+							itunesRecords, err := s.songItunesRepo.FindBySongID(perf.SongID)
+							if err == nil && len(itunesRecords) > 0 {
+								for _, itunesRecord := range itunesRecords {
+									log.Printf("    iTunes ID: %d (Primary: %v)", itunesRecord.ITunesID, itunesRecord.IsPrimary)
+
+									// 從 iTunes 取得完整資訊
+									var itunesInfo *itunes.QueryResponse
+									itunesInfo, err := s.itunesClient.QueryByID(itunesRecord.ITunesID)
+
+									// 構造完整的 request
+									requestData := map[string]interface{}{
+										"itunesid":        itunesRecord.ITunesID,
+										"start":           perf.StartSeconds,
+										"end":             perf.EndSeconds,
+										"name":            song.Name,
+										"original_artist": song.OriginalArtist,
+										"video_id":        streamID,
+										"channel_id":      channelID,
+										"available_at":    stream.StreamDate.Format(time.RFC3339),
+									}
+
+									// 如果有 iTunes 資訊，添加完整的 song 物件和 URL
+									if err == nil && itunesInfo != nil {
+										songObj := map[string]interface{}{
+											"trackId":         itunesInfo.ItunesID,
+											"trackTimeMillis": itunesInfo.TrackTimeMillis,
+											"collectionName":  itunesInfo.CollectionName,
+											"artistName":      itunesInfo.ArtistName,
+											"trackName":       itunesInfo.TrackName,
+											"artworkUrl100":   itunesInfo.ArtworkURL,
+											"trackViewUrl":    itunesInfo.TrackViewURL,
+										}
+										requestData["song"] = songObj
+										requestData["amUrl"] = itunesInfo.TrackViewURL
+										requestData["art"] = itunesInfo.ArtworkURL
+									}
+
+									// 添加 channel 資訊
+									if channelName != "" {
+										channelObj := map[string]interface{}{
+											"name":         channelName,
+											"english_name": channelEnglishName,
+										}
+										requestData["channel"] = channelObj
+									}
+
+									requestJSON, _ := json.MarshalIndent(requestData, "    ", "  ")
+									log.Printf("    Full Request:\n%s", string(requestJSON))
+								}
+							}
+						}
+					}
+				}
+			}
+		} else {
+			log.Printf("No performances found for stream")
+		}
+	} else {
+		log.Printf("Warning: perfRepo not set, cannot retrieve performances")
+	}
+
+	log.Printf("=== END DEBUG ===")
+
+	return &dto.SyncHolodexResponse{
+		NewStreams:  []string{},
+		Updated:     []string{},
+		Skipped:     []string{},
+		SyncedCount: 0,
+		Message:     "DEBUG 模式：完整 Request 內容已印出到伺服器日誌。請檢查 server logs 確認 request 格式是否正確。",
+	}, nil
+}
+
+// maskToken 將 token 遮蔽，只顯示前後幾個字元
+func maskToken(token string) string {
+	if len(token) <= 8 {
+		return "***"
+	}
+	return token[:4] + "..." + token[len(token)-4:]
 }

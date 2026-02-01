@@ -1,6 +1,7 @@
 package holodex
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -79,6 +80,34 @@ type Song struct {
 	ITunesID       int64  `json:"itunesid"`
 	Start          int    `json:"start"`
 	End            int    `json:"end"`
+}
+
+// iTunes 歌曲資料
+type ITunesSong struct {
+	TrackID         int64  `json:"trackId"`
+	TrackTimeMillis int    `json:"trackTimeMillis"`
+	CollectionName  string `json:"collectionName"`
+	ReleaseDate     string `json:"releaseDate"`
+	ArtistName      string `json:"artistName"`
+	TrackName       string `json:"trackName"`
+	ArtworkUrl100   string `json:"artworkUrl100"`
+	TrackViewUrl    string `json:"trackViewUrl"`
+}
+
+// AddSongsRequest 新增歌曲到 Holodex 的請求
+type AddSongsRequest struct {
+	Song           *ITunesSong `json:"song"`
+	ItunesID       int64       `json:"itunesid"`
+	Start          int         `json:"start"`
+	End            int         `json:"end"`
+	Name           string      `json:"name"`
+	OriginalArtist string      `json:"original_artist"`
+	AmUrl          string      `json:"amUrl,omitempty"`
+	Art            string      `json:"art,omitempty"`
+	VideoID        string      `json:"video_id"`
+	ChannelID      string      `json:"channel_id"`
+	Channel        *Channel    `json:"channel,omitempty"`
+	AvailableAt    string      `json:"available_at,omitempty"`
 }
 
 // Comment 評論資料
@@ -217,6 +246,48 @@ func (c *Client) get(endpoint string, params url.Values, result interface{}) err
 
 	if err := json.Unmarshal(body, result); err != nil {
 		return fmt.Errorf("unmarshal response: %w", err)
+	}
+
+	return nil
+}
+
+// AddSongs 新增歌曲到 Holodex
+func (c *Client) AddSongs(songs []AddSongsRequest) error {
+	if len(songs) == 0 {
+		return nil
+	}
+
+	reqURL := baseURL + "/songs"
+
+	// 逐個添加歌曲
+	for _, song := range songs {
+		// 使用 rate limiter 等待直到可以發送請求
+		c.rateLimiter.Wait()
+
+		body, err := json.Marshal(song)
+		if err != nil {
+			return fmt.Errorf("marshal song: %w", err)
+		}
+
+		req, err := http.NewRequest("PUT", reqURL, io.NopCloser(io.Reader(bytes.NewBuffer(body))))
+		if err != nil {
+			return fmt.Errorf("create request: %w", err)
+		}
+
+		req.Header.Set("X-APIKEY", c.apiKey)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json")
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("do request: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+			respBody, _ := io.ReadAll(resp.Body)
+			return fmt.Errorf("add song API error: status=%d body=%s", resp.StatusCode, string(respBody))
+		}
 	}
 
 	return nil

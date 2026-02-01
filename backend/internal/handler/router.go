@@ -45,7 +45,8 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	songService := service.NewSongService(songRepo, perfRepo, songItunesRepo)
 	streamService := service.NewStreamService(streamRepo, perfRepo)
 	singerService := service.NewSingerService(singerRepo, streamRepo, perfRepo)
-	holodexService := service.NewHolodexService(cfg.HolodexAPIKey, cfg.YouTubeAPIKey, streamRepo, singerRepo)
+	holodexService := service.NewHolodexService(cfg.HolodexAPIKey, cfg.YouTubeAPIKey, streamRepo, singerRepo, cfg.HolodexEditorToken)
+	holodexService.SetRepositoriesWithSongItunes(perfRepo, songRepo, songItunesRepo) // 為 SyncSetoriToHolodex 提供必要的 repositories
 	commentService := service.NewCommentService(holodexService, streamRepo)
 	normalizationService := service.NewNormalizationService(cfg.GroqAPIKey, songRepo)
 	performanceService := service.NewPerformanceService(perfRepo, songRepo, songItunesRepo)
@@ -100,6 +101,7 @@ func (r *Router) setupRoutes() {
 	// Holodex sync
 	r.mux.HandleFunc("POST /api/sync/holodex", r.handleSyncHolodex)
 	r.mux.HandleFunc("POST /api/sync/holodex/video/{id}", r.handleSyncHolodexVideo)
+	r.mux.HandleFunc("POST /api/sync/holodex/to-holodex/{id}", r.handleSyncSetoriToHolodex)
 
 	// Load songs from Holodex (without adding to normalization queue)
 	r.mux.HandleFunc("GET /api/streams/{id}/holodex-songs", r.handleLoadHolodexSongs)
@@ -651,6 +653,23 @@ func (r *Router) handleSyncHolodexVideo(w http.ResponseWriter, req *http.Request
 	}
 
 	result, err := r.holodexService.SyncVideo(videoID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	respondJSON(w, http.StatusOK, result)
+}
+
+// 同步 seTORI 資料到 Holodex
+func (r *Router) handleSyncSetoriToHolodex(w http.ResponseWriter, req *http.Request) {
+	streamID := req.PathValue("id")
+	if streamID == "" {
+		respondError(w, http.StatusBadRequest, "無効的影片 ID")
+		return
+	}
+
+	result, err := r.holodexService.SyncSetoriToHolodex(streamID)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return

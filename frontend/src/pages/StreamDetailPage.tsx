@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, Link } from 'react-router-dom';
-import { streamApi, performanceApi, aiApi, songApi, singerApi, itunesApi } from '../api/client';
+import { streamApi, performanceApi, aiApi, songApi, singerApi, itunesApi, holodexApi } from '../api/client';
 import type { Singer, CreatePerformanceItem, AINormalizationItem, Song, UpdateStreamRequest, SongEndTimeEstimateRequest, EstimateEndTimesRequest, ITunesSearchResult, CommentSong, SongSuggestion } from '../api/types';
 import Loading from '../components/ui/Loading';
 import Tag from '../components/ui/Tag';
@@ -651,6 +651,36 @@ export default function StreamDetailPage() {
     },
   });
 
+  // 同步單一影片
+  const syncVideoMutation = useMutation({
+    mutationFn: () => holodexApi.syncVideo(id!),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['stream', id] });
+      showToast(
+        `同期完了: ${data.synced_count > 0 ? `${data.synced_count}件更新` : '変更なし'}`,
+        'success'
+      );
+    },
+    onError: (err: Error) => {
+      showToast(`同期エラー: ${err.message}`, 'error');
+    },
+  });
+
+  // 同步 seTORI 資料到 Holodex
+  const syncToHolodexMutation = useMutation({
+    mutationFn: () => holodexApi.syncSetoriToHolodex(id!),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['stream', id] });
+      showToast(
+        `Holodex に同期完了: ${data.synced_count > 0 ? `${data.synced_count}件` : '完了'}`,
+        'success'
+      );
+    },
+    onError: (err: Error) => {
+      showToast(`Holodex 同期エラー: ${err.message}`, 'error');
+    },
+  });
+
   const loadFromHolodex = () => {
     if (!stream?.holodex_timeline_songs || stream.holodex_timeline_songs.length === 0) {
       showToast('Holodexデータがありません', 'info');
@@ -1290,7 +1320,7 @@ export default function StreamDetailPage() {
           </div>
 
           <div className="border-t py-3 px-0 shrink-0">
-            <div className="space-y-2 px-3">
+            <div className="space-y-1 px-3">
               <div className="relative h-3 bg-gray-100 rounded-none">
                 {setoriTimeline.map((item) => (
                   <button
@@ -1340,6 +1370,8 @@ export default function StreamDetailPage() {
                     </div>
                   </button>
                 ))}
+              </div>
+              <div className="relative h-3 bg-gray-100 rounded-none">
                 {commentTimeline.map((item) => {
                   const isPoint = item.end <= item.start;
                   return (
@@ -1388,6 +1420,23 @@ export default function StreamDetailPage() {
           {isEditing && (
             <div className="flex justify-between items-center gap-2">
               <div className="flex flex-wrap gap-2">
+                {!stream?.holodex_timeline_songs || stream.holodex_timeline_songs.length === 0 ? (
+                  <button
+                    onClick={() => syncToHolodexMutation.mutate()}
+                    disabled={syncToHolodexMutation.isPending}
+                    className="px-3 py-1.5 text-sm bg-red-600 text-white font-medium rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50"
+                  >
+                    {syncToHolodexMutation.isPending ? 'Holodex へ同期中...' : 'seTORI から Holodex へ同期'}
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => syncVideoMutation.mutate()}
+                    disabled={syncVideoMutation.isPending}
+                    className="px-3 py-1.5 text-sm bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
+                  >
+                    {syncVideoMutation.isPending ? '同期中...' : 'Holodex から同期'}
+                  </button>
+                )}
                 <button
                   onClick={loadFromHolodex}
                   disabled={!stream?.holodex_timeline_songs || stream.holodex_timeline_songs.length === 0}
