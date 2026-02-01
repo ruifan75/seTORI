@@ -495,36 +495,49 @@ export default function StreamDetailPage() {
   const aiNormalizeMutation = useMutation({
     mutationFn: (items: AINormalizationItem[]) =>
       aiApi.normalize({ items }),
-    onSuccess: (data) => {
+    onSuccess: async (data) => {
       // AI 結果を反映
-      setEditableSongs((prev) => {
-        const updated = [...prev];
-        for (const suggestion of data.suggestions) {
-          if (suggestion.index < updated.length) {
-            const current = updated[suggestion.index];
-            // 檢查是否有被 AI 修改
-            const nameChanged = current.name !== suggestion.normalized_name;
-            const artistChanged = current.artist !== suggestion.original_artist;
-            
-            updated[suggestion.index] = {
-              ...current,
-              name: suggestion.normalized_name,
-              nameReading: suggestion.normalized_name_reading,
-              artist: suggestion.original_artist,
-              artistReading: suggestion.original_artist_reading,
-              tags: suggestion.tags,
-              matchedSongId: suggestion.matched_song_id || null,
-              // 保留 AI 修改前的值
-              aiNormalizedName: nameChanged ? current.name : undefined,
-              aiNormalizedArtist: artistChanged ? current.artist : undefined,
-              // 更新原始值以追蹤後續變更
-              originalName: suggestion.normalized_name,
-              originalArtist: suggestion.original_artist,
-            };
+      const updated: EditableSong[] = [];
+      
+      for (const suggestion of data.suggestions) {
+        if (suggestion.index < editableSongs.length) {
+          const current = editableSongs[suggestion.index];
+          // 檢查是否有被 AI 修改
+          const nameChanged = current.name !== suggestion.normalized_name;
+          const artistChanged = current.artist !== suggestion.original_artist;
+          
+          let artUrl = current.artUrl;
+          
+          // 如果有 matched_song_id 且沒有 art，則獲取 song 的 art
+          if (suggestion.matched_song_id && !artUrl) {
+            try {
+              const song = await songApi.get(suggestion.matched_song_id);
+              artUrl = song.arts || null;
+            } catch (err) {
+              // 忽略錯誤，使用原有的 artUrl
+            }
           }
+          
+          updated[suggestion.index] = {
+            ...current,
+            name: suggestion.normalized_name,
+            nameReading: suggestion.normalized_name_reading,
+            artist: suggestion.original_artist,
+            artistReading: suggestion.original_artist_reading,
+            tags: suggestion.tags,
+            matchedSongId: suggestion.matched_song_id || null,
+            artUrl,
+            // 保留 AI 修改前的值
+            aiNormalizedName: nameChanged ? current.name : undefined,
+            aiNormalizedArtist: artistChanged ? current.artist : undefined,
+            // 更新原始值以追蹤後續變更
+            originalName: suggestion.normalized_name,
+            originalArtist: suggestion.original_artist,
+          };
         }
-        return updated;
-      });
+      }
+      
+      setEditableSongs(updated);
       showToast(`${data.suggestions.length}曲のAI正規化が完了しました`, 'success');
     },
     onError: (err: Error) => {
