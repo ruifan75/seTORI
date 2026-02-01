@@ -76,6 +76,8 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("GET /api/songs/{id}/performances", r.handleGetSongPerformances)
 	r.mux.HandleFunc("POST /api/songs", r.handleCreateSong)
 	r.mux.HandleFunc("PUT /api/songs/{id}", r.handleUpdateSong)
+	r.mux.HandleFunc("DELETE /api/songs/{id}", r.handleDeleteSong)
+	r.mux.HandleFunc("POST /api/songs/{id}/merge", r.handleMergeSong)
 
 	// API routes - Streams
 	r.mux.HandleFunc("GET /api/streams", r.handleListStreams)
@@ -268,6 +270,102 @@ func (r *Router) handleUpdateSong(w http.ResponseWriter, req *http.Request) {
 	}
 
 	respondJSON(w, http.StatusOK, result)
+}
+
+// handleDeleteSong 刪除歌曲
+func (r *Router) handleDeleteSong(w http.ResponseWriter, req *http.Request) {
+	idStr := req.PathValue("id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "無効的歌曲 ID")
+		return
+	}
+
+	// 檢查歌曲是否存在
+	song, err := r.songService.GetByID(id)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if song == nil {
+		respondError(w, http.StatusNotFound, "歌曲不存在")
+		return
+	}
+
+	// 刪除歌曲
+	if err := r.songService.Delete(id); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]string{
+		"message": "歌曲已刪除",
+		"id":      id.String(),
+	})
+}
+
+// handleMergeSong 將來源歌曲合併至目標歌曲
+func (r *Router) handleMergeSong(w http.ResponseWriter, req *http.Request) {
+	idStr := req.PathValue("id")
+	sourceSongID, err := uuid.Parse(idStr)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "無効的來源歌曲 ID")
+		return
+	}
+
+	var mergeReq struct {
+		TargetSongID string `json:"target_song_id"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&mergeReq); err != nil {
+		respondError(w, http.StatusBadRequest, "無効的請求格式")
+		return
+	}
+
+	targetSongID, err := uuid.Parse(mergeReq.TargetSongID)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "無効的目標歌曲 ID")
+		return
+	}
+
+	// 確保來源和目標是不同的歌曲
+	if sourceSongID == targetSongID {
+		respondError(w, http.StatusBadRequest, "來源和目標歌曲不能相同")
+		return
+	}
+
+	// 驗證兩首歌曲都存在
+	sourceSong, err := r.songService.GetByID(sourceSongID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if sourceSong == nil {
+		respondError(w, http.StatusNotFound, "來源歌曲不存在")
+		return
+	}
+
+	targetSong, err := r.songService.GetByID(targetSongID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if targetSong == nil {
+		respondError(w, http.StatusNotFound, "目標歌曲不存在")
+		return
+	}
+
+	// 執行合併
+	if err := r.songService.MergeSongs(sourceSongID, targetSongID); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"message":     "歌曲已合併",
+		"source_id":   sourceSongID.String(),
+		"target_id":   targetSongID.String(),
+		"target_song": targetSong,
+	})
 }
 
 // ========== Stream Handlers ==========

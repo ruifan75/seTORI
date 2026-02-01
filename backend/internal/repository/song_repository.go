@@ -220,3 +220,36 @@ func (r *SongRepository) SearchSimilar(name string, limit int) ([]models.Song, e
 
 	return songs, nil
 }
+
+// MergeSong 將來源歌曲的所有 performances 合併至目標歌曲，然後刪除來源歌曲
+func (r *SongRepository) MergeSong(sourceSongID, targetSongID uuid.UUID) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// 1. 更新所有 performances，將 song_id 從來源改為目標
+	updateQuery := `
+		UPDATE performances 
+		SET song_id = $1 
+		WHERE song_id = $2`
+	_, err = tx.Exec(updateQuery, targetSongID, sourceSongID)
+	if err != nil {
+		return fmt.Errorf("update performances: %w", err)
+	}
+
+	// 2. 刪除來源歌曲（及其關聯的 song_itunes）
+	// song_itunes 設有 ON DELETE CASCADE，所以會自動刪除
+	deleteQuery := `DELETE FROM songs WHERE id = $1`
+	_, err = tx.Exec(deleteQuery, sourceSongID)
+	if err != nil {
+		return fmt.Errorf("delete source song: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit transaction: %w", err)
+	}
+
+	return nil
+}

@@ -6,10 +6,14 @@ import { useToast } from '../../components/ui/Toast';
 export default function SyncPage() {
   const [channelId, setChannelId] = useState('');
   const [videoId, setVideoId] = useState('');
+  const [syncMode, setSyncMode] = useState<'new' | 'all'>('new');
   const { showToast } = useToast();
 
   const syncChannelMutation = useMutation({
-    mutationFn: () => holodexApi.syncChannel({ channel_id: channelId }),
+    mutationFn: () => holodexApi.syncChannel({ 
+      channel_id: channelId,
+      force_update: syncMode === 'all'
+    }),
     onSuccess: (data) => {
       showToast(`同期完了: ${data.synced_count}件`, 'success');
     },
@@ -66,6 +70,21 @@ export default function SyncPage() {
               placeholder="UCeqIMtLuGc3YgwkhEaG8oDg"
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
             />
+          </div>
+
+          <div>
+            <label htmlFor="syncMode" className="block text-sm font-medium text-gray-700 mb-1">
+              同步模式
+            </label>
+            <select
+              id="syncMode"
+              value={syncMode}
+              onChange={(e) => setSyncMode(e.target.value as 'new' | 'all')}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+            >
+              <option value="new">只同步新的影片</option>
+              <option value="all">同步所有影片（包含更新）</option>
+            </select>
           </div>
 
           <button

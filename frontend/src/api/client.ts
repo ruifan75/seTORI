@@ -78,6 +78,16 @@ export const songApi = {
     const { data } = await api.put(`/api/songs/${id}`, song);
     return data;
   },
+
+  delete: async (id: string): Promise<{ message: string; id: string }> => {
+    const { data } = await api.delete(`/api/songs/${id}`);
+    return data;
+  },
+
+  merge: async (sourceSongId: string, targetSongId: string): Promise<{ message: string; source_id: string; target_id: string; target_song: Song }> => {
+    const { data } = await api.post(`/api/songs/${sourceSongId}/merge`, { target_song_id: targetSongId });
+    return data;
+  },
 };
 
 // ========== 歌回 API ==========

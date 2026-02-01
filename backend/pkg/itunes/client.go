@@ -30,6 +30,7 @@ type QueryResponse struct {
 	TrackName      string `json:"track_name"`
 	ArtistName     string `json:"artist_name"`
 	ArtworkURL     string `json:"artwork_url"`
+	TrackViewURL   string `json:"track_view_url"`
 	Country        string `json:"country"`
 }
 
@@ -43,6 +44,7 @@ type itunesResult struct {
 	TrackName        string `json:"trackName"`
 	ArtistName       string `json:"artistName"`
 	CollectionName   string `json:"collectionName"`
+	TrackViewUrl     string `json:"trackViewUrl"`
 	ArtworkUrl100    string `json:"artworkUrl100"`
 	ArtworkUrl30     string `json:"artworkUrl30"`
 	ArtworkUrl60     string `json:"artworkUrl60"`
@@ -119,6 +121,8 @@ func (c *Client) QueryByID(itunesID int64) (*QueryResponse, error) {
 	params := url.Values{}
 	params.Add("id", fmt.Sprintf("%d", itunesID))
 	params.Add("entity", "song")
+	params.Add("country", "JP")
+	params.Add("lang", "ja_jp")
 
 	queryURL := "https://itunes.apple.com/lookup?" + params.Encode()
 
@@ -156,6 +160,7 @@ func (c *Client) QueryByID(itunesID int64) (*QueryResponse, error) {
 		TrackName:      r.TrackName,
 		ArtistName:     r.ArtistName,
 		ArtworkURL:     artworkURL,
+		TrackViewURL:   r.TrackViewUrl,
 		Country:        r.Country,
 	}, nil
 }

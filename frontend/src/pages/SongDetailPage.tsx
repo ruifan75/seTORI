@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useParams, useSearchParams, Link } from 'react-router-dom';
+import { useParams, useSearchParams, Link, useNavigate } from 'react-router-dom';
 import { songApi, itunesApi } from '../api/client';
-import type { UpdateSongRequest, ITunesSearchResult } from '../api/types';
+import type { UpdateSongRequest, ITunesSearchResult, Song, ITunesQueryResult } from '../api/types';
 import Loading from '../components/ui/Loading';
 import Pagination from '../components/ui/Pagination';
 import Tag from '../components/ui/Tag';
@@ -19,13 +19,127 @@ function formatTime(seconds: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
+// 歌曲搜尋輸入元件的 Props
+interface SongSearchInputProps {
+  value: string;
+  onChange: (value: string) => void;
+  onSelectSong: (song: Song) => void;
+  placeholder?: string;
+  excludeSongId?: string;
+}
+
+// 歌曲搜尋輸入元件（帶自動完成）
+function SongSearchInput({ value, onChange, onSelectSong, placeholder, excludeSongId }: SongSearchInputProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [suggestions, setSuggestions] = useState<Song[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Debounce 搜尋
+  useEffect(() => {
+    if (searchQuery.length < 2) {
+      setSuggestions([]);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      setIsLoading(true);
+      try {
+        const result = await songApi.list(1, 10, searchQuery);
+        const filtered = excludeSongId ? result.songs.filter((song) => song.id !== excludeSongId) : result.songs;
+        setSuggestions(filtered);
+      } catch {
+        setSuggestions([]);
+      } finally {
+        setIsLoading(false);
+      }
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  // 點擊外部關閉下拉選單
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        dropdownRef.current &&
+        !dropdownRef.current.contains(event.target as Node) &&
+        inputRef.current &&
+        !inputRef.current.contains(event.target as Node)
+      ) {
+        setIsOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newValue = e.target.value;
+    onChange(newValue);
+    setSearchQuery(newValue);
+    setIsOpen(true);
+  };
+
+  const handleSelectSong = (song: Song) => {
+    onSelectSong(song);
+    setIsOpen(false);
+  };
+
+  return (
+    <div className="relative">
+      <input
+        ref={inputRef}
+        type="text"
+        value={value}
+        onChange={handleInputChange}
+        placeholder={placeholder || '楽曲名を入力して検索'}
+        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+      />
+
+      {/* 搜尋建議下拉選單 */}
+      {isOpen && (value.length >= 2 || isLoading) && (
+        <div ref={dropdownRef} className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-64 overflow-y-auto">
+          {isLoading ? (
+            <div className="px-4 py-3 text-sm text-gray-500">検索中...</div>
+          ) : suggestions.length > 0 ? (
+            suggestions.map((song) => (
+              <button
+                key={song.id}
+                type="button"
+                onClick={() => handleSelectSong(song)}
+                className="w-full text-left px-4 py-2 hover:bg-gray-50 border-b last:border-b-0"
+              >
+                <div className="font-medium text-sm text-gray-900 truncate">{song.name}</div>
+                <div className="text-xs text-gray-500 truncate">{song.original_artist}</div>
+              </button>
+            ))
+          ) : (
+            <div className="px-4 py-3 text-sm text-gray-500">該当する楽曲がありません</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function SongDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const page = parseInt(searchParams.get('page') || '1');
   const { showToast } = useToast();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [isEditing, setIsEditing] = useState(false);
+  const [mergeTargetId, setMergeTargetId] = useState('');
+  const [mergeTargetQuery, setMergeTargetQuery] = useState('');
+  const [itunesDetails, setItunesDetails] = useState<Record<number, ITunesQueryResult>>({});
+  const fetchedItunesDetailIdsRef = useRef<Set<number>>(new Set());
+  const [itunesTrackUrls, setItunesTrackUrls] = useState<Record<number, string>>({});
+  const fetchedItunesIdsRef = useRef<Set<number>>(new Set());
   const [editedSong, setEditedSong] = useState<UpdateSongRequest>({
     name: '',
     name_reading: '',
@@ -59,6 +173,88 @@ export default function SongDetailPage() {
       showToast(error.response?.data?.message || '更新に失敗しました', 'error');
     },
   });
+
+  useEffect(() => {
+    if (!isEditing) {
+      return;
+    }
+
+    const ids = (editedSong.itunes_ids || []).map((item) => item.itunes_id);
+    ids.forEach((itunesId) => {
+      if (fetchedItunesDetailIdsRef.current.has(itunesId)) {
+        return;
+      }
+      fetchedItunesDetailIdsRef.current.add(itunesId);
+      itunesApi
+        .queryById(itunesId)
+        .then((result) => {
+          setItunesDetails((prev) => ({
+            ...prev,
+            [itunesId]: result,
+          }));
+        })
+        .catch(() => {
+          // ignore fetch errors
+        });
+    });
+  }, [editedSong.itunes_ids, isEditing]);
+
+  const deleteMutation = useMutation({
+    mutationFn: () => songApi.delete(id!),
+    onSuccess: () => {
+      showToast('楽曲を削除しました', 'success');
+      navigate('/songs');
+    },
+    onError: (error: any) => {
+      showToast(error.response?.data?.message || '削除に失敗しました', 'error');
+    },
+  });
+
+  const mergeMutation = useMutation({
+    mutationFn: (targetId: string) => songApi.merge(id!, targetId),
+    onSuccess: (result) => {
+      showToast('楽曲をマージしました', 'success');
+      setIsEditing(false);
+      navigate(`/songs/${result.target_id}`);
+    },
+    onError: (error: any) => {
+      showToast(error.response?.data?.message || 'マージに失敗しました', 'error');
+    },
+  });
+
+  useEffect(() => {
+    if (isEditing || !data?.song?.itunes_ids) {
+      return;
+    }
+
+    const primaryIds = data.song.itunes_ids
+      .filter((itunes) => itunes.is_primary)
+      .map((itunes) => itunes.itunes_id);
+
+    primaryIds.forEach((itunesId) => {
+      if (fetchedItunesIdsRef.current.has(itunesId)) {
+        return;
+      }
+
+      fetchedItunesIdsRef.current.add(itunesId);
+
+      itunesApi
+        .queryById(itunesId)
+        .then((result) => {
+          if (!result.track_view_url) {
+            return;
+          }
+
+          setItunesTrackUrls((prev) => ({
+            ...prev,
+            [itunesId]: result.track_view_url,
+          }));
+        })
+        .catch(() => {
+          // ignore errors to avoid blocking UI
+        });
+    });
+  }, [data?.song?.itunes_ids, isEditing]);
 
   const toggleEditing = () => {
     if (!isEditing && data?.song) {
@@ -101,12 +297,58 @@ export default function SongDetailPage() {
     setIsSearching(true);
     try {
       const results = await itunesApi.search(itunesSearchQuery);
-      setItunesSearchResults(results.results);
+      const existingIds = new Set((editedSong.itunes_ids || []).map((item) => item.itunes_id));
+      setItunesSearchResults(results.results.filter((item) => !existingIds.has(item.itunes_id)));
       setShowItunesSearch(true);
     } catch (error) {
       showToast('iTunes検索に失敗しました', 'error');
     } finally {
       setIsSearching(false);
+    }
+  };
+
+  const handleDeleteSong = () => {
+    if (!id) return;
+    if (!window.confirm('この楽曲を削除しますか？')) {
+      return;
+    }
+    deleteMutation.mutate();
+  };
+
+  const handleMergeSong = () => {
+    if (!id) return;
+    const targetId = mergeTargetId.trim();
+    if (!targetId) {
+      showToast('マージ先の楽曲を選択してください', 'error');
+      return;
+    }
+    if (targetId === id) {
+      showToast('同じ楽曲にはマージできません', 'error');
+      return;
+    }
+    if (!window.confirm('この楽曲をマージしますか？元の楽曲は削除されます。')) {
+      return;
+    }
+    mergeMutation.mutate(targetId);
+  };
+
+  const handleOpenItunes = async (itunesId: number) => {
+    const cached = itunesTrackUrls[itunesId];
+    if (cached) {
+      window.open(cached, '_blank', 'noopener,noreferrer');
+      return;
+    }
+
+    try {
+      const result = await itunesApi.queryById(itunesId);
+      const url = result.track_view_url || `https://music.apple.com/song/${itunesId}`;
+      setItunesTrackUrls((prev) => ({
+        ...prev,
+        [itunesId]: url,
+      }));
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } catch (error) {
+      window.open(`https://music.apple.com/song/${itunesId}`, '_blank', 'noopener,noreferrer');
     }
   };
 
@@ -128,9 +370,7 @@ export default function SongDetailPage() {
       arts: !editedSong.arts ? result.artwork_url : editedSong.arts,
     });
 
-    setItunesSearchResults([]);
-    setItunesSearchQuery('');
-    setShowItunesSearch(false);
+    setItunesSearchResults((prev) => prev.filter((item) => item.itunes_id !== result.itunes_id));
     showToast('iTunesを追加しました', 'success');
   };
 
@@ -175,7 +415,7 @@ export default function SongDetailPage() {
     }
   };
 
-  const handleRemoveItunes = (itunesId: number) => {
+  const handleRemoveItunes = async (itunesId: number) => {
     const updated = (editedSong.itunes_ids || []).filter(i => i.itunes_id !== itunesId);
     
     // 削除したのがプライマリの場合、最初のものをプライマリに設定
@@ -187,6 +427,31 @@ export default function SongDetailPage() {
       ...editedSong,
       itunes_ids: updated,
     });
+
+    setIsSearching(true);
+    try {
+      const result = await itunesApi.queryById(itunesId);
+      const restored: ITunesSearchResult = {
+        itunes_id: result.itunes_id,
+        collection_name: result.collection_name,
+        track_name: result.track_name,
+        artist_name: result.artist_name,
+        artwork_url: result.artwork_url,
+        country: result.country,
+      };
+
+      setItunesSearchResults((prev) => {
+        if (prev.some((item) => item.itunes_id === itunesId)) {
+          return prev;
+        }
+        return [restored, ...prev];
+      });
+      setShowItunesSearch(true);
+    } catch {
+      // ignore if lookup fails
+    } finally {
+      setIsSearching(false);
+    }
   };
 
   const handleSetPrimary = (itunesId: number) => {
@@ -250,53 +515,57 @@ export default function SongDetailPage() {
           <div className="flex-1">
             {isEditing ? (
               <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    楽曲名 *
-                  </label>
-                  <input
-                    type="text"
-                    value={editedSong.name}
-                    onChange={(e) => setEditedSong({ ...editedSong, name: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                    placeholder="楽曲名を入力"
-                  />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      楽曲名 *
+                    </label>
+                    <input
+                      type="text"
+                      value={editedSong.name}
+                      onChange={(e) => setEditedSong({ ...editedSong, name: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                      placeholder="楽曲名を入力"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      読み方
+                    </label>
+                    <input
+                      type="text"
+                      value={editedSong.name_reading}
+                      onChange={(e) => setEditedSong({ ...editedSong, name_reading: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                      placeholder="読み方を入力"
+                    />
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    読み方
-                  </label>
-                  <input
-                    type="text"
-                    value={editedSong.name_reading}
-                    onChange={(e) => setEditedSong({ ...editedSong, name_reading: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                    placeholder="読み方を入力"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    原曲アーティスト *
-                  </label>
-                  <input
-                    type="text"
-                    value={editedSong.original_artist}
-                    onChange={(e) => setEditedSong({ ...editedSong, original_artist: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                    placeholder="原曲アーティストを入力"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    アーティスト読み方
-                  </label>
-                  <input
-                    type="text"
-                    value={editedSong.original_artist_reading}
-                    onChange={(e) => setEditedSong({ ...editedSong, original_artist_reading: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                    placeholder="アーティスト読み方を入力"
-                  />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      原曲アーティスト *
+                    </label>
+                    <input
+                      type="text"
+                      value={editedSong.original_artist}
+                      onChange={(e) => setEditedSong({ ...editedSong, original_artist: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                      placeholder="原曲アーティストを入力"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      アーティスト読み方
+                    </label>
+                    <input
+                      type="text"
+                      value={editedSong.original_artist_reading}
+                      onChange={(e) => setEditedSong({ ...editedSong, original_artist_reading: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                      placeholder="アーティスト読み方を入力"
+                    />
+                  </div>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -328,68 +597,114 @@ export default function SongDetailPage() {
                   {/* 既有的 iTunes */}
                   {(editedSong.itunes_ids || []).length > 0 && (
                     <div className="mb-4 space-y-2">
-                      {editedSong.itunes_ids.map((itunes) => (
-                        <div key={itunes.itunes_id} className="flex items-center gap-2 p-2 bg-gray-50 rounded-lg">
-                          <div className="flex-1">
-                            <a
-                              href={`https://music.apple.com/song/${itunes.itunes_id}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-sm font-medium text-indigo-600 hover:text-indigo-700 hover:underline"
+                      {editedSong.itunes_ids.map((itunes) => {
+                        const detail = itunesDetails[itunes.itunes_id];
+                        return (
+                          <div key={itunes.itunes_id} className="flex items-center gap-3 p-2 bg-gray-50 rounded-lg">
+                            <div className="w-12 h-12 bg-gray-200 rounded overflow-hidden flex items-center justify-center">
+                              {detail?.artwork_url ? (
+                                <img
+                                  src={detail.artwork_url}
+                                  alt={detail.track_name || `iTunes ${itunes.itunes_id}`}
+                                  className="w-12 h-12 object-cover"
+                                />
+                              ) : (
+                                <span className="text-xs text-gray-500">N/A</span>
+                              )}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <a
+                                  href={`https://music.apple.com/song/${itunes.itunes_id}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-sm font-medium text-indigo-600 hover:text-indigo-700 hover:underline truncate"
+                                >
+                                  {detail?.track_name || `ID: ${itunes.itunes_id}`}
+                                </a>
+                                {detail?.artist_name && (
+                                  <span className="text-xs text-gray-600 truncate">{detail.artist_name}</span>
+                                )}
+                              </div>
+                              {detail?.collection_name && (
+                                <div className="text-xs text-gray-500 truncate">{detail.collection_name}</div>
+                              )}
+                            </div>
+                            <button
+                              onClick={() => handleSyncArtFromItunes(itunes.itunes_id)}
+                              disabled={isSearching}
+                              className="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                              title="このiTunes IDのアートワークを設定"
                             >
-                              ID: {itunes.itunes_id}
-                            </a>
+                              アート設定
+                            </button>
+                            <button
+                              onClick={() => handleSetPrimary(itunes.itunes_id)}
+                              className={`px-2 py-1 text-xs rounded ${
+                                itunes.is_primary
+                                  ? 'bg-pink-500 text-white'
+                                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                              }`}
+                            >
+                              {itunes.is_primary ? 'Primary' : 'Set Primary'}
+                            </button>
+                            <button
+                              onClick={() => handleRemoveItunes(itunes.itunes_id)}
+                              className="px-2 py-1 text-xs bg-red-100 text-red-700 rounded hover:bg-red-200"
+                            >
+                              削除
+                            </button>
                           </div>
-                          <button
-                            onClick={() => handleSyncArtFromItunes(itunes.itunes_id)}
-                            disabled={isSearching}
-                            className="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 disabled:opacity-50 disabled:cursor-not-allowed"
-                            title="このiTunes IDのアートワークを設定"
-                          >
-                            アート設定
-                          </button>
-                          <button
-                            onClick={() => handleSetPrimary(itunes.itunes_id)}
-                            className={`px-2 py-1 text-xs rounded ${
-                              itunes.is_primary
-                                ? 'bg-pink-500 text-white'
-                                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                            }`}
-                          >
-                            {itunes.is_primary ? 'Primary' : 'Set Primary'}
-                          </button>
-                          <button
-                            onClick={() => handleRemoveItunes(itunes.itunes_id)}
-                            className="px-2 py-1 text-xs bg-red-100 text-red-700 rounded hover:bg-red-200"
-                          >
-                            削除
-                          </button>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
 
-                  {/* iTunes 検索 */}
-                  <div className="space-y-2 mb-3">
-                    <label className="block text-sm font-medium text-gray-700">
-                      iTunes 検索
-                    </label>
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        value={itunesSearchQuery}
-                        onChange={(e) => setItunesSearchQuery(e.target.value)}
-                        placeholder="曲名で検索"
-                        className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                        disabled={isSearching}
-                      />
-                      <button
-                        onClick={handleSearchItunes}
-                        disabled={isSearching}
-                        className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        {isSearching ? '検索中...' : '検索'}
-                      </button>
+                  {/* iTunes 検索 & 直接入力 */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-3">
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-gray-700">
+                        iTunes 検索
+                      </label>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={itunesSearchQuery}
+                          onChange={(e) => setItunesSearchQuery(e.target.value)}
+                          placeholder="曲名で検索"
+                          className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                          disabled={isSearching}
+                        />
+                        <button
+                          onClick={handleSearchItunes}
+                          disabled={isSearching}
+                          className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {isSearching ? '検索中...' : '検索'}
+                        </button>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-gray-700">
+                        iTunes ID 直接入力
+                      </label>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={directItunesId}
+                          onChange={(e) => setDirectItunesId(e.target.value)}
+                          placeholder="iTunes ID (数字のみ)"
+                          className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                          disabled={isSearching}
+                        />
+                        <button
+                          onClick={handleAddItunesDirectId}
+                          disabled={isSearching}
+                          className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {isSearching ? '追加中...' : '追加'}
+                        </button>
+                      </div>
                     </div>
                   </div>
 
@@ -419,46 +734,62 @@ export default function SongDetailPage() {
                     </div>
                   )}
 
-                  {/* 直接 iTunes ID 入力 */}
-                  <div className="space-y-2">
-                    <label className="block text-sm font-medium text-gray-700">
-                      または iTunes ID を直接入力
-                    </label>
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        value={directItunesId}
-                        onChange={(e) => setDirectItunesId(e.target.value)}
-                        placeholder="iTunes ID (数字のみ)"
-                        className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                        disabled={isSearching}
-                      />
-                      <button
-                        onClick={handleAddItunesDirectId}
-                        disabled={isSearching}
-                        className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        {isSearching ? '追加中...' : '追加'}
-                      </button>
-                    </div>
-                  </div>
                 </div>
 
-                <div className="flex gap-2 pt-4 border-t">
-                  <button
-                    onClick={handleSave}
-                    disabled={updateMutation.isPending}
-                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {updateMutation.isPending ? '保存中...' : '保存'}
-                  </button>
-                  <button
-                    onClick={handleCancel}
-                    disabled={updateMutation.isPending}
-                    className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    キャンセル
-                  </button>
+                <div className="flex flex-wrap items-center justify-between gap-4 pt-4 border-t">
+                  <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2 p-2 border border-gray-200 rounded-lg bg-gray-50">
+                      <div className="w-64">
+                        <SongSearchInput
+                          value={mergeTargetQuery}
+                          onChange={(value) => {
+                            setMergeTargetQuery(value);
+                            setMergeTargetId('');
+                          }}
+                          onSelectSong={(song) => {
+                            if (song.id === id) {
+                              showToast('同じ楽曲にはマージできません', 'error');
+                              return;
+                            }
+                            setMergeTargetId(song.id);
+                            setMergeTargetQuery(`${song.name} / ${song.original_artist}`);
+                          }}
+                          placeholder="マージ先を検索"
+                          excludeSongId={id}
+                        />
+                      </div>
+                      <button
+                        onClick={handleMergeSong}
+                        disabled={mergeMutation.isPending}
+                        className="px-3 py-2 text-sm bg-gray-800 text-white rounded-lg hover:bg-gray-900 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {mergeMutation.isPending ? 'マージ中...' : 'マージ'}
+                      </button>
+                    </div>
+                    <button
+                      onClick={handleDeleteSong}
+                      disabled={deleteMutation.isPending}
+                      className="px-3 py-2 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {deleteMutation.isPending ? '削除中...' : '削除'}
+                    </button>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleSave}
+                      disabled={updateMutation.isPending}
+                      className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {updateMutation.isPending ? '保存中...' : '保存'}
+                    </button>
+                    <button
+                      onClick={handleCancel}
+                      disabled={updateMutation.isPending}
+                      className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      キャンセル
+                    </button>
+                  </div>
                 </div>
               </div>
             ) : (
@@ -494,9 +825,13 @@ export default function SongDetailPage() {
                   {song.itunes_ids.filter(i => i.is_primary).map((itunes) => (
                     <a
                       key={itunes.itunes_id}
-                      href={`https://music.apple.com/song/${itunes.itunes_id}`}
+                      href={itunesTrackUrls[itunes.itunes_id] || '#'}
                       target="_blank"
                       rel="noopener noreferrer"
+                      onClick={(event) => {
+                        event.preventDefault();
+                        handleOpenItunes(itunes.itunes_id);
+                      }}
                       className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium transition-colors bg-pink-500 text-white hover:bg-pink-600"
                       title={itunes.collection_name ? `${itunes.collection_name}${itunes.country ? ` (${itunes.country})` : ''}` : 'Apple Musicで開く'}
                     >

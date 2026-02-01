@@ -241,6 +241,11 @@ func (s *SongService) Delete(id uuid.UUID) error {
 	return s.songRepo.Delete(id)
 }
 
+// MergeSongs 將來源歌曲合併至目標歌曲
+func (s *SongService) MergeSongs(sourceSongID, targetSongID uuid.UUID) error {
+	return s.songRepo.MergeSong(sourceSongID, targetSongID)
+}
+
 // SearchSimilar 搜尋相似歌曲（用於 AI 正規化建議）
 func (s *SongService) SearchSimilar(name string, limit int) ([]dto.SongResponse, error) {
 	songs, err := s.songRepo.SearchSimilar(name, limit)
