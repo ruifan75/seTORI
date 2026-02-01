@@ -1,12 +1,15 @@
 package service
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"time"
 
 	"github.com/ruifan75/setori/internal/dto"
@@ -575,12 +578,6 @@ func (s *HolodexService) SyncSetoriToHolodex(streamID string) (*dto.SyncHolodexR
 		return nil, fmt.Errorf("Holodex editor token not configured")
 	}
 
-	log.Printf("=== DEBUG: SyncSetoriToHolodex Request ===")
-	log.Printf("Stream ID: %s", streamID)
-	log.Printf("Stream Title: %s", stream.Title)
-	log.Printf("Stream Date: %v", stream.StreamDate)
-	log.Printf("Editor Token: %s", maskToken(s.editorToken))
-
 	// 4. 取得頻道資訊（從 HolodexData 中解析，或使用第一個 singer 作為備用）
 	var channelID, channelName, channelEnglishName string
 
@@ -615,30 +612,22 @@ func (s *HolodexService) SyncSetoriToHolodex(streamID string) (*dto.SyncHolodexR
 		}
 	}
 
-	log.Printf("Channel ID: %s, Name: %s", channelID, channelName)
-
 	// 5. 取得 performances 和對應的 song 資訊
+	syncedCount := 0
+	var errors []string
+
 	if s.perfRepo != nil {
 		perfs, err := s.perfRepo.FindByStreamID(streamID)
 		if err == nil && len(perfs) > 0 {
-			log.Printf("Found %d performances:", len(perfs))
-
 			for _, perf := range perfs {
 				if s.songRepo != nil {
 					song, err := s.songRepo.FindByID(perf.SongID)
 					if err == nil && song != nil {
-						log.Printf("  - Performance: %s (%.0fs - %.0fs)",
-							song.Name,
-							float64(perf.StartSeconds),
-							float64(perf.EndSeconds))
-
 						// 取得 iTunes 資訊
 						if s.songItunesRepo != nil {
 							itunesRecords, err := s.songItunesRepo.FindBySongID(perf.SongID)
 							if err == nil && len(itunesRecords) > 0 {
 								for _, itunesRecord := range itunesRecords {
-									log.Printf("    iTunes ID: %d (Primary: %v)", itunesRecord.ITunesID, itunesRecord.IsPrimary)
-
 									// 從 iTunes 取得完整資訊
 									var itunesInfo *itunes.QueryResponse
 									itunesInfo, err := s.itunesClient.QueryByID(itunesRecord.ITunesID)
@@ -680,36 +669,60 @@ func (s *HolodexService) SyncSetoriToHolodex(streamID string) (*dto.SyncHolodexR
 										requestData["channel"] = channelObj
 									}
 
-									requestJSON, _ := json.MarshalIndent(requestData, "    ", "  ")
-									log.Printf("    Full Request:\n%s", string(requestJSON))
+									// 發送請求到 Holodex API
+									requestJSON, err := json.Marshal(requestData)
+									if err != nil {
+										errors = append(errors, fmt.Sprintf("%s: marshal error: %v", song.Name, err))
+										continue
+									}
+
+									req, err := http.NewRequest("PUT", "https://holodex.net/api/v2/songs", bytes.NewBuffer(requestJSON))
+									if err != nil {
+										errors = append(errors, fmt.Sprintf("%s: create request error: %v", song.Name, err))
+										continue
+									}
+
+									req.Header.Set("Content-Type", "application/json")
+									req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", s.editorToken))
+									req.Header.Set("Origin", "https://holodex.net")
+
+									client := &http.Client{Timeout: 30 * time.Second}
+									resp, err := client.Do(req)
+									if err != nil {
+										errors = append(errors, fmt.Sprintf("%s: request error: %v", song.Name, err))
+										continue
+									}
+									defer resp.Body.Close()
+
+									body, _ := io.ReadAll(resp.Body)
+									if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+										log.Printf("✓ Synced: %s (iTunes: %d)", song.Name, itunesRecord.ITunesID)
+										syncedCount++
+									} else {
+										errMsg := fmt.Sprintf("%s: API error %d: %s", song.Name, resp.StatusCode, string(body))
+										log.Printf("✗ %s", errMsg)
+										errors = append(errors, errMsg)
+									}
 								}
 							}
 						}
 					}
 				}
 			}
-		} else {
-			log.Printf("No performances found for stream")
 		}
-	} else {
-		log.Printf("Warning: perfRepo not set, cannot retrieve performances")
 	}
 
-	log.Printf("=== END DEBUG ===")
+	message := fmt.Sprintf("同步完成: %d 曲成功", syncedCount)
+	if len(errors) > 0 {
+		message = fmt.Sprintf("同期完了: %d 曲成功, %d 曲失敗", syncedCount, len(errors))
+		log.Printf("Errors during sync: %v", errors)
+	}
 
 	return &dto.SyncHolodexResponse{
 		NewStreams:  []string{},
-		Updated:     []string{},
+		Updated:     []string{streamID},
 		Skipped:     []string{},
-		SyncedCount: 0,
-		Message:     "DEBUG 模式：完整 Request 內容已印出到伺服器日誌。請檢查 server logs 確認 request 格式是否正確。",
+		SyncedCount: syncedCount,
+		Message:     message,
 	}, nil
-}
-
-// maskToken 將 token 遮蔽，只顯示前後幾個字元
-func maskToken(token string) string {
-	if len(token) <= 8 {
-		return "***"
-	}
-	return token[:4] + "..." + token[len(token)-4:]
 }
