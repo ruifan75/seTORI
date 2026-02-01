@@ -817,14 +817,78 @@ func (r *Router) handleItunesSearch(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	// 1. 從 iTunes 搜尋
 	itunesClient := itunes.NewClient()
-	result, err := itunesClient.Search(term)
+	itunesResult, err := itunesClient.Search(term)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	respondJSON(w, http.StatusOK, result)
+	// 2. 檢查每個 iTunes ID 是否已在資料庫中
+	songRepo := repository.NewSongRepository(r.db)
+
+	enhancedResults := make([]dto.ItunesSearchResultWithSong, 0, len(itunesResult.Results))
+
+	for _, itunesItem := range itunesResult.Results {
+		enhanced := dto.ItunesSearchResultWithSong{
+			ItunesID:       itunesItem.ItunesID,
+			CollectionName: itunesItem.CollectionName,
+			TrackName:      itunesItem.TrackName,
+			ArtistName:     itunesItem.ArtistName,
+			ArtworkURL:     itunesItem.ArtworkURL,
+			Country:        itunesItem.Country,
+		}
+
+		// 檢查是否已在資料庫中
+		existingSong, err := songRepo.FindByItunesID(itunesItem.ItunesID)
+		if err != nil {
+			log.Printf("[WARN] Error checking iTunes ID %d: %v", itunesItem.ItunesID, err)
+		}
+
+		if existingSong != nil {
+			// 取得演唱次數
+			perfCount, err := songRepo.GetPerformanceCount(existingSong.ID)
+			if err != nil {
+				log.Printf("[WARN] Error counting performances for song %s: %v", existingSong.ID, err)
+				perfCount = 0
+			}
+
+			// 轉換 sql.NullString 為 *string
+			var nameReading *string
+			if existingSong.NameReading.Valid {
+				nameReading = &existingSong.NameReading.String
+			}
+
+			var originalArtistReading *string
+			if existingSong.OriginalArtistReading.Valid {
+				originalArtistReading = &existingSong.OriginalArtistReading.String
+			}
+
+			var arts *string
+			if existingSong.Arts.Valid {
+				arts = &existingSong.Arts.String
+			}
+
+			enhanced.ExistingSong = &dto.SongBrief{
+				ID:                    existingSong.ID,
+				Name:                  existingSong.Name,
+				NameReading:           nameReading,
+				OriginalArtist:        existingSong.OriginalArtist,
+				OriginalArtistReading: originalArtistReading,
+				Arts:                  arts,
+				PerformanceCount:      perfCount,
+			}
+		}
+
+		enhancedResults = append(enhancedResults, enhanced)
+	}
+
+	response := dto.ItunesSearchResponseWithSongs{
+		Results: enhancedResults,
+	}
+
+	respondJSON(w, http.StatusOK, response)
 }
 
 func (r *Router) handleItunesQueryByID(w http.ResponseWriter, req *http.Request) {

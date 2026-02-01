@@ -363,3 +363,31 @@ type EstimateEndTimesResponse struct {
 	Estimates []SongEndTimeEstimate `json:"estimates"`
 	Message   string                `json:"message,omitempty"`
 }
+
+// ========== iTunes 搜尋增強 ==========
+
+// ItunesSearchResultWithSong iTunes 搜尋結果（可能已在資料庫中）
+type ItunesSearchResultWithSong struct {
+	ItunesID       int64      `json:"itunes_id"`
+	CollectionName string     `json:"collection_name"`
+	TrackName      string     `json:"track_name"`
+	ArtistName     string     `json:"artist_name"`
+	ArtworkURL     string     `json:"artwork_url"`
+	Country        string     `json:"country"`
+	ExistingSong   *SongBrief `json:"existing_song,omitempty"` // 如果已在 DB 中，回傳歌曲簡要資訊
+}
+
+// SongBrief 歌曲簡要資訊（用於 iTunes 搜尋結果）
+type SongBrief struct {
+	ID                    uuid.UUID `json:"id"`
+	Name                  string    `json:"name"`
+	NameReading           *string   `json:"name_reading,omitempty"`
+	OriginalArtist        string    `json:"original_artist"`
+	OriginalArtistReading *string   `json:"original_artist_reading,omitempty"`
+	Arts                  *string   `json:"arts,omitempty"`
+	PerformanceCount      int       `json:"performance_count"`
+}
+
+type ItunesSearchResponseWithSongs struct {
+	Results []ItunesSearchResultWithSong `json:"results"`
+}

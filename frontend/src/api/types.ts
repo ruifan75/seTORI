@@ -53,6 +53,16 @@ export interface UpdateSongRequest {
 
 // ========== iTunes API ==========
 
+export interface SongBrief {
+  id: string;
+  name: string;
+  name_reading?: string;
+  original_artist: string;
+  original_artist_reading?: string;
+  arts?: string;
+  performance_count: number;
+}
+
 export interface ITunesSearchResult {
   itunes_id: number;
   collection_name: string;
@@ -60,6 +70,7 @@ export interface ITunesSearchResult {
   artist_name: string;
   artwork_url: string;
   country: string;
+  existing_song?: SongBrief; // 如果已在 DB 中，包含歌曲資訊
 }
 
 export interface ITunesSearchResponse {

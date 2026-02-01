@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, Link } from 'react-router-dom';
-import { streamApi, performanceApi, commentApi, aiApi, songApi, singerApi } from '../api/client';
-import type { Singer, CreatePerformanceItem, AINormalizationItem, Song, UpdateStreamRequest, SongEndTimeEstimateRequest, EstimateEndTimesRequest } from '../api/types';
+import { streamApi, performanceApi, commentApi, aiApi, songApi, singerApi, itunesApi } from '../api/client';
+import type { Singer, CreatePerformanceItem, AINormalizationItem, Song, UpdateStreamRequest, SongEndTimeEstimateRequest, EstimateEndTimesRequest, ITunesSearchResult } from '../api/types';
 import Loading from '../components/ui/Loading';
 import Tag from '../components/ui/Tag';
 import { useToast } from '../components/ui/Toast';
@@ -74,25 +74,33 @@ interface SongSearchInputProps {
 function SongSearchInput({ value, onChange, onSelectSong, placeholder }: SongSearchInputProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [suggestions, setSuggestions] = useState<Song[]>([]);
+  const [dbSuggestions, setDbSuggestions] = useState<Song[]>([]);
+  const [itunesSuggestions, setItunesSuggestions] = useState<ITunesSearchResult[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Debounce 搜尋
+  // Debounce 搜尋（同時搜尋 DB 和 iTunes）
   useEffect(() => {
     if (searchQuery.length < 2) {
-      setSuggestions([]);
+      setDbSuggestions([]);
+      setItunesSuggestions([]);
       return;
     }
 
     const timer = setTimeout(async () => {
       setIsLoading(true);
       try {
-        const result = await songApi.list(1, 10, searchQuery);
-        setSuggestions(result.songs);
+        // 並行搜尋 DB 和 iTunes
+        const [dbResult, itunesResult] = await Promise.all([
+          songApi.list(1, 5, searchQuery).catch(() => ({ songs: [], pagination: { page: 1, limit: 5, total: 0, total_pages: 0 } })),
+          itunesApi.search(searchQuery).catch(() => ({ results: [] }))
+        ]);
+        setDbSuggestions(dbResult.songs);
+        setItunesSuggestions(itunesResult.results.slice(0, 5)); // 限制 iTunes 結果數量
       } catch {
-        setSuggestions([]);
+        setDbSuggestions([]);
+        setItunesSuggestions([]);
       } finally {
         setIsLoading(false);
       }
@@ -129,7 +137,54 @@ function SongSearchInput({ value, onChange, onSelectSong, placeholder }: SongSea
     onSelectSong(song);
     setIsOpen(false);
     setSearchQuery('');
-    setSuggestions([]);
+    setDbSuggestions([]);
+    setItunesSuggestions([]);
+  };
+
+  const handleSelectItunes = (itunes: ITunesSearchResult) => {
+    // 如果這個 iTunes 結果已經在資料庫中，直接綁定到該 song
+    if (itunes.existing_song) {
+      const existingSong: Song = {
+        id: itunes.existing_song.id,
+        name: itunes.existing_song.name,
+        name_reading: itunes.existing_song.name_reading,
+        original_artist: itunes.existing_song.original_artist,
+        original_artist_reading: itunes.existing_song.original_artist_reading,
+        arts: itunes.existing_song.arts,
+        performance_count: itunes.existing_song.performance_count,
+        created_at: '',
+        updated_at: '',
+        itunes_ids: [{
+          itunes_id: itunes.itunes_id,
+          collection_name: itunes.collection_name,
+          country: itunes.country,
+          is_primary: true,
+        }],
+      };
+      onSelectSong(existingSong);
+    } else {
+      // 純 iTunes 結果，創建臨時對象
+      const tempSong: Song = {
+        id: '', // 空 ID 表示這是新歌曲
+        name: itunes.track_name,
+        original_artist: itunes.artist_name,
+        arts: itunes.artwork_url,
+        performance_count: 0,
+        created_at: '',
+        updated_at: '',
+        itunes_ids: [{
+          itunes_id: itunes.itunes_id,
+          collection_name: itunes.collection_name,
+          country: itunes.country,
+          is_primary: true,
+        }],
+      };
+      onSelectSong(tempSong);
+    }
+    setIsOpen(false);
+    setSearchQuery('');
+    setDbSuggestions([]);
+    setItunesSuggestions([]);
   };
 
   return (
@@ -140,51 +195,148 @@ function SongSearchInput({ value, onChange, onSelectSong, placeholder }: SongSea
         value={value}
         onChange={handleInputChange}
         onFocus={() => {
-          if (suggestions.length > 0) setIsOpen(true);
+          if (dbSuggestions.length > 0 || itunesSuggestions.length > 0) setIsOpen(true);
         }}
         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
         placeholder={placeholder}
       />
 
       {/* 搜尋建議下拉選單 */}
-      {isOpen && (suggestions.length > 0 || isLoading) && (
+      {isOpen && (dbSuggestions.length > 0 || itunesSuggestions.length > 0 || isLoading) && (
         <div
           ref={dropdownRef}
-          className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-auto"
+          className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-96 overflow-auto"
         >
           {isLoading ? (
             <div className="px-4 py-3 text-sm text-gray-500">検索中...</div>
           ) : (
-            suggestions.map((song) => (
-              <button
-                key={song.id}
-                onClick={() => handleSelectSong(song)}
-                className="w-full px-4 py-3 text-left hover:bg-indigo-50 border-b border-gray-100 last:border-b-0 transition-colors"
-              >
-                <div className="flex items-center gap-3">
-                  {song.arts ? (
-                    <img
-                      src={song.arts}
-                      alt={song.name}
-                      className="w-10 h-10 object-cover rounded"
-                    />
-                  ) : (
-                    <div className="w-10 h-10 bg-gray-200 rounded flex items-center justify-center">
-                      <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
-                      </svg>
-                    </div>
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <div className="font-medium text-gray-900 truncate">{song.name}</div>
-                    <div className="text-sm text-gray-500 truncate">{song.original_artist}</div>
+            <>
+              {/* DB 結果 */}
+              {dbSuggestions.length > 0 && (
+                <div>
+                  <div className="px-4 py-2 bg-gray-100 text-xs font-semibold text-gray-600 sticky top-0">
+                    データベースから
                   </div>
-                  <div className="text-xs text-gray-400">
-                    {song.performance_count}回
-                  </div>
+                  {dbSuggestions.map((song) => (
+                    <button
+                      key={song.id}
+                      onClick={() => handleSelectSong(song)}
+                      className="w-full px-4 py-3 text-left hover:bg-indigo-50 border-b border-gray-100 transition-colors"
+                    >
+                      <div className="flex items-center gap-3">
+                        {song.arts ? (
+                          <img
+                            src={song.arts}
+                            alt={song.name}
+                            className="w-10 h-10 object-cover rounded"
+                          />
+                        ) : (
+                          <div className="w-10 h-10 bg-gray-200 rounded flex items-center justify-center">
+                            <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                            </svg>
+                          </div>
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <div className="font-medium text-gray-900 truncate">{song.name}</div>
+                          <div className="text-sm text-gray-500 truncate">{song.original_artist}</div>
+                          <div className="text-xs text-gray-400 mt-0.5">
+                            {song.performance_count}回の演奏記録
+                          </div>
+                        </div>
+                      </div>
+                    </button>
+                  ))}
                 </div>
-              </button>
-            ))
+              )}
+
+              {/* iTunes 結果（已在資料庫中）*/}
+              {itunesSuggestions.filter(i => i.existing_song).length > 0 && (
+                <div>
+                  <div className="px-4 py-2 bg-green-50 text-xs font-semibold text-green-700 sticky top-0 flex items-center gap-1">
+                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                    </svg>
+                    データベース内（iTunes経由）
+                  </div>
+                  {itunesSuggestions.filter(i => i.existing_song).map((itunes) => {
+                    const song = itunes.existing_song!;
+                    return (
+                      <button
+                        key={itunes.itunes_id}
+                        onClick={() => handleSelectItunes(itunes)}
+                        className="w-full px-4 py-3 text-left hover:bg-green-50 border-b border-gray-100 transition-colors"
+                      >
+                        <div className="flex items-center gap-3">
+                          {song.arts ? (
+                            <img
+                              src={song.arts}
+                              alt={song.name}
+                              className="w-10 h-10 object-cover rounded"
+                            />
+                          ) : (
+                            <div className="w-10 h-10 bg-green-100 rounded flex items-center justify-center">
+                              <svg className="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                              </svg>
+                            </div>
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium text-gray-900 truncate">{song.name}</div>
+                            <div className="text-sm text-gray-500 truncate">{song.original_artist}</div>
+                            <div className="text-xs text-gray-400 truncate">
+                              {song.performance_count}回演唱 · iTunes ID: {itunes.itunes_id}
+                            </div>
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* iTunes 結果（新歌曲）*/}
+              {itunesSuggestions.filter(i => !i.existing_song).length > 0 && (
+                <div>
+                  <div className="px-4 py-2 bg-blue-50 text-xs font-semibold text-blue-700 sticky top-0 flex items-center gap-1">
+                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                      <path d="M18 3a1 1 0 00-1.196-.98l-10 2A1 1 0 006 5v9.114A4.369 4.369 0 005 14c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V7.82l8-1.6v5.894A4.37 4.37 0 0015 12c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V3z" />
+                    </svg>
+                    iTunesから（新規）
+                  </div>
+                  {itunesSuggestions.filter(i => !i.existing_song).map((itunes) => (
+                    <button
+                      key={itunes.itunes_id}
+                      onClick={() => handleSelectItunes(itunes)}
+                      className="w-full px-4 py-3 text-left hover:bg-blue-50 border-b border-gray-100 transition-colors"
+                    >
+                      <div className="flex items-center gap-3">
+                        {itunes.artwork_url ? (
+                          <img
+                            src={itunes.artwork_url}
+                            alt={itunes.track_name}
+                            className="w-10 h-10 object-cover rounded"
+                          />
+                        ) : (
+                          <div className="w-10 h-10 bg-blue-100 rounded flex items-center justify-center">
+                            <svg className="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                            </svg>
+                          </div>
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <div className="font-medium text-gray-900 truncate">{itunes.track_name}</div>
+                          <div className="text-sm text-gray-500 truncate">{itunes.artist_name}</div>
+                          {itunes.collection_name && (
+                            <div className="text-xs text-gray-400 truncate">{itunes.collection_name}</div>
+                          )}
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
@@ -701,20 +853,42 @@ export default function StreamDetailPage() {
   const handleSelectExistingSong = (index: number, song: Song) => {
     setEditableSongs((prev) => {
       const updated = [...prev];
-      updated[index] = {
-        ...updated[index],
-        name: song.name,
-        nameReading: song.name_reading || '',
-        artist: song.original_artist,
-        artistReading: song.original_artist_reading || '',
-        artUrl: song.arts || null,
-        matchedSongId: song.id,
-        originalName: song.name,
-        originalArtist: song.original_artist,
-      };
+      
+      // 檢查是否是從 iTunes 選擇的（id 為空）
+      if (!song.id) {
+        // 從 iTunes 選擇：填入基本資訊和 iTunes ID
+        const itunesId = song.itunes_ids && song.itunes_ids.length > 0 ? song.itunes_ids[0].itunes_id : null;
+        updated[index] = {
+          ...updated[index],
+          name: song.name,
+          artist: song.original_artist,
+          artUrl: song.arts || null,
+          itunesId: itunesId ? Number(itunesId) : null,
+          matchedSongId: null, // 這是新歌曲
+          originalName: song.name,
+          originalArtist: song.original_artist,
+        };
+        showToast(`iTunes から「${song.name}」を選択しました`, 'success');
+      } else {
+        // 從 DB 選擇：填入完整資訊
+        const itunesId = song.itunes_ids && song.itunes_ids.length > 0 ? song.itunes_ids[0].itunes_id : null;
+        updated[index] = {
+          ...updated[index],
+          name: song.name,
+          nameReading: song.name_reading || '',
+          artist: song.original_artist,
+          artistReading: song.original_artist_reading || '',
+          artUrl: song.arts || null,
+          itunesId: itunesId ? Number(itunesId) : null,
+          matchedSongId: song.id,
+          originalName: song.name,
+          originalArtist: song.original_artist,
+        };
+        showToast(`「${song.name}」を選択しました`, 'success');
+      }
+      
       return updated;
     });
-    showToast(`「${song.name}」を選択しました`, 'success');
   };
 
   const handleTimeChange = (index: number, field: 'start' | 'end', timeStr: string) => {
