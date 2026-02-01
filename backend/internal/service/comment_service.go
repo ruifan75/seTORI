@@ -40,18 +40,8 @@ func (s *CommentService) AnalyzeComments(videoID string) (*dto.AnalyzeCommentsRe
 	// 去重
 	dedupedSongs := comment.DeduplicateSongs(filteredSongs)
 
-	// 取得影片資訊以獲取總長度
-	stream, _ := s.streamRepo.FindByID(videoID)
-	totalDuration := 0
-	if stream != nil && stream.DurationSeconds.Valid {
-		totalDuration = int(stream.DurationSeconds.Int32)
-	}
-
-	// 推算結束時間
-	estimatedSongs := comment.EstimateEndTimes(dedupedSongs, totalDuration)
-
-	// 驗證
-	validSongs := comment.ValidateSongs(estimatedSongs)
+	// 驗證（不推算結束時間，由前端在需要時請求）
+	validSongs := comment.ValidateSongs(dedupedSongs)
 
 	// 轉換為 DTO
 	songDTOs := make([]dto.CommentSong, len(validSongs))

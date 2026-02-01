@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, Link } from 'react-router-dom';
 import { streamApi, performanceApi, commentApi, aiApi, songApi, singerApi } from '../api/client';
-import type { Singer, CreatePerformanceItem, AINormalizationItem, Song, UpdateStreamRequest } from '../api/types';
+import type { Singer, CreatePerformanceItem, AINormalizationItem, Song, UpdateStreamRequest, SongEndTimeEstimateRequest, EstimateEndTimesRequest } from '../api/types';
 import Loading from '../components/ui/Loading';
 import Tag from '../components/ui/Tag';
 import { useToast } from '../components/ui/Toast';
@@ -545,12 +545,56 @@ export default function StreamDetailPage() {
     },
   });
 
+  // 推算結束時間
+  const estimateEndTimesMutation = useMutation({
+    mutationFn: (req: EstimateEndTimesRequest) =>
+      streamApi.estimateEndTimes(id!, req),
+    onSuccess: (data) => {
+      setEditableSongs((prev) => {
+        const updated = [...prev];
+        for (let i = 0; i < data.estimates.length && i < updated.length; i++) {
+          const estimate = data.estimates[i];
+          updated[i] = {
+            ...updated[i],
+            end: estimate.estimated_end,
+            isEndTimeEstimated: estimate.is_end_time_estimated,
+          };
+        }
+        return updated;
+      });
+      showToast('結束時間の推算が完了しました', 'success');
+    },
+    onError: (err: Error) => {
+      showToast(`推算エラー: ${err.message}`, 'error');
+    },
+  });
+
   const loadFromHolodex = () => {
     loadHolodexMutation.mutate();
   };
 
   const loadFromComments = () => {
     analyzeCommentsMutation.mutate();
+  };
+
+  const estimateEndTimes = () => {
+    if (!stream) return;
+    
+    const songs: SongEndTimeEstimateRequest[] = editableSongs.map((song, index) => ({
+      start: song.start,
+      end: song.end,
+      name: song.name,
+      artist: song.artist,
+      itunes_id: song.itunesId || undefined,
+      next_start: index + 1 < editableSongs.length ? editableSongs[index + 1].start : undefined,
+      stream_end: stream.duration_seconds || undefined,
+    }));
+
+    estimateEndTimesMutation.mutate({
+      songs,
+      stream_end: stream.duration_seconds || 0,
+      stream_title: stream.title,
+    });
   };
 
   const toggleEditing = () => {
@@ -1135,13 +1179,22 @@ export default function StreamDetailPage() {
                 {analyzeCommentsMutation.isPending ? '分析中...' : 'コメントから読み込む'}
               </button>
               {editableSongs.length > 0 && (
-                <button
-                  onClick={runAINormalization}
-                  disabled={aiNormalizeMutation.isPending}
-                  className="px-4 py-2 bg-purple-600 text-white font-medium rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50"
-                >
-                  {aiNormalizeMutation.isPending ? 'AI処理中...' : 'AI正規化'}
-                </button>
+                <>
+                  <button
+                    onClick={runAINormalization}
+                    disabled={aiNormalizeMutation.isPending}
+                    className="px-4 py-2 bg-purple-600 text-white font-medium rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50"
+                  >
+                    {aiNormalizeMutation.isPending ? 'AI処理中...' : 'AI正規化'}
+                  </button>
+                  <button
+                    onClick={estimateEndTimes}
+                    disabled={estimateEndTimesMutation.isPending}
+                    className="px-4 py-2 bg-orange-600 text-white font-medium rounded-lg hover:bg-orange-700 transition-colors disabled:opacity-50"
+                  >
+                    {estimateEndTimesMutation.isPending ? '推算中...' : '結束時間を推算'}
+                  </button>
+                </>
               )}
             </div>
           )}
@@ -1274,15 +1327,24 @@ export default function StreamDetailPage() {
                           className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent font-mono ${
                             song.isEndTimeEstimated ? 'border-orange-300 bg-orange-50' : 'border-gray-300'
                           }`}
-                          placeholder="0:00"
+                          placeholder={song.end === 0 ? "「結束時間を推算」で自動計算" : "0:00"}
                         />
+                        {/* 沒有結束時間的提示 */}
+                        {song.end === 0 && (
+                          <div className="mt-1 flex items-center gap-1 text-xs text-gray-500">
+                            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                            </svg>
+                            <span>未設定 - ボタンをクリックして推算してください</span>
+                          </div>
+                        )}
                         {/* 估計時間警告 */}
-                        {song.isEndTimeEstimated && (
+                        {song.end > 0 && song.isEndTimeEstimated && (
                           <div className="mt-1 flex items-center gap-1 text-xs text-orange-600">
                             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
                               <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
                             </svg>
-                            <span>推定時間（コメントから算出）- 要確認</span>
+                            <span>推定時間 - 要確認</span>
                           </div>
                         )}
                       </div>

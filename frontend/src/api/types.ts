@@ -312,3 +312,33 @@ export interface SuccessResponse {
   success: boolean;
   message?: string;
 }
+// ========== 推算結束時間 ==========
+
+export interface SongEndTimeEstimateRequest {
+  start: number;
+  end: number;
+  name: string;
+  artist: string;
+  itunes_id?: number;
+  next_start?: number;
+  stream_end?: number;
+}
+
+export interface SongEndTimeEstimate {
+  estimated_end: number;
+  is_end_time_estimated: boolean;
+  method: string; // "from_comment", "from_next_song", "from_itunes", "from_default"
+  original_itunes_dur?: number;
+  reason?: string;
+}
+
+export interface EstimateEndTimesRequest {
+  songs: SongEndTimeEstimateRequest[];
+  stream_end: number;
+  stream_title?: string;
+}
+
+export interface EstimateEndTimesResponse {
+  estimates: SongEndTimeEstimate[];
+  message?: string;
+}

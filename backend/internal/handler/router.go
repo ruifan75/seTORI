@@ -29,6 +29,7 @@ type Router struct {
 	commentService       *service.CommentService
 	normalizationService *service.NormalizationService
 	performanceService   *service.PerformanceService
+	endTimeEstimate      *service.EndTimeEstimateService
 }
 
 // NewRouter 建立新的路由器
@@ -48,6 +49,8 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	commentService := service.NewCommentService(holodexService, streamRepo)
 	normalizationService := service.NewNormalizationService(cfg.GroqAPIKey, songRepo)
 	performanceService := service.NewPerformanceService(perfRepo, songRepo, songItunesRepo)
+	itunesClient := itunes.NewClient()
+	endTimeEstimateService := service.NewEndTimeEstimateService(itunesClient)
 
 	r := &Router{
 		db:                   db,
@@ -58,6 +61,7 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 		singerService:        singerService,
 		holodexService:       holodexService,
 		commentService:       commentService,
+		endTimeEstimate:      endTimeEstimateService,
 		normalizationService: normalizationService,
 		performanceService:   performanceService,
 	}
@@ -99,6 +103,9 @@ func (r *Router) setupRoutes() {
 
 	// Load songs from Holodex (without adding to normalization queue)
 	r.mux.HandleFunc("GET /api/streams/{id}/holodex-songs", r.handleLoadHolodexSongs)
+
+	// Estimate end times
+	r.mux.HandleFunc("POST /api/streams/{id}/estimate-end-times", r.handleEstimateEndTimes)
 
 	// Create performances directly
 	r.mux.HandleFunc("POST /api/streams/{id}/performances", r.handleCreatePerformances)
@@ -662,6 +669,30 @@ func (r *Router) handleLoadHolodexSongs(w http.ResponseWriter, req *http.Request
 	}
 
 	result, err := r.holodexService.LoadHolodexSongs(videoID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	respondJSON(w, http.StatusOK, result)
+}
+
+// ========== Estimate End Times Handler ==========
+
+func (r *Router) handleEstimateEndTimes(w http.ResponseWriter, req *http.Request) {
+	streamID := req.PathValue("id")
+	if streamID == "" {
+		respondError(w, http.StatusBadRequest, "無効的歌回 ID")
+		return
+	}
+
+	var estimateReq dto.EstimateEndTimesRequest
+	if err := json.NewDecoder(req.Body).Decode(&estimateReq); err != nil {
+		respondError(w, http.StatusBadRequest, "無効的請求格式")
+		return
+	}
+
+	result, err := r.endTimeEstimate.EstimateEndTimes(&estimateReq)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return

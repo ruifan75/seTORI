@@ -23,6 +23,8 @@ import type {
   BatchAINormalizationResponse,
   ITunesSearchResponse,
   ITunesQueryResult,
+  EstimateEndTimesRequest,
+  EstimateEndTimesResponse,
 } from './types';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080';
@@ -106,6 +108,11 @@ export const streamApi = {
 
   update: async (id: string, req: UpdateStreamRequest): Promise<StreamDetailResponse> => {
     const { data } = await api.put(`/api/streams/${id}`, req);
+    return data;
+  },
+
+  estimateEndTimes: async (id: string, req: EstimateEndTimesRequest): Promise<EstimateEndTimesResponse> => {
+    const { data } = await api.post(`/api/streams/${id}/estimate-end-times`, req);
     return data;
   },
 };

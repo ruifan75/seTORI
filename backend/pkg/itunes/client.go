@@ -25,13 +25,14 @@ type SearchResponse struct {
 
 // QueryResponse iTunes 查詢回應
 type QueryResponse struct {
-	ItunesID       int64  `json:"itunes_id"`
-	CollectionName string `json:"collection_name"`
-	TrackName      string `json:"track_name"`
-	ArtistName     string `json:"artist_name"`
-	ArtworkURL     string `json:"artwork_url"`
-	TrackViewURL   string `json:"track_view_url"`
-	Country        string `json:"country"`
+	ItunesID        int64  `json:"itunes_id"`
+	CollectionName  string `json:"collection_name"`
+	TrackName       string `json:"track_name"`
+	ArtistName      string `json:"artist_name"`
+	ArtworkURL      string `json:"artwork_url"`
+	TrackViewURL    string `json:"track_view_url"`
+	TrackTimeMillis int64  `json:"track_time_millis"`
+	Country         string `json:"country"`
 }
 
 // itunesSearchResponse Apple Music API 搜尋回應結構
@@ -45,6 +46,7 @@ type itunesResult struct {
 	ArtistName       string `json:"artistName"`
 	CollectionName   string `json:"collectionName"`
 	TrackViewUrl     string `json:"trackViewUrl"`
+	TrackTimeMillis  int64  `json:"trackTimeMillis"`
 	ArtworkUrl100    string `json:"artworkUrl100"`
 	ArtworkUrl30     string `json:"artworkUrl30"`
 	ArtworkUrl60     string `json:"artworkUrl60"`
@@ -155,12 +157,13 @@ func (c *Client) QueryByID(itunesID int64) (*QueryResponse, error) {
 	}
 
 	return &QueryResponse{
-		ItunesID:       r.TrackID,
-		CollectionName: r.CollectionName,
-		TrackName:      r.TrackName,
-		ArtistName:     r.ArtistName,
-		ArtworkURL:     artworkURL,
-		TrackViewURL:   r.TrackViewUrl,
-		Country:        r.Country,
+		ItunesID:        r.TrackID,
+		CollectionName:  r.CollectionName,
+		TrackName:       r.TrackName,
+		ArtistName:      r.ArtistName,
+		ArtworkURL:      artworkURL,
+		TrackViewURL:    r.TrackViewUrl,
+		TrackTimeMillis: r.TrackTimeMillis,
+		Country:         r.Country,
 	}, nil
 }

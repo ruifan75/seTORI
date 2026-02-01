@@ -332,3 +332,34 @@ type SuccessResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message,omitempty"`
 }
+
+// ========== 推算結束時間 ==========
+
+type SongEndTimeEstimateRequest struct {
+	Start     int    `json:"start"`
+	End       int    `json:"end"`
+	Name      string `json:"name"`
+	Artist    string `json:"artist"`
+	ItunesID  int64  `json:"itunes_id,omitempty"`
+	NextStart int    `json:"next_start,omitempty"`
+	StreamEnd int    `json:"stream_end,omitempty"`
+}
+
+type SongEndTimeEstimate struct {
+	EstimatedEnd       int    `json:"estimated_end"`
+	IsEndTimeEstimated bool   `json:"is_end_time_estimated"`
+	Method             string `json:"method"` // "from_comment", "from_next_song", "from_itunes", "from_default"
+	OriginalItunesDur  int    `json:"original_itunes_dur,omitempty"`
+	Reason             string `json:"reason,omitempty"`
+}
+
+type EstimateEndTimesRequest struct {
+	Songs       []SongEndTimeEstimateRequest `json:"songs"`
+	StreamEnd   int                          `json:"stream_end"`
+	StreamTitle string                       `json:"stream_title,omitempty"`
+}
+
+type EstimateEndTimesResponse struct {
+	Estimates []SongEndTimeEstimate `json:"estimates"`
+	Message   string                `json:"message,omitempty"`
+}
