@@ -557,27 +557,12 @@ func (s *HolodexService) SyncSetoriToHolodex(streamID string) (*dto.SyncHolodexR
 		return nil, fmt.Errorf("stream not found: %s", streamID)
 	}
 
-	// 2. 檢查是否已有實際的 Holodex 資料（有歌曲列表）
-	hasHolodexData := false
-	if len(stream.HolodexData) > 0 {
-		var video struct {
-			Songs []interface{} `json:"songs"`
-		}
-		if err := json.Unmarshal(stream.HolodexData, &video); err == nil && len(video.Songs) > 0 {
-			hasHolodexData = true
-		}
-	}
-
-	if hasHolodexData {
-		return nil, fmt.Errorf("stream already has Holodex data with songs")
-	}
-
-	// 3. 檢查 editor token 是否配置
+	// 2. 檢查 editor token 是否配置
 	if s.editorToken == "" || s.editorToken == "your-holodex-editor-token-here" {
 		return nil, fmt.Errorf("Holodex editor token not configured")
 	}
 
-	// 4. 取得頻道資訊（從 HolodexData 中解析，或使用第一個 singer 作為備用）
+	// 3. 取得頻道資訊（從 HolodexData 中解析，或使用第一個 singer 作為備用）
 	var channelID, channelName, channelEnglishName string
 
 	// 首先嘗試從 HolodexData 取得 channel ID
@@ -611,7 +596,7 @@ func (s *HolodexService) SyncSetoriToHolodex(streamID string) (*dto.SyncHolodexR
 		}
 	}
 
-	// 5. 先從 Holodex 取得已存在的歌曲列表
+	// 4. 先從 Holodex 取得已存在的歌曲列表
 	existingSongs := make(map[int64]bool) // 用 iTunes ID 作為 key
 	holodexVideo, err := s.client.GetVideoWithSongs(streamID)
 	if err == nil && holodexVideo != nil {
@@ -635,7 +620,28 @@ func (s *HolodexService) SyncSetoriToHolodex(streamID string) (*dto.SyncHolodexR
 				if s.songRepo != nil {
 					song, err := s.songRepo.FindByID(perf.SongID)
 					if err == nil && song != nil {
-						// 取得 iTunes 資訊（只使用 primary iTunes ID）
+						// 構造基本的 request 資料
+						requestData := map[string]interface{}{
+							"start":           perf.StartSeconds,
+							"end":             perf.EndSeconds,
+							"name":            song.Name,
+							"original_artist": song.OriginalArtist,
+							"video_id":        streamID,
+							"channel_id":      channelID,
+							"available_at":    stream.StreamDate.Format(time.RFC3339),
+						}
+
+						// 添加 channel 資訊
+						if channelName != "" {
+							channelObj := map[string]interface{}{
+								"name":         channelName,
+								"english_name": channelEnglishName,
+							}
+							requestData["channel"] = channelObj
+						}
+
+						// 嘗試取得 iTunes 資訊（只使用 primary iTunes ID）
+						var primaryItunesID int64 = 0
 						if s.songItunesRepo != nil {
 							itunesRecords, err := s.songItunesRepo.FindBySongID(perf.SongID)
 							if err == nil && len(itunesRecords) > 0 {
@@ -655,28 +661,20 @@ func (s *HolodexService) SyncSetoriToHolodex(streamID string) (*dto.SyncHolodexR
 									primaryItunes = itunesRecords[0]
 								}
 
-								// 檢查這首歌是否已經存在於 Holodex
-								if existingSongs[primaryItunes.ITunesID] {
-									log.Printf("⊘ Skipped: %s (iTunes: %d) - already exists in Holodex", song.Name, primaryItunes.ITunesID)
+								primaryItunesID = primaryItunes.ITunesID
+
+								// 檢查這首歌是否已經存在於 Holodex（僅當有 iTunes ID 時）
+								if existingSongs[primaryItunesID] {
+									log.Printf("⊘ Skipped: %s (iTunes: %d) - already exists in Holodex", song.Name, primaryItunesID)
 									skippedCount++
 									continue
 								}
 
 								// 從 iTunes 取得完整資訊
-								var itunesInfo *itunes.QueryResponse
-								itunesInfo, err := s.itunesClient.QueryByID(primaryItunes.ITunesID)
+								itunesInfo, err := s.itunesClient.QueryByID(primaryItunesID)
 
-								// 構造完整的 request
-								requestData := map[string]interface{}{
-									"itunesid":        primaryItunes.ITunesID,
-									"start":           perf.StartSeconds,
-									"end":             perf.EndSeconds,
-									"name":            song.Name,
-									"original_artist": song.OriginalArtist,
-									"video_id":        streamID,
-									"channel_id":      channelID,
-									"available_at":    stream.StreamDate.Format(time.RFC3339),
-								}
+								// 設定 iTunes ID
+								requestData["itunesid"] = primaryItunesID
 
 								// 如果有 iTunes 資訊，添加完整的 song 物件和 URL
 								if err == nil && itunesInfo != nil {
@@ -693,51 +691,63 @@ func (s *HolodexService) SyncSetoriToHolodex(streamID string) (*dto.SyncHolodexR
 									requestData["amUrl"] = itunesInfo.TrackViewURL
 									requestData["art"] = itunesInfo.ArtworkURL
 								}
-
-								// 添加 channel 資訊
-								if channelName != "" {
-									channelObj := map[string]interface{}{
-										"name":         channelName,
-										"english_name": channelEnglishName,
-									}
-									requestData["channel"] = channelObj
-								}
-
-								// 發送請求到 Holodex API
-								requestJSON, err := json.Marshal(requestData)
-								if err != nil {
-									errors = append(errors, fmt.Sprintf("%s: marshal error: %v", song.Name, err))
-									continue
-								}
-
-								req, err := http.NewRequest("PUT", "https://holodex.net/api/v2/songs", bytes.NewBuffer(requestJSON))
-								if err != nil {
-									errors = append(errors, fmt.Sprintf("%s: create request error: %v", song.Name, err))
-									continue
-								}
-
-								req.Header.Set("Content-Type", "application/json")
-								req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", s.editorToken))
-								req.Header.Set("Origin", "https://holodex.net")
-
-								client := &http.Client{Timeout: 30 * time.Second}
-								resp, err := client.Do(req)
-								if err != nil {
-									errors = append(errors, fmt.Sprintf("%s: request error: %v", song.Name, err))
-									continue
-								}
-								defer resp.Body.Close()
-
-								body, _ := io.ReadAll(resp.Body)
-								if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-									log.Printf("✓ Synced: %s (iTunes: %d)", song.Name, primaryItunes.ITunesID)
-									syncedCount++
-								} else {
-									errMsg := fmt.Sprintf("%s: API error %d: %s", song.Name, resp.StatusCode, string(body))
-									log.Printf("✗ %s", errMsg)
-									errors = append(errors, errMsg)
-								}
 							}
+						}
+
+						// 如果沒有 iTunes ID，也要上傳（設定為 null 並添加 Musicdex source）
+						if primaryItunesID == 0 {
+							requestData["itunesid"] = nil
+							requestData["song"] = map[string]interface{}{
+								"trackId":         nil,
+								"artistName":      song.OriginalArtist,
+								"trackName":       song.Name,
+								"trackTimeMillis": nil,
+								"trackViewUrl":    nil,
+								"artworkUrl100":   nil,
+								"src":             "Musicdex",
+							}
+							requestData["amUrl"] = nil
+							requestData["art"] = nil
+						}
+
+						// 發送請求到 Holodex API
+						// 發送請求到 Holodex API
+						requestJSON, err := json.Marshal(requestData)
+						if err != nil {
+							errors = append(errors, fmt.Sprintf("%s: marshal error: %v", song.Name, err))
+							continue
+						}
+
+						req, err := http.NewRequest("PUT", "https://holodex.net/api/v2/songs", bytes.NewBuffer(requestJSON))
+						if err != nil {
+							errors = append(errors, fmt.Sprintf("%s: create request error: %v", song.Name, err))
+							continue
+						}
+
+						req.Header.Set("Content-Type", "application/json")
+						req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", s.editorToken))
+						req.Header.Set("Origin", "https://holodex.net")
+
+						client := &http.Client{Timeout: 30 * time.Second}
+						resp, err := client.Do(req)
+						if err != nil {
+							errors = append(errors, fmt.Sprintf("%s: request error: %v", song.Name, err))
+							continue
+						}
+						defer resp.Body.Close()
+
+						body, _ := io.ReadAll(resp.Body)
+						if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+							if primaryItunesID > 0 {
+								log.Printf("✓ Synced: %s (iTunes: %d)", song.Name, primaryItunesID)
+							} else {
+								log.Printf("✓ Synced: %s (no iTunes ID)", song.Name)
+							}
+							syncedCount++
+						} else {
+							errMsg := fmt.Sprintf("%s: API error %d: %s", song.Name, resp.StatusCode, string(body))
+							log.Printf("✗ %s", errMsg)
+							errors = append(errors, errMsg)
 						}
 					}
 				}
