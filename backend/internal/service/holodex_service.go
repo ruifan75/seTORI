@@ -611,8 +611,21 @@ func (s *HolodexService) SyncSetoriToHolodex(streamID string) (*dto.SyncHolodexR
 		}
 	}
 
-	// 5. 取得 performances 和對應的 song 資訊
+	// 5. 先從 Holodex 取得已存在的歌曲列表
+	existingSongs := make(map[int64]bool) // 用 iTunes ID 作為 key
+	holodexVideo, err := s.client.GetVideoWithSongs(streamID)
+	if err == nil && holodexVideo != nil {
+		for _, song := range holodexVideo.Songs {
+			if song.ITunesID > 0 {
+				existingSongs[song.ITunesID] = true
+				log.Printf("Found existing song in Holodex: iTunes ID %d (%s)", song.ITunesID, song.Name)
+			}
+		}
+	}
+
+	// 6. 取得 performances 和對應的 song 資訊
 	syncedCount := 0
+	skippedCount := 0
 	var errors []string
 
 	if s.perfRepo != nil {
@@ -640,6 +653,13 @@ func (s *HolodexService) SyncSetoriToHolodex(streamID string) (*dto.SyncHolodexR
 								// 如果沒有標記為 primary 的，使用第一筆
 								if !foundPrimary {
 									primaryItunes = itunesRecords[0]
+								}
+
+								// 檢查這首歌是否已經存在於 Holodex
+								if existingSongs[primaryItunes.ITunesID] {
+									log.Printf("⊘ Skipped: %s (iTunes: %d) - already exists in Holodex", song.Name, primaryItunes.ITunesID)
+									skippedCount++
+									continue
 								}
 
 								// 從 iTunes 取得完整資訊
@@ -726,8 +746,11 @@ func (s *HolodexService) SyncSetoriToHolodex(streamID string) (*dto.SyncHolodexR
 	}
 
 	message := fmt.Sprintf("同步完成: %d 曲成功", syncedCount)
+	if skippedCount > 0 {
+		message = fmt.Sprintf("同步完成: %d 曲成功, %d 曲已存在", syncedCount, skippedCount)
+	}
 	if len(errors) > 0 {
-		message = fmt.Sprintf("同期完了: %d 曲成功, %d 曲失敗", syncedCount, len(errors))
+		message = fmt.Sprintf("同步完成: %d 曲成功, %d 曲已存在, %d 曲失敗", syncedCount, skippedCount, len(errors))
 		log.Printf("Errors during sync: %v", errors)
 	}
 
