@@ -22,12 +22,12 @@ var (
 	timestampRe = regexp.MustCompile(`(\d{1,2}):(\d{2}):(\d{2})|(\d{1,2}):(\d{2})`)
 
 	// 匹配帶有開始和結束時間的格式
-	// 例如: "0:00 - 3:45 歌曲名 / 藝人" 或 "0:00;3:45 歌曲名"
+	// 例如: "0:00 - 3:45 歌曲名 / 藝人"、"0:00;3:45 歌曲名"、"0:00 : 3:45 歌曲名"
 	rangePatterns = []*regexp.Regexp{
 		// HH:MM:SS ; HH:MM:SS 歌曲名
-		regexp.MustCompile(`^(\d{1,2}:\d{2}:\d{2})\s*[;;\-–]\s*(\d{1,2}:\d{2}:\d{2})\s+(.+)$`),
+		regexp.MustCompile(`^(\d{1,2}:\d{2}:\d{2})\s*[;:：\-–]\s*(\d{1,2}:\d{2}:\d{2})\s+(.+)$`),
 		// MM:SS ; MM:SS 歌曲名
-		regexp.MustCompile(`^(\d{1,2}:\d{2})\s*[;;\-–]\s*(\d{1,2}:\d{2})\s+(.+)$`),
+		regexp.MustCompile(`^(\d{1,2}:\d{2})\s*[;:：\-–]\s*(\d{1,2}:\d{2})\s+(.+)$`),
 		// HH:MM:SS - HH:MM:SS 歌曲名
 		regexp.MustCompile(`^(\d{1,2}:\d{2}:\d{2})\s*[-–]\s*(\d{1,2}:\d{2}:\d{2})\s+(.+)$`),
 		// MM:SS - MM:SS 歌曲名
@@ -54,40 +54,42 @@ func ParseComment(line string) *ParsedSong {
 		return nil
 	}
 
-	// 嘗試匹配帶有時間範圍的格式
-	for _, pattern := range rangePatterns {
-		if matches := pattern.FindStringSubmatch(line); matches != nil {
-			startTime := parseTimestamp(matches[1])
-			endTime := parseTimestamp(matches[2])
-			songPart := strings.TrimSpace(matches[3])
-			name, artist := parseSongAndArtist(songPart)
-
-			return &ParsedSong{
-				Start:              startTime,
-				End:                endTime,
-				Name:               name,
-				OriginalArtist:     artist,
-				OriginalComment:    line,
-				IsEndTimeEstimated: false,
-			}
+	// 先以時間戳為主解析（不依賴分隔符）
+	matchIndexes := timestampRe.FindAllStringIndex(line, -1)
+	if len(matchIndexes) >= 2 {
+		startTime := parseTimestamp(line[matchIndexes[0][0]:matchIndexes[0][1]])
+		endTime := parseTimestamp(line[matchIndexes[1][0]:matchIndexes[1][1]])
+		songPart := strings.TrimSpace(line[matchIndexes[1][1]:])
+		songPart = trimLeadingSeparators(songPart)
+		name, artist := parseSongAndArtist(songPart)
+		if name == "" && artist == "" {
+			return nil
+		}
+		return &ParsedSong{
+			Start:              startTime,
+			End:                endTime,
+			Name:               name,
+			OriginalArtist:     artist,
+			OriginalComment:    line,
+			IsEndTimeEstimated: false,
 		}
 	}
 
-	// 嘗試匹配只有開始時間的格式
-	for _, pattern := range startOnlyPatterns {
-		if matches := pattern.FindStringSubmatch(line); matches != nil {
-			startTime := parseTimestamp(matches[1])
-			songPart := strings.TrimSpace(matches[2])
-			name, artist := parseSongAndArtist(songPart)
-
-			return &ParsedSong{
-				Start:              startTime,
-				End:                0, // 未知
-				Name:               name,
-				OriginalArtist:     artist,
-				OriginalComment:    line,
-				IsEndTimeEstimated: true,
-			}
+	if len(matchIndexes) == 1 {
+		startTime := parseTimestamp(line[matchIndexes[0][0]:matchIndexes[0][1]])
+		songPart := strings.TrimSpace(line[matchIndexes[0][1]:])
+		songPart = trimLeadingSeparators(songPart)
+		name, artist := parseSongAndArtist(songPart)
+		if name == "" && artist == "" {
+			return nil
+		}
+		return &ParsedSong{
+			Start:              startTime,
+			End:                0, // 未知
+			Name:               name,
+			OriginalArtist:     artist,
+			OriginalComment:    line,
+			IsEndTimeEstimated: true,
 		}
 	}
 
@@ -148,6 +150,10 @@ func parseSongAndArtist(songPart string) (name, artist string) {
 
 	// 沒有分隔符，整個都是歌名
 	return strings.TrimSpace(songPart), ""
+}
+
+func trimLeadingSeparators(text string) string {
+	return strings.TrimLeft(text, " \t;:：-–→~〜～")
 }
 
 // FormatTimestamp 將秒數格式化為時間戳

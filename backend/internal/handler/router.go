@@ -180,7 +180,7 @@ func (r *Router) handleGetSong(w http.ResponseWriter, req *http.Request) {
 	idStr := req.PathValue("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		respondError(w, http.StatusBadRequest, "無効的歌曲 ID")
+		respondError(w, http.StatusBadRequest, "無効な曲ID")
 		return
 	}
 
@@ -190,7 +190,7 @@ func (r *Router) handleGetSong(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	if result == nil {
-		respondError(w, http.StatusNotFound, "歌曲不存在")
+		respondError(w, http.StatusNotFound, "曲が見つかりません")
 		return
 	}
 
@@ -201,7 +201,7 @@ func (r *Router) handleGetSongPerformances(w http.ResponseWriter, req *http.Requ
 	idStr := req.PathValue("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		respondError(w, http.StatusBadRequest, "無効的歌曲 ID")
+		respondError(w, http.StatusBadRequest, "無効な曲ID")
 		return
 	}
 
@@ -221,7 +221,7 @@ func (r *Router) handleGetSongPerformances(w http.ResponseWriter, req *http.Requ
 		return
 	}
 	if result == nil {
-		respondError(w, http.StatusNotFound, "歌曲不存在")
+		respondError(w, http.StatusNotFound, "曲が見つかりません")
 		return
 	}
 
@@ -231,12 +231,12 @@ func (r *Router) handleGetSongPerformances(w http.ResponseWriter, req *http.Requ
 func (r *Router) handleCreateSong(w http.ResponseWriter, req *http.Request) {
 	var songReq dto.CreateSongRequest
 	if err := json.NewDecoder(req.Body).Decode(&songReq); err != nil {
-		respondError(w, http.StatusBadRequest, "無効的請求格式")
+		respondError(w, http.StatusBadRequest, "無効なリクエスト形式")
 		return
 	}
 
 	if songReq.Name == "" || songReq.OriginalArtist == "" {
-		respondError(w, http.StatusBadRequest, "歌曲名稱和原唱藝人為必填")
+		respondError(w, http.StatusBadRequest, "曲名と原曲アーティストは必須です")
 		return
 	}
 
@@ -253,18 +253,18 @@ func (r *Router) handleUpdateSong(w http.ResponseWriter, req *http.Request) {
 	idStr := req.PathValue("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		respondError(w, http.StatusBadRequest, "無効的歌曲 ID")
+		respondError(w, http.StatusBadRequest, "無効な曲ID")
 		return
 	}
 
 	var songReq dto.UpdateSongRequest
 	if err := json.NewDecoder(req.Body).Decode(&songReq); err != nil {
-		respondError(w, http.StatusBadRequest, "無効的請求格式")
+		respondError(w, http.StatusBadRequest, "無効なリクエスト形式")
 		return
 	}
 
 	if songReq.Name == "" || songReq.OriginalArtist == "" {
-		respondError(w, http.StatusBadRequest, "歌曲名稱和原唱藝人為必填")
+		respondError(w, http.StatusBadRequest, "曲名と原曲アーティストは必須です")
 		return
 	}
 
@@ -274,7 +274,7 @@ func (r *Router) handleUpdateSong(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	if result == nil {
-		respondError(w, http.StatusNotFound, "歌曲不存在")
+		respondError(w, http.StatusNotFound, "曲が見つかりません")
 		return
 	}
 
@@ -286,7 +286,7 @@ func (r *Router) handleDeleteSong(w http.ResponseWriter, req *http.Request) {
 	idStr := req.PathValue("id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
-		respondError(w, http.StatusBadRequest, "無効的歌曲 ID")
+		respondError(w, http.StatusBadRequest, "無効な曲ID")
 		return
 	}
 
@@ -297,7 +297,7 @@ func (r *Router) handleDeleteSong(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	if song == nil {
-		respondError(w, http.StatusNotFound, "歌曲不存在")
+		respondError(w, http.StatusNotFound, "曲が見つかりません")
 		return
 	}
 
@@ -308,7 +308,7 @@ func (r *Router) handleDeleteSong(w http.ResponseWriter, req *http.Request) {
 	}
 
 	respondJSON(w, http.StatusOK, map[string]string{
-		"message": "歌曲已刪除",
+		"message": "曲を削除しました",
 		"id":      id.String(),
 	})
 }
@@ -318,7 +318,7 @@ func (r *Router) handleMergeSong(w http.ResponseWriter, req *http.Request) {
 	idStr := req.PathValue("id")
 	sourceSongID, err := uuid.Parse(idStr)
 	if err != nil {
-		respondError(w, http.StatusBadRequest, "無効的來源歌曲 ID")
+		respondError(w, http.StatusBadRequest, "無効な元の曲ID")
 		return
 	}
 
@@ -326,19 +326,19 @@ func (r *Router) handleMergeSong(w http.ResponseWriter, req *http.Request) {
 		TargetSongID string `json:"target_song_id"`
 	}
 	if err := json.NewDecoder(req.Body).Decode(&mergeReq); err != nil {
-		respondError(w, http.StatusBadRequest, "無効的請求格式")
+		respondError(w, http.StatusBadRequest, "無効なリクエスト形式")
 		return
 	}
 
 	targetSongID, err := uuid.Parse(mergeReq.TargetSongID)
 	if err != nil {
-		respondError(w, http.StatusBadRequest, "無効的目標歌曲 ID")
+		respondError(w, http.StatusBadRequest, "無効な対象の曲ID")
 		return
 	}
 
 	// 確保來源和目標是不同的歌曲
 	if sourceSongID == targetSongID {
-		respondError(w, http.StatusBadRequest, "來源和目標歌曲不能相同")
+		respondError(w, http.StatusBadRequest, "元の曲と対象の曲は同じにできません")
 		return
 	}
 
@@ -349,7 +349,7 @@ func (r *Router) handleMergeSong(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	if sourceSong == nil {
-		respondError(w, http.StatusNotFound, "來源歌曲不存在")
+		respondError(w, http.StatusNotFound, "元の曲が見つかりません")
 		return
 	}
 
@@ -359,7 +359,7 @@ func (r *Router) handleMergeSong(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	if targetSong == nil {
-		respondError(w, http.StatusNotFound, "目標歌曲不存在")
+		respondError(w, http.StatusNotFound, "対象の曲が見つかりません")
 		return
 	}
 
@@ -370,7 +370,7 @@ func (r *Router) handleMergeSong(w http.ResponseWriter, req *http.Request) {
 	}
 
 	respondJSON(w, http.StatusOK, map[string]interface{}{
-		"message":     "歌曲已合併",
+		"message":     "曲を統合しました",
 		"source_id":   sourceSongID.String(),
 		"target_id":   targetSongID.String(),
 		"target_song": targetSong,
@@ -402,7 +402,7 @@ func (r *Router) handleListStreams(w http.ResponseWriter, req *http.Request) {
 func (r *Router) handleGetStream(w http.ResponseWriter, req *http.Request) {
 	id := req.PathValue("id")
 	if id == "" {
-		respondError(w, http.StatusBadRequest, "無効的歌回 ID")
+		respondError(w, http.StatusBadRequest, "無効な歌枠ID")
 		return
 	}
 
@@ -412,7 +412,7 @@ func (r *Router) handleGetStream(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	if result == nil {
-		respondError(w, http.StatusNotFound, "歌回不存在")
+		respondError(w, http.StatusNotFound, "歌枠が見つかりません")
 		return
 	}
 
@@ -426,13 +426,13 @@ func (r *Router) handleCreateStream(w http.ResponseWriter, req *http.Request) {
 func (r *Router) handleUpdateStream(w http.ResponseWriter, req *http.Request) {
 	id := req.PathValue("id")
 	if id == "" {
-		respondError(w, http.StatusBadRequest, "無効的歌回 ID")
+		respondError(w, http.StatusBadRequest, "無効な歌枠ID")
 		return
 	}
 
 	var streamReq dto.UpdateStreamRequest
 	if err := json.NewDecoder(req.Body).Decode(&streamReq); err != nil {
-		respondError(w, http.StatusBadRequest, "無効的請求格式")
+		respondError(w, http.StatusBadRequest, "無効なリクエスト形式")
 		return
 	}
 
@@ -442,7 +442,7 @@ func (r *Router) handleUpdateStream(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	if result == nil {
-		respondError(w, http.StatusNotFound, "歌回不存在")
+		respondError(w, http.StatusNotFound, "歌枠が見つかりません")
 		return
 	}
 
@@ -495,7 +495,7 @@ func (r *Router) handleSearchSingers(w http.ResponseWriter, req *http.Request) {
 func (r *Router) handleGetSinger(w http.ResponseWriter, req *http.Request) {
 	id := req.PathValue("id")
 	if id == "" {
-		respondError(w, http.StatusBadRequest, "無効的チャンネル ID")
+		respondError(w, http.StatusBadRequest, "無効なチャンネルID")
 		return
 	}
 
@@ -515,7 +515,7 @@ func (r *Router) handleGetSinger(w http.ResponseWriter, req *http.Request) {
 func (r *Router) handleGetSingerStreams(w http.ResponseWriter, req *http.Request) {
 	id := req.PathValue("id")
 	if id == "" {
-		respondError(w, http.StatusBadRequest, "無効的チャンネル ID")
+		respondError(w, http.StatusBadRequest, "無効なチャンネルID")
 		return
 	}
 
@@ -565,7 +565,7 @@ func (r *Router) handleGetSingerStreams(w http.ResponseWriter, req *http.Request
 func (r *Router) handleGetSingerPerformances(w http.ResponseWriter, req *http.Request) {
 	id := req.PathValue("id")
 	if id == "" {
-		respondError(w, http.StatusBadRequest, "無効的チャンネル ID")
+		respondError(w, http.StatusBadRequest, "無効なチャンネルID")
 		return
 	}
 
@@ -595,7 +595,7 @@ func (r *Router) handleGetSingerPerformances(w http.ResponseWriter, req *http.Re
 func (r *Router) handleCreateSinger(w http.ResponseWriter, req *http.Request) {
 	var singerReq dto.CreateSingerRequest
 	if err := json.NewDecoder(req.Body).Decode(&singerReq); err != nil {
-		respondError(w, http.StatusBadRequest, "無効的請求格式")
+		respondError(w, http.StatusBadRequest, "無効なリクエスト形式")
 		return
 	}
 
@@ -622,12 +622,12 @@ func (r *Router) handleCreateSinger(w http.ResponseWriter, req *http.Request) {
 func (r *Router) handleSyncHolodex(w http.ResponseWriter, req *http.Request) {
 	var syncReq dto.SyncHolodexRequest
 	if err := json.NewDecoder(req.Body).Decode(&syncReq); err != nil {
-		respondError(w, http.StatusBadRequest, "無効的請求格式")
+		respondError(w, http.StatusBadRequest, "無効なリクエスト形式")
 		return
 	}
 
 	if syncReq.ChannelID == "" {
-		respondError(w, http.StatusBadRequest, "channel_id 為必填")
+		respondError(w, http.StatusBadRequest, "channel_id は必須です")
 		return
 	}
 
@@ -648,7 +648,7 @@ func (r *Router) handleSyncHolodex(w http.ResponseWriter, req *http.Request) {
 func (r *Router) handleSyncHolodexVideo(w http.ResponseWriter, req *http.Request) {
 	videoID := req.PathValue("id")
 	if videoID == "" {
-		respondError(w, http.StatusBadRequest, "無効的影片 ID")
+		respondError(w, http.StatusBadRequest, "無効な動画ID")
 		return
 	}
 
@@ -665,7 +665,7 @@ func (r *Router) handleSyncHolodexVideo(w http.ResponseWriter, req *http.Request
 func (r *Router) handleSyncSetoriToHolodex(w http.ResponseWriter, req *http.Request) {
 	streamID := req.PathValue("id")
 	if streamID == "" {
-		respondError(w, http.StatusBadRequest, "無効的影片 ID")
+		respondError(w, http.StatusBadRequest, "無効な動画ID")
 		return
 	}
 
@@ -683,7 +683,7 @@ func (r *Router) handleSyncSetoriToHolodex(w http.ResponseWriter, req *http.Requ
 func (r *Router) handleLoadHolodexSongs(w http.ResponseWriter, req *http.Request) {
 	videoID := req.PathValue("id")
 	if videoID == "" {
-		respondError(w, http.StatusBadRequest, "無効的影片 ID")
+		respondError(w, http.StatusBadRequest, "無効な動画ID")
 		return
 	}
 
@@ -701,13 +701,13 @@ func (r *Router) handleLoadHolodexSongs(w http.ResponseWriter, req *http.Request
 func (r *Router) handleEstimateEndTimes(w http.ResponseWriter, req *http.Request) {
 	streamID := req.PathValue("id")
 	if streamID == "" {
-		respondError(w, http.StatusBadRequest, "無効的歌回 ID")
+		respondError(w, http.StatusBadRequest, "無効な歌枠ID")
 		return
 	}
 
 	var estimateReq dto.EstimateEndTimesRequest
 	if err := json.NewDecoder(req.Body).Decode(&estimateReq); err != nil {
-		respondError(w, http.StatusBadRequest, "無効的請求格式")
+		respondError(w, http.StatusBadRequest, "無効なリクエスト形式")
 		return
 	}
 
@@ -725,18 +725,18 @@ func (r *Router) handleEstimateEndTimes(w http.ResponseWriter, req *http.Request
 func (r *Router) handleCreatePerformances(w http.ResponseWriter, req *http.Request) {
 	streamID := req.PathValue("id")
 	if streamID == "" {
-		respondError(w, http.StatusBadRequest, "無効的歌回 ID")
+		respondError(w, http.StatusBadRequest, "無効な歌枠ID")
 		return
 	}
 
 	var createReq dto.CreatePerformancesRequest
 	if err := json.NewDecoder(req.Body).Decode(&createReq); err != nil {
-		respondError(w, http.StatusBadRequest, "無効的請求格式")
+		respondError(w, http.StatusBadRequest, "無効なリクエスト形式")
 		return
 	}
 
 	if len(createReq.Performances) == 0 {
-		respondError(w, http.StatusBadRequest, "至少需要一首歌曲")
+		respondError(w, http.StatusBadRequest, "最低でも1曲は必要です")
 		return
 	}
 
@@ -752,7 +752,7 @@ func (r *Router) handleCreatePerformances(w http.ResponseWriter, req *http.Reque
 func (r *Router) handleDeletePerformances(w http.ResponseWriter, req *http.Request) {
 	streamID := req.PathValue("id")
 	if streamID == "" {
-		respondError(w, http.StatusBadRequest, "無効的歌回 ID")
+		respondError(w, http.StatusBadRequest, "無効な歌枠ID")
 		return
 	}
 
@@ -763,7 +763,7 @@ func (r *Router) handleDeletePerformances(w http.ResponseWriter, req *http.Reque
 
 	respondJSON(w, http.StatusOK, dto.SuccessResponse{
 		Success: true,
-		Message: "已刪除所有演出記錄",
+		Message: "すべての演奏記録を削除しました",
 	})
 }
 
@@ -772,7 +772,7 @@ func (r *Router) handleDeletePerformances(w http.ResponseWriter, req *http.Reque
 func (r *Router) handleGetComments(w http.ResponseWriter, req *http.Request) {
 	videoID := req.PathValue("id")
 	if videoID == "" {
-		respondError(w, http.StatusBadRequest, "無効的影片 ID")
+		respondError(w, http.StatusBadRequest, "無効な動画ID")
 		return
 	}
 
@@ -791,7 +791,7 @@ func (r *Router) handleGetComments(w http.ResponseWriter, req *http.Request) {
 func (r *Router) handleAnalyzeComments(w http.ResponseWriter, req *http.Request) {
 	videoID := req.PathValue("id")
 	if videoID == "" {
-		respondError(w, http.StatusBadRequest, "無効的影片 ID")
+		respondError(w, http.StatusBadRequest, "無効な動画ID")
 		return
 	}
 
@@ -809,12 +809,12 @@ func (r *Router) handleAnalyzeComments(w http.ResponseWriter, req *http.Request)
 func (r *Router) handleBatchAINormalization(w http.ResponseWriter, req *http.Request) {
 	var batchReq dto.BatchAINormalizationRequest
 	if err := json.NewDecoder(req.Body).Decode(&batchReq); err != nil {
-		respondError(w, http.StatusBadRequest, "無効的請求格式")
+		respondError(w, http.StatusBadRequest, "無効なリクエスト形式")
 		return
 	}
 
 	if len(batchReq.Items) == 0 {
-		respondError(w, http.StatusBadRequest, "至少需要一首歌曲")
+		respondError(w, http.StatusBadRequest, "最低でも1曲は必要です")
 		return
 	}
 

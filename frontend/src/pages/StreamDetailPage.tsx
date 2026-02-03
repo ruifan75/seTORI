@@ -70,10 +70,11 @@ interface SongSearchInputProps {
   onChange: (value: string) => void;
   onSelectSong: (song: Song) => void;
   placeholder?: string;
+  showToast?: (message: string, type?: 'success' | 'error' | 'info') => void;
 }
 
 // 歌曲搜尋輸入元件（帶自動完成）
-function SongSearchInput({ value, onChange, onSelectSong, placeholder }: SongSearchInputProps) {
+function SongSearchInput({ value, onChange, onSelectSong, placeholder, showToast }: SongSearchInputProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [dbSuggestions, setDbSuggestions] = useState<Song[]>([]);
@@ -137,6 +138,9 @@ function SongSearchInput({ value, onChange, onSelectSong, placeholder }: SongSea
 
   const handleSelectSong = (song: Song) => {
     onSelectSong(song);
+    if (showToast) {
+      showToast(`「${song.name}」を選択しました`, 'success');
+    }
     setIsOpen(false);
     setSearchQuery('');
     setDbSuggestions([]);
@@ -164,6 +168,9 @@ function SongSearchInput({ value, onChange, onSelectSong, placeholder }: SongSea
         }],
       };
       onSelectSong(existingSong);
+      if (showToast) {
+        showToast(`「${existingSong.name}」を選択しました（データベース内）`, 'success');
+      }
     } else {
       // 純 iTunes 結果，創建臨時對象
       const tempSong: Song = {
@@ -182,6 +189,9 @@ function SongSearchInput({ value, onChange, onSelectSong, placeholder }: SongSea
         }],
       };
       onSelectSong(tempSong);
+      if (showToast) {
+        showToast(`iTunesから「${tempSong.name}」を選択しました`, 'success');
+      }
     }
     setIsOpen(false);
     setSearchQuery('');
@@ -945,7 +955,6 @@ export default function StreamDetailPage() {
           originalName: song.name,
           originalArtist: song.original_artist,
         };
-        showToast(`iTunes から「${song.name}」を選択しました`, 'success');
       } else {
         // 從 DB 選擇：填入完整資訊
         updated[index] = {
@@ -961,7 +970,6 @@ export default function StreamDetailPage() {
           originalName: song.name,
           originalArtist: song.original_artist,
         };
-        showToast(`「${song.name}」を選択しました`, 'success');
       }
       
       return updated;
@@ -1033,28 +1041,34 @@ export default function StreamDetailPage() {
       });
     }
 
-    // 如果有歌曲，更新 setlist
-    if (editableSongs.length > 0) {
-      const performances: CreatePerformanceItem[] = editableSongs.map((song) => ({
-        name: song.name,
-        name_reading: song.nameReading,
-        original_artist: song.artist,
-        original_artist_reading: song.artistReading,
-        start_seconds: song.start,
-        end_seconds: song.end,
-        tags: song.tags,
-        singer_ids: song.singerIds,
-        art_url: song.artUrl || undefined,
-        itunes_id: song.itunesId || undefined,
-      }));
-      createPerformancesMutation.mutate(performances);
-    } else {
-      // 沒有歌曲時，只保存 Stream 資訊並關閉編輯模式
-      showToast('歌枠情報を保存しました', 'success');
-      setIsEditing(false);
-      setEditableStreamInfo(null);
-      queryClient.invalidateQueries({ queryKey: ['stream', id] });
+    // 如果沒有歌曲，刪除所有 performance
+    if (editableSongs.length === 0) {
+      try {
+        await performanceApi.deleteAll(id!);
+        showToast('セットリストを削除しました', 'success');
+        setIsEditing(false);
+        setEditableSongs([]);
+        queryClient.invalidateQueries({ queryKey: ['stream', id] });
+      } catch (err: any) {
+        showToast(`削除エラー: ${err.message}`, 'error');
+      }
+      return;
     }
+
+    // 更新 setlist
+    const performances: CreatePerformanceItem[] = editableSongs.map((song) => ({
+      name: song.name,
+      name_reading: song.nameReading,
+      original_artist: song.artist,
+      original_artist_reading: song.artistReading,
+      start_seconds: song.start,
+      end_seconds: song.end,
+      tags: song.tags,
+      singer_ids: song.singerIds,
+      art_url: song.artUrl || undefined,
+      itunes_id: song.itunesId || undefined,
+    }));
+    createPerformancesMutation.mutate(performances);
   };
 
   // 自動保存 Stream 資訊（用於標籤、參與者、狀態等）
@@ -1546,9 +1560,8 @@ export default function StreamDetailPage() {
           <div className="bg-white rounded-lg shadow-sm border p-6">
             {/* Editable songs list will default to channel owner as vocalist */}
 
-            {editableSongs.length > 0 ? (
-              <div className="space-y-4">
-                {editableSongs.map((song, index) => (
+            <div className="space-y-4">
+              {editableSongs.length > 0 && editableSongs.map((song, index) => (
                   <div key={song.id} className="border rounded-lg p-4 bg-gray-50">
                     <div className="flex justify-between items-start mb-3">
                       <div className="flex items-center gap-3">
@@ -1607,6 +1620,7 @@ export default function StreamDetailPage() {
                           onChange={(value) => handleSongChange(index, 'name', value)}
                           onSelectSong={(selectedSong) => handleSelectExistingSong(index, selectedSong)}
                           placeholder="楽曲名を入力して検索"
+                          showToast={showToast}
                         />
                         {/* AI 正規化差異顯示 */}
                         {song.aiNormalizedName && (
@@ -1878,19 +1892,21 @@ export default function StreamDetailPage() {
                   </div>
                 ))}
 
-                {/* Add Song Button */}
-                <button
-                  onClick={addSong}
-                  className="w-full py-3 border-2 border-dashed border-gray-300 rounded-lg text-gray-500 hover:border-indigo-500 hover:text-indigo-500 transition-colors"
-                >
-                  + 楽曲を追加
-                </button>
-              </div>
-            ) : (
-              <div className="text-center py-8 text-gray-500">
-                上のボタンから楽曲データを読み込んでください
-              </div>
-            )}
+              {/* Add Song Button - always show */}
+              <button
+                onClick={addSong}
+                className="w-full py-3 border-2 border-dashed border-gray-300 rounded-lg text-gray-500 hover:border-indigo-500 hover:text-indigo-500 transition-colors"
+              >
+                + 楽曲を追加
+              </button>
+
+              {/* Help text when list is empty */}
+              {editableSongs.length === 0 && (
+                <div className="text-center py-8 text-gray-500">
+                  上のボタンから楽曲データを読み込むか、「+ 楽曲を追加」で手動追加してください
+                </div>
+              )}
+            </div>
           </div>
         ) : (
           /* Read-only Setlist */

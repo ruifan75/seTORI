@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, type ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useRef, type ReactNode } from 'react';
 
 interface Toast {
   id: number;
@@ -23,9 +23,10 @@ export function useToast() {
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const toastIdCounter = useRef(0);
 
   const showToast = useCallback((message: string, type: Toast['type'] = 'info') => {
-    const id = Date.now();
+    const id = Date.now() + toastIdCounter.current++;
     setToasts((prev) => [...prev, { id, message, type }]);
 
     // 自動移除

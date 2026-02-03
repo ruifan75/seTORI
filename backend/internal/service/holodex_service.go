@@ -119,7 +119,7 @@ func (s *HolodexService) SyncChannelInfo(channelID string) error {
 
 // SyncChannel 同步頻道的所有直播
 func (s *HolodexService) SyncChannel(channelID string, limit int, forceUpdate bool) (*dto.SyncHolodexResponse, error) {
-	log.Printf("開始同步頻道: %s", channelID)
+	log.Printf("チャンネル同期開始: %s", channelID)
 
 	// 先同步頻道資訊
 	channel, err := s.client.GetChannel(channelID)
@@ -176,12 +176,12 @@ func (s *HolodexService) SyncChannel(channelID string, limit int, forceUpdate bo
 
 		for i, video := range videos {
 			result.Processed = offset + i + 1
-			log.Printf("處理中 [%d/%d]: %s - %s", result.Processed, result.TotalStreams, video.ID, video.Title)
+			log.Printf("処理中 [%d/%d]: %s - %s", result.Processed, result.TotalStreams, video.ID, video.Title)
 
 			syncStatus, err := s.syncVideo(video, channelID, forceUpdate)
 			if err != nil {
 				// 記錄錯誤但繼續處理
-				log.Printf("同步失敗 (video: %s): %v", video.ID, err)
+				log.Printf("同期失敗 (video: %s): %v", video.ID, err)
 				result.Skipped = append(result.Skipped, video.ID)
 				continue
 			}
@@ -207,9 +207,9 @@ func (s *HolodexService) SyncChannel(channelID string, limit int, forceUpdate bo
 	}
 
 	result.InProgress = false
-	result.Message = fmt.Sprintf("同步完成: %d 個新增, %d 個更新, %d 個跳過",
+	result.Message = fmt.Sprintf("同期完了: %d 件新規, %d 件更新, %d 件スキップ",
 		len(result.NewStreams), len(result.Updated), len(result.Skipped))
-	log.Printf("頻道同步完成: %s - %s", channelID, result.Message)
+	log.Printf("チャンネル同期完了: %s - %s", channelID, result.Message)
 
 	return result, nil
 }
@@ -532,6 +532,12 @@ func (s *HolodexService) loadAndSaveComments(videoID string) {
 		return
 	}
 
+	commentRawJSON, err := json.Marshal(comments)
+	if err != nil {
+		log.Printf("marshal comment raw error (video: %s): %v", videoID, err)
+		return
+	}
+
 	stream, err := s.streamRepo.FindByID(videoID)
 	if err != nil {
 		log.Printf("find stream error (video: %s): %v", videoID, err)
@@ -539,6 +545,7 @@ func (s *HolodexService) loadAndSaveComments(videoID string) {
 	}
 	if stream != nil {
 		stream.CommentData = commentDataJSON
+		stream.CommentRaw = commentRawJSON
 		if err := s.streamRepo.Update(stream); err != nil {
 			log.Printf("update stream comment data error (video: %s): %v", videoID, err)
 		}
