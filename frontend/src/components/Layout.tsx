@@ -23,7 +23,17 @@ export default function Layout() {
           <div className="flex justify-between items-center h-16">
             {/* Logo */}
             <Link to="/" className="flex items-center gap-2">
-              <span className="text-2xl font-bold text-indigo-600">seTORI</span>
+              <span className="text-2xl font-bold text-indigo-600 inline-flex items-center">
+                seT
+                <span className="mx-0 inline-flex h-6 w-6 align-middle translate-y-[1px]">
+                  <img
+                    src="/icon.png"
+                    alt="seTORI bird"
+                    className="h-full w-full object-contain"
+                  />
+                </span>
+                RI
+              </span>
             </Link>
 
             {/* Navigation */}
