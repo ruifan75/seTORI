@@ -63,16 +63,16 @@ export default function SongsPage() {
               </div>
 
               <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
-                <table className="min-w-full divide-y divide-gray-200">
+                <table className="w-full table-fixed divide-y divide-gray-200">
                   <thead className="bg-gray-50">
                     <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-[45%]">
                         楽曲名
                       </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-[40%]">
                         アーティスト
                       </th>
-                      <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-[15%]">
                         歌唱回数
                       </th>
                     </tr>
@@ -80,19 +80,19 @@ export default function SongsPage() {
                   <tbody className="bg-white divide-y divide-gray-200">
                     {data?.songs.map((song) => (
                       <tr key={song.id} className="hover:bg-gray-50">
-                        <td className="px-6 py-4">
+                        <td className="px-6 py-4 max-w-0">
                           <Link
                             to={`/songs/${song.id}`}
-                            className="text-indigo-600 hover:text-indigo-900 font-medium"
+                            className="text-indigo-600 hover:text-indigo-900 font-medium block truncate"
                           >
                             {song.name}
                           </Link>
                           {song.name_reading && (
-                            <p className="text-xs text-gray-400 mt-0.5">{song.name_reading}</p>
+                            <p className="text-xs text-gray-400 mt-0.5 truncate">{song.name_reading}</p>
                           )}
                         </td>
-                        <td className="px-6 py-4 text-gray-500">
-                          {song.original_artist}
+                        <td className="px-6 py-4 text-gray-500 max-w-0">
+                          <span className="block truncate">{song.original_artist}</span>
                         </td>
                         <td className="px-6 py-4 text-right">
                           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">

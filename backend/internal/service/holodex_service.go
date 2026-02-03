@@ -755,12 +755,12 @@ func (s *HolodexService) SyncSetoriToHolodex(streamID string) (*dto.SyncHolodexR
 		}
 	}
 
-	message := fmt.Sprintf("同步完成: %d 曲成功", syncedCount)
+	message := fmt.Sprintf("同期完了: %d 曲成功", syncedCount)
 	if skippedCount > 0 {
-		message = fmt.Sprintf("同步完成: %d 曲成功, %d 曲已存在", syncedCount, skippedCount)
+		message = fmt.Sprintf("同期完了: %d 曲成功、%d 曲既に存在", syncedCount, skippedCount)
 	}
 	if len(errors) > 0 {
-		message = fmt.Sprintf("同步完成: %d 曲成功, %d 曲已存在, %d 曲失敗", syncedCount, skippedCount, len(errors))
+		message = fmt.Sprintf("同期完了: %d 曲成功、%d 曲既に存在、%d 曲失敗", syncedCount, skippedCount, len(errors))
 		log.Printf("Errors during sync: %v", errors)
 	}
 

@@ -735,7 +735,7 @@ export default function StreamDetailPage() {
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['stream', id] });
       showToast(
-        `Holodex に同期完了: ${data.synced_count > 0 ? `${data.synced_count}件` : '完了'}`,
+        data.message || `Holodex に同期完了: ${data.synced_count > 0 ? `${data.synced_count}件` : '完了'}`,
         'success'
       );
     },
@@ -756,6 +756,9 @@ export default function StreamDetailPage() {
     // 從已載入的 stream 資料中讀取
     setHolodexTimelineSongs(sortedSongs);
 
+    // 獲取預設的歌手ID（從participants或channelOwner）
+    const defaultSingerIds = stream.participants?.map((p) => p.id) || (channelOwner ? [channelOwner.id] : []);
+
     // 轉換為可編輯歌曲
     const songs: EditableSong[] = sortedSongs.map((song, index) => ({
       id: `holodex-${index}`,
@@ -766,7 +769,7 @@ export default function StreamDetailPage() {
       start: song.start_seconds,
       end: song.end_seconds,
       tags: song.tags,
-      singerIds: song.singer_ids,
+      singerIds: song.singer_ids.length > 0 ? song.singer_ids : defaultSingerIds,
       matchedSongId: null,
       artUrl: song.art_url || null,
       itunesId: song.itunes_id || null,
@@ -794,7 +797,7 @@ export default function StreamDetailPage() {
     setCommentTimelineSongs(sortedSongs);
 
     // 轉換為可編輯歌曲
-    const defaultSingerIds = channelOwner ? [channelOwner.id] : [];
+    const defaultSingerIds = stream.participants?.map((p) => p.id) || (channelOwner ? [channelOwner.id] : []);
     const songs: EditableSong[] = sortedSongs.map((song, index) => ({
       id: `comment-${index}`,
       name: song.name,
