@@ -21,28 +21,6 @@ var (
 	// 匹配時間戳格式: HH:MM:SS, H:MM:SS, MM:SS, M:SS
 	timestampRe = regexp.MustCompile(`(\d{1,2}):(\d{2}):(\d{2})|(\d{1,2}):(\d{2})`)
 
-	// 匹配帶有開始和結束時間的格式
-	// 例如: "0:00 - 3:45 歌曲名 / 藝人"、"0:00;3:45 歌曲名"、"0:00 : 3:45 歌曲名"
-	rangePatterns = []*regexp.Regexp{
-		// HH:MM:SS ; HH:MM:SS 歌曲名
-		regexp.MustCompile(`^(\d{1,2}:\d{2}:\d{2})\s*[;:：\-–]\s*(\d{1,2}:\d{2}:\d{2})\s+(.+)$`),
-		// MM:SS ; MM:SS 歌曲名
-		regexp.MustCompile(`^(\d{1,2}:\d{2})\s*[;:：\-–]\s*(\d{1,2}:\d{2})\s+(.+)$`),
-		// HH:MM:SS - HH:MM:SS 歌曲名
-		regexp.MustCompile(`^(\d{1,2}:\d{2}:\d{2})\s*[-–]\s*(\d{1,2}:\d{2}:\d{2})\s+(.+)$`),
-		// MM:SS - MM:SS 歌曲名
-		regexp.MustCompile(`^(\d{1,2}:\d{2})\s*[-–]\s*(\d{1,2}:\d{2})\s+(.+)$`),
-	}
-
-	// 匹配只有開始時間的格式
-	// 例如: "0:00 歌曲名 / 藝人"
-	startOnlyPatterns = []*regexp.Regexp{
-		// HH:MM:SS 歌曲名
-		regexp.MustCompile(`^(\d{1,2}:\d{2}:\d{2})\s+(.+)$`),
-		// MM:SS 歌曲名
-		regexp.MustCompile(`^(\d{1,2}:\d{2})\s+(.+)$`),
-	}
-
 	// 歌曲名和藝人的分隔符
 	separators = []string{" / ", " - ", "／", "　/　", " ー ", "（", " ("}
 )

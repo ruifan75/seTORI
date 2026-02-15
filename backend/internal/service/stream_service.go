@@ -201,13 +201,8 @@ func (s *StreamService) toStreamResponse(stream models.Stream, tags []models.Str
 		}
 	}
 
-	// 解析並加入 Comment timeline 資料
-	if len(stream.CommentData) > 0 {
-		var commentSongs []dto.CommentSong
-		if err := json.Unmarshal(stream.CommentData, &commentSongs); err == nil {
-			resp.CommentTimelineSongs = commentSongs
-		}
-	}
+	// 標記是否有原始留言可供分析
+	resp.HasCommentRaw = len(stream.CommentRaw) > 0
 
 	return resp
 }

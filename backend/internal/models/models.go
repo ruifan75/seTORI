@@ -50,7 +50,6 @@ type Stream struct {
 	ThumbnailURL    sql.NullString `json:"thumbnail_url"`
 	HolodexData     []byte         `json:"holodex_data"` // JSONB - Holodex songs data
 	HolodexHash     sql.NullString `json:"holodex_hash"`
-	CommentData     []byte         `json:"comment_data"` // JSONB - Comment analyzed songs data
 	CommentRaw      []byte         `json:"comment_raw"`  // JSONB - Raw comment list
 	IsProcessed     bool           `json:"is_processed"` // 處理完成
 	IsHidden        bool           `json:"is_hidden"`    // 隱藏

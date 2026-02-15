@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, Link } from 'react-router-dom';
-import { streamApi, performanceApi, aiApi, songApi, singerApi, itunesApi, holodexApi } from '../api/client';
+import { streamApi, performanceApi, aiApi, songApi, singerApi, itunesApi, holodexApi, commentApi } from '../api/client';
 import type { Singer, CreatePerformanceItem, AINormalizationItem, Song, UpdateStreamRequest, ITunesSearchResult, CommentSong, SongSuggestion } from '../api/types';
 import Loading from '../components/ui/Loading';
 import Tag from '../components/ui/Tag';
@@ -604,7 +604,6 @@ export default function StreamDetailPage() {
     setChannelOwner(stream?.channel_owner || null);
     // 載入儲存的 timeline 資料（沒有時也清空）
     setHolodexTimelineSongs(stream?.holodex_timeline_songs || []);
-    setCommentTimelineSongs(stream?.comment_timeline_songs || []);
   }, [stream]);
 
   // 編輯模式時避免整頁滾動（改用區塊內滾動）
@@ -794,42 +793,47 @@ export default function StreamDetailPage() {
     showToast(`Holodexから${songs.length}曲を読み込みました`, 'success');
   };
 
-  const loadFromComments = () => {
-    if (!stream?.comment_timeline_songs || stream.comment_timeline_songs.length === 0) {
-      showToast('コメントデータがありません', 'info');
-      return;
+  const [commentAnalyzeLoading, setCommentAnalyzeLoading] = useState(false);
+  const [showCommentMenu, setShowCommentMenu] = useState(false);
+
+  const loadFromComments = async (mode: 'regex' | 'ai') => {
+    if (!id) return;
+    setShowCommentMenu(false);
+    setCommentAnalyzeLoading(true);
+    try {
+      const result = await commentApi.analyze(id, mode);
+      const sortedSongs = [...result.songs].sort((a, b) => a.start - b.start);
+      setCommentTimelineSongs(sortedSongs);
+
+      const defaultSingerIds = stream?.participants?.map((p) => p.id) || (channelOwner ? [channelOwner.id] : []);
+      const songs: EditableSong[] = sortedSongs.map((song, index) => ({
+        id: `comment-${index}`,
+        name: song.name,
+        nameReading: '',
+        artist: song.original_artist,
+        artistReading: '',
+        start: song.start,
+        end: song.end,
+        tags: [],
+        singerIds: defaultSingerIds,
+        matchedSongId: null,
+        artUrl: null,
+        itunesId: null,
+        trackDuration: null,
+        originalName: song.name,
+        originalArtist: song.original_artist,
+        aiNormalizedName: undefined,
+        aiNormalizedArtist: undefined,
+        isEndTimeEstimated: song.is_end_time_estimated,
+      }));
+      setEditableSongs(songs);
+      showToast(`コメントから${songs.length}曲を読み込みました（${mode === 'ai' ? 'AI分析' : '正規分析'}）`, 'success');
+    } catch (error) {
+      showToast('コメント分析に失敗しました', 'error');
+      console.error('Comment analysis failed:', error);
+    } finally {
+      setCommentAnalyzeLoading(false);
     }
-
-    // 按開始時間排序
-    const sortedSongs = [...stream.comment_timeline_songs].sort((a, b) => a.start - b.start);
-    
-    // 從已載入的 stream 資料中讀取
-    setCommentTimelineSongs(sortedSongs);
-
-    // 轉換為可編輯歌曲
-    const defaultSingerIds = stream.participants?.map((p) => p.id) || (channelOwner ? [channelOwner.id] : []);
-    const songs: EditableSong[] = sortedSongs.map((song, index) => ({
-      id: `comment-${index}`,
-      name: song.name,
-      nameReading: '',
-      artist: song.original_artist,
-      artistReading: '',
-      start: song.start,
-      end: song.end,
-      tags: [],
-      singerIds: defaultSingerIds,
-      matchedSongId: null,
-      artUrl: null,
-      itunesId: null,
-      trackDuration: null,
-      originalName: song.name,
-      originalArtist: song.original_artist,
-      aiNormalizedName: undefined,
-      aiNormalizedArtist: undefined,
-      isEndTimeEstimated: song.is_end_time_estimated,
-    }));
-    setEditableSongs(songs);
-    showToast(`コメントから${songs.length}曲を読み込みました`, 'success');
   };
 
   const toggleEditing = () => {
@@ -1518,13 +1522,31 @@ export default function StreamDetailPage() {
                 >
                   Holodex データを読み込む
                 </button>
-                <button
-                  onClick={loadFromComments}
-                  disabled={!stream?.comment_timeline_songs || stream.comment_timeline_songs.length === 0}
-                  className="px-3 py-1.5 text-sm bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
-                >
-                  コメント データを読み込む
-                </button>
+                <div className="relative">
+                  <button
+                    onClick={() => setShowCommentMenu(!showCommentMenu)}
+                    disabled={!stream?.has_comment_raw || commentAnalyzeLoading}
+                    className="px-3 py-1.5 text-sm bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
+                  >
+                    {commentAnalyzeLoading ? 'コメント分析中...' : 'コメント データを読み込む'}
+                  </button>
+                  {showCommentMenu && (
+                    <div className="absolute top-full left-0 mt-1 bg-white border rounded-lg shadow-lg z-50 min-w-[160px]">
+                      <button
+                        onClick={() => loadFromComments('regex')}
+                        className="w-full px-4 py-2 text-sm text-left hover:bg-gray-100 rounded-t-lg"
+                      >
+                        正規分析
+                      </button>
+                      <button
+                        onClick={() => loadFromComments('ai')}
+                        className="w-full px-4 py-2 text-sm text-left hover:bg-gray-100 rounded-b-lg"
+                      >
+                        AI分析
+                      </button>
+                    </div>
+                  )}
+                </div>
                 {editableSongs.length > 0 && (
                   <button
                     onClick={runAINormalization}

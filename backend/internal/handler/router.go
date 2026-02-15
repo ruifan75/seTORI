@@ -45,7 +45,7 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	songService := service.NewSongService(songRepo, perfRepo, songItunesRepo)
 	streamService := service.NewStreamService(streamRepo, perfRepo)
 	singerService := service.NewSingerService(singerRepo, streamRepo, perfRepo)
-	holodexService := service.NewHolodexService(cfg.HolodexAPIKey, cfg.YouTubeAPIKey, streamRepo, singerRepo, cfg.HolodexEditorToken)
+	holodexService := service.NewHolodexService(cfg.HolodexAPIKey, cfg.YouTubeAPIKey, cfg.GroqAPIKey, streamRepo, singerRepo, cfg.HolodexEditorToken)
 	holodexService.SetRepositoriesWithSongItunes(perfRepo, songRepo, songItunesRepo) // 為 SyncSetoriToHolodex 提供必要的 repositories
 	commentService := service.NewCommentService(holodexService, streamRepo)
 	normalizationService := service.NewNormalizationService(cfg.GroqAPIKey, songRepo)
@@ -795,7 +795,12 @@ func (r *Router) handleAnalyzeComments(w http.ResponseWriter, req *http.Request)
 		return
 	}
 
-	result, err := r.commentService.AnalyzeComments(videoID)
+	mode := req.URL.Query().Get("mode")
+	if mode == "" {
+		mode = "regex"
+	}
+
+	result, err := r.commentService.AnalyzeComments(videoID, mode)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return

@@ -144,7 +144,7 @@ export interface Stream {
   is_processed: boolean;   // 處理完成
   is_hidden: boolean;      // 隱藏
   holodex_timeline_songs?: SongSuggestion[];  // Holodex timeline 資料
-  comment_timeline_songs?: CommentSong[];     // Comment timeline 資料
+  has_comment_raw: boolean;                   // 是否有原始留言可分析
   created_at: string;
   updated_at: string;
 }

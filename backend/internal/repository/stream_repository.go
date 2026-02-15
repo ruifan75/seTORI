@@ -33,13 +33,13 @@ func (r *StreamRepository) FindAll(limit, offset int, includeHidden bool) ([]mod
 	var query string
 	if includeHidden {
 		query = `
-			SELECT id, title, stream_date, duration_seconds, thumbnail_url, holodex_data, holodex_hash, comment_data, comment_raw, is_processed, is_hidden, created_at, updated_at
+			SELECT id, title, stream_date, duration_seconds, thumbnail_url, holodex_data, holodex_hash, comment_raw, is_processed, is_hidden, created_at, updated_at
 			FROM streams
 			ORDER BY stream_date DESC
 			LIMIT $1 OFFSET $2`
 	} else {
 		query = `
-			SELECT id, title, stream_date, duration_seconds, thumbnail_url, holodex_data, holodex_hash, comment_data, comment_raw, is_processed, is_hidden, created_at, updated_at
+			SELECT id, title, stream_date, duration_seconds, thumbnail_url, holodex_data, holodex_hash, comment_raw, is_processed, is_hidden, created_at, updated_at
 			FROM streams
 			WHERE is_hidden = FALSE
 			ORDER BY stream_date DESC
@@ -56,7 +56,7 @@ func (r *StreamRepository) FindAll(limit, offset int, includeHidden bool) ([]mod
 	for rows.Next() {
 		var s models.Stream
 		err := rows.Scan(&s.ID, &s.Title, &s.StreamDate, &s.DurationSeconds,
-			&s.ThumbnailURL, &s.HolodexData, &s.HolodexHash, &s.CommentData, &s.CommentRaw, &s.IsProcessed, &s.IsHidden, &s.CreatedAt, &s.UpdatedAt)
+			&s.ThumbnailURL, &s.HolodexData, &s.HolodexHash, &s.CommentRaw, &s.IsProcessed, &s.IsHidden, &s.CreatedAt, &s.UpdatedAt)
 		if err != nil {
 			return nil, 0, fmt.Errorf("scan stream: %w", err)
 		}
@@ -69,13 +69,13 @@ func (r *StreamRepository) FindAll(limit, offset int, includeHidden bool) ([]mod
 // FindByID 根據 Video ID 取得歌回
 func (r *StreamRepository) FindByID(id string) (*models.Stream, error) {
 	query := `
-		SELECT id, title, stream_date, duration_seconds, thumbnail_url, holodex_data, holodex_hash, comment_data, comment_raw, is_processed, is_hidden, created_at, updated_at
+		SELECT id, title, stream_date, duration_seconds, thumbnail_url, holodex_data, holodex_hash, comment_raw, is_processed, is_hidden, created_at, updated_at
 		FROM streams WHERE id = $1`
 
 	var s models.Stream
 	err := r.db.QueryRow(query, id).Scan(
 		&s.ID, &s.Title, &s.StreamDate, &s.DurationSeconds,
-		&s.ThumbnailURL, &s.HolodexData, &s.HolodexHash, &s.CommentData, &s.CommentRaw, &s.IsProcessed, &s.IsHidden, &s.CreatedAt, &s.UpdatedAt)
+		&s.ThumbnailURL, &s.HolodexData, &s.HolodexHash, &s.CommentRaw, &s.IsProcessed, &s.IsHidden, &s.CreatedAt, &s.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -106,12 +106,12 @@ func (r *StreamRepository) Update(s *models.Stream) error {
 	query := `
 		UPDATE streams
 		SET title = $2, stream_date = $3, duration_seconds = $4, thumbnail_url = $5,
-		    holodex_data = $6, holodex_hash = $7, comment_data = $8, comment_raw = $9, is_processed = $10, is_hidden = $11, updated_at = NOW()
+		    holodex_data = $6, holodex_hash = $7, comment_raw = $8, is_processed = $9, is_hidden = $10, updated_at = NOW()
 		WHERE id = $1
 		RETURNING updated_at`
 
 	err := r.db.QueryRow(query, s.ID, s.Title, s.StreamDate, s.DurationSeconds,
-		s.ThumbnailURL, s.HolodexData, s.HolodexHash, s.CommentData, s.CommentRaw, s.IsProcessed, s.IsHidden).
+		s.ThumbnailURL, s.HolodexData, s.HolodexHash, s.CommentRaw, s.IsProcessed, s.IsHidden).
 		Scan(&s.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("update stream: %w", err)
@@ -166,7 +166,7 @@ func (r *StreamRepository) Delete(id string) error {
 // FindByDateRange 根據日期範圍取得歌回
 func (r *StreamRepository) FindByDateRange(start, end time.Time) ([]models.Stream, error) {
 	query := `
-		SELECT id, title, stream_date, duration_seconds, thumbnail_url, holodex_data, holodex_hash, comment_data, comment_raw, is_processed, is_hidden, created_at, updated_at
+		SELECT id, title, stream_date, duration_seconds, thumbnail_url, holodex_data, holodex_hash, comment_raw, is_processed, is_hidden, created_at, updated_at
 		FROM streams
 		WHERE stream_date >= $1 AND stream_date <= $2
 		ORDER BY stream_date DESC`
@@ -181,7 +181,7 @@ func (r *StreamRepository) FindByDateRange(start, end time.Time) ([]models.Strea
 	for rows.Next() {
 		var s models.Stream
 		err := rows.Scan(&s.ID, &s.Title, &s.StreamDate, &s.DurationSeconds,
-			&s.ThumbnailURL, &s.HolodexData, &s.HolodexHash, &s.CommentData, &s.CommentRaw, &s.IsProcessed, &s.IsHidden, &s.CreatedAt, &s.UpdatedAt)
+			&s.ThumbnailURL, &s.HolodexData, &s.HolodexHash, &s.CommentRaw, &s.IsProcessed, &s.IsHidden, &s.CreatedAt, &s.UpdatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("scan stream: %w", err)
 		}

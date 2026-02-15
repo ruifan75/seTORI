@@ -191,8 +191,8 @@ export const commentApi = {
     return data;
   },
 
-  analyze: async (videoId: string): Promise<AnalyzeCommentsResponse> => {
-    const { data } = await api.post(`/api/streams/${videoId}/comments/analyze`);
+  analyze: async (videoId: string, mode: 'regex' | 'ai' = 'regex'): Promise<AnalyzeCommentsResponse> => {
+    const { data } = await api.post(`/api/streams/${videoId}/comments/analyze?mode=${mode}`);
     return data;
   },
 };

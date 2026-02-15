@@ -15,7 +15,7 @@ import (
 	"github.com/ruifan75/setori/internal/dto"
 	"github.com/ruifan75/setori/internal/models"
 	"github.com/ruifan75/setori/internal/repository"
-	"github.com/ruifan75/setori/pkg/comment"
+	"github.com/ruifan75/setori/pkg/ai"
 	"github.com/ruifan75/setori/pkg/holodex"
 	"github.com/ruifan75/setori/pkg/itunes"
 	"github.com/ruifan75/setori/pkg/youtube"
@@ -31,15 +31,22 @@ type HolodexService struct {
 	songRepo       *repository.SongRepository
 	songItunesRepo *repository.SongItunesRepository
 	editorToken    string
+	aiClient       *ai.Client
 }
 
 func NewHolodexService(
 	holodexAPIKey string,
 	youtubeAPIKey string,
+	groqAPIKey string,
 	streamRepo *repository.StreamRepository,
 	singerRepo *repository.SingerRepository,
 	editorToken string,
 ) *HolodexService {
+	var aiClient *ai.Client
+	if groqAPIKey != "" {
+		aiClient = ai.NewClient(groqAPIKey)
+	}
+
 	return &HolodexService{
 		client:        holodex.NewClient(holodexAPIKey),
 		youtubeClient: youtube.NewClient(youtubeAPIKey),
@@ -47,6 +54,7 @@ func NewHolodexService(
 		streamRepo:    streamRepo,
 		singerRepo:    singerRepo,
 		editorToken:   editorToken,
+		aiClient:      aiClient,
 	}
 }
 
@@ -498,37 +506,12 @@ func (s *HolodexService) GetVideoComments(videoID string) ([]string, error) {
 	return comments, nil
 }
 
-// loadAndSaveComments 內部使用，載入並儲存 Comment 資料到資料庫（忽略錯誤）
+// loadAndSaveComments 內部使用，載入並儲存原始留言到資料庫（忽略錯誤）
+// 不做解析，解析在使用者點擊分析按鈕時即時進行
 func (s *HolodexService) loadAndSaveComments(videoID string) {
-	// 獲取評論
 	comments, err := s.GetVideoComments(videoID)
 	if err != nil {
 		log.Printf("get comments error (video: %s): %v", videoID, err)
-		return
-	}
-
-	// 解析評論（使用 comment package）
-	parsedSongs := comment.ParseComments(comments)
-	dedupedSongs := comment.DeduplicateSongs(parsedSongs)
-	validSongs := comment.ValidateSongs(dedupedSongs)
-
-	// 轉換為 DTO
-	songDTOs := make([]dto.CommentSong, len(validSongs))
-	for i, song := range validSongs {
-		songDTOs[i] = dto.CommentSong{
-			Start:              song.Start,
-			End:                song.End,
-			Name:               song.Name,
-			OriginalArtist:     song.OriginalArtist,
-			OriginalComment:    song.OriginalComment,
-			IsEndTimeEstimated: song.IsEndTimeEstimated,
-		}
-	}
-
-	// 儲存到資料庫
-	commentDataJSON, err := json.Marshal(songDTOs)
-	if err != nil {
-		log.Printf("marshal comment data error (video: %s): %v", videoID, err)
 		return
 	}
 
@@ -544,10 +527,9 @@ func (s *HolodexService) loadAndSaveComments(videoID string) {
 		return
 	}
 	if stream != nil {
-		stream.CommentData = commentDataJSON
 		stream.CommentRaw = commentRawJSON
 		if err := s.streamRepo.Update(stream); err != nil {
-			log.Printf("update stream comment data error (video: %s): %v", videoID, err)
+			log.Printf("update stream comment raw error (video: %s): %v", videoID, err)
 		}
 	}
 }
