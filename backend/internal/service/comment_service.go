@@ -61,13 +61,13 @@ func (s *CommentService) AnalyzeComments(videoID string) (*dto.AnalyzeCommentsRe
 		log.Printf("failed to load filter keywords, skipping filter: %v", err)
 	}
 
-	// 去重 + 驗證 + 過濾
-	deduped := comment.DeduplicateSongs(parsedSongs)
+	// 過濾 + 去重 + 驗證（先過濾避免非歌曲項目影響去重）
+	filteredSongs := comment.FilterSongs(parsedSongs, filterKW, keepKW)
+	deduped := comment.DeduplicateSongs(filteredSongs)
 	validSongs := comment.ValidateSongs(deduped)
-	filteredSongs := comment.FilterSongs(validSongs, filterKW, keepKW)
 
-	songDTOs := make([]dto.CommentSong, len(filteredSongs))
-	for i, song := range filteredSongs {
+	songDTOs := make([]dto.CommentSong, len(validSongs))
+	for i, song := range validSongs {
 		songDTOs[i] = dto.CommentSong{
 			Start:              song.Start,
 			End:                song.End,

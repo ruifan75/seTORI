@@ -1,23 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, Link } from 'react-router-dom';
-import { streamApi, performanceApi, aiApi, songApi, singerApi, itunesApi, holodexApi, commentApi } from '../api/client';
+import { streamApi, performanceApi, aiApi, songApi, singerApi, itunesApi, holodexApi, commentApi, tagApi } from '../api/client';
 import type { Singer, CreatePerformanceItem, AINormalizationItem, Song, UpdateStreamRequest, ITunesSearchResult, CommentSong, SongSuggestion } from '../api/types';
 import Loading from '../components/ui/Loading';
 import Tag from '../components/ui/Tag';
 import { useToast } from '../components/ui/Toast';
 import YoutubePlayer, { youtubePlayerSeekTo, youtubePlayerGetCurrentTime } from '../components/YoutubePlayer';
 
-// 預設的直播類型標籤
-const STREAM_TAGS = [
-  { id: 'singing', label: '歌枠', color: '#E91E63' },
-  { id: 'anniversary', label: '周年', color: '#FFD700' },
-  { id: 'birthday', label: '誕生日', color: '#FF69B4' },
-  { id: 'concert', label: 'ライブ', color: '#9C27B0' },
-  { id: 'karaoke', label: 'カラオケ', color: '#2196F3' },
-  { id: 'unarchived', label: 'アーカイブなし', color: '#607D8B' },
-  { id: 'members_only', label: 'メン限', color: '#4CAF50' },
-];
 
 // 可編輯的直播資訊
 interface EditableStreamInfo {
@@ -29,16 +19,6 @@ interface EditableStreamInfo {
   isHidden: boolean;
 }
 
-// 預設的演出標籤
-const PERFORMANCE_TAGS = [
-  { id: 'acoustic', label: 'Acoustic', color: '#8B4513' },
-  { id: 'piano', label: 'Piano', color: '#4169E1' },
-  { id: 'hikigatari', label: '弾き語り', color: '#228B22' },
-  { id: 'acappella', label: 'A Cappella', color: '#9932CC' },
-  { id: 'short', label: 'Short', color: '#FF8C00' },
-  { id: 'full', label: 'Full', color: '#20B2AA' },
-  { id: 'medley', label: 'Medley', color: '#FF69B4' },
-];
 
 interface EditableSong {
   id: string;
@@ -148,7 +128,7 @@ function SongSearchInput({ value, onChange, onSelectSong, placeholder, showToast
 
   // Debounce 搜尋（同時搜尋 DB 和 iTunes）
   useEffect(() => {
-    if (searchQuery.length < 2) {
+    if (searchQuery.length < 1) {
       setDbSuggestions([]);
       setItunesSuggestions([]);
       return;
@@ -442,7 +422,7 @@ function SingerSearchInput({ onSelectSinger, excludeIds = [], placeholder }: Sin
 
   // Debounce 搜尋
   useEffect(() => {
-    if (searchQuery.length < 2) {
+    if (searchQuery.length < 1) {
       setSuggestions([]);
       return;
     }
@@ -641,6 +621,7 @@ export default function StreamDetailPage() {
   const [participants, setParticipants] = useState<Singer[]>([]);
   const [editableStreamInfo, setEditableStreamInfo] = useState<EditableStreamInfo | null>(null);
   const [currentPlayerTime, setCurrentPlayerTime] = useState<number | null>(null);
+  const [highlightedSongId, setHighlightedSongId] = useState<string | null>(null);
 
   const fetchTrackDurationByItunesId = async (itunesId: number): Promise<number | null> => {
     try {
@@ -661,6 +642,18 @@ export default function StreamDetailPage() {
     enabled: !!id,
     staleTime: 0, // 確保每次進入頁面都重新載入
   });
+
+  const { data: streamTagsData = [] } = useQuery({
+    queryKey: ['stream-tags'],
+    queryFn: tagApi.listStreamTags,
+  });
+  const STREAM_TAGS = streamTagsData.map((t) => ({ id: t.id, label: t.display_name, color: t.color }));
+
+  const { data: perfTagsData = [] } = useQuery({
+    queryKey: ['performance-tags'],
+    queryFn: tagApi.listPerformanceTags,
+  });
+  const PERFORMANCE_TAGS = perfTagsData.map((t) => ({ id: t.id, label: t.display_name, color: t.color }));
 
   // 當 stream 資料載入後，設置頻道擁有者和 timeline 資料
   useEffect(() => {
@@ -1098,6 +1091,52 @@ export default function StreamDetailPage() {
     ]);
   };
 
+  // Timeline から歌曲を追加（編集モード用）
+  const addSongFromTimeline = (item: { start: number; end: number; label: string; artist: string }, source: string) => {
+    const defaultSingerIds = channelOwner ? [channelOwner.id] : [];
+    const newId = `${source}-add-${Date.now()}`;
+    const newSong: EditableSong = {
+      id: newId,
+      name: item.label,
+      nameReading: '',
+      artist: item.artist,
+      artistReading: '',
+      start: item.start,
+      end: item.end,
+      tags: [],
+      singerIds: defaultSingerIds,
+      matchedSongId: null,
+      artUrl: null,
+      itunesId: null,
+      trackDuration: null,
+      originalName: item.label,
+      originalArtist: item.artist,
+    };
+    setEditableSongs(prev => {
+      const updated = [...prev, newSong].sort((a, b) => a.start - b.start);
+      return updated;
+    });
+    showToast(`「${item.label}」を追加しました`, 'success');
+    setTimeout(() => {
+      setHighlightedSongId(newId);
+      document.getElementById(`song-${newId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setTimeout(() => setHighlightedSongId(null), 3000);
+    }, 100);
+  };
+
+  // seTORI timeline クリック → 対応する曲にスクロール（編集モード用）
+  const scrollToEditableSong = (start: number) => {
+    if (editableSongs.length === 0) return;
+    const match = editableSongs.reduce((best, song) =>
+      Math.abs(song.start - start) < Math.abs(best.start - start) ? song : best
+    );
+    if (Math.abs(match.start - start) <= 30) {
+      setHighlightedSongId(match.id);
+      document.getElementById(`song-${match.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setTimeout(() => setHighlightedSongId(null), 3000);
+    }
+  };
+
   const handleConfirm = async () => {
     // 先更新 Stream 資訊（如果有變更）
     if (editableStreamInfo) {
@@ -1473,7 +1512,10 @@ export default function StreamDetailPage() {
                   <button
                     key={item.id}
                     type="button"
-                    onClick={() => youtubePlayerSeekTo(item.start)}
+                    onClick={() => {
+                      youtubePlayerSeekTo(item.start);
+                      if (isEditing) scrollToEditableSong(item.start);
+                    }}
                     className="absolute top-0 h-full rounded bg-indigo-500/80 hover:bg-indigo-600 transition-colors group"
                     style={{
                       left: `${getTimelineLeft(item.start)}%`,
@@ -1488,6 +1530,7 @@ export default function StreamDetailPage() {
                           {formatTime(item.start)} - {formatTime(item.end)}
                         </div>
                         <div className="text-indigo-400 text-[10px] mt-1">seTORI</div>
+                        {isEditing && <div className="text-gray-500 text-[10px]">クリックで曲にジャンプ</div>}
                       </div>
                     </div>
                   </button>
@@ -1498,7 +1541,10 @@ export default function StreamDetailPage() {
                   <button
                     key={item.id}
                     type="button"
-                    onClick={() => youtubePlayerSeekTo(item.start)}
+                    onClick={() => {
+                      youtubePlayerSeekTo(item.start);
+                      if (isEditing) addSongFromTimeline(item, 'holodex');
+                    }}
                     className="absolute top-0 h-full rounded bg-blue-500/70 hover:bg-blue-600 transition-colors group"
                     style={{
                       left: `${getTimelineLeft(item.start)}%`,
@@ -1513,6 +1559,7 @@ export default function StreamDetailPage() {
                           {formatTime(item.start)} - {formatTime(item.end)}
                         </div>
                         <div className="text-blue-400 text-[10px] mt-1">Holodex</div>
+                        {isEditing && <div className="text-gray-500 text-[10px]">クリックで追加</div>}
                       </div>
                     </div>
                   </button>
@@ -1525,7 +1572,10 @@ export default function StreamDetailPage() {
                     <button
                       key={item.id}
                       type="button"
-                      onClick={() => youtubePlayerSeekTo(item.start)}
+                      onClick={() => {
+                        youtubePlayerSeekTo(item.start);
+                        if (isEditing) addSongFromTimeline(item, 'comment');
+                      }}
                       className={
                         isPoint
                           ? 'absolute top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-orange-500 group'
@@ -1544,6 +1594,7 @@ export default function StreamDetailPage() {
                             {formatTime(item.start)}{!isPoint && ` - ${formatTime(item.end)}`}
                           </div>
                           <div className="text-orange-400 text-[10px] mt-1">Comment</div>
+                          {isEditing && <div className="text-gray-500 text-[10px]">クリックで追加</div>}
                         </div>
                       </div>
                     </button>
@@ -1632,7 +1683,7 @@ export default function StreamDetailPage() {
 
             <div className="space-y-4">
               {editableSongs.length > 0 && editableSongs.map((song, index) => (
-                  <div key={song.id} className="border rounded-lg p-4 bg-gray-50">
+                  <div key={song.id} id={`song-${song.id}`} className={`border rounded-lg p-4 transition-colors duration-500 ${highlightedSongId === song.id ? 'bg-yellow-100 border-yellow-400' : 'bg-gray-50'}`}>
                     <div className="flex justify-between items-start mb-3">
                       <div className="flex items-center gap-3">
                         {/* Art Thumbnail */}

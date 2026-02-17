@@ -8,12 +8,12 @@ import (
 
 // ParsedSong 解析後的歌曲資訊
 type ParsedSong struct {
-	Start              int    // 開始秒數
-	End                int    // 結束秒數（0 表示未知）
-	Name               string // 歌曲名稱
-	OriginalArtist     string // 原唱藝人
-	OriginalComment    string // 原始 comment 文本
-	IsEndTimeEstimated bool   // 結束時間是否為估計值
+	Start              int    `json:"start"`                // 開始秒數
+	End                int    `json:"end"`                  // 結束秒數（0 表示未知）
+	Name               string `json:"name"`                 // 歌曲名稱
+	OriginalArtist     string `json:"original_artist"`      // 原唱藝人
+	OriginalComment    string `json:"original_comment"`     // 原始 comment 文本
+	IsEndTimeEstimated bool   `json:"is_end_time_estimated"` // 結束時間是否為估計值
 }
 
 // 時間戳正則表達式

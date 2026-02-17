@@ -19,19 +19,23 @@ func FilterSongs(songs []ParsedSong, filterKW, keepKW []string) []ParsedSong {
 }
 
 // shouldFilter 判斷是否應該過濾掉
+// 檢查整行原始留言（OriginalComment），避免關鍵字出現在 artist 等欄位時漏掉
 func shouldFilter(song ParsedSong, filterKW, keepKW []string) bool {
-	nameLower := strings.ToLower(song.Name)
+	textLower := strings.ToLower(song.OriginalComment)
+	if textLower == "" {
+		textLower = strings.ToLower(song.Name)
+	}
 
 	// 先檢查是否包含保留關鍵字
 	for _, keyword := range keepKW {
-		if containsKeyword(nameLower, strings.ToLower(keyword)) {
+		if containsKeyword(textLower, strings.ToLower(keyword)) {
 			return false
 		}
 	}
 
 	// 檢查是否包含過濾關鍵字
 	for _, keyword := range filterKW {
-		if containsKeyword(nameLower, strings.ToLower(keyword)) {
+		if containsKeyword(textLower, strings.ToLower(keyword)) {
 			return true
 		}
 	}

@@ -26,6 +26,8 @@ import type {
   EstimateEndTimesRequest,
   EstimateEndTimesResponse,
   FilterKeyword,
+  StreamTag,
+  PerformanceTag,
 } from './types';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080';
@@ -262,6 +264,40 @@ export const filterKeywordApi = {
 
   delete: async (id: number): Promise<void> => {
     await api.delete(`/api/filter-keywords/${id}`);
+  },
+};
+
+// ========== タグ管理 API ==========
+
+export const tagApi = {
+  // Stream tags
+  listStreamTags: async (): Promise<StreamTag[]> => {
+    const { data } = await api.get('/api/stream-tags');
+    return data;
+  },
+
+  createStreamTag: async (id: string, displayName: string, color: string): Promise<StreamTag> => {
+    const { data } = await api.post('/api/stream-tags', { id, display_name: displayName, color });
+    return data;
+  },
+
+  deleteStreamTag: async (id: string): Promise<void> => {
+    await api.delete(`/api/stream-tags/${id}`);
+  },
+
+  // Performance tags
+  listPerformanceTags: async (): Promise<PerformanceTag[]> => {
+    const { data } = await api.get('/api/performance-tags');
+    return data;
+  },
+
+  createPerformanceTag: async (id: string, displayName: string, color: string): Promise<PerformanceTag> => {
+    const { data } = await api.post('/api/performance-tags', { id, display_name: displayName, color });
+    return data;
+  },
+
+  deletePerformanceTag: async (id: string): Promise<void> => {
+    await api.delete(`/api/performance-tags/${id}`);
   },
 };
 

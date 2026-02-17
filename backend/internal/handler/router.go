@@ -32,6 +32,7 @@ type Router struct {
 	performanceService   *service.PerformanceService
 	endTimeEstimate      *service.EndTimeEstimateService
 	filterKeywordRepo    *repository.FilterKeywordRepository
+	tagRepo              *repository.TagRepository
 }
 
 // NewRouter 建立新的路由器
@@ -43,6 +44,7 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	perfRepo := repository.NewPerformanceRepository(db)
 	songItunesRepo := repository.NewSongItunesRepository(db)
 	filterKeywordRepo := repository.NewFilterKeywordRepository(db)
+	tagRepo := repository.NewTagRepository(db)
 
 	// 建立 services
 	songService := service.NewSongService(songRepo, perfRepo, songItunesRepo)
@@ -69,6 +71,7 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 		normalizationService: normalizationService,
 		performanceService:   performanceService,
 		filterKeywordRepo:    filterKeywordRepo,
+		tagRepo:              tagRepo,
 	}
 
 	r.setupRoutes()
@@ -126,6 +129,14 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("GET /api/filter-keywords", r.handleListFilterKeywords)
 	r.mux.HandleFunc("POST /api/filter-keywords", r.handleCreateFilterKeyword)
 	r.mux.HandleFunc("DELETE /api/filter-keywords/{id}", r.handleDeleteFilterKeyword)
+
+	// Tag management
+	r.mux.HandleFunc("GET /api/stream-tags", r.handleListStreamTags)
+	r.mux.HandleFunc("POST /api/stream-tags", r.handleCreateStreamTag)
+	r.mux.HandleFunc("DELETE /api/stream-tags/{id}", r.handleDeleteStreamTag)
+	r.mux.HandleFunc("GET /api/performance-tags", r.handleListPerformanceTags)
+	r.mux.HandleFunc("POST /api/performance-tags", r.handleCreatePerformanceTag)
+	r.mux.HandleFunc("DELETE /api/performance-tags/{id}", r.handleDeletePerformanceTag)
 
 	// AI normalization (for direct editing flow)
 	r.mux.HandleFunc("POST /api/ai/normalize", r.handleBatchAINormalization)
@@ -882,6 +893,98 @@ func (r *Router) handleBackfillCommentSongs(w http.ResponseWriter, req *http.Req
 		"message": fmt.Sprintf("%d件のストリームを補填しました", count),
 		"count":   count,
 	})
+}
+
+// ========== Tag Management Handlers ==========
+
+func (r *Router) handleListStreamTags(w http.ResponseWriter, req *http.Request) {
+	tags, err := r.tagRepo.FindAllStreamTags()
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, tags)
+}
+
+func (r *Router) handleCreateStreamTag(w http.ResponseWriter, req *http.Request) {
+	var body struct {
+		ID          string `json:"id"`
+		DisplayName string `json:"display_name"`
+		Color       string `json:"color"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		respondError(w, http.StatusBadRequest, "無効なリクエスト形式")
+		return
+	}
+	if body.ID == "" || body.DisplayName == "" {
+		respondError(w, http.StatusBadRequest, "IDと表示名は必須です")
+		return
+	}
+
+	tag, err := r.tagRepo.CreateStreamTag(body.ID, body.DisplayName, body.Color)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusCreated, tag)
+}
+
+func (r *Router) handleDeleteStreamTag(w http.ResponseWriter, req *http.Request) {
+	id := req.PathValue("id")
+	if id == "" {
+		respondError(w, http.StatusBadRequest, "無効なID")
+		return
+	}
+	if err := r.tagRepo.DeleteStreamTag(id); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"message": "タグを削除しました"})
+}
+
+func (r *Router) handleListPerformanceTags(w http.ResponseWriter, req *http.Request) {
+	tags, err := r.tagRepo.FindAllPerformanceTags()
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, tags)
+}
+
+func (r *Router) handleCreatePerformanceTag(w http.ResponseWriter, req *http.Request) {
+	var body struct {
+		ID          string `json:"id"`
+		DisplayName string `json:"display_name"`
+		Color       string `json:"color"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		respondError(w, http.StatusBadRequest, "無効なリクエスト形式")
+		return
+	}
+	if body.ID == "" || body.DisplayName == "" {
+		respondError(w, http.StatusBadRequest, "IDと表示名は必須です")
+		return
+	}
+
+	tag, err := r.tagRepo.CreatePerformanceTag(body.ID, body.DisplayName, body.Color)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusCreated, tag)
+}
+
+func (r *Router) handleDeletePerformanceTag(w http.ResponseWriter, req *http.Request) {
+	id := req.PathValue("id")
+	if id == "" {
+		respondError(w, http.StatusBadRequest, "無効なID")
+		return
+	}
+	if err := r.tagRepo.DeletePerformanceTag(id); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"message": "タグを削除しました"})
 }
 
 // ========== Batch AI Normalization Handler ==========

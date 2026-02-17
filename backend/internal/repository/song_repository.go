@@ -120,8 +120,8 @@ func (r *SongRepository) FindByNameAndArtist(name, artist string) (*models.Song,
 	fuzzyQuery := `
 		SELECT id, name, name_reading, original_artist, original_artist_reading, arts, created_at, updated_at
 		FROM songs
-		WHERE lower(trim(normalize(name, NFKC))) = lower(trim($1))
-		  AND lower(trim(normalize(original_artist, NFKC))) = lower(trim($2))`
+		WHERE lower(replace(trim(normalize(name, NFKC)), ' ', '')) = lower(replace(trim($1), ' ', ''))
+		  AND lower(replace(trim(normalize(original_artist, NFKC)), ' ', '')) = lower(replace(trim($2), ' ', ''))`
 
 	err = r.db.QueryRow(fuzzyQuery, normalizedName, normalizedArtist).Scan(
 		&s.ID, &s.Name, &s.NameReading, &s.OriginalArtist,

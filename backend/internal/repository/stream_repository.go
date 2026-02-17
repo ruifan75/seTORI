@@ -163,12 +163,12 @@ func (r *StreamRepository) Delete(id string) error {
 	return nil
 }
 
-// FindWithoutCommentSongs 取得有 comment_raw 但沒有 comment_songs 的 stream（用於 backfill）
+// FindWithoutCommentSongs 取得有 comment_raw 的全部 stream（用於 backfill / 重新生成）
 func (r *StreamRepository) FindWithoutCommentSongs() ([]models.Stream, error) {
 	query := `
 		SELECT id, title, stream_date, duration_seconds, thumbnail_url, holodex_data, holodex_hash, comment_raw, comment_songs, is_processed, is_hidden, created_at, updated_at
 		FROM streams
-		WHERE comment_raw IS NOT NULL AND comment_raw != 'null' AND (comment_songs IS NULL OR comment_songs = 'null')`
+		WHERE comment_raw IS NOT NULL AND comment_raw != 'null'`
 
 	rows, err := r.db.Query(query)
 	if err != nil {
