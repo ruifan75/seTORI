@@ -3,6 +3,7 @@ package handler
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -30,6 +31,7 @@ type Router struct {
 	normalizationService *service.NormalizationService
 	performanceService   *service.PerformanceService
 	endTimeEstimate      *service.EndTimeEstimateService
+	filterKeywordRepo    *repository.FilterKeywordRepository
 }
 
 // NewRouter 建立新的路由器
@@ -40,6 +42,7 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	streamRepo := repository.NewStreamRepository(db)
 	perfRepo := repository.NewPerformanceRepository(db)
 	songItunesRepo := repository.NewSongItunesRepository(db)
+	filterKeywordRepo := repository.NewFilterKeywordRepository(db)
 
 	// 建立 services
 	songService := service.NewSongService(songRepo, perfRepo, songItunesRepo)
@@ -47,7 +50,7 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	singerService := service.NewSingerService(singerRepo, streamRepo, perfRepo)
 	holodexService := service.NewHolodexService(cfg.HolodexAPIKey, cfg.YouTubeAPIKey, cfg.GroqAPIKey, streamRepo, singerRepo, cfg.HolodexEditorToken)
 	holodexService.SetRepositoriesWithSongItunes(perfRepo, songRepo, songItunesRepo) // 為 SyncSetoriToHolodex 提供必要的 repositories
-	commentService := service.NewCommentService(holodexService, streamRepo)
+	commentService := service.NewCommentService(holodexService, streamRepo, filterKeywordRepo)
 	normalizationService := service.NewNormalizationService(cfg.GroqAPIKey, songRepo)
 	performanceService := service.NewPerformanceService(perfRepo, songRepo, songItunesRepo)
 	itunesClient := itunes.NewClient()
@@ -65,6 +68,7 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 		endTimeEstimate:      endTimeEstimateService,
 		normalizationService: normalizationService,
 		performanceService:   performanceService,
+		filterKeywordRepo:    filterKeywordRepo,
 	}
 
 	r.setupRoutes()
@@ -116,6 +120,12 @@ func (r *Router) setupRoutes() {
 	// Comment analysis
 	r.mux.HandleFunc("GET /api/streams/{id}/comments", r.handleGetComments)
 	r.mux.HandleFunc("POST /api/streams/{id}/comments/analyze", r.handleAnalyzeComments)
+	r.mux.HandleFunc("POST /api/comments/backfill", r.handleBackfillCommentSongs)
+
+	// Filter keywords management
+	r.mux.HandleFunc("GET /api/filter-keywords", r.handleListFilterKeywords)
+	r.mux.HandleFunc("POST /api/filter-keywords", r.handleCreateFilterKeyword)
+	r.mux.HandleFunc("DELETE /api/filter-keywords/{id}", r.handleDeleteFilterKeyword)
 
 	// AI normalization (for direct editing flow)
 	r.mux.HandleFunc("POST /api/ai/normalize", r.handleBatchAINormalization)
@@ -795,18 +805,83 @@ func (r *Router) handleAnalyzeComments(w http.ResponseWriter, req *http.Request)
 		return
 	}
 
-	mode := req.URL.Query().Get("mode")
-	if mode == "" {
-		mode = "regex"
-	}
-
-	result, err := r.commentService.AnalyzeComments(videoID, mode)
+	result, err := r.commentService.AnalyzeComments(videoID)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	respondJSON(w, http.StatusOK, result)
+}
+
+// ========== Filter Keywords Handlers ==========
+
+func (r *Router) handleListFilterKeywords(w http.ResponseWriter, req *http.Request) {
+	keywords, err := r.filterKeywordRepo.FindAll()
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	respondJSON(w, http.StatusOK, keywords)
+}
+
+func (r *Router) handleCreateFilterKeyword(w http.ResponseWriter, req *http.Request) {
+	var body struct {
+		Keyword string `json:"keyword"`
+		Type    string `json:"type"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		respondError(w, http.StatusBadRequest, "無効なリクエスト形式")
+		return
+	}
+
+	if body.Keyword == "" {
+		respondError(w, http.StatusBadRequest, "キーワードは必須です")
+		return
+	}
+	if body.Type != "filter" && body.Type != "keep" {
+		respondError(w, http.StatusBadRequest, "typeは 'filter' または 'keep' である必要があります")
+		return
+	}
+
+	kw, err := r.filterKeywordRepo.Create(body.Keyword, body.Type)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	respondJSON(w, http.StatusCreated, kw)
+}
+
+func (r *Router) handleDeleteFilterKeyword(w http.ResponseWriter, req *http.Request) {
+	idStr := req.PathValue("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "無効なID")
+		return
+	}
+
+	if err := r.filterKeywordRepo.Delete(id); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]string{"message": "キーワードを削除しました"})
+}
+
+// handleBackfillCommentSongs 補填所有有 comment_raw 但沒有 comment_songs 的 stream
+func (r *Router) handleBackfillCommentSongs(w http.ResponseWriter, req *http.Request) {
+	count, err := r.commentService.BackfillCommentSongs()
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"message": fmt.Sprintf("%d件のストリームを補填しました", count),
+		"count":   count,
+	})
 }
 
 // ========== Batch AI Normalization Handler ==========

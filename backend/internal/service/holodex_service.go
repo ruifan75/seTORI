@@ -16,6 +16,7 @@ import (
 	"github.com/ruifan75/setori/internal/models"
 	"github.com/ruifan75/setori/internal/repository"
 	"github.com/ruifan75/setori/pkg/ai"
+	"github.com/ruifan75/setori/pkg/comment"
 	"github.com/ruifan75/setori/pkg/holodex"
 	"github.com/ruifan75/setori/pkg/itunes"
 	"github.com/ruifan75/setori/pkg/youtube"
@@ -506,8 +507,8 @@ func (s *HolodexService) GetVideoComments(videoID string) ([]string, error) {
 	return comments, nil
 }
 
-// loadAndSaveComments 內部使用，載入並儲存原始留言到資料庫（忽略錯誤）
-// 不做解析，解析在使用者點擊分析按鈕時即時進行
+// loadAndSaveComments 內部使用，載入並儲存原始留言和解析結果到資料庫（忽略錯誤）
+// 儲存未去重的解析結果，去重在使用者點擊載入按鈕時進行
 func (s *HolodexService) loadAndSaveComments(videoID string) {
 	comments, err := s.GetVideoComments(videoID)
 	if err != nil {
@@ -521,6 +522,14 @@ func (s *HolodexService) loadAndSaveComments(videoID string) {
 		return
 	}
 
+	// Regex 解析（不去重、不過濾）
+	parsed := comment.ParseComments(comments)
+	commentSongsJSON, err := json.Marshal(parsed)
+	if err != nil {
+		log.Printf("marshal comment songs error (video: %s): %v", videoID, err)
+		return
+	}
+
 	stream, err := s.streamRepo.FindByID(videoID)
 	if err != nil {
 		log.Printf("find stream error (video: %s): %v", videoID, err)
@@ -528,8 +537,9 @@ func (s *HolodexService) loadAndSaveComments(videoID string) {
 	}
 	if stream != nil {
 		stream.CommentRaw = commentRawJSON
+		stream.CommentSongs = commentSongsJSON
 		if err := s.streamRepo.Update(stream); err != nil {
-			log.Printf("update stream comment raw error (video: %s): %v", videoID, err)
+			log.Printf("update stream comments error (video: %s): %v", videoID, err)
 		}
 	}
 }

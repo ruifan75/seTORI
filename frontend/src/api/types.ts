@@ -144,7 +144,7 @@ export interface Stream {
   is_processed: boolean;   // 處理完成
   is_hidden: boolean;      // 隱藏
   holodex_timeline_songs?: SongSuggestion[];  // Holodex timeline 資料
-  has_comment_raw: boolean;                   // 是否有原始留言可分析
+  comment_timeline_songs?: CommentSong[];     // コメント解析済みタイムライン
   created_at: string;
   updated_at: string;
 }
@@ -317,6 +317,15 @@ export interface AISuggestionResult {
 
 export interface BatchAINormalizationResponse {
   suggestions: AISuggestionResult[];
+}
+
+// ========== フィルターキーワード ==========
+
+export interface FilterKeyword {
+  id: number;
+  keyword: string;
+  type: 'filter' | 'keep';
+  created_at: string;
 }
 
 // ========== 通用回應 ==========

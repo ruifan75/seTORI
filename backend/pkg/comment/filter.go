@@ -2,48 +2,15 @@ package comment
 
 import (
 	"strings"
+	"unicode"
 )
 
-// 需要過濾的關鍵字（非歌曲項目）
-var filterKeywords = []string{
-	// 開場/結尾
-	"opening", "オープニング", "op", "intro", "イントロ",
-	"ending", "エンディング", "ed", "outro", "アウトロ",
-	"start", "end", "開始", "終了", "終わり",
-
-	// 聊天/互動
-	"トーク", "talk", "mc", "雑談", "おしゃべり", "chat",
-	"スパチャ", "superchat", "super chat", "スーパーチャット",
-	"marshmallow", "マシュマロ", "質問コーナー", "q&a",
-
-	// 休息
-	"休憩", "break", "intermission", "水分補給",
-
-	// 通知/廣告
-	"告知", "お知らせ", "notice", "announcement",
-	"メン限", "member", "メンバー限定",
-
-	// 其他
-	"bgm", "se", "jingle", "ジングル",
-	"待機", "waiting", "カウントダウン", "countdown",
-	"テスト", "test", "チェック", "check",
-	"自己紹介", "introduction",
-}
-
-// 需要保留的關鍵字（確認是歌曲）
-var keepKeywords = []string{
-	"cover", "カバー", "歌ってみた",
-	"acoustic", "アコースティック",
-	"piano", "ピアノ",
-	"original", "オリジナル",
-}
-
-// FilterSongs 過濾非歌曲項目
-func FilterSongs(songs []ParsedSong) []ParsedSong {
+// FilterSongs 過濾非歌曲項目（使用 DB 載入的關鍵字）
+func FilterSongs(songs []ParsedSong, filterKW, keepKW []string) []ParsedSong {
 	var filtered []ParsedSong
 
 	for _, song := range songs {
-		if !shouldFilter(song) {
+		if !shouldFilter(song, filterKW, keepKW) {
 			filtered = append(filtered, song)
 		}
 	}
@@ -52,26 +19,21 @@ func FilterSongs(songs []ParsedSong) []ParsedSong {
 }
 
 // shouldFilter 判斷是否應該過濾掉
-func shouldFilter(song ParsedSong) bool {
+func shouldFilter(song ParsedSong, filterKW, keepKW []string) bool {
 	nameLower := strings.ToLower(song.Name)
 
 	// 先檢查是否包含保留關鍵字
-	for _, keyword := range keepKeywords {
-		if strings.Contains(nameLower, strings.ToLower(keyword)) {
+	for _, keyword := range keepKW {
+		if containsKeyword(nameLower, strings.ToLower(keyword)) {
 			return false
 		}
 	}
 
 	// 檢查是否包含過濾關鍵字
-	for _, keyword := range filterKeywords {
-		if strings.Contains(nameLower, strings.ToLower(keyword)) {
+	for _, keyword := range filterKW {
+		if containsKeyword(nameLower, strings.ToLower(keyword)) {
 			return true
 		}
-	}
-
-	// 太短的名稱可能不是歌曲
-	if len([]rune(song.Name)) < 2 {
-		return true
 	}
 
 	// 如果只有數字，可能不是歌曲
@@ -82,6 +44,66 @@ func shouldFilter(song ParsedSong) bool {
 	return false
 }
 
+// containsKeyword 檢查 text 是否包含 keyword
+// 短 keyword（ASCII 3字以下）使用全字比對，避免 "op" 匹配到 "shop"
+func containsKeyword(text, keyword string) bool {
+	kwRunes := []rune(keyword)
+
+	// 短 ASCII keyword → 全字比對（前後必須是非英數字元或邊界）
+	if len(kwRunes) <= 3 && isAllASCIIAlpha(keyword) {
+		return containsWholeWord(text, keyword)
+	}
+
+	// 長 keyword 或非 ASCII → 子字串比對
+	return strings.Contains(text, keyword)
+}
+
+// containsWholeWord 全字比對：keyword 前後必須是邊界或非英數字元
+func containsWholeWord(text, keyword string) bool {
+	textRunes := []rune(text)
+	kwRunes := []rune(keyword)
+	kwLen := len(kwRunes)
+
+	for i := 0; i <= len(textRunes)-kwLen; i++ {
+		// 比對 keyword
+		match := true
+		for j := 0; j < kwLen; j++ {
+			if textRunes[i+j] != kwRunes[j] {
+				match = false
+				break
+			}
+		}
+		if !match {
+			continue
+		}
+
+		// 檢查前後邊界
+		beforeOK := i == 0 || !isWordChar(textRunes[i-1])
+		afterOK := i+kwLen >= len(textRunes) || !isWordChar(textRunes[i+kwLen])
+
+		if beforeOK && afterOK {
+			return true
+		}
+	}
+
+	return false
+}
+
+// isWordChar 判斷是否為「單字內字元」（英數字）
+func isWordChar(r rune) bool {
+	return unicode.IsLetter(r) && r < 0x3000 || unicode.IsDigit(r)
+}
+
+// isAllASCIIAlpha 判斷是否全為 ASCII 英文字母
+func isAllASCIIAlpha(s string) bool {
+	for _, r := range s {
+		if r < 'a' || r > 'z' {
+			return false
+		}
+	}
+	return len(s) > 0
+}
+
 // isOnlyDigits 檢查字串是否只包含數字
 func isOnlyDigits(s string) bool {
 	for _, r := range s {
@@ -90,15 +112,4 @@ func isOnlyDigits(s string) bool {
 		}
 	}
 	return len(s) > 0
-}
-
-// ContainsFilterKeyword 檢查是否包含過濾關鍵字（可用於 UI 警告）
-func ContainsFilterKeyword(name string) bool {
-	nameLower := strings.ToLower(name)
-	for _, keyword := range filterKeywords {
-		if strings.Contains(nameLower, strings.ToLower(keyword)) {
-			return true
-		}
-	}
-	return false
 }

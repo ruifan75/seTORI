@@ -62,6 +62,69 @@ interface EditableSong {
   aiNormalizedArtist?: string; // AI 修改前的藝人（如果有被 AI 修改）
   // 時間估計標記
   isEndTimeEstimated?: boolean; // 結束時間是否為估計值
+  // 合併追蹤
+  mergedFrom?: string[]; // AI 正規化後被合併的原始曲名
+}
+
+// AI 正規化後合併重複歌曲
+// 條件：name 完全一致 + artist 完全一致 + start 時間差 ≤ 30s
+function mergeDuplicateSongs(songs: EditableSong[]): EditableSong[] {
+  const result: EditableSong[] = [];
+
+  for (const song of songs) {
+    let merged = false;
+    for (let i = 0; i < result.length; i++) {
+      const existing = result[i];
+      if (
+        existing.name === song.name &&
+        existing.artist === song.artist &&
+        Math.abs(existing.start - song.start) <= 30
+      ) {
+        // Merge: 保留資訊較完整的一方
+        const hasRealEnd = (s: EditableSong) => s.end > 0 && !s.isEndTimeEstimated;
+        const preferSong = hasRealEnd(song) && !hasRealEnd(existing);
+
+        // 記錄被吸收方的原始名稱（AI 修改前的名稱）
+        const absorbedName = preferSong
+          ? (existing.aiNormalizedName || existing.originalName)
+          : (song.aiNormalizedName || song.originalName);
+        const prevMerged = existing.mergedFrom || [];
+
+        if (preferSong) {
+          result[i] = {
+            ...song,
+            tags: [...new Set([...song.tags, ...existing.tags])],
+            matchedSongId: song.matchedSongId || existing.matchedSongId,
+            artUrl: song.artUrl || existing.artUrl,
+            itunesId: song.itunesId ?? existing.itunesId,
+            trackDuration: song.trackDuration ?? existing.trackDuration,
+            nameReading: song.nameReading || existing.nameReading,
+            artistReading: song.artistReading || existing.artistReading,
+            mergedFrom: [...prevMerged, absorbedName],
+          };
+        } else {
+          result[i] = {
+            ...existing,
+            tags: [...new Set([...existing.tags, ...song.tags])],
+            matchedSongId: existing.matchedSongId || song.matchedSongId,
+            artUrl: existing.artUrl || song.artUrl,
+            itunesId: existing.itunesId ?? song.itunesId,
+            trackDuration: existing.trackDuration ?? song.trackDuration,
+            nameReading: existing.nameReading || song.nameReading,
+            artistReading: existing.artistReading || song.artistReading,
+            mergedFrom: [...prevMerged, absorbedName],
+          };
+        }
+        merged = true;
+        break;
+      }
+    }
+    if (!merged) {
+      result.push(song);
+    }
+  }
+
+  return result;
 }
 
 // 歌曲搜尋輸入元件的 Props
@@ -604,6 +667,7 @@ export default function StreamDetailPage() {
     setChannelOwner(stream?.channel_owner || null);
     // 載入儲存的 timeline 資料（沒有時也清空）
     setHolodexTimelineSongs(stream?.holodex_timeline_songs || []);
+    setCommentTimelineSongs(stream?.comment_timeline_songs || []);
   }, [stream]);
 
   // 編輯模式時避免整頁滾動（改用區塊內滾動）
@@ -715,8 +779,12 @@ export default function StreamDetailPage() {
         })
       );
       
-      setEditableSongs(updated);
-      showToast(`${data.suggestions.length}曲のAI正規化が完了しました`, 'success');
+      // 合併正規化後名稱相同的重複歌曲
+      const merged = mergeDuplicateSongs(updated);
+      const mergedCount = updated.length - merged.length;
+      setEditableSongs(merged);
+      const mergeMsg = mergedCount > 0 ? `（${mergedCount}曲の重複をマージ）` : '';
+      showToast(`${data.suggestions.length}曲のAI正規化が完了しました${mergeMsg}`, 'success');
     },
     onError: (err: Error) => {
       showToast(`AI正規化エラー: ${err.message}`, 'error');
@@ -794,16 +862,14 @@ export default function StreamDetailPage() {
   };
 
   const [commentAnalyzeLoading, setCommentAnalyzeLoading] = useState(false);
-  const [showCommentMenu, setShowCommentMenu] = useState(false);
 
-  const loadFromComments = async (mode: 'regex' | 'ai') => {
+  const loadFromComments = async () => {
     if (!id) return;
-    setShowCommentMenu(false);
     setCommentAnalyzeLoading(true);
     try {
-      const result = await commentApi.analyze(id, mode);
+      const result = await commentApi.analyze(id);
       const sortedSongs = [...result.songs].sort((a, b) => a.start - b.start);
-      setCommentTimelineSongs(sortedSongs);
+      // timeline は stream.comment_timeline_songs のまま（未フィルタ）を維持
 
       const defaultSingerIds = stream?.participants?.map((p) => p.id) || (channelOwner ? [channelOwner.id] : []);
       const songs: EditableSong[] = sortedSongs.map((song, index) => ({
@@ -827,7 +893,7 @@ export default function StreamDetailPage() {
         isEndTimeEstimated: song.is_end_time_estimated,
       }));
       setEditableSongs(songs);
-      showToast(`コメントから${songs.length}曲を読み込みました（${mode === 'ai' ? 'AI分析' : '正規分析'}）`, 'success');
+      showToast(`コメントから${songs.length}曲を読み込みました`, 'success');
     } catch (error) {
       showToast('コメント分析に失敗しました', 'error');
       console.error('Comment analysis failed:', error);
@@ -1522,31 +1588,13 @@ export default function StreamDetailPage() {
                 >
                   Holodex データを読み込む
                 </button>
-                <div className="relative">
-                  <button
-                    onClick={() => setShowCommentMenu(!showCommentMenu)}
-                    disabled={!stream?.has_comment_raw || commentAnalyzeLoading}
-                    className="px-3 py-1.5 text-sm bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
-                  >
-                    {commentAnalyzeLoading ? 'コメント分析中...' : 'コメント データを読み込む'}
-                  </button>
-                  {showCommentMenu && (
-                    <div className="absolute top-full left-0 mt-1 bg-white border rounded-lg shadow-lg z-50 min-w-[160px]">
-                      <button
-                        onClick={() => loadFromComments('regex')}
-                        className="w-full px-4 py-2 text-sm text-left hover:bg-gray-100 rounded-t-lg"
-                      >
-                        正規分析
-                      </button>
-                      <button
-                        onClick={() => loadFromComments('ai')}
-                        className="w-full px-4 py-2 text-sm text-left hover:bg-gray-100 rounded-b-lg"
-                      >
-                        AI分析
-                      </button>
-                    </div>
-                  )}
-                </div>
+                <button
+                  onClick={loadFromComments}
+                  disabled={!stream?.comment_timeline_songs?.length || commentAnalyzeLoading}
+                  className="px-3 py-1.5 text-sm bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
+                >
+                  {commentAnalyzeLoading ? 'コメント分析中...' : 'コメント データを読み込む'}
+                </button>
                 {editableSongs.length > 0 && (
                   <button
                     onClick={runAINormalization}
@@ -1651,6 +1699,13 @@ export default function StreamDetailPage() {
                             <span className="line-through text-gray-400">{song.aiNormalizedName}</span>
                             {' → '}
                             <span className="text-blue-600 font-medium">{song.name}</span>
+                          </div>
+                        )}
+                        {/* 合併元顯示 */}
+                        {song.mergedFrom && song.mergedFrom.length > 0 && (
+                          <div className="mt-1 text-sm">
+                            <span className="text-orange-600">マージ:</span>{' '}
+                            <span className="text-gray-500">{song.mergedFrom.join(', ')}</span>
                           </div>
                         )}
                       </div>

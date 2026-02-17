@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/ruifan75/setori/internal/models"
+	"github.com/ruifan75/setori/pkg/util"
 )
 
 type SongRepository struct {
@@ -93,20 +94,43 @@ func (r *SongRepository) FindByID(id uuid.UUID) (*models.Song, error) {
 }
 
 // FindByNameAndArtist 根據歌名和藝人查詢（用於正規化時檢查是否已存在）
+// 先精確比對，找不到時用 lower + trim 模糊比對（處理大小寫、空格差異）
+// Go 側先做 NFKC 正規化（處理 Ⅱ→II 等 Unicode 差異）
 func (r *SongRepository) FindByNameAndArtist(name, artist string) (*models.Song, error) {
-	query := `
+	// 精確比對
+	exactQuery := `
 		SELECT id, name, name_reading, original_artist, original_artist_reading, arts, created_at, updated_at
 		FROM songs WHERE name = $1 AND original_artist = $2`
 
 	var s models.Song
-	err := r.db.QueryRow(query, name, artist).Scan(
+	err := r.db.QueryRow(exactQuery, name, artist).Scan(
+		&s.ID, &s.Name, &s.NameReading, &s.OriginalArtist,
+		&s.OriginalArtistReading, &s.Arts, &s.CreatedAt, &s.UpdatedAt)
+	if err == nil {
+		return &s, nil
+	}
+	if err != sql.ErrNoRows {
+		return nil, fmt.Errorf("find song by name and artist: %w", err)
+	}
+
+	// Fallback: NFKC 正規化 + lower + trim 模糊比對
+	normalizedName := util.NormalizeUnicode(name)
+	normalizedArtist := util.NormalizeUnicode(artist)
+
+	fuzzyQuery := `
+		SELECT id, name, name_reading, original_artist, original_artist_reading, arts, created_at, updated_at
+		FROM songs
+		WHERE lower(trim(normalize(name, NFKC))) = lower(trim($1))
+		  AND lower(trim(normalize(original_artist, NFKC))) = lower(trim($2))`
+
+	err = r.db.QueryRow(fuzzyQuery, normalizedName, normalizedArtist).Scan(
 		&s.ID, &s.Name, &s.NameReading, &s.OriginalArtist,
 		&s.OriginalArtistReading, &s.Arts, &s.CreatedAt, &s.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("find song by name and artist: %w", err)
+		return nil, fmt.Errorf("find song by name and artist (fuzzy): %w", err)
 	}
 	return &s, nil
 }

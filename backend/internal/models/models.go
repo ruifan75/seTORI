@@ -50,8 +50,9 @@ type Stream struct {
 	ThumbnailURL    sql.NullString `json:"thumbnail_url"`
 	HolodexData     []byte         `json:"holodex_data"` // JSONB - Holodex songs data
 	HolodexHash     sql.NullString `json:"holodex_hash"`
-	CommentRaw      []byte         `json:"comment_raw"`  // JSONB - Raw comment list
-	IsProcessed     bool           `json:"is_processed"` // 處理完成
+	CommentRaw      []byte         `json:"comment_raw"`   // JSONB - Raw comment list
+	CommentSongs    []byte         `json:"comment_songs"` // JSONB - Parsed songs (undeduped)
+	IsProcessed     bool           `json:"is_processed"`  // 處理完成
 	IsHidden        bool           `json:"is_hidden"`    // 隱藏
 	CreatedAt       time.Time      `json:"created_at"`
 	UpdatedAt       time.Time      `json:"updated_at"`
@@ -83,6 +84,14 @@ type StreamTag struct {
 	DisplayName string    `json:"display_name"`
 	Color       string    `json:"color"`
 	CreatedAt   time.Time `json:"created_at"`
+}
+
+// FilterKeyword フィルターキーワード
+type FilterKeyword struct {
+	ID        int       `json:"id"`
+	Keyword   string    `json:"keyword"`
+	Type      string    `json:"type"` // "filter" or "keep"
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // User 使用者

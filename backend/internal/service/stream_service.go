@@ -201,8 +201,13 @@ func (s *StreamService) toStreamResponse(stream models.Stream, tags []models.Str
 		}
 	}
 
-	// 標記是否有原始留言可供分析
-	resp.HasCommentRaw = len(stream.CommentRaw) > 0
+	// 從 comment_songs 載入解析結果（未去重）
+	if len(stream.CommentSongs) > 0 {
+		var commentSongs []dto.CommentSong
+		if err := json.Unmarshal(stream.CommentSongs, &commentSongs); err == nil && len(commentSongs) > 0 {
+			resp.CommentTimelineSongs = commentSongs
+		}
+	}
 
 	return resp
 }

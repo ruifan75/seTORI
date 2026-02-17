@@ -127,7 +127,7 @@ type StreamResponse struct {
 	IsProcessed          bool                `json:"is_processed"`
 	IsHidden             bool                `json:"is_hidden"`
 	HolodexTimelineSongs []SongSuggestion    `json:"holodex_timeline_songs,omitempty"` // 從 holodex_data 解析
-	HasCommentRaw        bool                `json:"has_comment_raw"`                  // 是否有原始留言可分析
+	CommentTimelineSongs []CommentSong       `json:"comment_timeline_songs,omitempty"` // 從 comment_songs 解析（未去重）
 	CreatedAt            time.Time           `json:"created_at"`
 	UpdatedAt            time.Time           `json:"updated_at"`
 }

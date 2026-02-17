@@ -25,6 +25,7 @@ import type {
   ITunesQueryResult,
   EstimateEndTimesRequest,
   EstimateEndTimesResponse,
+  FilterKeyword,
 } from './types';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080';
@@ -191,8 +192,8 @@ export const commentApi = {
     return data;
   },
 
-  analyze: async (videoId: string, mode: 'regex' | 'ai' = 'regex'): Promise<AnalyzeCommentsResponse> => {
-    const { data } = await api.post(`/api/streams/${videoId}/comments/analyze?mode=${mode}`);
+  analyze: async (videoId: string): Promise<AnalyzeCommentsResponse> => {
+    const { data } = await api.post(`/api/streams/${videoId}/comments/analyze`);
     return data;
   },
 };
@@ -243,6 +244,24 @@ export const itunesApi = {
   queryById: async (itunesId: number): Promise<ITunesQueryResult> => {
     const { data } = await api.get(`/api/itunes/${itunesId}`);
     return data;
+  },
+};
+
+// ========== フィルターキーワード API ==========
+
+export const filterKeywordApi = {
+  list: async (): Promise<FilterKeyword[]> => {
+    const { data } = await api.get('/api/filter-keywords');
+    return data;
+  },
+
+  create: async (keyword: string, type: 'filter' | 'keep'): Promise<FilterKeyword> => {
+    const { data } = await api.post('/api/filter-keywords', { keyword, type });
+    return data;
+  },
+
+  delete: async (id: number): Promise<void> => {
+    await api.delete(`/api/filter-keywords/${id}`);
   },
 };
 

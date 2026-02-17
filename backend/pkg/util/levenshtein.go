@@ -1,5 +1,15 @@
 package util
 
+import (
+	"golang.org/x/text/unicode/norm"
+)
+
+// NormalizeUnicode 使用 NFKC 正規化 Unicode 字串
+// 例如：全形羅馬數字 Ⅱ (U+2161) → II, 全形英數 Ａ → A
+func NormalizeUnicode(s string) string {
+	return norm.NFKC.String(s)
+}
+
 // LevenshteinDistance 計算兩個字串的編輯距離
 func LevenshteinDistance(s1, s2 string) int {
 	r1 := []rune(s1)
@@ -49,7 +59,11 @@ func LevenshteinDistance(s1, s2 string) int {
 }
 
 // Similarity 計算兩個字串的相似度 (0.0 - 1.0)
+// 比較前先做 NFKC 正規化（如 Ⅱ → II）
 func Similarity(s1, s2 string) float64 {
+	s1 = NormalizeUnicode(s1)
+	s2 = NormalizeUnicode(s2)
+
 	if s1 == s2 {
 		return 1.0
 	}

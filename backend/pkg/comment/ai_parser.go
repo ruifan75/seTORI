@@ -9,31 +9,30 @@ import (
 	"github.com/ruifan75/setori/pkg/ai"
 )
 
-type aiCommentSong struct {
-	Start           json.RawMessage `json:"start"`
-	End             json.RawMessage `json:"end"`
-	Name            string          `json:"name"`
-	OriginalArtist  string          `json:"original_artist"`
-	OriginalComment string          `json:"original_comment"`
+// aiLineSelection AI 回傳的行選擇結果（只包含索引和時間，不包含日文文字）
+type aiLineSelection struct {
+	LineIndex int             `json:"line"`  // 1-based index of the input line
+	Start     json.RawMessage `json:"start"` // start seconds
+	End       json.RawMessage `json:"end"`   // end seconds (0 if unknown)
+	IsSong    bool            `json:"is_song"`
 }
 
-const commentAISystemPrompt = `あなたはYouTubeコメントから歌枠のタイムスタンプを抽出するアシスタントです。
+const commentAISystemPrompt = `あなたはYouTubeコメントから歌枠のタイムスタンプ行を選別するアシスタントです。
 
-以下のルールでJSON配列のみを返してください:
+入力は番号付きのコメント行です。以下のルールでJSON配列のみを返してください:
 - 出力はJSON配列のみ（説明文やコードブロックは禁止）
-- 各要素は {"start":秒数,"end":秒数,"name":"曲名","original_artist":"原曲アーティスト","original_comment":"元の行"}
-- start/end は秒数の整数。end が不明な場合は 0。
+- 各要素は {"line":行番号,"start":開始秒数,"end":終了秒数,"is_song":true/false}
+- line は入力の行番号（1始まり）をそのまま返す
+- start/end は秒数の整数。end が不明な場合は 0
 - 1行に複数のタイムスタンプがあれば最初を start、2つ目を end とする
-- 曲名やアーティストが不明な場合は空文字
-- 歌曲以外（雑談/告知など）は可能なら除外
-- 複数のコメントに同じ曲が含まれる場合は重複を除外し、1曲につき1エントリのみ返す
-- 重複判定: 開始時間が近く（30秒以内）曲名が類似していれば同一曲とみなす
-- 重複がある場合、start と end の両方がある方を優先する。次にアーティスト情報がある方を優先する
+- is_song: その行が歌曲であれば true、雑談・告知・開始・終了などは false
+- 日本語テキストは一切出力しないでください。行番号と数値のみ返してください
 `
 
 var aiTimestampRe = regexp.MustCompile(`(\d{1,2}:\d{2}:\d{2})|(\d{1,2}:\d{2})`)
 
-// ParseCommentsWithAI uses Groq to extract song list from raw comments.
+// ParseCommentsWithAI uses Groq to select and deduplicate song lines from raw comments.
+// AI only returns line indices; actual text is extracted from original lines via regex.
 func ParseCommentsWithAI(aiClient *ai.Client, comments []string) ([]ParsedSong, error) {
 	if aiClient == nil {
 		return nil, fmt.Errorf("ai client is nil")
@@ -44,7 +43,7 @@ func ParseCommentsWithAI(aiClient *ai.Client, comments []string) ([]ParsedSong, 
 		return nil, fmt.Errorf("no timestamp lines")
 	}
 
-	userMessage := "以下のコメント行から歌のタイムスタンプを抽出してください。\n\n"
+	userMessage := "以下のコメント行から歌のタイムスタンプ行を選別してください。\n\n"
 	for i, line := range lines {
 		userMessage += fmt.Sprintf("%d) %s\n", i+1, line)
 	}
@@ -54,28 +53,41 @@ func ParseCommentsWithAI(aiClient *ai.Client, comments []string) ([]ParsedSong, 
 		return nil, err
 	}
 
-	parsed, err := parseAICommentResponse(response)
+	selections, err := parseAILineSelections(response)
 	if err != nil {
 		return nil, err
 	}
 
-	result := make([]ParsedSong, 0, len(parsed))
-	for _, item := range parsed {
-		start := parseAISeconds(item.Start)
-		end := parseAISeconds(item.End)
-		name := strings.TrimSpace(item.Name)
-		artist := strings.TrimSpace(item.OriginalArtist)
-		if name == "" && artist == "" {
+	// Use AI selections to pick lines, then parse text with regex
+	result := make([]ParsedSong, 0, len(selections))
+	for _, sel := range selections {
+		if !sel.IsSong {
 			continue
 		}
-		result = append(result, ParsedSong{
-			Start:              start,
-			End:                end,
-			Name:               name,
-			OriginalArtist:     artist,
-			OriginalComment:    strings.TrimSpace(item.OriginalComment),
-			IsEndTimeEstimated: end == 0,
-		})
+		if sel.LineIndex < 1 || sel.LineIndex > len(lines) {
+			continue
+		}
+
+		originalLine := lines[sel.LineIndex-1]
+
+		// Parse the original line with regex to extract song name and artist
+		parsed := ParseComment(originalLine)
+		if parsed == nil {
+			continue
+		}
+
+		// Use AI's time if provided, otherwise use regex-parsed time
+		start := parseAISeconds(sel.Start)
+		end := parseAISeconds(sel.End)
+		if start > 0 {
+			parsed.Start = start
+		}
+		if end > 0 {
+			parsed.End = end
+			parsed.IsEndTimeEstimated = false
+		}
+
+		result = append(result, *parsed)
 	}
 
 	return result, nil
@@ -97,14 +109,14 @@ func extractTimestampLines(comments []string) []string {
 	return lines
 }
 
-func parseAICommentResponse(response string) ([]aiCommentSong, error) {
+func parseAILineSelections(response string) ([]aiLineSelection, error) {
 	response = strings.TrimSpace(response)
 	response = strings.TrimPrefix(response, "```json")
 	response = strings.TrimPrefix(response, "```")
 	response = strings.TrimSuffix(response, "```")
 	response = strings.TrimSpace(response)
 
-	var items []aiCommentSong
+	var items []aiLineSelection
 	if err := json.Unmarshal([]byte(response), &items); err != nil {
 		return nil, fmt.Errorf("unmarshal AI response: %w", err)
 	}

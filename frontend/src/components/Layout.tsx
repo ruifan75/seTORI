@@ -9,6 +9,7 @@ const navItems = [
 
 const adminItems = [
   { path: '/admin/sync', label: '同期' },
+  { path: '/admin/settings', label: '設定' },
 ];
 
 export default function Layout() {
