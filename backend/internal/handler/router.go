@@ -53,7 +53,7 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	holodexService := service.NewHolodexService(cfg.HolodexAPIKey, cfg.YouTubeAPIKey, cfg.GroqAPIKey, streamRepo, singerRepo, cfg.HolodexEditorToken)
 	holodexService.SetRepositoriesWithSongItunes(perfRepo, songRepo, songItunesRepo) // 為 SyncSetoriToHolodex 提供必要的 repositories
 	commentService := service.NewCommentService(holodexService, streamRepo, filterKeywordRepo)
-	normalizationService := service.NewNormalizationService(cfg.GroqAPIKey, songRepo)
+	normalizationService := service.NewNormalizationService(cfg.GroqAPIKey, songRepo, songItunesRepo)
 	performanceService := service.NewPerformanceService(perfRepo, songRepo, songItunesRepo)
 	itunesClient := itunes.NewClient()
 	endTimeEstimateService := service.NewEndTimeEstimateService(itunesClient)

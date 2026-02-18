@@ -170,6 +170,7 @@ type PerformanceResponse struct {
 	EndSeconds     int                      `json:"end_seconds"`
 	OrderIndex     int                      `json:"order_index"`
 	Tags           []PerformanceTagResponse `json:"tags"`
+	CustomTags     []string                 `json:"custom_tags"`
 	Singers        []SingerResponse         `json:"singers"`
 	YouTubeURL     string                   `json:"youtube_url"`
 	CreatedAt      time.Time                `json:"created_at"`
@@ -187,6 +188,7 @@ type SongPerformanceResponse struct {
 	StartSeconds int                      `json:"start_seconds"`
 	EndSeconds   int                      `json:"end_seconds"`
 	Tags         []PerformanceTagResponse `json:"tags"`
+	CustomTags   []string                 `json:"custom_tags"`
 	Singers      []SingerResponse         `json:"singers"`
 	YouTubeURL   string                   `json:"youtube_url"`
 	CreatedAt    time.Time                `json:"created_at"`
@@ -268,6 +270,7 @@ type CreatePerformanceItem struct {
 	SingerIDs             []string `json:"singer_ids"`
 	ArtURL                *string  `json:"art_url,omitempty"`
 	ItunesID              *int64   `json:"itunes_id,omitempty"` // Holodex 提供的 iTunes ID
+	CustomTags            []string `json:"custom_tags,omitempty"`
 }
 
 type CreatePerformancesRequest struct {
@@ -285,6 +288,7 @@ type AINormalizationItem struct {
 	Name           string  `json:"name"`
 	OriginalArtist string  `json:"original_artist"`
 	ArtURL         *string `json:"art_url,omitempty"`
+	ItunesID       *int64  `json:"itunes_id,omitempty"`
 }
 
 // 批量 AI 正規化請求
@@ -303,11 +307,20 @@ type AISuggestionResult struct {
 	Confidence            float64  `json:"confidence"`
 	Reasoning             string   `json:"reasoning"`
 	MatchedSongID         *string  `json:"matched_song_id,omitempty"` // 如果匹配到現有歌曲
+	MatchReason           string   `json:"match_reason,omitempty"`    // 匹配原因（name, itunes_id）
+	// DB 歌曲資訊（匹配到時回傳）
+	MatchedSongName           *string `json:"matched_song_name,omitempty"`
+	MatchedSongNameReading    *string `json:"matched_song_name_reading,omitempty"`
+	MatchedSongArtist         *string `json:"matched_song_artist,omitempty"`
+	MatchedSongArtistReading  *string `json:"matched_song_artist_reading,omitempty"`
+	MatchedSongArtURL         *string `json:"matched_song_art_url,omitempty"`
+	MatchedSongItunesID       *int64  `json:"matched_song_itunes_id,omitempty"`
 }
 
 // 批量 AI 正規化回應
 type BatchAINormalizationResponse struct {
 	Suggestions []AISuggestionResult `json:"suggestions"`
+	Warning     string               `json:"warning,omitempty"`
 }
 
 // ========== 認證 ==========

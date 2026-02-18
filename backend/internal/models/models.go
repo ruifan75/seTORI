@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 // Singer 演唱者/VTuber
@@ -66,8 +67,9 @@ type Performance struct {
 	StartSeconds  int           `json:"start_seconds"`
 	EndSeconds    int           `json:"end_seconds"`
 	OrderIndex    int           `json:"order_index"`
-	HolodexSongID uuid.NullUUID `json:"holodex_song_id"`
-	CreatedAt     time.Time     `json:"created_at"`
+	HolodexSongID uuid.NullUUID   `json:"holodex_song_id"`
+	CustomTags    pq.StringArray `json:"custom_tags"`
+	CreatedAt     time.Time      `json:"created_at"`
 }
 
 // PerformanceTag 演出版本標籤

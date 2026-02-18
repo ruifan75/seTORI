@@ -34,7 +34,7 @@ type PerformanceWithDetails struct {
 func (r *PerformanceRepository) FindByStreamID(streamID string) ([]PerformanceWithDetails, error) {
 	query := `
 		SELECT p.id, p.stream_id, p.song_id, p.start_seconds, p.end_seconds, p.order_index,
-		       p.holodex_song_id, p.created_at,
+		       p.holodex_song_id, p.custom_tags, p.created_at,
 		       s.name AS song_name, s.original_artist, s.arts
 		FROM performances p
 		JOIN songs s ON p.song_id = s.id
@@ -51,7 +51,7 @@ func (r *PerformanceRepository) FindByStreamID(streamID string) ([]PerformanceWi
 	for rows.Next() {
 		var p PerformanceWithDetails
 		err := rows.Scan(&p.ID, &p.StreamID, &p.SongID, &p.StartSeconds, &p.EndSeconds,
-			&p.OrderIndex, &p.HolodexSongID, &p.CreatedAt, &p.SongName, &p.OriginalArtist, &p.Arts)
+			&p.OrderIndex, &p.HolodexSongID, &p.CustomTags, &p.CreatedAt, &p.SongName, &p.OriginalArtist, &p.Arts)
 		if err != nil {
 			return nil, fmt.Errorf("scan performance: %w", err)
 		}
@@ -92,7 +92,7 @@ func (r *PerformanceRepository) FindBySongID(songID uuid.UUID, limit, offset int
 
 	query := `
 		SELECT p.id, p.stream_id, p.song_id, p.start_seconds, p.end_seconds, p.order_index,
-		       p.holodex_song_id, p.created_at,
+		       p.holodex_song_id, p.custom_tags, p.created_at,
 		       st.title AS stream_title, st.stream_date, st.thumbnail_url
 		FROM performances p
 		JOIN streams st ON p.stream_id = st.id
@@ -110,7 +110,7 @@ func (r *PerformanceRepository) FindBySongID(songID uuid.UUID, limit, offset int
 	for rows.Next() {
 		var p PerformanceWithDetails
 		err := rows.Scan(&p.ID, &p.StreamID, &p.SongID, &p.StartSeconds, &p.EndSeconds,
-			&p.OrderIndex, &p.HolodexSongID, &p.CreatedAt,
+			&p.OrderIndex, &p.HolodexSongID, &p.CustomTags, &p.CreatedAt,
 			&p.StreamTitle, &p.StreamDate, &p.ThumbnailURL)
 		if err != nil {
 			return nil, 0, fmt.Errorf("scan performance: %w", err)
@@ -140,12 +140,12 @@ func (r *PerformanceRepository) FindBySongID(songID uuid.UUID, limit, offset int
 func (r *PerformanceRepository) Create(p *models.Performance) error {
 	p.ID = uuid.New()
 	query := `
-		INSERT INTO performances (id, stream_id, song_id, start_seconds, end_seconds, order_index, holodex_song_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO performances (id, stream_id, song_id, start_seconds, end_seconds, order_index, holodex_song_id, custom_tags)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		RETURNING created_at`
 
 	err := r.db.QueryRow(query, p.ID, p.StreamID, p.SongID, p.StartSeconds, p.EndSeconds,
-		p.OrderIndex, p.HolodexSongID).Scan(&p.CreatedAt)
+		p.OrderIndex, p.HolodexSongID, p.CustomTags).Scan(&p.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("create performance: %w", err)
 	}
@@ -364,7 +364,7 @@ func (r *PerformanceRepository) FindBySingerID(singerID string, limit, offset in
 
 	query := `
 		SELECT p.id, p.stream_id, p.song_id, p.start_seconds, p.end_seconds, p.order_index,
-		       p.holodex_song_id, p.created_at,
+		       p.holodex_song_id, p.custom_tags, p.created_at,
 		       st.title AS stream_title, st.stream_date, st.thumbnail_url,
 		       s.name AS song_name, s.original_artist
 		FROM performances p
@@ -385,7 +385,7 @@ func (r *PerformanceRepository) FindBySingerID(singerID string, limit, offset in
 	for rows.Next() {
 		var p PerformanceWithDetails
 		err := rows.Scan(&p.ID, &p.StreamID, &p.SongID, &p.StartSeconds, &p.EndSeconds,
-			&p.OrderIndex, &p.HolodexSongID, &p.CreatedAt,
+			&p.OrderIndex, &p.HolodexSongID, &p.CustomTags, &p.CreatedAt,
 			&p.StreamTitle, &p.StreamDate, &p.ThumbnailURL,
 			&p.SongName, &p.OriginalArtist)
 		if err != nil {

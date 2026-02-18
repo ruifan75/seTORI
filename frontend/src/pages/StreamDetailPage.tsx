@@ -41,9 +41,11 @@ interface EditableSong {
   aiNormalizedName?: string; // AI 修改前的名稱（如果有被 AI 修改）
   aiNormalizedArtist?: string; // AI 修改前的藝人（如果有被 AI 修改）
   // 時間估計標記
-  isEndTimeEstimated?: boolean; // 結束時間是否為估計值
+  isEndTimeEstimated?: boolean; // 結束時間是否為估計値
   // 合併追蹤
   mergedFrom?: string[]; // AI 正規化後被合併的原始曲名
+  // 自由文字 tag
+  customTags: string[];
 }
 
 // AI 正規化後合併重複歌曲
@@ -720,64 +722,64 @@ export default function StreamDetailPage() {
     onSuccess: async (data) => {
       // AI 結果を反映
       const updated: EditableSong[] = [...editableSongs];
-      
-      await Promise.all(
-        data.suggestions.map(async (suggestion) => {
-          if (suggestion.index >= updated.length) return;
-          const current = updated[suggestion.index];
-          // 檢查是否有被 AI 修改
-          const nameChanged = current.name !== suggestion.normalized_name;
-          const artistChanged = current.artist !== suggestion.original_artist;
-          
-          let artUrl = current.artUrl;
-          let itunesId = current.itunesId ?? null;
-          let trackDuration = current.trackDuration ?? null;
-          
-          if (suggestion.matched_song_id) {
-            try {
-              const song = await songApi.get(suggestion.matched_song_id);
-              if (!artUrl) {
-                artUrl = song.arts || null;
-              }
-              const songItunesId = song.itunes_ids && song.itunes_ids.length > 0
-                ? Number(song.itunes_ids[0].itunes_id)
-                : null;
-              if (songItunesId) {
-                itunesId = songItunesId;
-                trackDuration = await fetchTrackDurationByItunesId(songItunesId);
-              }
-            } catch (err) {
-              // 忽略錯誤，使用原有的 artUrl / itunesId / trackDuration
-            }
-          }
-          
-          updated[suggestion.index] = {
-            ...current,
-            name: suggestion.normalized_name,
-            nameReading: suggestion.normalized_name_reading,
-            artist: suggestion.original_artist,
-            artistReading: suggestion.original_artist_reading,
-            tags: suggestion.tags,
-            matchedSongId: suggestion.matched_song_id || null,
-            artUrl,
-            itunesId,
-            trackDuration,
-            // 保留 AI 修改前的值
-            aiNormalizedName: nameChanged ? current.name : undefined,
-            aiNormalizedArtist: artistChanged ? current.artist : undefined,
-            // 更新原始值以追蹤後續變更
-            originalName: suggestion.normalized_name,
-            originalArtist: suggestion.original_artist,
-          };
-        })
-      );
+
+      // 先同步處理所有建議（不再需要逐首 API 呼叫）
+      for (const suggestion of data.suggestions) {
+        if (suggestion.index >= updated.length) continue;
+        const current = updated[suggestion.index];
+
+        // DB に既存歌曲がある場合はその情報を使用、なければ AI 結果を使用
+        const hasMatch = !!suggestion.matched_song_id;
+        const finalName = hasMatch && suggestion.matched_song_name
+          ? suggestion.matched_song_name : suggestion.normalized_name;
+        const finalNameReading = hasMatch && suggestion.matched_song_name_reading != null
+          ? suggestion.matched_song_name_reading : suggestion.normalized_name_reading;
+        const finalArtist = hasMatch && suggestion.matched_song_artist
+          ? suggestion.matched_song_artist : suggestion.original_artist;
+        const finalArtistReading = hasMatch && suggestion.matched_song_artist_reading != null
+          ? suggestion.matched_song_artist_reading : suggestion.original_artist_reading;
+        const artUrl = (hasMatch ? suggestion.matched_song_art_url : null) || current.artUrl;
+        const itunesId = suggestion.matched_song_itunes_id || current.itunesId || null;
+
+        // iTunes ID が取得できた場合、トラック長を取得
+        let trackDuration = current.trackDuration;
+        if (itunesId && itunesId !== current.itunesId) {
+          trackDuration = await fetchTrackDurationByItunesId(itunesId);
+        }
+
+        const nameChanged = current.name !== finalName;
+        const artistChanged = current.artist !== finalArtist;
+
+        updated[suggestion.index] = {
+          ...current,
+          name: finalName,
+          nameReading: finalNameReading,
+          artist: finalArtist,
+          artistReading: finalArtistReading,
+          tags: suggestion.tags,
+          matchedSongId: suggestion.matched_song_id || null,
+          artUrl,
+          itunesId,
+          trackDuration,
+          // 保留正規化前の値
+          aiNormalizedName: nameChanged ? current.name : undefined,
+          aiNormalizedArtist: artistChanged ? current.artist : undefined,
+          // 更新原始值以追蹤後續變更
+          originalName: finalName,
+          originalArtist: finalArtist,
+        };
+      }
       
       // 合併正規化後名稱相同的重複歌曲
       const merged = mergeDuplicateSongs(updated);
       const mergedCount = updated.length - merged.length;
       setEditableSongs(merged);
       const mergeMsg = mergedCount > 0 ? `（${mergedCount}曲の重複をマージ）` : '';
-      showToast(`${data.suggestions.length}曲のAI正規化が完了しました${mergeMsg}`, 'success');
+      if (data.warning) {
+        showToast(data.warning + mergeMsg, 'error');
+      } else {
+        showToast(`${data.suggestions.length}曲のAI正規化が完了しました${mergeMsg}`, 'success');
+      }
     },
     onError: (err: Error) => {
       showToast(`AI正規化エラー: ${err.message}`, 'error');
@@ -849,6 +851,7 @@ export default function StreamDetailPage() {
       aiNormalizedName: undefined,
       aiNormalizedArtist: undefined,
       isEndTimeEstimated: false,
+      customTags: [],
     }));
     setEditableSongs(songs);
     showToast(`Holodexから${songs.length}曲を読み込みました`, 'success');
@@ -884,6 +887,7 @@ export default function StreamDetailPage() {
         aiNormalizedName: undefined,
         aiNormalizedArtist: undefined,
         isEndTimeEstimated: song.is_end_time_estimated,
+        customTags: [],
       }));
       setEditableSongs(songs);
       showToast(`コメントから${songs.length}曲を読み込みました`, 'success');
@@ -953,6 +957,7 @@ export default function StreamDetailPage() {
             aiNormalizedName: undefined,
             aiNormalizedArtist: undefined,
             isEndTimeEstimated: false,
+            customTags: perf.custom_tags || [],
           }));
           setEditableSongs(songs);
         }
@@ -967,6 +972,7 @@ export default function StreamDetailPage() {
       name: song.name,
       original_artist: song.artist,
       art_url: song.artUrl || undefined,
+      itunes_id: song.itunesId || undefined,
     }));
     aiNormalizeMutation.mutate(items);
   };
@@ -1087,6 +1093,7 @@ export default function StreamDetailPage() {
         trackDuration: null,
         originalName: '',
         originalArtist: '',
+        customTags: [],
       },
     ]);
   };
@@ -1111,6 +1118,7 @@ export default function StreamDetailPage() {
       trackDuration: null,
       originalName: item.label,
       originalArtist: item.artist,
+      customTags: [],
     };
     setEditableSongs(prev => {
       const updated = [...prev, newSong].sort((a, b) => a.start - b.start);
@@ -1164,6 +1172,16 @@ export default function StreamDetailPage() {
       return;
     }
 
+    // 終了時間のバリデーション
+    const missingEndTime = editableSongs.filter(s => s.end === 0);
+    if (missingEndTime.length > 0) {
+      showToast(`終了時間が未設定の曲が${missingEndTime.length}件あります`, 'error');
+      // 最初の未設定曲にスクロール
+      const firstMissing = missingEndTime[0];
+      document.getElementById(`song-${firstMissing.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+
     // 更新 setlist
     const performances: CreatePerformanceItem[] = editableSongs.map((song) => ({
       name: song.name,
@@ -1176,6 +1194,7 @@ export default function StreamDetailPage() {
       singer_ids: song.singerIds,
       art_url: song.artUrl || undefined,
       itunes_id: song.itunesId || undefined,
+      custom_tags: song.customTags.length > 0 ? song.customTags : undefined,
     }));
     createPerformancesMutation.mutate(performances);
   };
@@ -1831,7 +1850,7 @@ export default function StreamDetailPage() {
                       {/* End Time */}
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">
-                          終了時間 <span className="text-gray-400">(任意)</span>
+                          終了時間 <span className="text-red-500">*</span>
                         </label>
                         <div className="flex gap-2">
                           <input
@@ -1846,7 +1865,7 @@ export default function StreamDetailPage() {
                               }
                             }}
                             className={`w-32 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent font-mono ${
-                              song.isEndTimeEstimated ? 'border-orange-300 bg-orange-50' : 'border-gray-300'
+                              song.end === 0 ? 'border-red-400 bg-red-50' : song.isEndTimeEstimated ? 'border-orange-300 bg-orange-50' : 'border-gray-300'
                             }`}
                             placeholder={song.end === 0 ? "歌曲長度ボタンで自動設定" : "0:00"}
                           />
@@ -1909,11 +1928,11 @@ export default function StreamDetailPage() {
                         </div>
                         {/* 沒有結束時間的提示 */}
                         {song.end === 0 && (
-                          <div className="mt-1 flex items-center gap-1 text-xs text-gray-500">
+                          <div className="mt-1 flex items-center gap-1 text-xs text-red-500">
                             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
                               <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
                             </svg>
-                            <span>未設定 - 右の+ボタンで自動設定</span>
+                            <span>終了時間は必須です</span>
                           </div>
                         )}
                         {/* 估計時間警告 */}
@@ -1948,6 +1967,47 @@ export default function StreamDetailPage() {
                             {tag.label}
                           </button>
                         ))}
+                        {/* Custom tags */}
+                        {song.customTags.map((ct) => (
+                          <span
+                            key={ct}
+                            className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-medium bg-gray-500 text-white"
+                          >
+                            {ct}
+                            <button
+                              onClick={() => {
+                                setEditableSongs((prev) => {
+                                  const updated = [...prev];
+                                  updated[index] = { ...updated[index], customTags: updated[index].customTags.filter((t) => t !== ct) };
+                                  return updated;
+                                });
+                              }}
+                              className="hover:text-red-200 ml-0.5"
+                            >
+                              ×
+                            </button>
+                          </span>
+                        ))}
+                        {/* Custom tag input */}
+                        <input
+                          type="text"
+                          placeholder="+ カスタムタグ"
+                          className="px-3 py-1 rounded-full text-sm border border-dashed border-gray-300 bg-transparent text-gray-500 focus:border-gray-500 focus:outline-none w-32"
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              const value = e.currentTarget.value.trim();
+                              if (value && !song.customTags.includes(value)) {
+                                setEditableSongs((prev) => {
+                                  const updated = [...prev];
+                                  updated[index] = { ...updated[index], customTags: [...updated[index].customTags, value] };
+                                  return updated;
+                                });
+                                e.currentTarget.value = '';
+                              }
+                              e.preventDefault();
+                            }
+                          }}
+                        />
                       </div>
                     </div>
 
@@ -2128,6 +2188,9 @@ export default function StreamDetailPage() {
                           <div className="flex flex-wrap gap-1">
                             {perf.tags.map((tag) => (
                               <Tag key={tag.id} label={tag.display_name} color={tag.color} />
+                            ))}
+                            {perf.custom_tags?.map((ct) => (
+                              <Tag key={ct} label={ct} color="#6B7280" />
                             ))}
                           </div>
                         </td>

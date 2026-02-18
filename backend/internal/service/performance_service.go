@@ -80,6 +80,7 @@ func (s *PerformanceService) CreatePerformances(streamID string, items []dto.Cre
 			StartSeconds: item.StartSeconds,
 			EndSeconds:   item.EndSeconds,
 			OrderIndex:   0, // 不再使用，改用 start_seconds 排序
+			CustomTags:   item.CustomTags,
 		}
 
 		if err := s.perfRepo.Create(perf); err != nil {

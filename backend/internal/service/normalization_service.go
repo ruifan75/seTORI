@@ -3,25 +3,30 @@ package service
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/ruifan75/setori/internal/dto"
+	"github.com/ruifan75/setori/internal/models"
 	"github.com/ruifan75/setori/internal/repository"
 	"github.com/ruifan75/setori/pkg/ai"
 )
 
 type NormalizationService struct {
-	aiClient *ai.Client
-	songRepo *repository.SongRepository
+	aiClient       *ai.Client
+	songRepo       *repository.SongRepository
+	songItunesRepo *repository.SongItunesRepository
 }
 
 func NewNormalizationService(
 	groqAPIKey string,
 	songRepo *repository.SongRepository,
+	songItunesRepo *repository.SongItunesRepository,
 ) *NormalizationService {
 	return &NormalizationService{
-		aiClient: ai.NewClient(groqAPIKey),
-		songRepo: songRepo,
+		aiClient:       ai.NewClient(groqAPIKey),
+		songRepo:       songRepo,
+		songItunesRepo: songItunesRepo,
 	}
 }
 
@@ -82,37 +87,31 @@ func (s *NormalizationService) BatchAINormalization(items []dto.AINormalizationI
 	userMessage := s.buildBatchMessage(items)
 
 	// 一次呼叫 AI 處理所有歌曲
+	var warning string
+	var suggestionMap map[int]BatchAISuggestion
+
 	response, err := s.aiClient.SimpleChat(batchSystemPrompt, userMessage)
 	if err != nil {
-		return nil, fmt.Errorf("AI batch chat: %w", err)
-	}
-
-	// 解析批量回應
-	batchSuggestions, err := s.parseBatchAIResponse(response)
-	if err != nil {
-		// 解析失敗時，返回原始資料
-		suggestions := make([]dto.AISuggestionResult, len(items))
-		for i, item := range items {
-			suggestions[i] = dto.AISuggestionResult{
-				Index:                 i,
-				NormalizedName:        item.Name,
-				NormalizedNameReading: "",
-				OriginalArtist:        item.OriginalArtist,
-				OriginalArtistReading: "",
-				Tags:                  []string{},
-				Confidence:            0,
-				Reasoning:             fmt.Sprintf("AI解析失敗: %v", err),
+		// AI 呼叫失敗，記錄警告但繼續執行 DB 配對
+		log.Printf("[WARN] AI batch chat failed: %v", err)
+		warning = fmt.Sprintf("AI正規化に失敗しました（%v）。DB照合のみ実行しました。", err)
+		suggestionMap = make(map[int]BatchAISuggestion)
+	} else {
+		// 解析批量回應
+		batchSuggestions, parseErr := s.parseBatchAIResponse(response)
+		if parseErr != nil {
+			log.Printf("[WARN] AI response parse failed: %v", parseErr)
+			warning = "AI応答の解析に失敗しました。DB照合のみ実行しました。"
+			suggestionMap = make(map[int]BatchAISuggestion)
+		} else {
+			suggestionMap = make(map[int]BatchAISuggestion)
+			for _, s := range batchSuggestions {
+				suggestionMap[s.Index] = s
 			}
 		}
-		return &dto.BatchAINormalizationResponse{Suggestions: suggestions}, nil
 	}
 
-	// 將 AI 回應轉換為結果，並填補缺失的項目
-	suggestionMap := make(map[int]BatchAISuggestion)
-	for _, s := range batchSuggestions {
-		suggestionMap[s.Index] = s
-	}
-
+	// 將 AI 回應轉換為結果，並填補缺失的項目（AI 失敗時全部使用原始資料）
 	suggestions := make([]dto.AISuggestionResult, len(items))
 	for i, item := range items {
 		if aiSugg, ok := suggestionMap[i]; ok {
@@ -127,14 +126,10 @@ func (s *NormalizationService) BatchAINormalization(items []dto.AINormalizationI
 				Reasoning:             "",
 			}
 
-			// 嘗試配對現有歌曲
-			matchedSong, err := s.songRepo.FindByNameAndArtist(aiSugg.NormalizedName, aiSugg.OriginalArtist)
-			if err == nil && matchedSong != nil {
-				songID := matchedSong.ID.String()
-				suggestions[i].MatchedSongID = &songID
-			}
+			// 嘗試配對現有歌曲：iTunes ID 優先 → 歌名 + 藝人
+			s.matchAndPopulateSong(&suggestions[i], &item, aiSugg.NormalizedName, aiSugg.OriginalArtist)
 		} else {
-			// AI 沒有返回此項目，使用原始資料
+			// AI 沒有返回此項目或 AI 失敗，使用原始資料
 			suggestions[i] = dto.AISuggestionResult{
 				Index:                 i,
 				NormalizedName:        item.Name,
@@ -143,19 +138,15 @@ func (s *NormalizationService) BatchAINormalization(items []dto.AINormalizationI
 				OriginalArtistReading: "",
 				Tags:                  []string{},
 				Confidence:            0,
-				Reasoning:             "AI未返回此項目",
+				Reasoning:             "",
 			}
 
-			// 也嘗試用原始名稱配對
-			matchedSong, err := s.songRepo.FindByNameAndArtist(item.Name, item.OriginalArtist)
-			if err == nil && matchedSong != nil {
-				songID := matchedSong.ID.String()
-				suggestions[i].MatchedSongID = &songID
-			}
+			// 仍然嘗試 DB 配對
+			s.matchAndPopulateSong(&suggestions[i], &item, item.Name, item.OriginalArtist)
 		}
 	}
 
-	return &dto.BatchAINormalizationResponse{Suggestions: suggestions}, nil
+	return &dto.BatchAINormalizationResponse{Suggestions: suggestions, Warning: warning}, nil
 }
 
 // buildBatchMessage 構建包含所有歌曲的批量訊息
@@ -173,6 +164,67 @@ func (s *NormalizationService) buildBatchMessage(items []dto.AINormalizationItem
 	}
 
 	return sb.String()
+}
+
+// matchAndPopulateSong 嘗試匹配 DB 歌曲並填入資訊
+// 優先順序：iTunes ID → 歌名 + 藝人
+func (s *NormalizationService) matchAndPopulateSong(result *dto.AISuggestionResult, item *dto.AINormalizationItem, normalizedName, normalizedArtist string) {
+	var matchedSong *models.Song
+	var matchReason string
+
+	// 1. 優先使用 iTunes ID 配對
+	if item.ItunesID != nil && *item.ItunesID > 0 {
+		song, err := s.songRepo.FindByItunesID(*item.ItunesID)
+		if err == nil && song != nil {
+			matchedSong = song
+			matchReason = "itunes_id"
+		}
+	}
+
+	// 2. 使用歌名 + 藝人配對
+	if matchedSong == nil {
+		song, err := s.songRepo.FindByNameAndArtist(normalizedName, normalizedArtist)
+		if err == nil && song != nil {
+			matchedSong = song
+			matchReason = "name"
+		}
+	}
+
+	if matchedSong == nil {
+		return
+	}
+
+	// 填入匹配結果
+	songID := matchedSong.ID.String()
+	result.MatchedSongID = &songID
+	result.MatchReason = matchReason
+	result.MatchedSongName = &matchedSong.Name
+	result.MatchedSongArtist = &matchedSong.OriginalArtist
+	if matchedSong.NameReading.Valid {
+		result.MatchedSongNameReading = &matchedSong.NameReading.String
+	}
+	if matchedSong.OriginalArtistReading.Valid {
+		result.MatchedSongArtistReading = &matchedSong.OriginalArtistReading.String
+	}
+	if matchedSong.Arts.Valid {
+		result.MatchedSongArtURL = &matchedSong.Arts.String
+	}
+
+	// 取得 primary iTunes ID
+	if s.songItunesRepo != nil {
+		itunesRecords, err := s.songItunesRepo.FindBySongID(matchedSong.ID)
+		if err == nil && len(itunesRecords) > 0 {
+			for _, record := range itunesRecords {
+				if record.IsPrimary {
+					result.MatchedSongItunesID = &record.ITunesID
+					break
+				}
+			}
+			if result.MatchedSongItunesID == nil {
+				result.MatchedSongItunesID = &itunesRecords[0].ITunesID
+			}
+		}
+	}
 }
 
 // parseBatchAIResponse 解析批量 AI 回應

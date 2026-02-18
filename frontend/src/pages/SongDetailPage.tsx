@@ -935,10 +935,13 @@ export default function SongDetailPage() {
                       </div>
 
                       {/* Tags */}
-                      {perf.tags.length > 0 && (
+                      {(perf.tags.length > 0 || (perf.custom_tags && perf.custom_tags.length > 0)) && (
                         <div className="flex flex-wrap gap-1.5 mt-3">
                           {perf.tags.map((tag) => (
                             <Tag key={tag.id} label={tag.display_name} color={tag.color} />
+                          ))}
+                          {perf.custom_tags?.map((ct) => (
+                            <Tag key={ct} label={ct} color="#6B7280" />
                           ))}
                         </div>
                       )}

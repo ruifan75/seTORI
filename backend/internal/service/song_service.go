@@ -332,6 +332,13 @@ func (s *SongService) toSongPerformanceResponse(perf repository.PerformanceWithD
 		}
 	}
 
+	// Custom tags
+	if len(perf.CustomTags) > 0 {
+		resp.CustomTags = []string(perf.CustomTags)
+	} else {
+		resp.CustomTags = []string{}
+	}
+
 	// 轉換演唱者
 	resp.Singers = make([]dto.SingerResponse, len(perf.Singers))
 	for i, singer := range perf.Singers {

@@ -182,6 +182,7 @@ export interface Performance {
   end_seconds: number;
   order_index: number;
   tags: PerformanceTag[];
+  custom_tags: string[];
   singers: Singer[];
   youtube_url: string;
   created_at: string;
@@ -203,6 +204,7 @@ export interface SongPerformance {
   start_seconds: number;
   end_seconds: number;
   tags: PerformanceTag[];
+  custom_tags: string[];
   singers: Singer[];
   youtube_url: string;
   created_at: string;
@@ -281,6 +283,7 @@ export interface CreatePerformanceItem {
   singer_ids: string[];
   art_url?: string;
   itunes_id?: number; // Holodex 提供的 iTunes ID
+  custom_tags?: string[];
 }
 
 export interface CreatePerformancesRequest {
@@ -297,6 +300,7 @@ export interface AINormalizationItem {
   name: string;
   original_artist: string;
   art_url?: string;
+  itunes_id?: number;
 }
 
 export interface BatchAINormalizationRequest {
@@ -313,10 +317,18 @@ export interface AISuggestionResult {
   confidence: number;
   reasoning: string;
   matched_song_id?: string;
+  match_reason?: string;
+  matched_song_name?: string;
+  matched_song_name_reading?: string;
+  matched_song_artist?: string;
+  matched_song_artist_reading?: string;
+  matched_song_art_url?: string;
+  matched_song_itunes_id?: number;
 }
 
 export interface BatchAINormalizationResponse {
   suggestions: AISuggestionResult[];
+  warning?: string;
 }
 
 // ========== フィルターキーワード ==========
