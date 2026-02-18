@@ -1315,6 +1315,12 @@ export default function StreamDetailPage() {
   const getTimelineLeft = (start: number) => (start / timelineDuration) * 100;
   const getTimelineWidth = (start: number, end: number) =>
     Math.max(((end - start) / timelineDuration) * 100, 0.4);
+  const getTooltipAlignClass = (startSeconds: number) => {
+    const leftPercent = getTimelineLeft(startSeconds);
+    if (leftPercent < 15) return 'left-0';
+    if (leftPercent > 85) return 'right-0';
+    return 'left-1/2 -translate-x-1/2';
+  };
 
   return (
     <>
@@ -1541,7 +1547,7 @@ export default function StreamDetailPage() {
                       width: `${getTimelineWidth(item.start, item.end)}%`,
                     }}
                   >
-                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block z-50 pointer-events-none">
+                    <div className={`absolute bottom-full ${getTooltipAlignClass(item.start)} mb-2 hidden group-hover:block z-50 pointer-events-none`}>
                       <div className="bg-gray-900 text-white text-xs rounded-lg p-2 shadow-lg whitespace-nowrap">
                         <div className="font-semibold">{item.label}</div>
                         {item.artist && <div className="text-gray-300">{item.artist}</div>}
@@ -1570,7 +1576,7 @@ export default function StreamDetailPage() {
                       width: `${getTimelineWidth(item.start, item.end)}%`,
                     }}
                   >
-                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block z-50 pointer-events-none">
+                    <div className={`absolute bottom-full ${getTooltipAlignClass(item.start)} mb-2 hidden group-hover:block z-50 pointer-events-none`}>
                       <div className="bg-gray-900 text-white text-xs rounded-lg p-2 shadow-lg whitespace-nowrap">
                         <div className="font-semibold">{item.label}</div>
                         {item.artist && <div className="text-gray-300">{item.artist}</div>}
@@ -1605,7 +1611,7 @@ export default function StreamDetailPage() {
                         width: isPoint ? undefined : `${getTimelineWidth(item.start, item.end)}%`,
                       }}
                     >
-                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block z-50 pointer-events-none">
+                      <div className={`absolute bottom-full ${getTooltipAlignClass(item.start)} mb-2 hidden group-hover:block z-50 pointer-events-none`}>
                         <div className="bg-gray-900 text-white text-xs rounded-lg p-2 shadow-lg whitespace-nowrap">
                           <div className="font-semibold">{item.label}</div>
                           {item.artist && <div className="text-gray-300">{item.artist}</div>}
