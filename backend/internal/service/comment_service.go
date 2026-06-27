@@ -8,6 +8,7 @@ import (
 	"github.com/ruifan75/setori/internal/dto"
 	"github.com/ruifan75/setori/internal/models"
 	"github.com/ruifan75/setori/internal/repository"
+	"github.com/ruifan75/setori/pkg/ai"
 	"github.com/ruifan75/setori/pkg/comment"
 )
 
@@ -15,17 +16,20 @@ type CommentService struct {
 	holodexService    *HolodexService
 	streamRepo        *repository.StreamRepository
 	filterKeywordRepo *repository.FilterKeywordRepository
+	aiClient          ai.Chatter // 留言 AI hybrid 解析用（多 provider 輪替）
 }
 
 func NewCommentService(
 	holodexService *HolodexService,
 	streamRepo *repository.StreamRepository,
 	filterKeywordRepo *repository.FilterKeywordRepository,
+	aiClient ai.Chatter,
 ) *CommentService {
 	return &CommentService{
 		holodexService:    holodexService,
 		streamRepo:        streamRepo,
 		filterKeywordRepo: filterKeywordRepo,
+		aiClient:          aiClient,
 	}
 }
 
@@ -39,20 +43,22 @@ func (s *CommentService) AnalyzeComments(videoID string) (*dto.AnalyzeCommentsRe
 
 	var parsedSongs []comment.ParsedSong
 
-	// 優先從 comment_songs 讀取
-	if stream != nil && len(stream.CommentSongs) > 0 {
-		if err := json.Unmarshal(stream.CommentSongs, &parsedSongs); err != nil {
-			parsedSongs = nil
-		}
-	}
-
-	// Fallback: 從 comment_raw 或 Holodex 解析
-	if len(parsedSongs) == 0 {
-		comments, err := s.getComments(videoID, stream)
-		if err != nil {
+	// 取得原始留言，於 edit-time 進行 AI hybrid 解析（AI 判斷歌曲行 + 正則抽取文字）；
+	// AI 不可用或失敗時自動退回純正則。
+	comments, err := s.getComments(videoID, stream)
+	if err != nil {
+		// 無法取得留言：退回已快取的 comment_songs（正則結果），否則回報錯誤
+		if stream != nil && len(stream.CommentSongs) > 0 {
+			_ = json.Unmarshal(stream.CommentSongs, &parsedSongs)
+		} else {
 			return nil, err
 		}
-		parsedSongs = comment.ParseComments(comments)
+	} else {
+		parsedSongs = s.parseComments(comments)
+		// AI/正則都解析不出歌曲時，退回已快取的 comment_songs
+		if len(parsedSongs) == 0 && stream != nil && len(stream.CommentSongs) > 0 {
+			_ = json.Unmarshal(stream.CommentSongs, &parsedSongs)
+		}
 	}
 
 	// 從 DB 載入 filter/keep keywords
@@ -136,6 +142,20 @@ func (s *CommentService) loadFilterKeywords() (filterKW, keepKW []string, err er
 	}
 
 	return filterKW, keepKW, nil
+}
+
+// parseComments 於 edit-time 解析留言：優先用 AI hybrid（AI 選取歌曲行 + 正則抽取文字），
+// 失敗、無歌曲或未設定 Groq key 時退回純正則。
+func (s *CommentService) parseComments(comments []string) []comment.ParsedSong {
+	if s.aiClient != nil {
+		songs, err := comment.ParseCommentsWithAI(s.aiClient, comments)
+		if err != nil {
+			log.Printf("AI comment parse failed, falling back to regex: %v", err)
+		} else if len(songs) > 0 {
+			return songs
+		}
+	}
+	return comment.ParseComments(comments)
 }
 
 // getComments 從 DB 讀取原始留言，若無則從 Holodex 抓取

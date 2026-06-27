@@ -96,6 +96,19 @@ type FilterKeyword struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// AIProvider AI provider 設定（OpenAI 相容端點）
+type AIProvider struct {
+	ID        int       `json:"id"`
+	Name      string    `json:"name"`
+	BaseURL   string    `json:"base_url"`
+	Model     string    `json:"model"`
+	APIKey    string    `json:"-"` // 不輸出 API key
+	Enabled   bool      `json:"enabled"`
+	Priority  int       `json:"priority"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 // User 使用者
 type User struct {
 	ID           uuid.UUID    `json:"id"`

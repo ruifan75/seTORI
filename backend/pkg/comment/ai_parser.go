@@ -31,9 +31,9 @@ const commentAISystemPrompt = `あなたはYouTubeコメントから歌枠のタ
 
 var aiTimestampRe = regexp.MustCompile(`(\d{1,2}:\d{2}:\d{2})|(\d{1,2}:\d{2})`)
 
-// ParseCommentsWithAI uses Groq to select and deduplicate song lines from raw comments.
+// ParseCommentsWithAI uses an LLM to select and deduplicate song lines from raw comments.
 // AI only returns line indices; actual text is extracted from original lines via regex.
-func ParseCommentsWithAI(aiClient *ai.Client, comments []string) ([]ParsedSong, error) {
+func ParseCommentsWithAI(aiClient ai.Chatter, comments []string) ([]ParsedSong, error) {
 	if aiClient == nil {
 		return nil, fmt.Errorf("ai client is nil")
 	}

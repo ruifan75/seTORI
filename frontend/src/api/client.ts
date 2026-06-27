@@ -28,6 +28,8 @@ import type {
   FilterKeyword,
   StreamTag,
   PerformanceTag,
+  AIProvider,
+  AIProviderInput,
 } from './types';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080';
@@ -307,6 +309,29 @@ export const tagApi = {
 
   deletePerformanceTag: async (id: string): Promise<void> => {
     await api.delete(`/api/performance-tags/${id}`);
+  },
+};
+
+// ========== AI Provider API ==========
+
+export const aiProviderApi = {
+  list: async (): Promise<AIProvider[]> => {
+    const { data } = await api.get('/api/ai-providers');
+    return data;
+  },
+
+  create: async (input: AIProviderInput): Promise<AIProvider> => {
+    const { data } = await api.post('/api/ai-providers', input);
+    return data;
+  },
+
+  update: async (id: number, input: Partial<AIProviderInput>): Promise<AIProvider> => {
+    const { data } = await api.put(`/api/ai-providers/${id}`, input);
+    return data;
+  },
+
+  delete: async (id: number): Promise<void> => {
+    await api.delete(`/api/ai-providers/${id}`);
   },
 };
 

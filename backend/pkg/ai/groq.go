@@ -6,26 +6,59 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
-const groqBaseURL = "https://api.groq.com/openai/v1/chat/completions"
+const (
+	// 預設 Groq OpenAI 相容 base 與模型
+	groqBaseURL = "https://api.groq.com/openai/v1"
+	groqModel   = "llama-3.3-70b-versatile"
+)
 
-// Client Groq API 客戶端
+// Chatter 是 LLM 對話介面，可由單一 Client 或多 provider 輪替服務實作
+type Chatter interface {
+	SimpleChat(systemPrompt, userMessage string) (string, error)
+}
+
+// APIError 表示 LLM API 回傳的非 2xx 錯誤，帶有狀態碼供 failover 判斷
+type APIError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *APIError) Error() string {
+	return fmt.Sprintf("API error: status=%d body=%s", e.StatusCode, e.Body)
+}
+
+// Client OpenAI 相容 LLM 客戶端（Groq / Gemini / Cerebras 等）
 type Client struct {
 	apiKey     string
 	httpClient *http.Client
 	model      string
+	baseURL    string // OpenAI 相容 base，如 https://api.groq.com/openai/v1
 }
 
-// NewClient 建立新的 Groq 客戶端
+// NewClient 建立預設的 Groq 客戶端（向後相容）
 func NewClient(apiKey string) *Client {
+	return NewClientWith(groqBaseURL, groqModel, apiKey)
+}
+
+// NewClientWith 以指定 base URL 與模型建立 OpenAI 相容客戶端
+func NewClientWith(baseURL, model, apiKey string) *Client {
+	if baseURL == "" {
+		baseURL = groqBaseURL
+	}
+	if model == "" {
+		model = groqModel
+	}
 	return &Client{
 		apiKey: apiKey,
 		httpClient: &http.Client{
 			Timeout: 60 * time.Second,
 		},
-		model: "llama-3.3-70b-versatile", // 使用 Llama 3.3 70B
+		model:   model,
+		baseURL: baseURL,
 	}
 }
 
@@ -75,7 +108,8 @@ func (c *Client) Chat(messages []ChatMessage) (*ChatResponse, error) {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	req, err := http.NewRequest("POST", groqBaseURL, bytes.NewBuffer(jsonBody))
+	endpoint := strings.TrimRight(c.baseURL, "/") + "/chat/completions"
+	req, err := http.NewRequest("POST", endpoint, bytes.NewBuffer(jsonBody))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
@@ -95,7 +129,7 @@ func (c *Client) Chat(messages []ChatMessage) (*ChatResponse, error) {
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API error: status=%d body=%s", resp.StatusCode, string(body))
+		return nil, &APIError{StatusCode: resp.StatusCode, Body: string(body)}
 	}
 
 	var chatResp ChatResponse

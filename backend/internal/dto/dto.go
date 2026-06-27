@@ -410,3 +410,17 @@ type SongBrief struct {
 type ItunesSearchResponseWithSongs struct {
 	Results []ItunesSearchResultWithSong `json:"results"`
 }
+
+// ========== AI Provider ==========
+
+// AIProviderResponse AI provider 設定（不含 API key，僅回傳末四碼提示）
+type AIProviderResponse struct {
+	ID       int    `json:"id"`
+	Name     string `json:"name"`
+	BaseURL  string `json:"base_url"`
+	Model    string `json:"model"`
+	Enabled  bool   `json:"enabled"`
+	Priority int    `json:"priority"`
+	HasKey   bool   `json:"has_key"`
+	KeyHint  string `json:"key_hint,omitempty"`
+}

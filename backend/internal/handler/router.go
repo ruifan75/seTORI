@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/ruifan75/setori/internal/config"
 	"github.com/ruifan75/setori/internal/dto"
+	"github.com/ruifan75/setori/internal/models"
 	"github.com/ruifan75/setori/internal/repository"
 	"github.com/ruifan75/setori/internal/service"
 	"github.com/ruifan75/setori/pkg/itunes"
@@ -34,6 +35,7 @@ type Router struct {
 	endTimeEstimate      *service.EndTimeEstimateService
 	filterKeywordRepo    *repository.FilterKeywordRepository
 	tagRepo              *repository.TagRepository
+	aiProviderRepo       *repository.AIProviderRepository
 }
 
 // NewRouter 建立新的路由器
@@ -46,6 +48,10 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	songItunesRepo := repository.NewSongItunesRepository(db)
 	filterKeywordRepo := repository.NewFilterKeywordRepository(db)
 	tagRepo := repository.NewTagRepository(db)
+	aiProviderRepo := repository.NewAIProviderRepository(db)
+
+	// AI 服務：多 provider 輪替 + failover，未設定時退回 GROQ_API_KEY
+	aiService := service.NewAIService(aiProviderRepo, cfg.GroqAPIKey)
 
 	// 建立 services
 	songService := service.NewSongService(songRepo, perfRepo, songItunesRepo)
@@ -53,8 +59,8 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	singerService := service.NewSingerService(singerRepo, streamRepo, perfRepo)
 	holodexService := service.NewHolodexService(cfg.HolodexAPIKey, cfg.YouTubeAPIKey, cfg.GroqAPIKey, streamRepo, singerRepo, cfg.HolodexEditorToken)
 	holodexService.SetRepositoriesWithSongItunes(perfRepo, songRepo, songItunesRepo) // 為 SyncSetoriToHolodex 提供必要的 repositories
-	commentService := service.NewCommentService(holodexService, streamRepo, filterKeywordRepo)
-	normalizationService := service.NewNormalizationService(cfg.GroqAPIKey, songRepo, songItunesRepo)
+	commentService := service.NewCommentService(holodexService, streamRepo, filterKeywordRepo, aiService)
+	normalizationService := service.NewNormalizationService(aiService, songRepo, songItunesRepo)
 	performanceService := service.NewPerformanceService(perfRepo, songRepo, songItunesRepo)
 	itunesClient := itunes.NewClient()
 	endTimeEstimateService := service.NewEndTimeEstimateService(itunesClient)
@@ -73,6 +79,7 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 		performanceService:   performanceService,
 		filterKeywordRepo:    filterKeywordRepo,
 		tagRepo:              tagRepo,
+		aiProviderRepo:       aiProviderRepo,
 	}
 
 	if cfg.APIAuthToken == "" {
@@ -145,6 +152,12 @@ func (r *Router) setupRoutes() {
 
 	// AI normalization (for direct editing flow)
 	r.mux.HandleFunc("POST /api/ai/normalize", r.handleBatchAINormalization)
+
+	// AI provider 設定（管理員）
+	r.mux.HandleFunc("GET /api/ai-providers", r.handleListAIProviders)
+	r.mux.HandleFunc("POST /api/ai-providers", r.handleCreateAIProvider)
+	r.mux.HandleFunc("PUT /api/ai-providers/{id}", r.handleUpdateAIProvider)
+	r.mux.HandleFunc("DELETE /api/ai-providers/{id}", r.handleDeleteAIProvider)
 
 	// iTunes API
 	r.mux.HandleFunc("GET /api/itunes/search", r.handleItunesSearch)
@@ -1129,6 +1142,148 @@ func (r *Router) handleItunesQueryByID(w http.ResponseWriter, req *http.Request)
 	respondJSON(w, http.StatusOK, result)
 }
 
+// ========== AI Provider Handlers ==========
+
+func toAIProviderResponse(p models.AIProvider) dto.AIProviderResponse {
+	resp := dto.AIProviderResponse{
+		ID:       p.ID,
+		Name:     p.Name,
+		BaseURL:  p.BaseURL,
+		Model:    p.Model,
+		Enabled:  p.Enabled,
+		Priority: p.Priority,
+		HasKey:   p.APIKey != "",
+	}
+	if n := len(p.APIKey); n > 0 {
+		hint := p.APIKey
+		if n > 4 {
+			hint = p.APIKey[n-4:]
+		}
+		resp.KeyHint = "…" + hint
+	}
+	return resp
+}
+
+func (r *Router) handleListAIProviders(w http.ResponseWriter, req *http.Request) {
+	providers, err := r.aiProviderRepo.FindAll()
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	resp := make([]dto.AIProviderResponse, len(providers))
+	for i, p := range providers {
+		resp[i] = toAIProviderResponse(p)
+	}
+	respondJSON(w, http.StatusOK, resp)
+}
+
+func (r *Router) handleCreateAIProvider(w http.ResponseWriter, req *http.Request) {
+	var body struct {
+		Name     string `json:"name"`
+		BaseURL  string `json:"base_url"`
+		Model    string `json:"model"`
+		APIKey   string `json:"api_key"`
+		Enabled  *bool  `json:"enabled"`
+		Priority int    `json:"priority"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		respondError(w, http.StatusBadRequest, "無効なリクエスト形式")
+		return
+	}
+	if body.Name == "" || body.BaseURL == "" || body.Model == "" || body.APIKey == "" {
+		respondError(w, http.StatusBadRequest, "name, base_url, model, api_key は必須です")
+		return
+	}
+
+	enabled := true
+	if body.Enabled != nil {
+		enabled = *body.Enabled
+	}
+	p := &models.AIProvider{
+		Name:     body.Name,
+		BaseURL:  body.BaseURL,
+		Model:    body.Model,
+		APIKey:   body.APIKey,
+		Enabled:  enabled,
+		Priority: body.Priority,
+	}
+	if err := r.aiProviderRepo.Create(p); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusCreated, toAIProviderResponse(*p))
+}
+
+func (r *Router) handleUpdateAIProvider(w http.ResponseWriter, req *http.Request) {
+	id, err := strconv.Atoi(req.PathValue("id"))
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "無効なID")
+		return
+	}
+
+	existing, err := r.aiProviderRepo.FindByID(id)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if existing == nil {
+		respondError(w, http.StatusNotFound, "プロバイダーが見つかりません")
+		return
+	}
+
+	var body struct {
+		Name     *string `json:"name"`
+		BaseURL  *string `json:"base_url"`
+		Model    *string `json:"model"`
+		APIKey   *string `json:"api_key"`
+		Enabled  *bool   `json:"enabled"`
+		Priority *int    `json:"priority"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		respondError(w, http.StatusBadRequest, "無効なリクエスト形式")
+		return
+	}
+
+	if body.Name != nil {
+		existing.Name = *body.Name
+	}
+	if body.BaseURL != nil {
+		existing.BaseURL = *body.BaseURL
+	}
+	if body.Model != nil {
+		existing.Model = *body.Model
+	}
+	if body.Enabled != nil {
+		existing.Enabled = *body.Enabled
+	}
+	if body.Priority != nil {
+		existing.Priority = *body.Priority
+	}
+	// API key 只有在有提供且非空時才更新（留空表示保持原值）
+	if body.APIKey != nil && *body.APIKey != "" {
+		existing.APIKey = *body.APIKey
+	}
+
+	if err := r.aiProviderRepo.Update(existing); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, toAIProviderResponse(*existing))
+}
+
+func (r *Router) handleDeleteAIProvider(w http.ResponseWriter, req *http.Request) {
+	id, err := strconv.Atoi(req.PathValue("id"))
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "無効なID")
+		return
+	}
+	if err := r.aiProviderRepo.Delete(id); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"message": "プロバイダーを削除しました"})
+}
+
 // ========== Auth ==========
 
 // authorized 判斷請求是否通過認證。
@@ -1140,6 +1295,15 @@ func (r *Router) authorized(req *http.Request) bool {
 		return true
 	}
 
+	token := strings.TrimSpace(strings.TrimPrefix(req.Header.Get("Authorization"), "Bearer "))
+	authed := token == r.cfg.APIAuthToken
+
+	// AI provider 設定一律需要認證（含 GET）——避免外洩 provider 設定
+	if strings.HasPrefix(req.URL.Path, "/api/ai-providers") {
+		return authed
+	}
+
+	// 其餘：安全方法（GET/HEAD/OPTIONS）與 /health 維持公開
 	switch req.Method {
 	case http.MethodGet, http.MethodHead, http.MethodOptions:
 		return true
@@ -1148,8 +1312,7 @@ func (r *Router) authorized(req *http.Request) bool {
 		return true
 	}
 
-	token := strings.TrimSpace(strings.TrimPrefix(req.Header.Get("Authorization"), "Bearer "))
-	return token == r.cfg.APIAuthToken
+	return authed
 }
 
 // ========== Helper Functions ==========

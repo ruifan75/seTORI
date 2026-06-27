@@ -13,18 +13,18 @@ import (
 )
 
 type NormalizationService struct {
-	aiClient       *ai.Client
+	aiClient       ai.Chatter
 	songRepo       *repository.SongRepository
 	songItunesRepo *repository.SongItunesRepository
 }
 
 func NewNormalizationService(
-	groqAPIKey string,
+	aiClient ai.Chatter,
 	songRepo *repository.SongRepository,
 	songItunesRepo *repository.SongItunesRepository,
 ) *NormalizationService {
 	return &NormalizationService{
-		aiClient:       ai.NewClient(groqAPIKey),
+		aiClient:       aiClient,
 		songRepo:       songRepo,
 		songItunesRepo: songItunesRepo,
 	}

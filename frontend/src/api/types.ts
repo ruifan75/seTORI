@@ -340,6 +340,28 @@ export interface FilterKeyword {
   created_at: string;
 }
 
+// ========== AI Provider ==========
+
+export interface AIProvider {
+  id: number;
+  name: string;
+  base_url: string;
+  model: string;
+  enabled: boolean;
+  priority: number;
+  has_key: boolean;
+  key_hint?: string;
+}
+
+export interface AIProviderInput {
+  name: string;
+  base_url: string;
+  model: string;
+  api_key?: string;
+  enabled?: boolean;
+  priority?: number;
+}
+
 // ========== 通用回應 ==========
 
 export interface ErrorResponse {

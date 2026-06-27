@@ -31,7 +31,7 @@ seTORI 用來蒐集、辨識並管理 VTuber 歌回中演唱的每一首歌。�
 | 4 | **演唱記錄 (Performances)** | 開始/結束秒數、演唱標籤、多歌手聯動。唯一鍵 `(stream_id + song_id + start_seconds)` |
 | 5 | **Holodex 雙向同步** | 拉取頻道直播與歌單、上傳 seTORI 歌單回 Holodex、SHA256 hash 快取避免重複處理 |
 | 6 | **留言分析** | 從 YouTube/Holodex 抓留言，正則解析時間戳（HH:MM:SS / MM:SS）+ 分隔符拆解歌名/歌手 |
-| 7 | **AI 辨識與正規化** | Groq Llama 3.3 70B 批次歌名正規化、版本標籤偵測、留言行篩選 fallback |
+| 7 | **AI 辨識與正規化** | 批次歌名正規化、版本標籤偵測、留言 hybrid 解析；**支援多個 OpenAI 相容 provider（Groq/Gemini/Cerebras…）於管理介面設定、依優先序 failover**，撞到 usage limit 自動換下一家 |
 | 8 | **iTunes 整合** | 搜尋並綁定 Track ID，取得時長/專輯資訊，並用時長估算演唱結束時間 |
 
 ---
@@ -157,6 +157,8 @@ cd frontend && npm run build                          # 輸出到 dist/
 | `PORT` | — | 後端埠號，預設 `8080` |
 
 前端：`VITE_API_URL`（選填，預設 `http://localhost:8080`）、`VITE_API_TOKEN`（選填，後端啟用 `API_AUTH_TOKEN` 時用來附帶 Bearer token）。
+
+> 各外部 API（Holodex / Groq / YouTube / iTunes）的實際用途、觸發路由與上線敏感度，整理於 **[`docs/EXTERNAL_APIS.md`](./docs/EXTERNAL_APIS.md)**。
 
 ---
 
