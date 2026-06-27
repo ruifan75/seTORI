@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/ruifan75/setori/internal/models"
 	"github.com/ruifan75/setori/pkg/util"
+	"github.com/lib/pq"
 )
 
 type SongRepository struct {
@@ -190,6 +191,42 @@ func (r *SongRepository) GetPerformanceCount(songID uuid.UUID) (int, error) {
 		return 0, fmt.Errorf("get performance count: %w", err)
 	}
 	return count, nil
+}
+
+// GetPerformanceCounts 批次取得多首歌曲的演出次數（只計算非隱藏的 Stream），避免 N+1
+func (r *SongRepository) GetPerformanceCounts(songIDs []uuid.UUID) (map[uuid.UUID]int, error) {
+	counts := make(map[uuid.UUID]int, len(songIDs))
+	if len(songIDs) == 0 {
+		return counts, nil
+	}
+
+	ids := make([]string, len(songIDs))
+	for i, id := range songIDs {
+		ids[i] = id.String()
+	}
+
+	query := `
+		SELECT p.song_id, COUNT(*)
+		FROM performances p
+		JOIN streams st ON p.stream_id = st.id
+		WHERE p.song_id = ANY($1::uuid[]) AND st.is_hidden = FALSE
+		GROUP BY p.song_id`
+
+	rows, err := r.db.Query(query, pq.Array(ids))
+	if err != nil {
+		return nil, fmt.Errorf("get performance counts: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id uuid.UUID
+		var c int
+		if err := rows.Scan(&id, &c); err != nil {
+			return nil, fmt.Errorf("scan performance count: %w", err)
+		}
+		counts[id] = c
+	}
+	return counts, rows.Err()
 }
 
 // FindByItunesID 根據 iTunes ID 查詢歌曲

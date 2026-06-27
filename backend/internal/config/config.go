@@ -12,6 +12,7 @@ type Config struct {
 	YouTubeAPIKey      string
 	GroqAPIKey         string
 	JWTSecret          string
+	APIAuthToken       string
 	Environment        string
 }
 
@@ -24,7 +25,10 @@ func Load() (*Config, error) {
 		YouTubeAPIKey:      getEnv("YOUTUBE_API_KEY", ""),
 		GroqAPIKey:         getEnv("GROQ_API_KEY", ""),
 		JWTSecret:          getEnv("JWT_SECRET", "your-secret-key-change-in-production"),
-		Environment:        getEnv("ENVIRONMENT", "development"),
+		// APIAuthToken 若設定，則對寫入操作（POST/PUT/DELETE/PATCH）要求
+		// Authorization: Bearer <token>。留空則維持公開（適用本機開發）。
+		APIAuthToken: getEnv("API_AUTH_TOKEN", ""),
+		Environment:  getEnv("ENVIRONMENT", "development"),
 	}
 
 	return cfg, nil

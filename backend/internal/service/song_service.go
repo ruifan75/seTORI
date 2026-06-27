@@ -43,11 +43,24 @@ func (s *SongService) GetAll(page, limit int, search string) (*dto.SongListRespo
 		return nil, fmt.Errorf("get songs: %w", err)
 	}
 
+	// 批次取得演出次數與 iTunes 關聯，避免 N+1
+	songIDs := make([]uuid.UUID, len(songs))
+	for i, song := range songs {
+		songIDs[i] = song.ID
+	}
+	counts, err := s.songRepo.GetPerformanceCounts(songIDs)
+	if err != nil {
+		return nil, fmt.Errorf("get performance counts: %w", err)
+	}
+	itunesMap, err := s.songItunesRepo.FindBySongIDs(songIDs)
+	if err != nil {
+		return nil, fmt.Errorf("get song itunes: %w", err)
+	}
+
 	// 轉換為 DTO
 	songResponses := make([]dto.SongResponse, len(songs))
 	for i, song := range songs {
-		count, _ := s.songRepo.GetPerformanceCount(song.ID)
-		songResponses[i] = s.toSongResponse(song, count)
+		songResponses[i] = buildSongResponse(song, counts[song.ID], itunesMap[song.ID])
 	}
 
 	totalPages := (total + limit - 1) / limit
@@ -261,8 +274,17 @@ func (s *SongService) SearchSimilar(name string, limit int) ([]dto.SongResponse,
 	return responses, nil
 }
 
-// toSongResponse 轉換 Model 到 DTO
+// toSongResponse 轉換 Model 到 DTO（單筆查詢時即時抓取 iTunes 關聯）
 func (s *SongService) toSongResponse(song models.Song, count int) dto.SongResponse {
+	var itunesRecords []models.SongITunes
+	if s.songItunesRepo != nil {
+		itunesRecords, _ = s.songItunesRepo.FindBySongID(song.ID)
+	}
+	return buildSongResponse(song, count, itunesRecords)
+}
+
+// buildSongResponse 由已備妥的資料組裝 DTO（供批次列表與單筆查詢共用）
+func buildSongResponse(song models.Song, count int, itunesRecords []models.SongITunes) dto.SongResponse {
 	resp := dto.SongResponse{
 		ID:               song.ID,
 		Name:             song.Name,
@@ -282,22 +304,18 @@ func (s *SongService) toSongResponse(song models.Song, count int) dto.SongRespon
 		resp.Arts = &song.Arts.String
 	}
 
-	// 取得 iTunes IDs
-	if s.songItunesRepo != nil {
-		itunesRecords, _ := s.songItunesRepo.FindBySongID(song.ID)
-		if len(itunesRecords) > 0 {
-			resp.ItunesIDs = make([]dto.SongItunesResponse, len(itunesRecords))
-			for i, rec := range itunesRecords {
-				resp.ItunesIDs[i] = dto.SongItunesResponse{
-					ItunesID:  rec.ITunesID,
-					IsPrimary: rec.IsPrimary,
-				}
-				if rec.CollectionName.Valid {
-					resp.ItunesIDs[i].CollectionName = &rec.CollectionName.String
-				}
-				if rec.Country.Valid {
-					resp.ItunesIDs[i].Country = &rec.Country.String
-				}
+	if len(itunesRecords) > 0 {
+		resp.ItunesIDs = make([]dto.SongItunesResponse, len(itunesRecords))
+		for i, rec := range itunesRecords {
+			resp.ItunesIDs[i] = dto.SongItunesResponse{
+				ItunesID:  rec.ITunesID,
+				IsPrimary: rec.IsPrimary,
+			}
+			if rec.CollectionName.Valid {
+				resp.ItunesIDs[i].CollectionName = &rec.CollectionName.String
+			}
+			if rec.Country.Valid {
+				resp.ItunesIDs[i].Country = &rec.Country.String
 			}
 		}
 	}

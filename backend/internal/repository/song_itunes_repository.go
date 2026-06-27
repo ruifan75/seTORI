@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/ruifan75/setori/internal/models"
+	"github.com/lib/pq"
 )
 
 type SongItunesRepository struct {
@@ -63,6 +64,41 @@ func (r *SongItunesRepository) FindBySongID(songID uuid.UUID) ([]models.SongITun
 	}
 
 	return results, nil
+}
+
+// FindBySongIDs 批次取得多首歌曲的 iTunes 關聯，避免 N+1
+func (r *SongItunesRepository) FindBySongIDs(songIDs []uuid.UUID) (map[uuid.UUID][]models.SongITunes, error) {
+	result := make(map[uuid.UUID][]models.SongITunes, len(songIDs))
+	if len(songIDs) == 0 {
+		return result, nil
+	}
+
+	ids := make([]string, len(songIDs))
+	for i, id := range songIDs {
+		ids[i] = id.String()
+	}
+
+	query := `
+		SELECT id, song_id, itunes_id, collection_name, country, is_primary, created_at
+		FROM song_itunes
+		WHERE song_id = ANY($1::uuid[])
+		ORDER BY is_primary DESC, created_at ASC`
+
+	rows, err := r.db.Query(query, pq.Array(ids))
+	if err != nil {
+		return nil, fmt.Errorf("find song itunes by song ids: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var si models.SongITunes
+		if err := rows.Scan(&si.ID, &si.SongID, &si.ITunesID, &si.CollectionName,
+			&si.Country, &si.IsPrimary, &si.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan song itunes: %w", err)
+		}
+		result[si.SongID] = append(result[si.SongID], si)
+	}
+	return result, rows.Err()
 }
 
 // FindByItunesID 根據 iTunes ID 取得關聯的歌曲 ID

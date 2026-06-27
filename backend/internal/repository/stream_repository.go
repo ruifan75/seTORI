@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/ruifan75/setori/internal/models"
+	"github.com/lib/pq"
 )
 
 type StreamRepository struct {
@@ -243,6 +244,73 @@ func (r *StreamRepository) GetTags(streamID string) ([]models.StreamTag, error) 
 	}
 
 	return tags, nil
+}
+
+// GetTagsForStreams 批次取得多個歌回的標籤，避免 N+1
+func (r *StreamRepository) GetTagsForStreams(streamIDs []string) (map[string][]models.StreamTag, error) {
+	result := make(map[string][]models.StreamTag, len(streamIDs))
+	if len(streamIDs) == 0 {
+		return result, nil
+	}
+
+	query := `
+		SELECT sst.stream_id, st.id, st.display_name, st.color, st.created_at
+		FROM stream_tags st
+		JOIN stream_stream_tags sst ON st.id = sst.tag_id
+		WHERE sst.stream_id = ANY($1)`
+
+	rows, err := r.db.Query(query, pq.Array(streamIDs))
+	if err != nil {
+		return nil, fmt.Errorf("get tags for streams: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var streamID string
+		var t models.StreamTag
+		if err := rows.Scan(&streamID, &t.ID, &t.DisplayName, &t.Color, &t.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan stream tag: %w", err)
+		}
+		result[streamID] = append(result[streamID], t)
+	}
+	return result, rows.Err()
+}
+
+// GetSingersForStreams 批次取得多個歌回的參與者與頻道擁有者，避免 N+1
+func (r *StreamRepository) GetSingersForStreams(streamIDs []string) (participants map[string][]models.Singer, owners map[string]*models.Singer, err error) {
+	participants = make(map[string][]models.Singer, len(streamIDs))
+	owners = make(map[string]*models.Singer, len(streamIDs))
+	if len(streamIDs) == 0 {
+		return participants, owners, nil
+	}
+
+	query := `
+		SELECT ss.stream_id, ss.is_owner, s.id, s.name, s.english_name, s.photo_url, s.organization, s.created_at, s.updated_at
+		FROM singers s
+		JOIN stream_singers ss ON s.id = ss.singer_id
+		WHERE ss.stream_id = ANY($1)`
+
+	rows, err := r.db.Query(query, pq.Array(streamIDs))
+	if err != nil {
+		return nil, nil, fmt.Errorf("get singers for streams: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var streamID string
+		var isOwner bool
+		var sg models.Singer
+		if err := rows.Scan(&streamID, &isOwner, &sg.ID, &sg.Name, &sg.EnglishName,
+			&sg.PhotoURL, &sg.Organization, &sg.CreatedAt, &sg.UpdatedAt); err != nil {
+			return nil, nil, fmt.Errorf("scan stream singer: %w", err)
+		}
+		participants[streamID] = append(participants[streamID], sg)
+		if isOwner {
+			owner := sg
+			owners[streamID] = &owner
+		}
+	}
+	return participants, owners, rows.Err()
 }
 
 // AddTag 為歌回添加標籤

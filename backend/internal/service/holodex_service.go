@@ -733,9 +733,10 @@ func (s *HolodexService) SyncSetoriToHolodex(streamID string) (*dto.SyncHolodexR
 							errors = append(errors, fmt.Sprintf("%s: request error: %v", song.Name, err))
 							continue
 						}
-						defer resp.Body.Close()
 
+						// 在迴圈內逐一關閉，避免 defer 累積導致連線洩漏
 						body, _ := io.ReadAll(resp.Body)
+						resp.Body.Close()
 						if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 							if primaryItunesID > 0 {
 								log.Printf("✓ Synced: %s (iTunes: %d)", song.Name, primaryItunesID)

@@ -39,6 +39,15 @@ const api = axios.create({
   },
 });
 
+// 認證攔截器 - 若有設定 VITE_API_TOKEN，附帶 Bearer token（後端啟用 API_AUTH_TOKEN 時需要）
+const API_TOKEN = import.meta.env.VITE_API_TOKEN;
+if (API_TOKEN) {
+  api.interceptors.request.use((config) => {
+    config.headers.Authorization = `Bearer ${API_TOKEN}`;
+    return config;
+  });
+}
+
 // 錯誤攔截器 - 提取後端錯誤訊息
 api.interceptors.response.use(
   (response) => response,

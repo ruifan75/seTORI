@@ -25,10 +25,8 @@ func DeduplicateSongs(songs []ParsedSong) []ParsedSong {
 
 		for i := range result {
 			if isSimilar(song, result[i]) {
-				// 選擇資訊更完整的那個
-				if betterSong(song, result[i]) {
-					result[i] = song
-				}
+				// 合併兩者的資訊，取各欄位最完整的版本
+				result[i] = mergeParsedSong(result[i], song)
 				isDuplicate = true
 				break
 			}
@@ -55,26 +53,37 @@ func isSimilar(a, b ParsedSong) bool {
 	return similarity >= SimilarityThreshold
 }
 
-// betterSong 判斷 a 是否比 b 更完整
-func betterSong(a, b ParsedSong) bool {
-	// 有藝人資訊的優先
-	if a.OriginalArtist != "" && b.OriginalArtist == "" {
-		return true
-	}
-	if a.OriginalArtist == "" && b.OriginalArtist != "" {
-		return false
+// mergeParsedSong 合併兩首相似歌曲，取各欄位最完整的版本
+func mergeParsedSong(existing, incoming ParsedSong) ParsedSong {
+	merged := existing
+
+	// 藝人名：優先較完整（較長）的版本
+	if len(incoming.OriginalArtist) > len(merged.OriginalArtist) {
+		merged.OriginalArtist = incoming.OriginalArtist
 	}
 
-	// 有結束時間的優先
-	if a.End > 0 && b.End == 0 {
-		return true
-	}
-	if a.End == 0 && b.End > 0 {
-		return false
+	// 結束時間：優先「有值且非估計」的版本
+	switch {
+	case merged.End == 0 && incoming.End > 0:
+		merged.End = incoming.End
+		merged.IsEndTimeEstimated = incoming.IsEndTimeEstimated
+	case incoming.End > 0 && merged.IsEndTimeEstimated && !incoming.IsEndTimeEstimated:
+		// 既有的是估計值，incoming 是實際值 → 用實際值取代
+		merged.End = incoming.End
+		merged.IsEndTimeEstimated = false
 	}
 
-	// 歌名較長的可能更完整
-	return len(a.Name) > len(b.Name)
+	// 取較長的歌名（可能更完整）
+	if len(incoming.Name) > len(merged.Name) {
+		merged.Name = incoming.Name
+	}
+
+	// 保留原始留言（取較長的）
+	if len(incoming.OriginalComment) > len(merged.OriginalComment) {
+		merged.OriginalComment = incoming.OriginalComment
+	}
+
+	return merged
 }
 
 func abs(x int) int {

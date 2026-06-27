@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -72,6 +73,10 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 		performanceService:   performanceService,
 		filterKeywordRepo:    filterKeywordRepo,
 		tagRepo:              tagRepo,
+	}
+
+	if cfg.APIAuthToken == "" {
+		log.Printf("[WARN] API_AUTH_TOKEN 未設定：寫入 API 目前為公開。正式環境請設定此值以啟用認證")
 	}
 
 	r.setupRoutes()
@@ -157,6 +162,12 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 	if req.Method == "OPTIONS" {
 		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	// 認證 middleware：若有設定 API_AUTH_TOKEN，寫入操作需提供 Bearer token
+	if !r.authorized(req) {
+		respondError(w, http.StatusUnauthorized, "認証が必要です")
 		return
 	}
 
@@ -441,7 +452,9 @@ func (r *Router) handleGetStream(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r *Router) handleCreateStream(w http.ResponseWriter, req *http.Request) {
-	respondJSON(w, http.StatusOK, map[string]string{"message": "TODO: Create stream"})
+	// 直播只能透過 Holodex 同步建立（POST /api/sync/holodex/video/{id}），
+	// 尚未提供手動建立的入口。回傳 501 以避免讓呼叫端誤以為已建立成功。
+	respondError(w, http.StatusNotImplemented, "ストリームの手動作成は未対応です。Holodex同期を使用してください")
 }
 
 func (r *Router) handleUpdateStream(w http.ResponseWriter, req *http.Request) {
@@ -1114,6 +1127,29 @@ func (r *Router) handleItunesQueryByID(w http.ResponseWriter, req *http.Request)
 	}
 
 	respondJSON(w, http.StatusOK, result)
+}
+
+// ========== Auth ==========
+
+// authorized 判斷請求是否通過認證。
+// 規則：未設定 API_AUTH_TOKEN 時一律放行（公開）；
+// 設定後，安全方法（GET/HEAD/OPTIONS）與 /health 仍公開，
+// 其餘寫入操作需帶 Authorization: Bearer <token>。
+func (r *Router) authorized(req *http.Request) bool {
+	if r.cfg.APIAuthToken == "" {
+		return true
+	}
+
+	switch req.Method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return true
+	}
+	if req.URL.Path == "/health" {
+		return true
+	}
+
+	token := strings.TrimSpace(strings.TrimPrefix(req.Header.Get("Authorization"), "Bearer "))
+	return token == r.cfg.APIAuthToken
 }
 
 // ========== Helper Functions ==========

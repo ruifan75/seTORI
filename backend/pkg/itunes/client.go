@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"time"
 )
 
 // SearchResult iTunes 搜尋結果
@@ -63,7 +64,9 @@ type Client struct {
 // NewClient 建立新的 iTunes 客戶端
 func NewClient() *Client {
 	return &Client{
-		httpClient: &http.Client{},
+		httpClient: &http.Client{
+			Timeout: 30 * time.Second,
+		},
 	}
 }
 

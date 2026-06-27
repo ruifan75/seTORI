@@ -38,13 +38,24 @@ func (s *StreamService) GetAll(page, limit int) (*dto.StreamListResponse, error)
 		return nil, fmt.Errorf("get streams: %w", err)
 	}
 
+	// 批次取得標籤與參與者，避免 N+1
+	streamIDs := make([]string, len(streams))
+	for i, stream := range streams {
+		streamIDs[i] = stream.ID
+	}
+	tagsMap, err := s.streamRepo.GetTagsForStreams(streamIDs)
+	if err != nil {
+		return nil, fmt.Errorf("get stream tags: %w", err)
+	}
+	participantsMap, ownersMap, err := s.streamRepo.GetSingersForStreams(streamIDs)
+	if err != nil {
+		return nil, fmt.Errorf("get stream singers: %w", err)
+	}
+
 	// 轉換為 DTO
 	streamResponses := make([]dto.StreamResponse, len(streams))
 	for i, stream := range streams {
-		tags, _ := s.streamRepo.GetTags(stream.ID)
-		participants, _ := s.streamRepo.GetSingers(stream.ID)
-		channelOwner, _ := s.streamRepo.GetChannelOwner(stream.ID)
-		streamResponses[i] = s.toStreamResponse(stream, tags, participants, channelOwner)
+		streamResponses[i] = s.toStreamResponse(stream, tagsMap[stream.ID], participantsMap[stream.ID], ownersMap[stream.ID])
 	}
 
 	totalPages := (total + limit - 1) / limit
