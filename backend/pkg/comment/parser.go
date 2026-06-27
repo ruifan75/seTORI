@@ -21,9 +21,14 @@ var (
 	// 匹配時間戳格式: HH:MM:SS, H:MM:SS, MM:SS, M:SS
 	timestampRe = regexp.MustCompile(`(\d{1,2}):(\d{2}):(\d{2})|(\d{1,2}):(\d{2})`)
 
-	// 歌曲名和藝人的分隔符
-	separators = []string{" / ", " - ", "／", "　/　", " ー ", "（", " ("}
+	// 行首曲序編號樣式：[01] / (1) / （1） / 01. / 01) / 01、 / ① 等
+	leadingNumberRe = regexp.MustCompile(`^\s*(?:\[\s*\d{1,3}\s*\]|[(（]\s*\d{1,3}\s*[)）]|\d{1,3}\s*[.．、)）]|[\x{2460}-\x{2473}])\s*`)
 )
+
+// stripLeadingNumber 移除歌名前的曲序編號（如 [01]、01.、①）
+func stripLeadingNumber(s string) string {
+	return leadingNumberRe.ReplaceAllString(s, "")
+}
 
 // ParseComment 解析單行評論
 func ParseComment(line string) *ParsedSong {
@@ -111,17 +116,28 @@ func parseTimestamp(ts string) int {
 }
 
 // parseSongAndArtist 從歌曲部分提取歌名和藝人
+// 優先以斜線（/ 或 ／）切成欄位：歌名/歌手/[作品資訊]/[年份]，取前兩欄，其餘忽略。
 func parseSongAndArtist(songPart string) (name, artist string) {
-	// 嘗試各種分隔符
-	for _, sep := range separators {
+	songPart = stripLeadingNumber(strings.TrimSpace(songPart))
+
+	// 斜線分隔（半形/全形）→ 丟棄年份、作品註記等後續欄位
+	normalized := strings.ReplaceAll(songPart, "／", "/")
+	if strings.Contains(normalized, "/") {
+		fields := strings.Split(normalized, "/")
+		name = strings.TrimSpace(fields[0])
+		if len(fields) > 1 {
+			artist = strings.TrimSpace(fields[1])
+		}
+		return name, artist
+	}
+
+	// 其他分隔符（破折號、括號）
+	for _, sep := range []string{" - ", " ー ", "（", " ("} {
 		if idx := strings.Index(songPart, sep); idx != -1 {
 			name = strings.TrimSpace(songPart[:idx])
 			artist = strings.TrimSpace(songPart[idx+len(sep):])
-
-			// 如果是括號分隔，移除結尾的括號
 			artist = strings.TrimSuffix(artist, ")")
 			artist = strings.TrimSuffix(artist, "）")
-
 			return name, artist
 		}
 	}
