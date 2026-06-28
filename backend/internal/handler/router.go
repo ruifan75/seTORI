@@ -16,6 +16,7 @@ import (
 	"github.com/ruifan75/setori/internal/models"
 	"github.com/ruifan75/setori/internal/repository"
 	"github.com/ruifan75/setori/internal/service"
+	"github.com/ruifan75/setori/pkg/ai"
 	"github.com/ruifan75/setori/pkg/itunes"
 )
 
@@ -60,10 +61,10 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	singerService := service.NewSingerService(singerRepo, streamRepo, perfRepo)
 	holodexService := service.NewHolodexService(cfg.HolodexAPIKey, cfg.YouTubeAPIKey, cfg.GroqAPIKey, streamRepo, singerRepo, cfg.HolodexEditorToken)
 	holodexService.SetRepositoriesWithSongItunes(perfRepo, songRepo, songItunesRepo) // SyncSetoriToHolodex に必要な repositories を提供
-	commentService := service.NewCommentService(holodexService, streamRepo, filterKeywordRepo, aiService)
 	normalizationService := service.NewNormalizationService(aiService, songRepo, songItunesRepo)
 	chatEndService := service.NewChatEndService(streamRepo, "", "")
-	holodexService.SetChatEndService(chatEndService) // 同期時に自動で chat end を検出
+	// CommentService は分析時に正規化・拍手 end を内部で実行する（抽出→正規化→end→キャッシュ）
+	commentService := service.NewCommentService(holodexService, streamRepo, filterKeywordRepo, aiService, normalizationService, chatEndService)
 	performanceService := service.NewPerformanceService(perfRepo, songRepo, songItunesRepo)
 	itunesClient := itunes.NewClient()
 	endTimeEstimateService := service.NewEndTimeEstimateService(itunesClient)
@@ -87,7 +88,7 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	}
 
 	if cfg.APIAuthToken == "" {
-		log.Printf("[WARN] API_AUTH_TOKEN 未設定：書き込み API は現在公開。 本番環境ではこの値を設定して認証を有効にしてください")
+		log.Printf("[WARN] API_AUTH_TOKEN が未設定です：書き込み API は現在公開です。本番環境ではこの値を設定して認証を有効にしてください")
 	}
 
 	r.setupRoutes()
@@ -164,6 +165,8 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("POST /api/ai-providers", r.handleCreateAIProvider)
 	r.mux.HandleFunc("PUT /api/ai-providers/{id}", r.handleUpdateAIProvider)
 	r.mux.HandleFunc("DELETE /api/ai-providers/{id}", r.handleDeleteAIProvider)
+	r.mux.HandleFunc("GET /api/ai-providers/{id}/models", r.handleListAIProviderModels)
+	r.mux.HandleFunc("POST /api/ai-providers/models/preview", r.handlePreviewAIProviderModels)
 
 	// iTunes API
 	r.mux.HandleFunc("GET /api/itunes/search", r.handleItunesSearch)
@@ -848,7 +851,10 @@ func (r *Router) handleAnalyzeComments(w http.ResponseWriter, req *http.Request)
 		return
 	}
 
-	result, err := r.commentService.AnalyzeComments(videoID)
+	// ?force=true で快取を無視して再分析（再正規化）する
+	force := req.URL.Query().Get("force") == "true"
+
+	result, err := r.commentService.AnalyzeComments(videoID, force)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1318,6 +1324,60 @@ func (r *Router) handleDeleteAIProvider(w http.ResponseWriter, req *http.Request
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"message": "プロバイダーを削除しました"})
+}
+
+// handleListAIProviderModels プロバイダーの保存済み API key を使い、
+// OpenAI 互換 GET {base}/models を呼んで利用可能なモデル一覧を返す。
+func (r *Router) handleListAIProviderModels(w http.ResponseWriter, req *http.Request) {
+	id, err := strconv.Atoi(req.PathValue("id"))
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "無効なID")
+		return
+	}
+	p, err := r.aiProviderRepo.FindByID(id)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if p == nil {
+		respondError(w, http.StatusNotFound, "プロバイダーが見つかりません")
+		return
+	}
+	if p.APIKey == "" {
+		respondError(w, http.StatusBadRequest, "このプロバイダーには API key が設定されていません")
+		return
+	}
+
+	modelList, err := ai.ListModels(p.BaseURL, p.APIKey)
+	if err != nil {
+		// プロバイダー側のエラー（401/404 など）はそのまま 502 で伝える
+		respondError(w, http.StatusBadGateway, "モデル一覧の取得に失敗しました: "+err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"models": modelList})
+}
+
+// handlePreviewAIProviderModels 未保存の base_url + api_key で利用可能なモデルを取得する。
+// プロバイダー新規追加フォームで、保存前に model を選べるようにするため。
+func (r *Router) handlePreviewAIProviderModels(w http.ResponseWriter, req *http.Request) {
+	var body struct {
+		BaseURL string `json:"base_url"`
+		APIKey  string `json:"api_key"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		respondError(w, http.StatusBadRequest, "無効なリクエスト形式")
+		return
+	}
+	if body.BaseURL == "" || body.APIKey == "" {
+		respondError(w, http.StatusBadRequest, "base_url と api_key は必須です")
+		return
+	}
+	modelList, err := ai.ListModels(body.BaseURL, body.APIKey)
+	if err != nil {
+		respondError(w, http.StatusBadGateway, "モデル一覧の取得に失敗しました: "+err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"models": modelList})
 }
 
 // ========== Auth ==========

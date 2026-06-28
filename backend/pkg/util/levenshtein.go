@@ -1,6 +1,8 @@
 package util
 
 import (
+	"strings"
+
 	"golang.org/x/text/unicode/norm"
 )
 
@@ -95,4 +97,19 @@ func min(a, b, c int) int {
 		return b
 	}
 	return c
+}
+
+// SanitizeJSONB 清理可能導致 JSONB 寫入錯誤的值
+// 例如將 "null" 或 "[null]" 轉為 "[]" （空陣列），避免部份舊資料在 metadata update 時觸發 invalid input syntax for type json
+func SanitizeJSONB(b []byte) []byte {
+	if b == nil {
+		return nil
+	}
+	s := strings.TrimSpace(string(b))
+	switch s {
+	case "null", "[null]", "{}", "":
+		return []byte("[]")
+	default:
+		return b
+	}
 }

@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { filterKeywordApi, tagApi, aiProviderApi } from '../../api/client';
 import { useToast } from '../../components/ui/Toast';
-import type { FilterKeyword, StreamTag, PerformanceTag, AIProvider, AIProviderInput } from '../../api/types';
+import type { FilterKeyword, StreamTag, PerformanceTag, AIProvider, AIProviderInput, AIModelInfo } from '../../api/types';
 
 function KeywordSection({
   title,
@@ -207,6 +207,86 @@ const AI_PRESETS: { label: string; name: string; base_url: string; model: string
   { label: 'Ollama (本機)', name: 'Ollama', base_url: 'http://localhost:11434/v1', model: 'llama3.1' },
 ];
 
+// ModelPicker モデル選択用の ▾ ボタン + 下拉清單。
+// 開いたタイミングで fetcher を呼び、取得中はスピナーを表示する。
+function ModelPicker({ fetcher, current, onSelect, disabled, disabledTitle }: {
+  fetcher: () => Promise<AIModelInfo[]>;
+  current: string;
+  onSelect: (id: string) => void;
+  disabled?: boolean;
+  disabledTitle?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [models, setModels] = useState<AIModelInfo[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const toggle = async () => {
+    if (open) { setOpen(false); return; }
+    setOpen(true);
+    setError(null);
+    setLoading(true);
+    try {
+      setModels(await fetcher());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'モデル一覧の取得に失敗しました');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={toggle}
+        disabled={disabled}
+        title={disabled ? (disabledTitle ?? '') : '利用可能なモデルを取得'}
+        className="px-2 py-[5px] border border-l-0 border-gray-300 rounded-r text-gray-500 hover:bg-gray-50 disabled:opacity-40 disabled:hover:bg-transparent"
+      >▾</button>
+      {open && (
+        <>
+          {/* backdrop：點擊外部關閉 */}
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 top-full mt-1 z-20 w-80 max-h-72 overflow-auto bg-white border border-gray-200 rounded-lg shadow-lg py-1 text-sm">
+            {loading && (
+              <div className="flex items-center gap-2 px-3 py-2 text-gray-500">
+                <svg className="animate-spin h-4 w-4 text-indigo-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                モデルを取得中...
+              </div>
+            )}
+            {!loading && error && (
+              <div className="px-3 py-2 text-red-600 break-words">{error}</div>
+            )}
+            {!loading && !error && models.length === 0 && (
+              <div className="px-3 py-2 text-gray-400">利用可能なモデルがありません</div>
+            )}
+            {!loading && !error && models.map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => { onSelect(m.id); setOpen(false); }}
+                className={`block w-full text-left px-3 py-1.5 hover:bg-indigo-50 ${m.id === current ? 'bg-indigo-50' : ''}`}
+              >
+                <span className={`font-mono ${m.id === current ? 'text-indigo-700 font-semibold' : 'text-gray-700'}`}>{m.id}</span>
+                {(m.display_name || m.context_window) && (
+                  <span className="block text-[11px] text-gray-400 truncate">
+                    {m.display_name}
+                    {m.context_window ? `${m.display_name ? ' · ' : ''}${Math.round(m.context_window / 1000)}K ctx` : ''}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function ProviderRow({ p, idx, total, onUpdate, onDelete, onMove }: {
   p: AIProvider;
   idx: number;
@@ -216,10 +296,15 @@ function ProviderRow({ p, idx, total, onUpdate, onDelete, onMove }: {
   onMove: (idx: number, dir: -1 | 1) => void;
 }) {
   const [model, setModel] = useState(p.model);
-  const saveModel = () => {
-    const m = model.trim();
+
+  // 外部で model が更新されたら input に反映
+  useEffect(() => { setModel(p.model); }, [p.model]);
+
+  const saveModel = (value?: string) => {
+    const m = (value ?? model).trim();
     if (m && m !== p.model) onUpdate(p.id, { model: m });
   };
+
   return (
     <div className="flex items-center gap-3 px-3 py-2 border rounded-lg">
       <input
@@ -242,14 +327,23 @@ function ProviderRow({ p, idx, total, onUpdate, onDelete, onMove }: {
           {!p.enabled && <span className="text-xs text-gray-400">（無効）</span>}
         </div>
         <div className="flex items-center gap-1 text-xs text-gray-500 pl-7">
-          <input
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
-            onBlur={saveModel}
-            onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
-            title="モデルを編集（Enter / フォーカスアウトで保存）"
-            className="w-48 px-1.5 py-0.5 font-mono text-gray-700 border border-gray-200 rounded focus:ring-1 focus:ring-indigo-400 focus:border-transparent"
-          />
+          <div className="flex items-center">
+            <input
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              onBlur={() => saveModel()}
+              onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+              title="モデルを編集（Enter / フォーカスアウトで保存）"
+              className="w-48 px-1.5 py-0.5 font-mono text-gray-700 border border-gray-200 rounded-l focus:ring-1 focus:ring-indigo-400 focus:border-transparent"
+            />
+            <ModelPicker
+              fetcher={() => aiProviderApi.listModels(p.id)}
+              current={model}
+              onSelect={(id) => { setModel(id); saveModel(id); }}
+              disabled={!p.has_key}
+              disabledTitle="API キーが必要です"
+            />
+          </div>
           <span className="truncate">· {p.base_url} · key {p.key_hint ?? (p.has_key ? '****' : 'なし')}</span>
         </div>
       </div>
@@ -382,13 +476,22 @@ function AIProviderSection() {
             placeholder="名前（例: Groq）"
             className="w-36 px-3 py-1.5 text-sm border border-gray-300 rounded-lg"
           />
-          <input
-            type="text"
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
-            placeholder="モデル"
-            className="flex-1 min-w-[12rem] px-3 py-1.5 text-sm border border-gray-300 rounded-lg"
-          />
+          <div className="flex flex-1 min-w-[12rem]">
+            <input
+              type="text"
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              placeholder="モデル"
+              className="flex-1 min-w-0 px-3 py-1.5 text-sm border border-r-0 border-gray-300 rounded-l-lg"
+            />
+            <ModelPicker
+              fetcher={() => aiProviderApi.previewModels({ base_url: baseUrl.trim(), api_key: apiKey.trim() })}
+              current={model}
+              onSelect={(id) => setModel(id)}
+              disabled={!baseUrl.trim() || !apiKey.trim()}
+              disabledTitle="先に Base URL と API キーを入力してください"
+            />
+          </div>
         </div>
         <div className="flex flex-wrap gap-2">
           <input

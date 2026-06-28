@@ -859,38 +859,63 @@ export default function StreamDetailPage() {
 
   const [commentAnalyzeLoading, setCommentAnalyzeLoading] = useState(false);
 
-  const loadFromComments = async () => {
+  // force=true で快取を無視し AI 再分析（再正規化）。通常は快取済みの結果を秒読みする。
+  const loadFromComments = async (force = false) => {
     if (!id) return;
     setCommentAnalyzeLoading(true);
     try {
-      const result = await commentApi.analyze(id);
+      const result = await commentApi.analyze(id, force);
       const sortedSongs = [...result.songs].sort((a, b) => a.start - b.start);
-      // timeline は stream.comment_timeline_songs のまま（未フィルタ）を維持
 
       const defaultSingerIds = stream?.participants?.map((p) => p.id) || (channelOwner ? [channelOwner.id] : []);
-      const songs: EditableSong[] = sortedSongs.map((song, index) => ({
-        id: `comment-${index}`,
-        name: song.name,
-        nameReading: '',
-        artist: song.original_artist,
-        artistReading: '',
-        start: song.start,
-        end: song.end,
-        tags: [],
-        singerIds: defaultSingerIds,
-        matchedSongId: null,
-        artUrl: null,
-        itunesId: null,
-        trackDuration: null,
-        originalName: song.name,
-        originalArtist: song.original_artist,
-        aiNormalizedName: undefined,
-        aiNormalizedArtist: undefined,
-        isEndTimeEstimated: song.is_end_time_estimated,
-        customTags: [],
-      }));
-      setEditableSongs(songs);
-      showToast(`コメントから${songs.length}曲を読み込みました`, 'success');
+
+      // 分析時に正規化＋DB 照合が折り込まれているので、その結果をそのまま反映する
+      const songs: EditableSong[] = [];
+      for (let index = 0; index < sortedSongs.length; index++) {
+        const song = sortedSongs[index];
+        const hasMatch = !!song.matched_song_id;
+        const finalName = hasMatch && song.matched_song_name
+          ? song.matched_song_name : (song.normalized_name || song.name);
+        const finalNameReading = hasMatch && song.matched_song_name_reading != null
+          ? song.matched_song_name_reading : (song.normalized_name_reading || '');
+        const finalArtist = hasMatch && song.matched_song_artist
+          ? song.matched_song_artist : (song.normalized_artist || song.original_artist);
+        const finalArtistReading = hasMatch && song.matched_song_artist_reading != null
+          ? song.matched_song_artist_reading : (song.normalized_artist_reading || '');
+        const artUrl = (hasMatch ? song.matched_song_art_url : undefined) || null;
+        const itunesId = song.matched_song_itunes_id || null;
+        const trackDuration = itunesId ? await fetchTrackDurationByItunesId(itunesId) : null;
+        const nameChanged = finalName !== song.name;
+        const artistChanged = finalArtist !== song.original_artist;
+
+        songs.push({
+          id: `comment-${index}`,
+          name: finalName,
+          nameReading: finalNameReading,
+          artist: finalArtist,
+          artistReading: finalArtistReading,
+          start: song.start,
+          end: song.end,
+          tags: song.tags || [],
+          singerIds: defaultSingerIds,
+          matchedSongId: song.matched_song_id || null,
+          artUrl,
+          itunesId,
+          trackDuration,
+          originalName: finalName,
+          originalArtist: finalArtist,
+          aiNormalizedName: nameChanged ? song.name : undefined,
+          aiNormalizedArtist: artistChanged ? song.original_artist : undefined,
+          isEndTimeEstimated: song.is_end_time_estimated,
+          customTags: [],
+        });
+      }
+
+      const merged = mergeDuplicateSongs(songs);
+      const mergedCount = songs.length - merged.length;
+      setEditableSongs(merged);
+      const mergeMsg = mergedCount > 0 ? `（${mergedCount}曲の重複をマージ）` : '';
+      showToast(`コメントから${merged.length}曲を読み込みました${mergeMsg}`, 'success');
     } catch (error) {
       showToast('コメント分析に失敗しました', 'error');
       console.error('Comment analysis failed:', error);
@@ -1665,12 +1690,22 @@ export default function StreamDetailPage() {
                   Holodex データを読み込む
                 </button>
                 <button
-                  onClick={loadFromComments}
-                  disabled={!stream?.comment_timeline_songs?.length || commentAnalyzeLoading}
+                  onClick={() => loadFromComments(false)}
+                  disabled={!stream?.has_comment_raw || commentAnalyzeLoading}
                   className="px-3 py-1.5 text-sm bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
                 >
                   {commentAnalyzeLoading ? 'コメント分析中...' : 'コメント データを読み込む'}
                 </button>
+                {stream?.has_comment_raw && (
+                  <button
+                    onClick={() => loadFromComments(true)}
+                    disabled={commentAnalyzeLoading}
+                    title="キャッシュを無視して AI で再分析・再正規化します"
+                    className="px-3 py-1.5 text-sm bg-green-50 text-green-700 border border-green-300 font-medium rounded-lg hover:bg-green-100 transition-colors disabled:opacity-50"
+                  >
+                    再分析
+                  </button>
+                )}
                 {editableSongs.length > 0 && (
                   <button
                     onClick={runAINormalization}

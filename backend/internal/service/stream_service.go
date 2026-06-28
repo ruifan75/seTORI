@@ -212,13 +212,16 @@ func (s *StreamService) toStreamResponse(stream models.Stream, tags []models.Str
 		}
 	}
 
-	// 從 comment_songs 載入解析結果（未去重）
+	// 從 comment_songs 載入已分析的快取結果
 	if len(stream.CommentSongs) > 0 {
 		var commentSongs []dto.CommentSong
 		if err := json.Unmarshal(stream.CommentSongs, &commentSongs); err == nil && len(commentSongs) > 0 {
 			resp.CommentTimelineSongs = commentSongs
 		}
 	}
+
+	// comment_raw に留言があれば分析ボタンを有効化できる（comment_songs 未生成でも分析可能）
+	resp.HasCommentRaw = len(stream.CommentRaw) > 0 && string(stream.CommentRaw) != "null" && string(stream.CommentRaw) != "[]"
 
 	return resp
 }
@@ -321,8 +324,8 @@ func (s *StreamService) Update(id string, req *dto.UpdateStreamRequest) (*dto.St
 		stream.IsHidden = *req.IsHidden
 	}
 
-	// 更新 Stream
-	if err := s.streamRepo.Update(stream); err != nil {
+	// 更新 Stream metadata（只更新可變欄位，不重寫大型 JSONB）
+	if err := s.streamRepo.UpdateMetadata(id, stream.Title, stream.StreamDate, stream.IsProcessed, stream.IsHidden); err != nil {
 		return nil, fmt.Errorf("update stream: %w", err)
 	}
 

@@ -144,7 +144,8 @@ export interface Stream {
   is_processed: boolean;   // 処理済み
   is_hidden: boolean;      // 非表示
   holodex_timeline_songs?: SongSuggestion[];  // Holodex タイムライン データ
-  comment_timeline_songs?: CommentSong[];     // コメント解析済みタイムライン
+  comment_timeline_songs?: CommentSong[];     // コメント解析済みタイムライン（分析キャッシュ）
+  has_comment_raw?: boolean;                  // 分析可能な生コメントがあるか
   created_at: string;
   updated_at: string;
 }
@@ -244,6 +245,20 @@ export interface CommentSong {
   original_artist: string;
   original_comment: string;
   is_end_time_estimated: boolean;
+  // 分析時に折り込んだ正規化結果（あれば）
+  normalized_name?: string;
+  normalized_name_reading?: string;
+  normalized_artist?: string;
+  normalized_artist_reading?: string;
+  tags?: string[];
+  confidence?: number;
+  matched_song_id?: string;
+  matched_song_name?: string;
+  matched_song_name_reading?: string;
+  matched_song_artist?: string;
+  matched_song_artist_reading?: string;
+  matched_song_art_url?: string;
+  matched_song_itunes_id?: number;
 }
 
 export interface AnalyzeCommentsResponse {
@@ -360,6 +375,14 @@ export interface AIProviderInput {
   api_key?: string;
   enabled?: boolean;
   priority?: number;
+}
+
+// プロバイダーから取得した chat 利用可能なモデル情報
+export interface AIModelInfo {
+  id: string;
+  display_name?: string;
+  context_window?: number;
+  description?: string;
 }
 
 // ========== 汎用レスポンス ==========

@@ -30,6 +30,7 @@ import type {
   PerformanceTag,
   AIProvider,
   AIProviderInput,
+  AIModelInfo,
 } from './types';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080';
@@ -205,8 +206,8 @@ export const commentApi = {
     return data;
   },
 
-  analyze: async (videoId: string): Promise<AnalyzeCommentsResponse> => {
-    const { data } = await api.post(`/api/streams/${videoId}/comments/analyze`);
+  analyze: async (videoId: string, force = false): Promise<AnalyzeCommentsResponse> => {
+    const { data } = await api.post(`/api/streams/${videoId}/comments/analyze${force ? '?force=true' : ''}`);
     return data;
   },
 };
@@ -332,6 +333,18 @@ export const aiProviderApi = {
 
   delete: async (id: number): Promise<void> => {
     await api.delete(`/api/ai-providers/${id}`);
+  },
+
+  // 透過 provider 已儲存的 API key 查詢可用 model 清單
+  listModels: async (id: number): Promise<AIModelInfo[]> => {
+    const { data } = await api.get(`/api/ai-providers/${id}/models`);
+    return data.models ?? [];
+  },
+
+  // 用尚未儲存的 base_url + api_key 查詢可用 model（新增表單用）
+  previewModels: async (input: { base_url: string; api_key: string }): Promise<AIModelInfo[]> => {
+    const { data } = await api.post('/api/ai-providers/models/preview', input);
+    return data.models ?? [];
   },
 };
 

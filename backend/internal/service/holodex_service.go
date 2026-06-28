@@ -16,7 +16,6 @@ import (
 	"github.com/ruifan75/setori/internal/models"
 	"github.com/ruifan75/setori/internal/repository"
 	"github.com/ruifan75/setori/pkg/ai"
-	"github.com/ruifan75/setori/pkg/comment"
 	"github.com/ruifan75/setori/pkg/holodex"
 	"github.com/ruifan75/setori/pkg/itunes"
 	"github.com/ruifan75/setori/pkg/youtube"
@@ -33,12 +32,6 @@ type HolodexService struct {
 	songItunesRepo *repository.SongItunesRepository
 	editorToken    string
 	aiClient       *ai.Client
-	chatEndService *ChatEndService
-}
-
-// SetChatEndService 注入 chat 拍手結束時間偵測服務（同步時自動觸發）。
-func (s *HolodexService) SetChatEndService(c *ChatEndService) {
-	s.chatEndService = c
 }
 
 func NewHolodexService(
@@ -513,8 +506,9 @@ func (s *HolodexService) GetVideoComments(videoID string) ([]string, error) {
 	return comments, nil
 }
 
-// loadAndSaveComments 內部使用，載入並儲存原始留言和解析結果到資料庫（忽略錯誤）
-// 儲存未去重的解析結果，去重在使用者點擊載入按鈕時進行
+// loadAndSaveComments 同步時只抓取並儲存「原始留言」，準備給之後的分析使用。
+// AI 抽取／正規化／拍手 end 偵測都不在同步時跑（避免大量同步時打爆 AI/yt-dlp），
+// 改在編輯頁手動觸發分析時才執行並快取（見 CommentService.AnalyzeComments）。
 func (s *HolodexService) loadAndSaveComments(videoID string) {
 	comments, err := s.GetVideoComments(videoID)
 	if err != nil {
@@ -528,28 +522,8 @@ func (s *HolodexService) loadAndSaveComments(videoID string) {
 		return
 	}
 
-	// Regex 解析（不去重、不過濾）
-	parsed := comment.ParseComments(comments)
-	commentSongsJSON, err := json.Marshal(parsed)
-	if err != nil {
-		log.Printf("marshal comment songs error (video: %s): %v", videoID, err)
-		return
-	}
-
-	stream, err := s.streamRepo.FindByID(videoID)
-	if err != nil {
-		log.Printf("find stream error (video: %s): %v", videoID, err)
-		return
-	}
-	if stream != nil {
-		stream.CommentRaw = commentRawJSON
-		stream.CommentSongs = commentSongsJSON
-		if err := s.streamRepo.Update(stream); err != nil {
-			log.Printf("update stream comments error (video: %s): %v", videoID, err)
-		} else if s.chatEndService != nil {
-			// comment_songs 存好後，背景偵測 live chat 拍手作為各首歌的 end
-			s.chatEndService.AnalyzeStreamAsync(videoID)
-		}
+	if err := s.streamRepo.SaveCommentRaw(videoID, commentRawJSON); err != nil {
+		log.Printf("save comment raw error (video: %s): %v", videoID, err)
 	}
 }
 

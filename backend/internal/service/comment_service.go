@@ -1,6 +1,8 @@
 package service
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -10,13 +12,16 @@ import (
 	"github.com/ruifan75/setori/internal/repository"
 	"github.com/ruifan75/setori/pkg/ai"
 	"github.com/ruifan75/setori/pkg/comment"
+	"github.com/ruifan75/setori/pkg/util"
 )
 
 type CommentService struct {
-	holodexService    *HolodexService
-	streamRepo        *repository.StreamRepository
-	filterKeywordRepo *repository.FilterKeywordRepository
-	aiClient          ai.Chatter // 留言 AI hybrid 解析用（多 provider 輪替）
+	holodexService       *HolodexService
+	streamRepo           *repository.StreamRepository
+	filterKeywordRepo    *repository.FilterKeywordRepository
+	aiClient             ai.Chatter // 留言 AI hybrid 解析用（多 provider 輪替）
+	normalizationService *NormalizationService
+	chatEndService       *ChatEndService
 }
 
 func NewCommentService(
@@ -24,57 +29,65 @@ func NewCommentService(
 	streamRepo *repository.StreamRepository,
 	filterKeywordRepo *repository.FilterKeywordRepository,
 	aiClient ai.Chatter,
+	normalizationService *NormalizationService,
+	chatEndService *ChatEndService,
 ) *CommentService {
 	return &CommentService{
-		holodexService:    holodexService,
-		streamRepo:        streamRepo,
-		filterKeywordRepo: filterKeywordRepo,
-		aiClient:          aiClient,
+		holodexService:       holodexService,
+		streamRepo:           streamRepo,
+		filterKeywordRepo:    filterKeywordRepo,
+		aiClient:             aiClient,
+		normalizationService: normalizationService,
+		chatEndService:       chatEndService,
 	}
 }
 
-// AnalyzeComments 分析影片的評論並提取歌曲資訊（去重 + 過濾）
-// 優先從 comment_songs 讀取已解析結果，若無則從 comment_raw 解析
-func (s *CommentService) AnalyzeComments(videoID string) (*dto.AnalyzeCommentsResponse, error) {
+// AnalyzeComments 從留言分析歌曲：AI 抽取 → 正規化＋DB 照合 → live chat 拍手 end → 存 DB。
+// 以 comment_raw 的 hash 為快取鍵：資料沒變且非強制時，直接回傳已存的 comment_songs（不打 AI）。
+func (s *CommentService) AnalyzeComments(videoID string, force bool) (*dto.AnalyzeCommentsResponse, error) {
 	stream, err := s.streamRepo.FindByID(videoID)
 	if err != nil {
 		return nil, fmt.Errorf("find stream: %w", err)
 	}
+	if stream == nil {
+		return nil, fmt.Errorf("stream not found: %s", videoID)
+	}
 
-	var parsedSongs []comment.ParsedSong
+	rawHash := hashBytes(stream.CommentRaw)
 
-	// 取得原始留言，於 edit-time 進行 AI hybrid 解析（AI 判斷歌曲行 + 正則抽取文字）；
-	// AI 不可用或失敗時自動退回純正則。
-	comments, err := s.getComments(videoID, stream)
-	if err != nil {
-		// 無法取得留言：退回已快取的 comment_songs（正則結果），否則回報錯誤
-		if stream != nil && len(stream.CommentSongs) > 0 {
-			_ = json.Unmarshal(stream.CommentSongs, &parsedSongs)
-		} else {
-			return nil, err
-		}
-	} else {
-		parsedSongs = s.parseComments(comments)
-		// AI/正則都解析不出歌曲時，退回已快取的 comment_songs
-		if len(parsedSongs) == 0 && stream != nil && len(stream.CommentSongs) > 0 {
-			_ = json.Unmarshal(stream.CommentSongs, &parsedSongs)
+	// 快取命中：comment_songs 是用「現在這份 comment_raw」算出來的 → 直接回傳，不打 AI
+	if !force && rawHash != "" && len(stream.CommentSongs) > 0 {
+		cachedHash, _ := s.streamRepo.GetCommentSongsHash(videoID)
+		if cachedHash.Valid && cachedHash.String == rawHash {
+			var cached []dto.CommentSong
+			if err := json.Unmarshal(stream.CommentSongs, &cached); err == nil && len(cached) > 0 {
+				return &dto.AnalyzeCommentsResponse{Songs: cached}, nil
+			}
 		}
 	}
 
-	// 從 DB 載入 filter/keep keywords
+	// 1. 取得原始留言（DB 優先，否則 Holodex 抓取）
+	comments, err := s.getComments(videoID, stream)
+	if err != nil {
+		return nil, err
+	}
+
+	// 2. AI hybrid 抽取（AI 判斷歌曲行 + 逐字驗證；失敗/未設定時自動退回純正則）
+	parsedSongs := s.parseComments(comments)
+
+	// 3. 過濾 + 去重 + 驗證（先過濾避免非歌曲項目影響去重）
 	filterKW, keepKW, err := s.loadFilterKeywords()
 	if err != nil {
 		log.Printf("failed to load filter keywords, skipping filter: %v", err)
 	}
-
-	// 過濾 + 去重 + 驗證（先過濾避免非歌曲項目影響去重）
 	filteredSongs := comment.FilterSongs(parsedSongs, filterKW, keepKW)
 	deduped := comment.DeduplicateSongs(filteredSongs)
 	validSongs := comment.ValidateSongs(deduped)
 
-	songDTOs := make([]dto.CommentSong, len(validSongs))
+	// 4. 轉成 CommentSong（逐字抽取結果）
+	songs := make([]dto.CommentSong, len(validSongs))
 	for i, song := range validSongs {
-		songDTOs[i] = dto.CommentSong{
+		songs[i] = dto.CommentSong{
 			Start:              song.Start,
 			End:                song.End,
 			Name:               song.Name,
@@ -84,9 +97,71 @@ func (s *CommentService) AnalyzeComments(videoID string) (*dto.AnalyzeCommentsRe
 		}
 	}
 
-	return &dto.AnalyzeCommentsResponse{
-		Songs: songDTOs,
-	}, nil
+	// 5. 折り込んだ正規化（AI 正規化＋DB 照合し、結果を各曲に埋め込む）
+	s.normalizeInto(songs)
+
+	// 6. live chat の拍手で end を推定（start 基準でマッチ。利用不可なら据え置き）
+	if s.chatEndService != nil {
+		var duration int
+		if stream.DurationSeconds.Valid {
+			duration = int(stream.DurationSeconds.Int32)
+		}
+		songs, _ = s.chatEndService.DetectEndsForSongs(videoID, duration, songs)
+	}
+
+	// 7. 永続化（comment_songs + 來源 hash）→ 次回からはキャッシュを直接読む
+	if rawHash != "" {
+		if songsJSON, mErr := json.Marshal(songs); mErr == nil {
+			if err := s.streamRepo.SaveCommentSongs(videoID, songsJSON, rawHash); err != nil {
+				log.Printf("[comment] save comment_songs failed (%s): %v", videoID, err)
+			}
+		}
+	}
+
+	return &dto.AnalyzeCommentsResponse{Songs: songs}, nil
+}
+
+// normalizeInto 對 songs 跑 AI 正規化＋DB 照合，把結果填回每首 song（in-place）。
+func (s *CommentService) normalizeInto(songs []dto.CommentSong) {
+	if s.normalizationService == nil || len(songs) == 0 {
+		return
+	}
+	items := make([]dto.AINormalizationItem, len(songs))
+	for i, sg := range songs {
+		items[i] = dto.AINormalizationItem{Name: sg.Name, OriginalArtist: sg.OriginalArtist}
+	}
+	resp, err := s.normalizationService.BatchAINormalization(items)
+	if err != nil {
+		log.Printf("[comment] normalization failed, keeping raw extraction: %v", err)
+		return
+	}
+	for _, sug := range resp.Suggestions {
+		if sug.Index < 0 || sug.Index >= len(songs) {
+			continue
+		}
+		songs[sug.Index].NormalizedName = sug.NormalizedName
+		songs[sug.Index].NormalizedNameReading = sug.NormalizedNameReading
+		songs[sug.Index].NormalizedArtist = sug.OriginalArtist
+		songs[sug.Index].NormalizedArtistReading = sug.OriginalArtistReading
+		songs[sug.Index].Tags = sug.Tags
+		songs[sug.Index].Confidence = sug.Confidence
+		songs[sug.Index].MatchedSongID = sug.MatchedSongID
+		songs[sug.Index].MatchedSongName = sug.MatchedSongName
+		songs[sug.Index].MatchedSongNameReading = sug.MatchedSongNameReading
+		songs[sug.Index].MatchedSongArtist = sug.MatchedSongArtist
+		songs[sug.Index].MatchedSongArtistReading = sug.MatchedSongArtistReading
+		songs[sug.Index].MatchedSongArtURL = sug.MatchedSongArtURL
+		songs[sug.Index].MatchedSongItunesID = sug.MatchedSongItunesID
+	}
+}
+
+// hashBytes 計算 JSONB 內容的 sha256（空內容回傳空字串）。
+func hashBytes(b []byte) string {
+	if len(b) == 0 {
+		return ""
+	}
+	h := sha256.Sum256(b)
+	return hex.EncodeToString(h[:])
 }
 
 // BackfillCommentSongs 補填所有有 comment_raw 但沒有 comment_songs 的 stream
@@ -113,6 +188,7 @@ func (s *CommentService) BackfillCommentSongs() (int, error) {
 			log.Printf("backfill marshal error (video: %s): %v", stream.ID, err)
 			continue
 		}
+		songsJSON = util.SanitizeJSONB(songsJSON)
 
 		stream.CommentSongs = songsJSON
 		if err := s.streamRepo.Update(&stream); err != nil {

@@ -127,7 +127,8 @@ type StreamResponse struct {
 	IsProcessed          bool                `json:"is_processed"`
 	IsHidden             bool                `json:"is_hidden"`
 	HolodexTimelineSongs []SongSuggestion    `json:"holodex_timeline_songs,omitempty"` // 從 holodex_data 解析
-	CommentTimelineSongs []CommentSong       `json:"comment_timeline_songs,omitempty"` // 從 comment_songs 解析（未去重）
+	CommentTimelineSongs []CommentSong       `json:"comment_timeline_songs,omitempty"` // 從 comment_songs 解析（已分析快取）
+	HasCommentRaw        bool                `json:"has_comment_raw"`                  // comment_raw 是否有留言可供分析
 	CreatedAt            time.Time           `json:"created_at"`
 	UpdatedAt            time.Time           `json:"updated_at"`
 }
@@ -224,10 +225,26 @@ type SyncHolodexResponse struct {
 type CommentSong struct {
 	Start              int    `json:"start"`
 	End                int    `json:"end"`
-	Name               string `json:"name"`
-	OriginalArtist     string `json:"original_artist"`
+	Name               string `json:"name"`            // 抽出した歌名（逐字。正規化前）
+	OriginalArtist     string `json:"original_artist"` // 抽出した歌手（逐字。正規化前）
 	OriginalComment    string `json:"original_comment"`
 	IsEndTimeEstimated bool   `json:"is_end_time_estimated"`
+
+	// ↓ 折り込んだ正規化結果（分析時に AI 正規化＋DB 照合まで実行し、ここに保存・再利用する）
+	NormalizedName          string   `json:"normalized_name,omitempty"`
+	NormalizedNameReading   string   `json:"normalized_name_reading,omitempty"`
+	NormalizedArtist        string   `json:"normalized_artist,omitempty"`
+	NormalizedArtistReading string   `json:"normalized_artist_reading,omitempty"`
+	Tags                    []string `json:"tags,omitempty"`
+	Confidence              float64  `json:"confidence,omitempty"`
+	// DB 照合（マッチした既存曲）
+	MatchedSongID            *string `json:"matched_song_id,omitempty"`
+	MatchedSongName          *string `json:"matched_song_name,omitempty"`
+	MatchedSongNameReading   *string `json:"matched_song_name_reading,omitempty"`
+	MatchedSongArtist        *string `json:"matched_song_artist,omitempty"`
+	MatchedSongArtistReading *string `json:"matched_song_artist_reading,omitempty"`
+	MatchedSongArtURL        *string `json:"matched_song_art_url,omitempty"`
+	MatchedSongItunesID      *int64  `json:"matched_song_itunes_id,omitempty"`
 }
 
 type AnalyzeCommentsResponse struct {

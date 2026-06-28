@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/ruifan75/setori/internal/models"
+	"github.com/ruifan75/setori/pkg/util"
 	"github.com/lib/pq"
 )
 
@@ -102,8 +103,13 @@ func (r *StreamRepository) Create(s *models.Stream) error {
 	return nil
 }
 
-// Update 更新歌回
+// Update 更新歌回（完整更新，包含大型 JSONB 欄位，僅用於同步/分析流程）
 func (r *StreamRepository) Update(s *models.Stream) error {
+	// 預先清理可能導致 "invalid input syntax for type json" 的壞資料（如舊 backfill 產生的 [null]）
+	s.HolodexData = util.SanitizeJSONB(s.HolodexData)
+	s.CommentRaw = util.SanitizeJSONB(s.CommentRaw)
+	s.CommentSongs = util.SanitizeJSONB(s.CommentSongs)
+
 	query := `
 		UPDATE streams
 		SET title = $2, stream_date = $3, duration_seconds = $4, thumbnail_url = $5,
@@ -116,6 +122,23 @@ func (r *StreamRepository) Update(s *models.Stream) error {
 		Scan(&s.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("update stream: %w", err)
+	}
+	return nil
+}
+
+// UpdateMetadata 只更新可由使用者編輯的 metadata 欄位，不動大型 JSONB（holodex_data / comment_*）
+// 這樣可以避免在一般資訊更新時重寫可能有問題的 JSONB 資料
+func (r *StreamRepository) UpdateMetadata(id string, title string, streamDate time.Time, isProcessed, isHidden bool) error {
+	query := `
+		UPDATE streams
+		SET title = $2, stream_date = $3, is_processed = $4, is_hidden = $5, updated_at = NOW()
+		WHERE id = $1
+		RETURNING updated_at`
+
+	var updatedAt time.Time
+	err := r.db.QueryRow(query, id, title, streamDate, isProcessed, isHidden).Scan(&updatedAt)
+	if err != nil {
+		return fmt.Errorf("update stream metadata: %w", err)
 	}
 	return nil
 }
@@ -350,6 +373,65 @@ func (r *StreamRepository) RemoveTag(streamID, tagID string) error {
 	_, err := r.db.Exec("DELETE FROM stream_stream_tags WHERE stream_id = $1 AND tag_id = $2", streamID, tagID)
 	if err != nil {
 		return fmt.Errorf("remove stream tag: %w", err)
+	}
+	return nil
+}
+
+// ========== 分析快取（comment / holodex 正規化結果，以來源 hash 為鍵） ==========
+
+// SaveCommentRaw 只更新 comment_raw（同步時用，不動 comment_songs/其他大欄位）
+func (r *StreamRepository) SaveCommentRaw(id string, raw []byte) error {
+	raw = util.SanitizeJSONB(raw)
+	_, err := r.db.Exec(`UPDATE streams SET comment_raw = $2, updated_at = NOW() WHERE id = $1`, id, raw)
+	if err != nil {
+		return fmt.Errorf("save comment raw: %w", err)
+	}
+	return nil
+}
+
+// GetCommentSongsHash 取得 comment_songs 是從哪個 comment_raw hash 算出來的（快取有效性判斷用）
+func (r *StreamRepository) GetCommentSongsHash(id string) (sql.NullString, error) {
+	var h sql.NullString
+	err := r.db.QueryRow(`SELECT comment_songs_hash FROM streams WHERE id = $1`, id).Scan(&h)
+	if err == sql.ErrNoRows {
+		return sql.NullString{}, nil
+	}
+	if err != nil {
+		return sql.NullString{}, fmt.Errorf("get comment songs hash: %w", err)
+	}
+	return h, nil
+}
+
+// SaveCommentSongs 寫入分析後的 comment_songs 與其來源 hash（只動這兩欄）
+func (r *StreamRepository) SaveCommentSongs(id string, songs []byte, hash string) error {
+	songs = util.SanitizeJSONB(songs)
+	_, err := r.db.Exec(`UPDATE streams SET comment_songs = $2, comment_songs_hash = $3, updated_at = NOW() WHERE id = $1`, id, songs, hash)
+	if err != nil {
+		return fmt.Errorf("save comment songs: %w", err)
+	}
+	return nil
+}
+
+// GetHolodexSongsCache 取得快取的 Holodex 正規化結果與其來源 holodex_hash
+func (r *StreamRepository) GetHolodexSongsCache(id string) (normalized []byte, hash sql.NullString, err error) {
+	var n []byte
+	var h sql.NullString
+	err = r.db.QueryRow(`SELECT holodex_songs_normalized, holodex_songs_hash FROM streams WHERE id = $1`, id).Scan(&n, &h)
+	if err == sql.ErrNoRows {
+		return nil, sql.NullString{}, nil
+	}
+	if err != nil {
+		return nil, sql.NullString{}, fmt.Errorf("get holodex songs cache: %w", err)
+	}
+	return n, h, nil
+}
+
+// SaveHolodexSongs 寫入快取的 Holodex 正規化結果與其來源 holodex_hash（只動這兩欄）
+func (r *StreamRepository) SaveHolodexSongs(id string, normalized []byte, hash string) error {
+	normalized = util.SanitizeJSONB(normalized)
+	_, err := r.db.Exec(`UPDATE streams SET holodex_songs_normalized = $2, holodex_songs_hash = $3, updated_at = NOW() WHERE id = $1`, id, normalized, hash)
+	if err != nil {
+		return fmt.Errorf("save holodex songs: %w", err)
 	}
 	return nil
 }
