@@ -201,11 +201,62 @@ function TagSection({
 
 const AI_PRESETS: { label: string; name: string; base_url: string; model: string }[] = [
   { label: 'Groq', name: 'Groq', base_url: 'https://api.groq.com/openai/v1', model: 'llama-3.3-70b-versatile' },
-  { label: 'Google Gemini', name: 'Gemini', base_url: 'https://generativelanguage.googleapis.com/v1beta/openai', model: 'gemini-2.0-flash' },
+  { label: 'Google Gemini', name: 'Gemini', base_url: 'https://generativelanguage.googleapis.com/v1beta/openai', model: 'gemini-2.5-flash' },
   { label: 'Cerebras', name: 'Cerebras', base_url: 'https://api.cerebras.ai/v1', model: 'llama-3.3-70b' },
   { label: 'OpenRouter', name: 'OpenRouter', base_url: 'https://openrouter.ai/api/v1', model: '' },
   { label: 'Ollama (本機)', name: 'Ollama', base_url: 'http://localhost:11434/v1', model: 'llama3.1' },
 ];
+
+function ProviderRow({ p, idx, total, onUpdate, onDelete, onMove }: {
+  p: AIProvider;
+  idx: number;
+  total: number;
+  onUpdate: (id: number, input: Partial<AIProviderInput>) => void;
+  onDelete: (id: number) => void;
+  onMove: (idx: number, dir: -1 | 1) => void;
+}) {
+  const [model, setModel] = useState(p.model);
+  const saveModel = () => {
+    const m = model.trim();
+    if (m && m !== p.model) onUpdate(p.id, { model: m });
+  };
+  return (
+    <div className="flex items-center gap-3 px-3 py-2 border rounded-lg">
+      <input
+        type="checkbox"
+        checked={p.enabled}
+        onChange={(e) => onUpdate(p.id, { enabled: e.target.checked })}
+        title="有効/無効"
+        className="h-4 w-4"
+      />
+      <div className="flex flex-col leading-none">
+        <button onClick={() => onMove(idx, -1)} disabled={idx === 0}
+          className="text-xs text-gray-400 hover:text-gray-700 disabled:opacity-30" title="上へ（優先度を上げる）">▲</button>
+        <button onClick={() => onMove(idx, 1)} disabled={idx === total - 1}
+          className="text-xs text-gray-400 hover:text-gray-700 disabled:opacity-30" title="下へ（優先度を下げる）">▼</button>
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-gray-400 w-5 text-right">{idx + 1}.</span>
+          <span className="font-medium text-gray-900">{p.name}</span>
+          {!p.enabled && <span className="text-xs text-gray-400">（無効）</span>}
+        </div>
+        <div className="flex items-center gap-1 text-xs text-gray-500 pl-7">
+          <input
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+            onBlur={saveModel}
+            onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+            title="モデルを編集（Enter / フォーカスアウトで保存）"
+            className="w-48 px-1.5 py-0.5 font-mono text-gray-700 border border-gray-200 rounded focus:ring-1 focus:ring-indigo-400 focus:border-transparent"
+          />
+          <span className="truncate">· {p.base_url} · key {p.key_hint ?? (p.has_key ? '****' : 'なし')}</span>
+        </div>
+      </div>
+      <button onClick={() => onDelete(p.id)} className="text-sm text-red-600 hover:text-red-800" title="削除">削除</button>
+    </div>
+  );
+}
 
 function AIProviderSection() {
   const queryClient = useQueryClient();
@@ -299,50 +350,15 @@ function AIProviderSection() {
             </p>
           )}
           {providers.map((p: AIProvider, idx: number) => (
-            <div key={p.id} className="flex items-center gap-3 px-3 py-2 border rounded-lg">
-              <input
-                type="checkbox"
-                checked={p.enabled}
-                onChange={(e) => updateMutation.mutate({ id: p.id, input: { enabled: e.target.checked } })}
-                title="有効/無効"
-                className="h-4 w-4"
-              />
-              <div className="flex flex-col leading-none">
-                <button
-                  onClick={() => move(idx, -1)}
-                  disabled={idx === 0}
-                  className="text-xs text-gray-400 hover:text-gray-700 disabled:opacity-30"
-                  title="上へ（優先度を上げる）"
-                >
-                  ▲
-                </button>
-                <button
-                  onClick={() => move(idx, 1)}
-                  disabled={idx === providers.length - 1}
-                  className="text-xs text-gray-400 hover:text-gray-700 disabled:opacity-30"
-                  title="下へ（優先度を下げる）"
-                >
-                  ▼
-                </button>
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-gray-400 w-5 text-right">{idx + 1}.</span>
-                  <span className="font-medium text-gray-900">{p.name}</span>
-                  {!p.enabled && <span className="text-xs text-gray-400">（無効）</span>}
-                </div>
-                <div className="text-xs text-gray-500 truncate pl-7">
-                  {p.model} · {p.base_url} · key {p.key_hint ?? (p.has_key ? '****' : 'なし')}
-                </div>
-              </div>
-              <button
-                onClick={() => deleteMutation.mutate(p.id)}
-                className="text-sm text-red-600 hover:text-red-800"
-                title="削除"
-              >
-                削除
-              </button>
-            </div>
+            <ProviderRow
+              key={p.id}
+              p={p}
+              idx={idx}
+              total={providers.length}
+              onUpdate={(id, input) => updateMutation.mutate({ id, input })}
+              onDelete={(id) => deleteMutation.mutate(id)}
+              onMove={move}
+            />
           ))}
         </div>
       )}
