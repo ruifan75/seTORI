@@ -5,28 +5,33 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode"
 
 	"github.com/ruifan75/setori/pkg/ai"
+	"github.com/ruifan75/setori/pkg/util"
 )
 
-// aiLineSelection AI 回傳的行選擇結果（只包含索引和時間，不包含日文文字）
+// aiLineSelection AI 回傳的單行解析結果
 type aiLineSelection struct {
 	LineIndex int             `json:"line"`  // 1-based index of the input line
 	Start     json.RawMessage `json:"start"` // start seconds
 	End       json.RawMessage `json:"end"`   // end seconds (0 if unknown)
 	IsSong    bool            `json:"is_song"`
+	Name      string          `json:"name"`   // 曲名（原文逐字，需通過 verbatim 驗證）
+	Artist    string          `json:"artist"` // 歌手（原文逐字，需通過 verbatim 驗證）
 }
 
-const commentAISystemPrompt = `あなたはYouTubeコメントから歌枠のタイムスタンプ行を選別するアシスタントです。
+const commentAISystemPrompt = `あなたはYouTubeのコメントから歌枠のセットリストを抽出するアシスタントです。
 
-入力は番号付きのコメント行です。以下のルールでJSON配列のみを返してください:
+入力は番号付きのコメント行です。各行について判定し、JSON配列のみを返してください:
 - 出力はJSON配列のみ（説明文やコードブロックは禁止）
-- 各要素は {"line":行番号,"start":開始秒数,"end":終了秒数,"is_song":true/false}
-- line は入力の行番号（1始まり）をそのまま返す
-- start/end は秒数の整数。end が不明な場合は 0
-- 1行に複数のタイムスタンプがあれば最初を start、2つ目を end とする
-- is_song: その行が歌曲であれば true、雑談・告知・開始・終了などは false
-- 日本語テキストは一切出力しないでください。行番号と数値のみ返してください
+- 各要素は {"line":行番号,"start":開始秒数,"end":終了秒数,"is_song":true/false,"name":"曲名","artist":"歌手名"}
+- line は入力の行番号（1始まり）
+- start/end は秒数の整数。end が不明な場合は 0。1行に複数のタイムスタンプがあれば最初を start、2つ目を end とする
+- is_song: 歌曲なら true、雑談・開始・終了・告知などは false
+- name と artist は【入力行に書かれている文字をそのままコピー】してください。翻訳・補完・表記の修正・並べ替えは一切禁止。入力に存在しない文字を出力してはいけません
+- name は曲名のみ、artist は歌手のみ。年号や「アニメ『X』OP」などの付加情報は含めない
+- artist が不明なら artist は空文字列にする
 `
 
 var aiTimestampRe = regexp.MustCompile(`(\d{1,2}:\d{2}:\d{2})|(\d{1,2}:\d{2})`)
@@ -43,7 +48,7 @@ func ParseCommentsWithAI(aiClient ai.Chatter, comments []string) ([]ParsedSong, 
 		return nil, fmt.Errorf("no timestamp lines")
 	}
 
-	userMessage := "以下のコメント行から歌のタイムスタンプ行を選別してください。\n\n"
+	userMessage := "以下のコメント行から歌のセットリストを抽出してください。\n\n"
 	for i, line := range lines {
 		userMessage += fmt.Sprintf("%d) %s\n", i+1, line)
 	}
@@ -58,7 +63,6 @@ func ParseCommentsWithAI(aiClient ai.Chatter, comments []string) ([]ParsedSong, 
 		return nil, err
 	}
 
-	// Use AI selections to pick lines, then parse text with regex
 	result := make([]ParsedSong, 0, len(selections))
 	for _, sel := range selections {
 		if !sel.IsSong {
@@ -70,27 +74,57 @@ func ParseCommentsWithAI(aiClient ai.Chatter, comments []string) ([]ParsedSong, 
 
 		originalLine := lines[sel.LineIndex-1]
 
-		// Parse the original line with regex to extract song name and artist
+		// 正則 baseline（AI 不可用 / 未通過驗證時的保底）
 		parsed := ParseComment(originalLine)
 		if parsed == nil {
-			continue
+			parsed = &ParsedSong{OriginalComment: originalLine, IsEndTimeEstimated: true}
 		}
 
-		// Use AI's time if provided, otherwise use regex-parsed time
-		start := parseAISeconds(sel.Start)
-		end := parseAISeconds(sel.End)
-		if start > 0 {
+		// AI 抽取的歌名/歌手：僅在「逐字出現在原始行」時才採用，杜絕幻覺竄改
+		if name := strings.TrimSpace(sel.Name); name != "" && isVerbatim(name, originalLine) {
+			parsed.Name = name
+		}
+		if artist := strings.TrimSpace(sel.Artist); artist != "" && isVerbatim(artist, originalLine) {
+			parsed.OriginalArtist = artist
+		}
+
+		// 時間：AI 有提供就用 AI 的
+		if start := parseAISeconds(sel.Start); start > 0 {
 			parsed.Start = start
 		}
-		if end > 0 {
+		if end := parseAISeconds(sel.End); end > 0 {
 			parsed.End = end
 			parsed.IsEndTimeEstimated = false
 		}
 
+		if parsed.Name == "" {
+			continue
+		}
 		result = append(result, *parsed)
 	}
 
 	return result, nil
+}
+
+// isVerbatim 判斷 candidate 是否「逐字」出現在 source 中（NFKC + 去空白 + lower 後比對子字串）。
+// 用來確保 AI 回傳的歌名/歌手確實來自原文，而非模型自行生成/竄改。
+func isVerbatim(candidate, source string) bool {
+	c := normalizeForMatch(candidate)
+	if c == "" {
+		return false
+	}
+	return strings.Contains(normalizeForMatch(source), c)
+}
+
+func normalizeForMatch(s string) string {
+	s = util.NormalizeUnicode(s) // NFKC：全形→半形等
+	s = strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) {
+			return -1
+		}
+		return r
+	}, s)
+	return strings.ToLower(s)
 }
 
 func extractTimestampLines(comments []string) []string {
