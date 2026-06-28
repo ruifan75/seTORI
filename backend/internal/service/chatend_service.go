@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ruifan75/setori/internal/dto"
@@ -102,6 +104,40 @@ func (s *ChatEndService) AnalyzeStreamAsync(videoID string) {
 			log.Printf("[chatend] analyze error (%s): %v", videoID, err)
 		}
 	}()
+}
+
+// Backfill 對所有有 comment_songs 的歌回跑拍手 end 偵測（bounded concurrency）。
+// 適合對既有資料補跑；已下載的 live chat 會用快取，所以重跑很便宜。
+func (s *ChatEndService) Backfill(concurrency int) {
+	ids, err := s.streamRepo.FindIDsWithCommentSongs()
+	if err != nil {
+		log.Printf("[chatend] backfill: list streams failed: %v", err)
+		return
+	}
+	if concurrency < 1 {
+		concurrency = 1
+	}
+	log.Printf("[chatend] backfill 開始: %d 場 (concurrency=%d)", len(ids), concurrency)
+
+	sem := make(chan struct{}, concurrency)
+	var wg sync.WaitGroup
+	var done int64
+	for _, id := range ids {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(id string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			if err := s.AnalyzeStream(id); err != nil {
+				log.Printf("[chatend] backfill %s: %v", id, err)
+			}
+			if n := atomic.AddInt64(&done, 1); n%10 == 0 || int(n) == len(ids) {
+				log.Printf("[chatend] backfill 進度: %d/%d", n, len(ids))
+			}
+		}(id)
+	}
+	wg.Wait()
+	log.Printf("[chatend] backfill 完成: %d 場", len(ids))
 }
 
 // fetchLiveChat 用 yt-dlp 下載 live chat replay（已下載則用快取）。

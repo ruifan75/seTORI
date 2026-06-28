@@ -141,6 +141,7 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("POST /api/streams/{id}/comments/analyze", r.handleAnalyzeComments)
 	r.mux.HandleFunc("POST /api/comments/backfill", r.handleBackfillCommentSongs)
 	r.mux.HandleFunc("POST /api/streams/{id}/analyze-chat-ends", r.handleAnalyzeChatEnds)
+	r.mux.HandleFunc("POST /api/chat-ends/backfill", r.handleBackfillChatEnds)
 
 	// Filter keywords management
 	r.mux.HandleFunc("GET /api/filter-keywords", r.handleListFilterKeywords)
@@ -868,6 +869,21 @@ func (r *Router) handleAnalyzeChatEnds(w http.ResponseWriter, req *http.Request)
 	respondJSON(w, http.StatusAccepted, map[string]string{
 		"message": "拍手解析を開始しました（バックグラウンド処理）",
 		"id":      videoID,
+	})
+}
+
+// handleBackfillChatEnds 對所有有 comment_songs 的歌回補跑拍手 end 偵測（背景、限並發）
+func (r *Router) handleBackfillChatEnds(w http.ResponseWriter, req *http.Request) {
+	concurrency := 3
+	if c := req.URL.Query().Get("concurrency"); c != "" {
+		if v, err := strconv.Atoi(c); err == nil && v > 0 {
+			concurrency = v
+		}
+	}
+	go r.chatEndService.Backfill(concurrency)
+	respondJSON(w, http.StatusAccepted, map[string]interface{}{
+		"message":     "拍手 end のバックフィルを開始しました（バックグラウンド、ログ参照）",
+		"concurrency": concurrency,
 	})
 }
 

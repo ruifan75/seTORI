@@ -191,6 +191,28 @@ func (r *StreamRepository) FindWithoutCommentSongs() ([]models.Stream, error) {
 	return streams, nil
 }
 
+// FindIDsWithCommentSongs 取得所有有 comment_songs 的歌回 ID（供拍手 end backfill）
+func (r *StreamRepository) FindIDsWithCommentSongs() ([]string, error) {
+	rows, err := r.db.Query(`
+		SELECT id FROM streams
+		WHERE comment_songs IS NOT NULL AND comment_songs::text NOT IN ('null', '[]')
+		ORDER BY stream_date DESC`)
+	if err != nil {
+		return nil, fmt.Errorf("query streams with comment songs: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 // FindByDateRange 根據日期範圍取得歌回
 func (r *StreamRepository) FindByDateRange(start, end time.Time) ([]models.Stream, error) {
 	query := `
