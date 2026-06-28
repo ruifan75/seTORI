@@ -36,6 +36,7 @@ type Router struct {
 	filterKeywordRepo    *repository.FilterKeywordRepository
 	tagRepo              *repository.TagRepository
 	aiProviderRepo       *repository.AIProviderRepository
+	chatEndService       *service.ChatEndService
 }
 
 // NewRouter 建立新的路由器
@@ -61,6 +62,8 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	holodexService.SetRepositoriesWithSongItunes(perfRepo, songRepo, songItunesRepo) // 為 SyncSetoriToHolodex 提供必要的 repositories
 	commentService := service.NewCommentService(holodexService, streamRepo, filterKeywordRepo, aiService)
 	normalizationService := service.NewNormalizationService(aiService, songRepo, songItunesRepo)
+	chatEndService := service.NewChatEndService(streamRepo, "", "")
+	holodexService.SetChatEndService(chatEndService) // 同步時自動偵測拍手 end
 	performanceService := service.NewPerformanceService(perfRepo, songRepo, songItunesRepo)
 	itunesClient := itunes.NewClient()
 	endTimeEstimateService := service.NewEndTimeEstimateService(itunesClient)
@@ -80,6 +83,7 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 		filterKeywordRepo:    filterKeywordRepo,
 		tagRepo:              tagRepo,
 		aiProviderRepo:       aiProviderRepo,
+		chatEndService:       chatEndService,
 	}
 
 	if cfg.APIAuthToken == "" {
@@ -136,6 +140,7 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("GET /api/streams/{id}/comments", r.handleGetComments)
 	r.mux.HandleFunc("POST /api/streams/{id}/comments/analyze", r.handleAnalyzeComments)
 	r.mux.HandleFunc("POST /api/comments/backfill", r.handleBackfillCommentSongs)
+	r.mux.HandleFunc("POST /api/streams/{id}/analyze-chat-ends", r.handleAnalyzeChatEnds)
 
 	// Filter keywords management
 	r.mux.HandleFunc("GET /api/filter-keywords", r.handleListFilterKeywords)
@@ -849,6 +854,21 @@ func (r *Router) handleAnalyzeComments(w http.ResponseWriter, req *http.Request)
 	}
 
 	respondJSON(w, http.StatusOK, result)
+}
+
+// handleAnalyzeChatEnds 手動觸發：用 live chat 拍手偵測該歌回各首歌的 end（背景執行）
+func (r *Router) handleAnalyzeChatEnds(w http.ResponseWriter, req *http.Request) {
+	videoID := req.PathValue("id")
+	if videoID == "" {
+		respondError(w, http.StatusBadRequest, "無効な動画ID")
+		return
+	}
+	// 下載 live chat 可能要數十秒～數分鐘，背景跑、立即回 202
+	r.chatEndService.AnalyzeStreamAsync(videoID)
+	respondJSON(w, http.StatusAccepted, map[string]string{
+		"message": "拍手解析を開始しました（バックグラウンド処理）",
+		"id":      videoID,
+	})
 }
 
 // ========== Filter Keywords Handlers ==========

@@ -29,3 +29,6 @@ vendor/
 # Logs
 logs/
 *.log
+
+# Downloaded live chat cache
+data/

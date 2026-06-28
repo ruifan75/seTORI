@@ -33,6 +33,12 @@ type HolodexService struct {
 	songItunesRepo *repository.SongItunesRepository
 	editorToken    string
 	aiClient       *ai.Client
+	chatEndService *ChatEndService
+}
+
+// SetChatEndService 注入 chat 拍手結束時間偵測服務（同步時自動觸發）。
+func (s *HolodexService) SetChatEndService(c *ChatEndService) {
+	s.chatEndService = c
 }
 
 func NewHolodexService(
@@ -540,6 +546,9 @@ func (s *HolodexService) loadAndSaveComments(videoID string) {
 		stream.CommentSongs = commentSongsJSON
 		if err := s.streamRepo.Update(stream); err != nil {
 			log.Printf("update stream comments error (video: %s): %v", videoID, err)
+		} else if s.chatEndService != nil {
+			// comment_songs 存好後，背景偵測 live chat 拍手作為各首歌的 end
+			s.chatEndService.AnalyzeStreamAsync(videoID)
 		}
 	}
 }
