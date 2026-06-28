@@ -4,7 +4,7 @@ import (
 	"os"
 )
 
-// Config 應用程式設定
+// Config アプリケーション設定
 type Config struct {
 	DatabaseURL        string
 	HolodexAPIKey      string
@@ -16,7 +16,7 @@ type Config struct {
 	Environment        string
 }
 
-// Load 載入設定從環境變數
+// Load 環境変数から設定を読み込み
 func Load() (*Config, error) {
 	cfg := &Config{
 		DatabaseURL:        getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/setori?sslmode=disable"),
@@ -25,8 +25,8 @@ func Load() (*Config, error) {
 		YouTubeAPIKey:      getEnv("YOUTUBE_API_KEY", ""),
 		GroqAPIKey:         getEnv("GROQ_API_KEY", ""),
 		JWTSecret:          getEnv("JWT_SECRET", "your-secret-key-change-in-production"),
-		// APIAuthToken 若設定，則對寫入操作（POST/PUT/DELETE/PATCH）要求
-		// Authorization: Bearer <token>。留空則維持公開（適用本機開發）。
+		// APIAuthToken が設定されている場合、書き込み操作（POST/PUT/DELETE/PATCH）に対し
+		// Authorization: Bearer <token> を要求。空欄時は公開（ローカル開発向け）。
 		APIAuthToken: getEnv("API_AUTH_TOKEN", ""),
 		Environment:  getEnv("ENVIRONMENT", "development"),
 	}

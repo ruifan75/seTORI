@@ -1,42 +1,42 @@
 # seTORI 🎤
 
-> VTuber 歌回（歌枠 / 唱歌直播）歌曲資料庫與追蹤系統
+> VTuber 歌枠（歌回 / 歌唱配信）楽曲データベースとトラッキングシステム
 
-seTORI 用來蒐集、辨識並管理 VTuber 歌回中演唱的每一首歌。它整合 **Holodex** 雙向同步、**YouTube / iTunes** 元資料，以及 **Groq (Llama 3.3 70B)** AI 輔助，把零散的直播留言時間軸整理成結構化的「演唱記錄」資料庫。
-
----
-
-## 目錄
-
-- [核心功能](#核心功能)
-- [系統架構](#系統架構)
-- [專案結構](#專案結構)
-- [快速開始](#快速開始)
-- [環境變數](#環境變數)
-- [API 一覽](#api-一覽)
-- [資料模型](#資料模型)
-- [留言分析流程](#留言分析流程)
-- [已知問題與改進方向](#已知問題與改進方向)
-- [安全性注意事項](#安全性注意事項-)
+seTORI は VTuber の歌枠で歌われた楽曲を収集・識別・管理するためのシステムです。**Holodex** の双方向同期、**YouTube / iTunes** メタデータ、そして **Groq (Llama 3.3 70B)** AI 支援を統合し、散在する配信コメントのタイムスタンプを構造化された「歌唱記録」データベースへと整理します。
 
 ---
 
-## 核心功能
+## 目次
 
-| # | 功能 | 說明 |
+- [コア機能](#コア機能)
+- [システム構成](#システム構成)
+- [プロジェクト構造](#プロジェクト構造)
+- [クイックスタート](#クイックスタート)
+- [環境変数](#環境変数)
+- [API 一覧](#api-一覧)
+- [データモデル](#データモデル)
+- [コメント解析フロー](#コメント解析フロー)
+- [既知の問題と改善点](#既知の問題と改善点)
+- [セキュリティ注意事項](#セキュリティ注意事項)
+
+---
+
+## コア機能
+
+| # | 機能 | 説明 |
 |---|------|------|
-| 1 | **歌曲管理 (Songs)** | CRUD、GIN trigram 模糊搜尋、重複歌曲合併、全歷史演唱記錄。唯一鍵 `(name + original_artist)` |
-| 2 | **直播管理 (Streams)** | 以 YouTube 影片 ID 為主鍵；`is_processed` / `is_hidden` 狀態；JSONB 欄位 `holodex_data` / `comment_raw` / `comment_songs` |
-| 3 | **歌手管理 (Singers)** | 以 YouTube 頻道 ID 為主鍵；事務所、頭像、英文名；支援多人聯動歌回 |
-| 4 | **演唱記錄 (Performances)** | 開始/結束秒數、演唱標籤、多歌手聯動。唯一鍵 `(stream_id + song_id + start_seconds)` |
-| 5 | **Holodex 雙向同步** | 拉取頻道直播與歌單、上傳 seTORI 歌單回 Holodex、SHA256 hash 快取避免重複處理 |
-| 6 | **留言分析** | 從 YouTube/Holodex 抓留言，正則解析時間戳（HH:MM:SS / MM:SS）+ 分隔符拆解歌名/歌手 |
-| 7 | **AI 辨識與正規化** | 批次歌名正規化、版本標籤偵測、留言 hybrid 解析；**支援多個 OpenAI 相容 provider（Groq/Gemini/Cerebras…）於管理介面設定、依優先序 failover**，撞到 usage limit 自動換下一家 |
-| 8 | **iTunes 整合** | 搜尋並綁定 Track ID，取得時長/專輯資訊，並用時長估算演唱結束時間 |
+| 1 | **楽曲管理 (Songs)** | CRUD、GIN trigram あいまい検索、重複楽曲のマージ、全履歴の歌唱記録。一意キー `(name + original_artist)` |
+| 2 | **配信管理 (Streams)** | YouTube 動画 ID を主キー；`is_processed` / `is_hidden` ステータス；JSONB カラム `holodex_data` / `comment_raw` / `comment_songs` |
+| 3 | **歌手管理 (Singers)** | YouTube チャンネル ID を主キー；所属事務所、アバター、英語名；複数人コラボ歌枠対応 |
+| 4 | **歌唱記録 (Performances)** | 開始/終了秒数、歌唱タグ、複数歌手コラボ。一意キー `(stream_id + song_id + start_seconds)` |
+| 5 | **Holodex 双方向同期** | チャンネルの配信とセットリストの取得、seTORI セットリストの Holodex へのアップロード、SHA256 ハッシュキャッシュによる重複防止 |
+| 6 | **コメント分析** | YouTube/Holodex からコメントを取得、正規表現でタイムスタンプ（HH:MM:SS / MM:SS）を解析 + 区切り文字で曲名/アーティストを分解 |
+| 7 | **AI 識別と正規化** | バッチでの曲名正規化、バージョンタグ検出、コメントのハイブリッド解析；**管理画面で複数の OpenAI 互換プロバイダー（Groq/Gemini/Cerebras…）を設定し優先度順に failover**、使用制限に達したら自動で次に切り替え |
+| 8 | **iTunes 連携** | 検索と Track ID 紐付けで再生時間/アルバム情報を取得し、再生時間から歌唱終了時間を推定 |
 
 ---
 
-## 系統架構
+## システム構成
 
 ```
 ┌────────────────────────────┐      HTTP / Axios     ┌────────────────────────────┐
@@ -45,83 +45,83 @@ seTORI 用來蒐集、辨識並管理 VTuber 歌回中演唱的每一首歌。�
 │  React Query + Zustand     │        JSON           │  service / repository      │
 └────────────────────────────┘                       └─────────────┬──────────────┘
                                                                     │ SQL (lib/pq)
-                          外部服務                                   ▼
+                          外部サービス                                   ▼
         ┌───────────────┬───────────────┬──────────────┐   ┌────────────────────┐
         │ Holodex API   │ YouTube API   │ iTunes API   │   │ PostgreSQL 16      │
         │ Groq API      │               │              │   │ :5432 (Docker)     │
         └───────────────┴───────────────┴──────────────┘   └────────────────────┘
 ```
 
-| 層級 | 技術 |
+| 層 | 技術 |
 |------|------|
-| 前端 | React 19 · TypeScript · Vite 7 · Tailwind CSS 3 · React Router 7 |
-| 狀態 | Zustand（UI）· TanStack React Query（伺服器狀態） |
-| 後端 | Go 1.24（標準庫 `net/http`，service / repository 模式，建構式 DI） |
-| 資料庫 | PostgreSQL 16（`uuid-ossp`、`pg_trgm` 擴充） |
+| フロントエンド | React 19 · TypeScript · Vite 7 · Tailwind CSS 3 · React Router 7 |
+| 状態 | Zustand（UI）· TanStack React Query（サーバー状態） |
+| バックエンド | Go 1.24（標準ライブラリ `net/http`、service / repository パターン、コンストラクタ DI） |
+| データベース | PostgreSQL 16（`uuid-ossp`、`pg_trgm` 拡張） |
 | AI | Groq API — Llama 3.3 70B |
 | 外部 | Holodex API · YouTube Data API v3 · iTunes Search/Lookup API |
 
-後端是**純標準庫**實作：沒有 web 框架，路由用 Go 1.22+ 的 `http.ServeMux`（`GET /api/songs/{id}` 樣式），migration 透過 `embed.FS` 內嵌、啟動時自動執行。
+バックエンドは**純粋な標準ライブラリ**で実装されています：Web フレームワークは使用せず、ルーティングは Go 1.22+ の `http.ServeMux`（`GET /api/songs/{id}` スタイル）、マイグレーションは `embed.FS` で埋め込み、起動時に自動実行します。
 
 ---
 
-## 專案結構
+## プロジェクト構造
 
 ```
 seTORI/
 ├── backend/                      # Go API server
-│   ├── cmd/server/main.go        # 進入點：載入 .env → 連 DB → migrate → 啟動 router
+│   ├── cmd/server/main.go        # エントリポイント：.env 読み込み → DB 接続 → migrate → router 起動
 │   ├── internal/
-│   │   ├── config/               # 從環境變數載入 Config
-│   │   ├── database/             # 連線池 + migration runner + migrations/*.sql
-│   │   ├── handler/router.go     # 所有 HTTP handler（+ CORS / logging）
-│   │   ├── dto/                  # 請求/回應結構
+│   │   ├── config/               # 環境変数から Config を読み込み
+│   │   ├── database/             # コネクションプール + migration runner + migrations/*.sql
+│   │   ├── handler/router.go     # すべての HTTP handler（+ CORS / logging）
+│   │   ├── dto/                  # リクエスト/レスポンス構造体
 │   │   ├── models/               # DB model
-│   │   ├── repository/           # SQL 存取層
-│   │   └── service/              # 商業邏輯層
+│   │   ├── repository/           # SQL アクセス層
+│   │   └── service/              # ビジネスロジック層
 │   └── pkg/
 │       ├── ai/                   # Groq client
-│       ├── comment/              # 留言解析 / 去重 / 過濾 / 結束時間估算
+│       ├── comment/              # コメント解析 / 重複排除 / フィルタ / 終了時間推定
 │       ├── holodex/ itunes/ youtube/   # 外部 API client
-│       ├── ratelimit/            # Holodex 速率限制
-│       └── util/                 # Levenshtein 相似度 + NFKC 正規化
+│       ├── ratelimit/            # Holodex レートリミット
+│       └── util/                 # Levenshtein 類似度 + NFKC 正規化
 ├── frontend/                     # React SPA
 │   └── src/
-│       ├── api/                  # axios client + TypeScript 型別
+│       ├── api/                  # axios client + TypeScript 型定義
 │       ├── components/           # Layout、YoutubePlayer、ui/*
-│       └── pages/                # 各頁面（StreamDetailPage 為主編輯介面）
-├── docker/docker-compose.yml     # PostgreSQL（目前僅 DB 容器化）
-└── utawaku-timestamp/            # 輔助 Python 工具（音訊/留言時間軸偵測，獨立 repo）
+│       └── pages/                # 各ページ（StreamDetailPage が主編集画面）
+├── docker/docker-compose.yml     # PostgreSQL（現在は DB のみコンテナ化）
+└── utawaku-timestamp/            # 補助 Python ツール（音声/コメントタイムスタンプ検出、独立リポジトリ）
 ```
 
 ---
 
-## 快速開始
+## クイックスタート
 
-### 先決條件
+### 前提条件
 
 - Go **1.24+**
-- Node.js **18+**（建議 20+）與 npm
-- Docker / Docker Compose（用於 PostgreSQL）
+- Node.js **18+**（推奨 20+）と npm
+- Docker / Docker Compose（PostgreSQL 用）
 
-### 1. 啟動資料庫
+### 1. データベースの起動
 
 ```bash
 cd docker
 docker compose up -d        # PostgreSQL 16 on :5432 (postgres/postgres/setori)
 ```
 
-### 2. 啟動後端
+### 2. バックエンドの起動
 
 ```bash
 cd backend
-cp .env.example .env        # 填入你的 API keys（見下方環境變數）
-go run ./cmd/server/main.go # 啟動時自動執行 migration，監聽 :8080
+cp .env.example .env        # API キーを記入（下記の環境変数を参照）
+go run ./cmd/server/main.go # 起動時に自動でマイグレーションを実行、:8080 でリッスン
 ```
 
-健康檢查：`curl http://localhost:8080/health` → `{"status":"ok"}`
+ヘルスチェック：`curl http://localhost:8080/health` → `{"status":"ok"}`
 
-### 3. 啟動前端
+### 3. フロントエンドの起動
 
 ```bash
 cd frontend
@@ -129,132 +129,132 @@ npm install
 npm run dev                 # Vite dev server on :5173
 ```
 
-前端預設打 `http://localhost:8080`，可用 `VITE_API_URL` 覆寫（建立 `frontend/.env`）。
+フロントエンドはデフォルトで `http://localhost:8080` に接続します。`VITE_API_URL` で上書き可能（`frontend/.env` を作成）。
 
-### 建構正式版
+### 本番ビルド
 
 ```bash
-cd backend  && go build -o bin/server ./cmd/server   # bin/ 已被 .gitignore 忽略
-cd frontend && npm run build                          # 輸出到 dist/
+cd backend  && go build -o bin/server ./cmd/server   # bin/ は .gitignore 対象
+cd frontend && npm run build                          # dist/ に出力
 ```
 
 ---
 
-## 環境變數
+## 環境変数
 
-`backend/.env`（參考 `backend/.env.example`）：
+`backend/.env`（`backend/.env.example` を参照）：
 
-| 變數 | 必填 | 說明 |
+| 変数 | 必須 | 説明 |
 |------|:---:|------|
-| `DATABASE_URL` | ✓ | PostgreSQL 連線字串，預設 `postgres://postgres:postgres@localhost:5432/setori?sslmode=disable` |
-| `HOLODEX_API_KEY` | ✓ | Holodex API key（同步直播/歌單） |
-| `HOLODEX_EDITOR_TOKEN` | — | 上傳歌單回 Holodex 用的編輯 token |
-| `GROQ_API_KEY` | — | AI 正規化/留言篩選，未設定時自動降級為純正則 |
-| `YOUTUBE_API_KEY` | — | 取得頻道高解析度頭像，未設定時 fallback 到 Holodex |
-| `JWT_SECRET` | — | 預留欄位，目前未使用 |
-| `API_AUTH_TOKEN` | — | 若設定，寫入操作（POST/PUT/DELETE）需帶 `Authorization: Bearer <token>`；留空則公開（見 [安全性](#安全性注意事項-)） |
+| `DATABASE_URL` | ✓ | PostgreSQL 接続文字列。デフォルト `postgres://postgres:postgres@localhost:5432/setori?sslmode=disable` |
+| `HOLODEX_API_KEY` | ✓ | Holodex API キー（配信/セットリスト同期用） |
+| `HOLODEX_EDITOR_TOKEN` | — | セットリストを Holodex にアップロードする際の編集者トークン |
+| `GROQ_API_KEY` | — | AI 正規化/コメントフィルタ。未設定時は純粋な正規表現にフォールバック |
+| `YOUTUBE_API_KEY` | — | チャンネルの高解像度アバター取得用。未設定時は Holodex にフォールバック |
+| `JWT_SECRET` | — | 予約フィールド（未使用） |
+| `API_AUTH_TOKEN` | — | 設定時は書き込み操作（POST/PUT/DELETE）に `Authorization: Bearer <token>` が必要。空欄時は公開（[セキュリティ](#セキュリティ注意事項)参照） |
 | `ENVIRONMENT` | — | `development` / `production` |
-| `PORT` | — | 後端埠號，預設 `8080` |
+| `PORT` | — | バックエンドのポート。デフォルト `8080` |
 
-前端：`VITE_API_URL`（選填，預設 `http://localhost:8080`）、`VITE_API_TOKEN`（選填，後端啟用 `API_AUTH_TOKEN` 時用來附帶 Bearer token）。
+フロントエンド：`VITE_API_URL`（任意、デフォルト `http://localhost:8080`）、`VITE_API_TOKEN`（任意、バックエンドで `API_AUTH_TOKEN` 有効時に Bearer トークンを付与）。
 
-> 各外部 API（Holodex / Groq / YouTube / iTunes）的實際用途、觸發路由與上線敏感度，整理於 **[`docs/EXTERNAL_APIS.md`](./docs/EXTERNAL_APIS.md)**。
+> 各外部 API（Holodex / Groq / YouTube / iTunes）の実際の用途、トリガールート、課金感度は **[`docs/EXTERNAL_APIS.md`](./docs/EXTERNAL_APIS.md)** にまとめています。
 
 ---
 
-## API 一覽
+## API 一覧
 
-所有 API 以 `/api` 為前綴，回傳 JSON，錯誤格式為 `{"error": "..."}`。
+すべての API は `/api` をプレフィックスとし、JSON を返却します。エラー形式は `{"error": "..."}` です。
 
-| Method | Path | 說明 |
+| Method | Path | 説明 |
 |--------|------|------|
-| GET | `/health` | 健康檢查 |
+| GET | `/health` | ヘルスチェック |
 | **Songs** | | |
-| GET | `/api/songs` | 列表（`page` / `limit` / `search`） |
-| GET | `/api/songs/{id}` | 單首歌曲 |
-| GET | `/api/songs/{id}/performances` | 該歌曲所有演唱記錄 |
-| POST | `/api/songs` | 建立 |
+| GET | `/api/songs` | 一覧（`page` / `limit` / `search`） |
+| GET | `/api/songs/{id}` | 単一楽曲 |
+| GET | `/api/songs/{id}/performances` | その楽曲の全歌唱記録 |
+| POST | `/api/songs` | 作成 |
 | PUT | `/api/songs/{id}` | 更新 |
-| DELETE | `/api/songs/{id}` | 刪除 |
-| POST | `/api/songs/{id}/merge` | 合併到目標歌曲 |
+| DELETE | `/api/songs/{id}` | 削除 |
+| POST | `/api/songs/{id}/merge` | 対象楽曲へマージ |
 | **Streams** | | |
-| GET | `/api/streams` | 列表（預設不含隱藏） |
-| GET | `/api/streams/{id}` | 詳情（含演唱清單、Holodex/留言時間軸） |
-| POST | `/api/streams` | ⚠️ 未實作（回 501），請改用 Holodex 同步 |
-| PUT | `/api/streams/{id}` | 更新標題/日期/標籤/參與者/狀態 |
-| GET | `/api/streams/{id}/holodex-songs` | 即時載入 Holodex 歌單 |
-| POST | `/api/streams/{id}/estimate-end-times` | 估算結束時間 |
-| POST/DELETE | `/api/streams/{id}/performances` | 批次建立 / 全部刪除演唱記錄 |
-| GET | `/api/streams/{id}/comments` | 取得原始留言 |
-| POST | `/api/streams/{id}/comments/analyze` | 分析留言為歌曲 |
-| POST | `/api/comments/backfill` | 補填 comment_songs |
+| GET | `/api/streams` | 一覧（デフォルトは非表示を除く） |
+| GET | `/api/streams/{id}` | 詳細（歌唱リスト、Holodex/コメントタイムライン含む） |
+| POST | `/api/streams` | ⚠️ 未実装（501 を返す）。Holodex 同期を使用してください |
+| PUT | `/api/streams/{id}` | タイトル/日付/タグ/参加者/ステータスの更新 |
+| GET | `/api/streams/{id}/holodex-songs` | Holodex セットリストを即時読み込み |
+| POST | `/api/streams/{id}/estimate-end-times` | 終了時間の推定 |
+| POST/DELETE | `/api/streams/{id}/performances` | 歌唱記録の一括作成 / 全削除 |
+| GET | `/api/streams/{id}/comments` | 生コメントの取得 |
+| POST | `/api/streams/{id}/comments/analyze` | コメントを楽曲に解析 |
+| POST | `/api/comments/backfill` | comment_songs を補完 |
 | **Singers** | | |
-| GET | `/api/singers` · `/search` · `/{id}` · `/{id}/streams` · `/{id}/performances` | 列表/搜尋/詳情/直播/演唱 |
-| POST | `/api/singers` | 透過 Holodex 同步頻道資訊新增 |
+| GET | `/api/singers` · `/search` · `/{id}` · `/{id}/streams` · `/{id}/performances` | 一覧/検索/詳細/配信/歌唱 |
+| POST | `/api/singers` | Holodex 同期によりチャンネル情報から新規追加 |
 | **Holodex Sync** | | |
-| POST | `/api/sync/holodex` | 同步整個頻道 |
-| POST | `/api/sync/holodex/video/{id}` | 同步單一影片 |
-| POST | `/api/sync/holodex/to-holodex/{id}` | 上傳 seTORI 歌單回 Holodex |
-| **其他** | | |
-| GET/POST/DELETE | `/api/filter-keywords` | 留言過濾關鍵字管理 |
-| GET/POST/DELETE | `/api/stream-tags` · `/api/performance-tags` | 標籤管理 |
-| POST | `/api/ai/normalize` | 批次 AI 歌名正規化 |
-| GET | `/api/itunes/search` · `/api/itunes/{id}` | iTunes 搜尋 / 查詢 |
+| POST | `/api/sync/holodex` | チャンネル全体を同期 |
+| POST | `/api/sync/holodex/video/{id}` | 単一動画を同期 |
+| POST | `/api/sync/holodex/to-holodex/{id}` | seTORI セットリストを Holodex へアップロード |
+| **その他** | | |
+| GET/POST/DELETE | `/api/filter-keywords` | コメントフィルタキーワード管理 |
+| GET/POST/DELETE | `/api/stream-tags` · `/api/performance-tags` | タグ管理 |
+| POST | `/api/ai/normalize` | AI による曲名一括正規化 |
+| GET | `/api/itunes/search` · `/api/itunes/{id}` | iTunes 検索 / 照会 |
 
 ---
 
-## 資料模型
+## データモデル
 
-主要資料表（完整定義見 `backend/internal/database/migrations/`）：
+主なテーブル（完全な定義は `backend/internal/database/migrations/` を参照）：
 
-- `singers` — VTuber，PK 為 YouTube 頻道 ID
-- `songs` — 歌曲 master，唯一鍵 `(name, original_artist)`；`song_itunes` 一對多綁定 iTunes Track
-- `streams` — 歌回，PK 為 YouTube 影片 ID；`holodex_data` / `comment_raw` / `comment_songs` 為 JSONB
-- `performances` — 演唱記錄，唯一鍵 `(stream_id, song_id, start_seconds)`
-- 多對多：`stream_singers`（含 `is_owner`）、`performance_singers`、`stream_stream_tags`、`performance_performance_tags`
-- `performance_tags` / `stream_tags` — 預載入內建標籤；`filter_keywords` — 留言過濾/保留關鍵字（含 seed）
+- `singers` — VTuber、PK は YouTube チャンネル ID
+- `songs` — 楽曲マスター、一意キー `(name, original_artist)`；`song_itunes` で iTunes Track と 1:N 紐付け
+- `streams` — 歌枠、PK は YouTube 動画 ID；`holodex_data` / `comment_raw` / `comment_songs` は JSONB
+- `performances` — 歌唱記録、一意キー `(stream_id, song_id, start_seconds)`
+- 多対多：`stream_singers`（`is_owner` 含む）、`performance_singers`、`stream_stream_tags`、`performance_performance_tags`
+- `performance_tags` / `stream_tags` — ビルトインタグをプリロード；`filter_keywords` — コメントの除外/保持キーワード（seed 含む）
 
-Migration 命名為 `NNN_description.sql`，啟動時依檔名排序、用 `schema_migrations` 表追蹤、冪等執行。
+マイグレーションのファイル名は `NNN_description.sql`。起動時にファイル名順で実行し、`schema_migrations` テーブルで追跡。冪等に動作します。
 
 ---
 
-## 留言分析流程
+## コメント解析フロー
 
 ```
-原始留言 (comment_raw)
-   │  regex 解析時間戳 + 分隔符        pkg/comment/parser.go
+生コメント (comment_raw)
+   │  regex でタイムスタンプ + 区切り文字を解析   pkg/comment/parser.go
    ▼
-ParsedSong[]  (comment_songs，未去重)
-   │  關鍵字過濾（filter/keep）        pkg/comment/filter.go
-   │  時間戳±30s & 歌名相似度≥0.8 去重   pkg/comment/dedup.go
-   │  合理性驗證（無歌名/負時間剔除）    pkg/comment/estimator.go
+ParsedSong[]  (comment_songs、未重複排除)
+   │  キーワードフィルタ（filter/keep）           pkg/comment/filter.go
+   │  タイムスタンプ±30s & 曲名類似度≥0.8 で重複排除  pkg/comment/dedup.go
+   │  妥当性検証（曲名なし/負時間は除外）         pkg/comment/estimator.go
    ▼
-分析結果回傳前端 → 使用者編輯 → 建立 Performance
+解析結果をフロントへ返却 → ユーザーが編集 → Performance を作成
 ```
 
-- 結束時間估算優先序：留言已標註 → iTunes 時長 → 下一首開始時間 → 預設 240 秒（`service/end_time_estimate_service.go`）。
-- Groq AI 在純正則失敗時作為 fallback，並負責歌名正規化與版本標籤（acoustic/piano/short…）偵測。
+- 終了時間の推定優先順位：コメントに記載あり → iTunes 再生時間 → 次の曲の開始時間 → デフォルト 240 秒（`service/end_time_estimate_service.go`）。
+- Groq AI は純粋な正規表現が失敗したときのフォールバックとして機能し、曲名正規化とバージョンタグ（acoustic/piano/short…）の検出を担当。
 
 ---
 
-## 已知問題與改進方向
+## 既知の問題と改善点
 
-詳細的程式碼審查結果見 **[`CODE_REVIEW.md`](./CODE_REVIEW.md)**。重點：
+詳細なコードレビュー結果は **[`CODE_REVIEW.md`](./CODE_REVIEW.md)** を参照。主なポイント：
 
-**架構**
-- `StreamDetailPage.tsx` 超過 2300 行，亟需拆分元件
-- 認證為選用（`API_AUTH_TOKEN`）的 Bearer token 閘門，僅保護寫入操作；尚無完整的使用者/角色機制（`JWT_SECRET` 仍未使用）
-- 後端有少量未使用的死碼（`pkg/comment` 估算函式、部分 client 方法）
-- 無自動化測試、無 API 文件（Swagger）
+**アーキテクチャ**
+- `StreamDetailPage.tsx` が 2300 行を超えており、コンポーネント分割が急務
+- 認証は任意（`API_AUTH_TOKEN`）の Bearer トークンゲートで書き込み操作のみ保護。完全なユーザー/ロール機構は未実装（`JWT_SECRET` は未使用）
+- バックエンドに未使用のデッドコードが若干存在（`pkg/comment` の推定関数、一部 client メソッド）
+- 自動テストなし、API ドキュメントなし（Swagger）
 
-**功能 / 維運**
-- 缺少批次操作、匯出（CSV/JSON）、統計 Dashboard
-- 前後端尚未容器化（Docker 僅有 PostgreSQL）、無 CI/CD、無結構化日誌
+**機能 / 運用**
+- バッチ操作、CSV/JSON エクスポート、統計ダッシュボードが不足
+- フロント/バックエンドのコンテナ化未実施（Docker は PostgreSQL のみ）、CI/CD なし、構造化ログなし
 
 ---
 
-## 安全性注意事項 ⚠️
+## セキュリティ注意事項 ⚠️
 
-- 歷史 commit 曾將 **`backend/.env`（含真實 API keys）與編譯產物 `backend/bin/server`** 提交進版控。已從追蹤移除（`.gitignore` 本就涵蓋），但金鑰已存在於 git 歷史中——**請務必輪替 Holodex / Groq / YouTube / Holodex Editor token，並考慮清理 git 歷史（如 `git filter-repo`）**。
-- **寫入認證**：設定 `API_AUTH_TOKEN` 後，所有 POST/PUT/DELETE 需帶 `Authorization: Bearer <token>`（讀取 API 與 `/health` 維持公開）；前端設定 `VITE_API_TOKEN` 即會自動附帶。**未設定時寫入 API 為公開**，啟動時會印出警告。
-- CORS 目前為 `Access-Control-Allow-Origin: *`。正式部署前請限制來源，並考慮導入完整的使用者/角色認證。
+- 過去の commit で **`backend/.env`（実在の API キー入り）とビルド成果物 `backend/bin/server`** がリポジトリにコミットされたことがあります。`.gitignore` でカバー済みですが、すでに git 履歴に残っています。**Holodex / Groq / YouTube / Holodex Editor トークンを必ずローテーションし、必要に応じて git 履歴のクリーンアップ（`git filter-repo` など）を検討してください**。
+- **書き込み認証**：`API_AUTH_TOKEN` を設定すると、すべての POST/PUT/DELETE で `Authorization: Bearer <token>` が必要になります（読み取り API と `/health` は公開のまま）。フロントエンドで `VITE_API_TOKEN` を設定すると自動付与されます。**未設定時は書き込み API が公開** となり、起動時に警告を表示します。
+- CORS は現在 `Access-Control-Allow-Origin: *` です。本番デプロイ前にオリジンを制限し、完全なユーザー/ロール認証の導入を検討してください。

@@ -16,7 +16,7 @@ export default function YoutubePlayer({ videoId, onReady }: YoutubePlayerProps) 
       return;
     }
 
-    // 確保 YouTube API 已加載
+    // YouTube API がロード済みであることを確認
     const initPlayer = () => {
       if (!(window as any).YT) {
         setTimeout(initPlayer, 100);
@@ -24,7 +24,7 @@ export default function YoutubePlayer({ videoId, onReady }: YoutubePlayerProps) 
       }
 
       try {
-        // 清空容器
+        // コンテナをクリア
         if (containerRef.current) {
           containerRef.current.innerHTML = '';
         }
@@ -51,11 +51,11 @@ export default function YoutubePlayer({ videoId, onReady }: YoutubePlayerProps) 
       }
     };
 
-    // 檢查 YouTube API 是否已加載
+    // YouTube API がロード済みかを確認
     if ((window as any).YT && (window as any).YT.Player) {
       initPlayer();
     } else {
-      // 加載 YouTube IFrame API
+      // YouTube IFrame API をロード
       if (!document.getElementById('youtube-api')) {
         const script = document.createElement('script');
         script.id = 'youtube-api';
@@ -69,14 +69,14 @@ export default function YoutubePlayer({ videoId, onReady }: YoutubePlayerProps) 
     }
 
     return () => {
-      // 不銷毀播放器，因為它會自動清理
+      // プレイヤーを破棄しない（自動クリーンアップされるため）
     };
   }, [videoId, onReady]);
 
   return <div ref={containerRef} style={{ width: '100%', height: '100%' }} />;
 }
 
-// 暴露播放器實例，供其他組件使用
+// プレイヤーインスタンスを公開、他のコンポーネントで使用するため
 export const youtubePlayerSeekTo = (seconds: number) => {
   if (playerInstance && playerInstance.seekTo) {
     playerInstance.seekTo(seconds, true);
@@ -86,7 +86,7 @@ export const youtubePlayerSeekTo = (seconds: number) => {
   }
 };
 
-// 取得當前播放時間（秒）
+// 現在の再生時間を取得（秒）
 export const youtubePlayerGetCurrentTime = (): number | null => {
   if (playerInstance && playerInstance.getCurrentTime) {
     return playerInstance.getCurrentTime();

@@ -14,26 +14,26 @@ import (
 
 const baseURL = "https://holodex.net/api/v2"
 
-// Client Holodex API 客戶端
+// Client Holodex API クライアント
 type Client struct {
 	apiKey      string
 	httpClient  *http.Client
 	rateLimiter *ratelimit.RateLimiter
 }
 
-// NewClient 建立新的 Holodex 客戶端
+// NewClient Holodex クライアントを新規作成
 func NewClient(apiKey string) *Client {
 	return &Client{
 		apiKey: apiKey,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
-		// Holodex API 限制: 80 requests per 2 minutes
-		rateLimiter: ratelimit.NewRateLimiter(75, 2*time.Minute), // 設定 75 避免邊界情況
+		// Holodex API 制限: 80 requests per 2 minutes
+		rateLimiter: ratelimit.NewRateLimiter(75, 2*time.Minute), // 75 に設定して境界ケースを避ける
 	}
 }
 
-// Video 影片資料
+// Video 動画データ
 type Video struct {
 	ID             string    `json:"id"`
 	Title          string    `json:"title"`
@@ -53,10 +53,10 @@ type Video struct {
 	Channel        *Channel  `json:"channel"`
 	Songs          []Song    `json:"songs"`
 	Comments       []Comment `json:"comments"`
-	Mentions       []Channel `json:"mentions"` // 參與者（被提及的頻道）
+	Mentions       []Channel `json:"mentions"` // 参加者（言及されたチャンネル）
 }
 
-// Channel 頻道資料
+// Channel チャンネルデータ
 type Channel struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
@@ -71,7 +71,7 @@ type Channel struct {
 	Description string `json:"description"`
 }
 
-// Song 歌曲資料（來自 Holodex）
+// Song 楽曲データ（Holodex 由来）
 type Song struct {
 	ID             string `json:"id"`
 	Name           string `json:"name"`
@@ -82,7 +82,7 @@ type Song struct {
 	End            int    `json:"end"`
 }
 
-// iTunes 歌曲資料
+// iTunes 楽曲データ
 type ITunesSong struct {
 	TrackID         int64  `json:"trackId"`
 	TrackTimeMillis int    `json:"trackTimeMillis"`
@@ -94,7 +94,7 @@ type ITunesSong struct {
 	TrackViewUrl    string `json:"trackViewUrl"`
 }
 
-// AddSongsRequest 新增歌曲到 Holodex 的請求
+// AddSongsRequest Holodex へ楽曲を追加するリクエスト
 type AddSongsRequest struct {
 	Song           *ITunesSong `json:"song"`
 	ItunesID       int64       `json:"itunesid"`
@@ -110,13 +110,13 @@ type AddSongsRequest struct {
 	AvailableAt    string      `json:"available_at,omitempty"`
 }
 
-// Comment 評論資料
+// Comment コメントデータ
 type Comment struct {
 	CommentKey string `json:"comment_key"`
 	Message    string `json:"message"`
 }
 
-// GetChannelVideos 取得頻道的影片列表
+// GetChannelVideos チャンネルの動画一覧を取得
 func (c *Client) GetChannelVideos(channelID string, videoType string, limit int, offset int) ([]Video, error) {
 	params := url.Values{}
 	params.Set("channel_id", channelID)
@@ -134,10 +134,10 @@ func (c *Client) GetChannelVideos(channelID string, videoType string, limit int,
 	return videos, nil
 }
 
-// GetVideo 取得單一影片詳情
+// GetVideo 単一動画の詳細を取得
 func (c *Client) GetVideo(videoID string) (*Video, error) {
 	params := url.Values{}
-	params.Set("c", "1") // 包含 comments
+	params.Set("c", "1") // comments を含む
 
 	var video Video
 	err := c.get("/videos/"+videoID, params, &video)
@@ -148,7 +148,7 @@ func (c *Client) GetVideo(videoID string) (*Video, error) {
 	return &video, nil
 }
 
-// GetVideoWithSongs 取得影片及其歌曲清單
+// GetVideoWithSongs 動画とその楽曲一覧を取得
 func (c *Client) GetVideoWithSongs(videoID string) (*Video, error) {
 	var video Video
 	err := c.get("/videos/"+videoID, nil, &video)
@@ -159,7 +159,7 @@ func (c *Client) GetVideoWithSongs(videoID string) (*Video, error) {
 	return &video, nil
 }
 
-// GetChannel 取得頻道資訊
+// GetChannel チャンネル情報を取得
 func (c *Client) GetChannel(channelID string) (*Channel, error) {
 	var channel Channel
 	err := c.get("/channels/"+channelID, nil, &channel)
@@ -170,7 +170,7 @@ func (c *Client) GetChannel(channelID string) (*Channel, error) {
 	return &channel, nil
 }
 
-// SearchVideos 搜尋影片
+// SearchVideos 動画を検索
 func (c *Client) SearchVideos(query string, topic string, limit int) ([]Video, error) {
 	params := url.Values{}
 	if query != "" {
@@ -191,7 +191,7 @@ func (c *Client) SearchVideos(query string, topic string, limit int) ([]Video, e
 	return videos, nil
 }
 
-// GetAllStreams 取得所有直播影片
+// GetAllStreams すべての配信動画を取得
 func (c *Client) GetAllStreams(channelID string, limit int, offset int) ([]Video, error) {
 	params := url.Values{}
 	params.Set("channel_id", channelID)
@@ -210,9 +210,9 @@ func (c *Client) GetAllStreams(channelID string, limit int, offset int) ([]Video
 	return videos, nil
 }
 
-// get 執行 GET 請求
+// get GET リクエストを実行
 func (c *Client) get(endpoint string, params url.Values, result interface{}) error {
-	// 使用 rate limiter 等待直到可以發送請求
+	// rate limiter で送信可能になるまで待機
 	c.rateLimiter.Wait()
 
 	reqURL := baseURL + endpoint
@@ -251,7 +251,7 @@ func (c *Client) get(endpoint string, params url.Values, result interface{}) err
 	return nil
 }
 
-// AddSongs 新增歌曲到 Holodex
+// AddSongs Holodex に楽曲を追加
 func (c *Client) AddSongs(songs []AddSongsRequest) error {
 	if len(songs) == 0 {
 		return nil
@@ -259,9 +259,9 @@ func (c *Client) AddSongs(songs []AddSongsRequest) error {
 
 	reqURL := baseURL + "/songs"
 
-	// 逐個添加歌曲
+	// 楽曲を1つずつ追加
 	for _, song := range songs {
-		// 使用 rate limiter 等待直到可以發送請求
+		// rate limiter で送信可能になるまで待機
 		c.rateLimiter.Wait()
 
 		body, err := json.Marshal(song)

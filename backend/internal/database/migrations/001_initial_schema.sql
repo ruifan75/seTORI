@@ -1,22 +1,22 @@
--- seTORI 資料庫 Schema - 初始化
--- 建立日期: 2026-01-29
--- 最後更新: 2026-02-01
--- 說明：簡化版本，只包含實際使用的表
+-- seTORI データベース Schema - 初期化
+-- 作成日: 2026-01-29
+-- 最終更新: 2026-02-01
+-- 説明：簡略版、実際に使用するテーブルのみ含む
 
--- 啟用 UUID 擴展
+-- UUID 拡張を有効化
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
--- 啟用模糊搜尋擴展
+-- あいまい検索拡張を有効化
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 -- ==========================================
--- 1. singers（演唱者/VTuber）
+-- 1. singers（歌手/VTuber）
 -- ==========================================
 CREATE TABLE IF NOT EXISTS singers (
     id VARCHAR(64) PRIMARY KEY,                    -- YouTube Channel ID
-    name VARCHAR(255) NOT NULL,                    -- 顯示名稱
-    english_name VARCHAR(255),                     -- 英文名稱（可選）
-    photo_url TEXT,                                -- 頭像 URL
-    organization VARCHAR(100),                     -- 所屬組織 (Hololive, ReAcT 等)
+    name VARCHAR(255) NOT NULL,                    -- 表示名
+    english_name VARCHAR(255),                     -- 英語名（任意）
+    photo_url TEXT,                                -- アバター URL
+    organization VARCHAR(100),                     -- 所属組織 (Hololive, ReAcT など)
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );

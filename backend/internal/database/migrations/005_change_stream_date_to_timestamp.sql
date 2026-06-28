@@ -1,5 +1,5 @@
--- 將 streams.stream_date 從 DATE 改為 TIMESTAMP WITH TIME ZONE
--- 這樣可以儲存精確到秒的時間資訊，並包含時區
+-- streams.stream_date を DATE から TIMESTAMP WITH TIME ZONE に変更
+-- これにより秒単位の正確な時間情報とタイムゾーンを保存可能にする
 
 ALTER TABLE streams 
 ALTER COLUMN stream_date TYPE TIMESTAMP WITH TIME ZONE 

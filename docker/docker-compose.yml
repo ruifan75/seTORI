@@ -19,7 +19,7 @@ services:
       timeout: 5s
       retries: 5
 
-  # 未來可加入 backend 和 frontend services
+  # 将来 backend と frontend サービスを追加可能
   # backend:
   #   build:
   #     context: ../backend

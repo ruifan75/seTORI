@@ -34,10 +34,10 @@ export default function SingersPage() {
     e.preventDefault();
     if (!channelInput.trim()) return;
 
-    // 從輸入中提取 Channel ID
+    // 入力から Channel ID を抽出
     let channelId = channelInput.trim();
 
-    // 如果是 YouTube URL，提取 Channel ID
+    // YouTube URL の場合は Channel ID を抽出
     const urlMatch = channelInput.match(/youtube\.com\/channel\/([^/?]+)/);
     if (urlMatch) {
       channelId = urlMatch[1];

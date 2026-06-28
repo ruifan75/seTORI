@@ -16,7 +16,7 @@ type Client struct {
 	httpClient *http.Client
 }
 
-// NewClient 建立新的 YouTube Client
+// NewClient 新しい YouTube クライアントを作成
 func NewClient(apiKey string) *Client {
 	return &Client{
 		apiKey: apiKey,
@@ -43,18 +43,18 @@ type ChannelSnippet struct {
 	} `json:"thumbnails"`
 }
 
-// Channel YouTube Channel 資訊
+// Channel YouTube チャンネル情報
 type Channel struct {
 	ID      string         `json:"id"`
 	Snippet ChannelSnippet `json:"snippet"`
 }
 
-// ChannelListResponse YouTube Channel List API 回應
+// ChannelListResponse YouTube Channel List API レスポンス
 type ChannelListResponse struct {
 	Items []Channel `json:"items"`
 }
 
-// GetChannel 取得頻道資訊
+// GetChannel チャンネル情報を取得
 func (c *Client) GetChannel(channelID string) (*Channel, error) {
 	if c.apiKey == "" {
 		return nil, fmt.Errorf("YouTube API key not configured")
@@ -89,14 +89,14 @@ func (c *Client) GetChannel(channelID string) (*Channel, error) {
 	return &result.Items[0], nil
 }
 
-// GetChannelPhoto 取得頻道大頭貼 URL（優先使用高解析度）
+// GetChannelPhoto チャンネルアバター URL を取得（高解像度を優先）
 func (c *Client) GetChannelPhoto(channelID string) (string, error) {
 	channel, err := c.GetChannel(channelID)
 	if err != nil {
 		return "", err
 	}
 
-	// 優先使用高解析度
+	// 高解像度を優先使用
 	if channel.Snippet.Thumbnails.High.URL != "" {
 		return channel.Snippet.Thumbnails.High.URL, nil
 	}
@@ -110,7 +110,7 @@ func (c *Client) GetChannelPhoto(channelID string) (string, error) {
 	return "", fmt.Errorf("no thumbnail found for channel: %s", channelID)
 }
 
-// IsConfigured 檢查 API Key 是否已設定
+// IsConfigured API Key が設定されているかを確認
 func (c *Client) IsConfigured() bool {
 	return c.apiKey != ""
 }

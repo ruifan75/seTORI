@@ -7,14 +7,14 @@ import (
 	"strings"
 )
 
-// 嵌入遷移文件
+// マイグレーションファイルを埋め込み
 //
 //go:embed migrations/*.sql
 var migrationFS embed.FS
 
-// RunMigrations 執行所有待機遷移
+// RunMigrations 待機中のすべてのマイグレーションを実行
 func RunMigrations(db *sql.DB) error {
-	// 建立遷移跟蹤表
+	// マイグレーション追跡テーブルを作成
 	createTableSQL := `
 		CREATE TABLE IF NOT EXISTS schema_migrations (
 			version VARCHAR(50) PRIMARY KEY,
@@ -25,13 +25,13 @@ func RunMigrations(db *sql.DB) error {
 		return fmt.Errorf("建立遷移表失敗: %w", err)
 	}
 
-	// 讀取遷移文件
+	// マイグレーションファイルを読み込み
 	entries, err := migrationFS.ReadDir("migrations")
 	if err != nil {
 		return fmt.Errorf("讀取遷移目錄失敗: %w", err)
 	}
 
-	// 按字母序執行遷移（文件名應該是 001_*, 002_* 等）
+	// ファイル名順でマイグレーションを実行（ファイル名は 001_*, 002_* などであるべき）
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".sql") {
 			continue
@@ -51,7 +51,7 @@ func RunMigrations(db *sql.DB) error {
 			continue
 		}
 
-		// 讀取遷移文件
+		// マイグレーションファイルを読み込み
 		content, err := migrationFS.ReadFile(fmt.Sprintf("migrations/%s", version))
 		if err != nil {
 			return fmt.Errorf("讀取遷移文件 %s 失敗: %w", version, err)

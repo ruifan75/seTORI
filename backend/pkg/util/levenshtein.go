@@ -4,13 +4,13 @@ import (
 	"golang.org/x/text/unicode/norm"
 )
 
-// NormalizeUnicode 使用 NFKC 正規化 Unicode 字串
-// 例如：全形羅馬數字 Ⅱ (U+2161) → II, 全形英數 Ａ → A
+// NormalizeUnicode NFKC で Unicode 文字列を正規化
+// 例：全角ローマ数字 Ⅱ (U+2161) → II, 全角英数 Ａ → A
 func NormalizeUnicode(s string) string {
 	return norm.NFKC.String(s)
 }
 
-// LevenshteinDistance 計算兩個字串的編輯距離
+// LevenshteinDistance 2つの文字列の編集距離を計算
 func LevenshteinDistance(s1, s2 string) int {
 	r1 := []rune(s1)
 	r2 := []rune(s2)

@@ -19,7 +19,7 @@ import (
 	"github.com/ruifan75/setori/pkg/itunes"
 )
 
-// Router HTTP 路由器
+// Router HTTP ルーター
 type Router struct {
 	db  *sql.DB
 	cfg *config.Config
@@ -39,9 +39,9 @@ type Router struct {
 	chatEndService       *service.ChatEndService
 }
 
-// NewRouter 建立新的路由器
+// NewRouter 新しいルーターを作成
 func NewRouter(db *sql.DB, cfg *config.Config) *Router {
-	// 建立 repositories
+	// repositories を作成
 	songRepo := repository.NewSongRepository(db)
 	singerRepo := repository.NewSingerRepository(db)
 	streamRepo := repository.NewStreamRepository(db)
@@ -51,19 +51,19 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	tagRepo := repository.NewTagRepository(db)
 	aiProviderRepo := repository.NewAIProviderRepository(db)
 
-	// AI 服務：多 provider 輪替 + failover，未設定時退回 GROQ_API_KEY
+	// AI サービス：複数 provider ローテーション + failover、未設定時は GROQ_API_KEY にフォールバック
 	aiService := service.NewAIService(aiProviderRepo, cfg.GroqAPIKey)
 
-	// 建立 services
+	// services を作成
 	songService := service.NewSongService(songRepo, perfRepo, songItunesRepo)
 	streamService := service.NewStreamService(streamRepo, perfRepo)
 	singerService := service.NewSingerService(singerRepo, streamRepo, perfRepo)
 	holodexService := service.NewHolodexService(cfg.HolodexAPIKey, cfg.YouTubeAPIKey, cfg.GroqAPIKey, streamRepo, singerRepo, cfg.HolodexEditorToken)
-	holodexService.SetRepositoriesWithSongItunes(perfRepo, songRepo, songItunesRepo) // 為 SyncSetoriToHolodex 提供必要的 repositories
+	holodexService.SetRepositoriesWithSongItunes(perfRepo, songRepo, songItunesRepo) // SyncSetoriToHolodex に必要な repositories を提供
 	commentService := service.NewCommentService(holodexService, streamRepo, filterKeywordRepo, aiService)
 	normalizationService := service.NewNormalizationService(aiService, songRepo, songItunesRepo)
 	chatEndService := service.NewChatEndService(streamRepo, "", "")
-	holodexService.SetChatEndService(chatEndService) // 同步時自動偵測拍手 end
+	holodexService.SetChatEndService(chatEndService) // 同期時に自動で chat end を検出
 	performanceService := service.NewPerformanceService(perfRepo, songRepo, songItunesRepo)
 	itunesClient := itunes.NewClient()
 	endTimeEstimateService := service.NewEndTimeEstimateService(itunesClient)
@@ -87,7 +87,7 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	}
 
 	if cfg.APIAuthToken == "" {
-		log.Printf("[WARN] API_AUTH_TOKEN 未設定：寫入 API 目前為公開。正式環境請設定此值以啟用認證")
+		log.Printf("[WARN] API_AUTH_TOKEN 未設定：書き込み API は現在公開。 本番環境ではこの値を設定して認証を有効にしてください")
 	}
 
 	r.setupRoutes()
@@ -170,7 +170,7 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("GET /api/itunes/{id}", r.handleItunesQueryByID)
 }
 
-// ServeHTTP 實作 http.Handler 介面
+// ServeHTTP http.Handler インターフェースを実装
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	start := time.Now()
 
@@ -184,18 +184,18 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// 認證 middleware：若有設定 API_AUTH_TOKEN，寫入操作需提供 Bearer token
+	// 認証 middleware：API_AUTH_TOKEN 設定時は書き込み操作に Bearer token が必要
 	if !r.authorized(req) {
 		respondError(w, http.StatusUnauthorized, "認証が必要です")
 		return
 	}
 
-	// 記錄請求
+	// リクエストを記録
 	log.Printf("[%s] %s %s", req.Method, req.URL.Path, req.RemoteAddr)
 
 	r.mux.ServeHTTP(w, req)
 
-	// 記錄請求完成時間
+	// リクエストを記録完成時間
 	log.Printf("[%s] %s completed in %v", req.Method, req.URL.Path, time.Since(start))
 }
 

@@ -11,17 +11,17 @@ import (
 )
 
 const (
-	// 預設 Groq OpenAI 相容 base 與模型
+	// デフォルト Groq OpenAI 互換 base とモデル
 	groqBaseURL = "https://api.groq.com/openai/v1"
 	groqModel   = "llama-3.3-70b-versatile"
 )
 
-// Chatter 是 LLM 對話介面，可由單一 Client 或多 provider 輪替服務實作
+// Chatter は LLM 対話インターフェース。単一 Client または複数 provider のローテーションで実装可能
 type Chatter interface {
 	SimpleChat(systemPrompt, userMessage string) (string, error)
 }
 
-// APIError 表示 LLM API 回傳的非 2xx 錯誤，帶有狀態碼供 failover 判斷
+// APIError LLM API から返される非 2xx エラー。failover 判断用のステータスコードを含む
 type APIError struct {
 	StatusCode int
 	Body       string
@@ -31,20 +31,20 @@ func (e *APIError) Error() string {
 	return fmt.Sprintf("API error: status=%d body=%s", e.StatusCode, e.Body)
 }
 
-// Client OpenAI 相容 LLM 客戶端（Groq / Gemini / Cerebras 等）
+// Client OpenAI 互換 LLM クライアント（Groq / Gemini / Cerebras など）
 type Client struct {
 	apiKey     string
 	httpClient *http.Client
 	model      string
-	baseURL    string // OpenAI 相容 base，如 https://api.groq.com/openai/v1
+	baseURL    string // OpenAI 互換 base、例: https://api.groq.com/openai/v1
 }
 
-// NewClient 建立預設的 Groq 客戶端（向後相容）
+// NewClient デフォルトの Groq クライアントを作成（後方互換）
 func NewClient(apiKey string) *Client {
 	return NewClientWith(groqBaseURL, groqModel, apiKey)
 }
 
-// NewClientWith 以指定 base URL 與模型建立 OpenAI 相容客戶端
+// NewClientWith 指定 base URL とモデルで OpenAI 互換クライアントを作成
 func NewClientWith(baseURL, model, apiKey string) *Client {
 	if baseURL == "" {
 		baseURL = groqBaseURL
@@ -62,13 +62,13 @@ func NewClientWith(baseURL, model, apiKey string) *Client {
 	}
 }
 
-// ChatMessage 聊天訊息
+// ChatMessage チャットメッセージ
 type ChatMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
 }
 
-// ChatRequest 聊天請求
+// ChatRequest チャットリクエスト
 type ChatRequest struct {
 	Model       string        `json:"model"`
 	Messages    []ChatMessage `json:"messages"`
@@ -76,7 +76,7 @@ type ChatRequest struct {
 	MaxTokens   int           `json:"max_tokens,omitempty"`
 }
 
-// ChatResponse 聊天回應
+// ChatResponse チャットレスポンス
 type ChatResponse struct {
 	ID      string `json:"id"`
 	Object  string `json:"object"`
@@ -94,12 +94,12 @@ type ChatResponse struct {
 	} `json:"usage"`
 }
 
-// Chat 發送聊天請求
+// Chat チャットリクエストを送信
 func (c *Client) Chat(messages []ChatMessage) (*ChatResponse, error) {
 	reqBody := ChatRequest{
 		Model:       c.model,
 		Messages:    messages,
-		Temperature: 0.1, // 使用較低溫度以獲得更一致的結果
+		Temperature: 0.1, // より一貫した結果を得るため低めの温度を使用
 		MaxTokens:   2048,
 	}
 
@@ -140,7 +140,7 @@ func (c *Client) Chat(messages []ChatMessage) (*ChatResponse, error) {
 	return &chatResp, nil
 }
 
-// SimpleChat 簡化的聊天方法
+// SimpleChat 簡略化されたチャットメソッド
 func (c *Client) SimpleChat(systemPrompt, userMessage string) (string, error) {
 	messages := []ChatMessage{
 		{Role: "system", Content: systemPrompt},

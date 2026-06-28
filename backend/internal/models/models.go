@@ -8,23 +8,23 @@ import (
 	"github.com/lib/pq"
 )
 
-// Singer 演唱者/VTuber
+// Singer 歌手/VTuber
 type Singer struct {
 	ID           string         `json:"id"`           // YouTube Channel ID
-	Name         string         `json:"name"`         // 顯示名稱
-	EnglishName  sql.NullString `json:"english_name"` // 英文名稱
-	PhotoURL     sql.NullString `json:"photo_url"`    // 頭像 URL
-	Organization sql.NullString `json:"organization"` // 所屬組織
+	Name         string         `json:"name"`         // 表示名
+	EnglishName  sql.NullString `json:"english_name"` // 英語名
+	PhotoURL     sql.NullString `json:"photo_url"`    // アバター URL
+	Organization sql.NullString `json:"organization"` // 所属組織
 	CreatedAt    time.Time      `json:"created_at"`
 	UpdatedAt    time.Time      `json:"updated_at"`
 }
 
-// Song 歌曲 Master
+// Song 楽曲 Master
 type Song struct {
 	ID                    uuid.UUID      `json:"id"`
-	Name                  string         `json:"name"`                    // 歌曲名稱
-	NameReading           sql.NullString `json:"name_reading"`            // 讀音（平假名）
-	OriginalArtist        string         `json:"original_artist"`         // 原唱藝人
+	Name                  string         `json:"name"`                    // 楽曲名
+	NameReading           sql.NullString `json:"name_reading"`            // 読み（平仮名）
+	OriginalArtist        string         `json:"original_artist"`         // 原曲アーティスト
 	OriginalArtistReading sql.NullString `json:"original_artist_reading"` // 原唱藝人讀音
 	Arts                  sql.NullString `json:"arts"`                    // 封面圖 URL
 	CreatedAt             time.Time      `json:"created_at"`

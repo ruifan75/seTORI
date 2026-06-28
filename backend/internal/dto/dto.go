@@ -6,7 +6,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// ========== 分頁 ==========
+// ========== ページング ==========
 
 type PaginationRequest struct {
 	Page  int `json:"page"`
@@ -20,7 +20,7 @@ type PaginationResponse struct {
 	TotalPages int `json:"total_pages"`
 }
 
-// ========== 歌曲 ==========
+// ========== 楽曲 ==========
 
 type SongItunesResponse struct {
 	ItunesID       int64   `json:"itunes_id"`
@@ -70,7 +70,7 @@ type UpdateSongRequest struct {
 	ItunesIds             []ItunesItem `json:"itunes_ids,omitempty"`
 }
 
-// ========== 演唱者 ==========
+// ========== 歌手 ==========
 
 type SingerResponse struct {
 	ID           string    `json:"id"`
@@ -107,7 +107,7 @@ type CreateSingerRequest struct {
 	Organization *string `json:"organization,omitempty"`
 }
 
-// ========== 歌回 ==========
+// ========== 歌枠 ==========
 
 type StreamTagResponse struct {
 	ID          string `json:"id"`

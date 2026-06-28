@@ -1,4 +1,4 @@
-// ========== 分頁 ==========
+// ========== ページング ==========
 
 export interface PaginationResponse {
   page: number;
@@ -7,7 +7,7 @@ export interface PaginationResponse {
   total_pages: number;
 }
 
-// ========== 歌曲 ==========
+// ========== 楽曲 ==========
 
 export interface SongItunes {
   itunes_id: number;
@@ -70,7 +70,7 @@ export interface ITunesSearchResult {
   artist_name: string;
   artwork_url: string;
   country: string;
-  existing_song?: SongBrief; // 如果已在 DB 中，包含歌曲資訊
+  existing_song?: SongBrief; // DB に既に存在する場合、楽曲情報を含む
 }
 
 export interface ITunesSearchResponse {
@@ -88,7 +88,7 @@ export interface ITunesQueryResult {
   country: string;
 }
 
-// ========== 演唱者 ==========
+// ========== 歌手 ==========
 
 export interface Singer {
   id: string;
@@ -124,7 +124,7 @@ export interface CreateSingerRequest {
   organization?: string;
 }
 
-// ========== 歌回 ==========
+// ========== 歌枠 ==========
 
 export interface StreamTag {
   id: string;
@@ -139,11 +139,11 @@ export interface Stream {
   duration_seconds?: number;
   thumbnail_url?: string;
   tags: StreamTag[];
-  participants: Singer[];  // 參與者
-  channel_owner?: Singer;  // 頻道擁有者
-  is_processed: boolean;   // 處理完成
-  is_hidden: boolean;      // 隱藏
-  holodex_timeline_songs?: SongSuggestion[];  // Holodex timeline 資料
+  participants: Singer[];  // 参加者
+  channel_owner?: Singer;  // チャンネルオーナー
+  is_processed: boolean;   // 処理済み
+  is_hidden: boolean;      // 非表示
+  holodex_timeline_songs?: SongSuggestion[];  // Holodex タイムライン データ
   comment_timeline_songs?: CommentSong[];     // コメント解析済みタイムライン
   created_at: string;
   updated_at: string;
@@ -163,7 +163,7 @@ export interface UpdateStreamRequest {
   is_hidden?: boolean;
 }
 
-// ========== 演出 ==========
+// ========== パフォーマンス ==========
 
 export interface PerformanceTag {
   id: string;
@@ -192,7 +192,7 @@ export interface StreamDetailResponse extends Stream {
   performances: Performance[];
 }
 
-// 用於歌曲詳情頁的反向查詢（也用於演唱者詳情頁）
+// 楽曲詳細ページからの逆引きクエリ用（歌手詳細ページでも使用）
 export interface SongPerformance {
   id: string;
   stream_id: string;
@@ -216,7 +216,7 @@ export interface SongPerformanceListResponse {
   pagination: PaginationResponse;
 }
 
-// ========== Holodex 同步 ==========
+// ========== Holodex 同期 ==========
 
 export interface SyncHolodexRequest {
   channel_id: string;
@@ -235,7 +235,7 @@ export interface SyncHolodexResponse {
   message?: string;
 }
 
-// ========== Comment 分析 ==========
+// ========== コメント解析 ==========
 
 export interface CommentSong {
   start: number;
@@ -251,7 +251,7 @@ export interface AnalyzeCommentsResponse {
   raw_comments: string[];
 }
 
-// ========== 直接建立演出 ==========
+// ========== 直接パフォーマンス作成 ==========
 
 export interface SongSuggestion {
   name: string;
@@ -362,7 +362,7 @@ export interface AIProviderInput {
   priority?: number;
 }
 
-// ========== 通用回應 ==========
+// ========== 汎用レスポンス ==========
 
 export interface ErrorResponse {
   error: string;
@@ -373,7 +373,7 @@ export interface SuccessResponse {
   success: boolean;
   message?: string;
 }
-// ========== 推算結束時間 ==========
+// ========== 終了時間推定 ==========
 
 export interface SongEndTimeEstimateRequest {
   start: number;

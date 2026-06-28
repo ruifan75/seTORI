@@ -17,7 +17,7 @@ export default function SingerDetailPage() {
   const [streamPage, setStreamPage] = useState(1);
   const [perfPage, setPerfPage] = useState(1);
   const [syncMode, setSyncMode] = useState<'new' | 'all'>('new');
-  // Filter states - 預設不顯示隱藏的
+  // Filter states - デフォルトでは非表示を除外
   const [processedFilter, setProcessedFilter] = useState<ProcessedFilter>('all');
   const [hiddenFilter, setHiddenFilter] = useState<HiddenFilter>('false');
 

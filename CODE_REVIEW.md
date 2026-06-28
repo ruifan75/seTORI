@@ -1,95 +1,95 @@
-# seTORI 程式碼審查報告
+# seTORI コードレビュー報告
 
-> 審查日期：2026-06-28 · 範圍：`backend/`（Go）、`frontend/`（React/TS）、`docker/`、CI 設定
-> 編譯狀態：`go vet ./...` ✅ · `go build ./...` ✅ · `tsc -b --noEmit` ✅（皆通過）
+> レビュー日：2026-06-28 · 範囲：`backend/`（Go）、`frontend/`（React/TS）、`docker/`、CI 設定
+> ビルド状態：`go vet ./...` ✅ · `go build ./...` ✅ · `tsc -b --noEmit` ✅（すべて通過）
 
-本文件記錄一次完整 review 的發現。標示 **[已修復]** 者已於本次提交處理；其餘為記錄供後續處理。
-
----
-
-## 1. 嚴重 — 安全性
-
-### 1.1 真實 API 金鑰被提交進版控 **[已修復追蹤，需手動輪替]**
-`backend/.env` 含真實的 `HOLODEX_API_KEY`、`HOLODEX_EDITOR_TOKEN`、`GROQ_API_KEY`、`YOUTUBE_API_KEY`，且 `backend/bin/server`（10 MB 編譯產物）也被提交。兩者其實都已在 `backend/.gitignore` 內，是在加入 gitignore 前就先 commit 進去的。
-
-- **已做**：`git rm --cached backend/.env backend/bin/server`（檔案保留在磁碟，僅移出索引）。
-- **仍須處理**：金鑰已存在 git 歷史 → **輪替所有 token**；如 repo 會外流，使用 `git filter-repo` / BFG 清除歷史中的 `.env`。
-
-### 1.2 無認證且 CORS 全開 **[部分修復]**
-`internal/handler/router.go` 對所有來源回 `Access-Control-Allow-Origin: *`，且原本所有寫入端點皆無認證。
-
-- **已做**：新增選用的 Bearer token 閘門。設定 `API_AUTH_TOKEN` 後，POST/PUT/DELETE 需帶 `Authorization: Bearer <token>`（GET 與 `/health` 維持公開）；未設定則維持公開並於啟動印出警告。前端 `VITE_API_TOKEN` 會自動附帶。此為非破壞性、預設不影響本機開發。
-- **仍須處理**：CORS 來源白名單；若需多使用者/角色，再導入完整 JWT 登入（`config.JWTSecret`、`models.User` 仍為預留）。
+本ドキュメントは完全なレビューで発見された事項を記録します。**[修正済]** と記載されたものは今回のコミットで処理済みです。それ以外は今後の対応用に記録しています。
 
 ---
 
-## 2. 中 — 正確性 / 資源
+## 1. 重大 — セキュリティ
 
-### 2.1 iTunes client 沒有逾時 **[已修復]**
-`pkg/itunes/client.go` 的 `NewClient()` 用 `&http.Client{}`（無 `Timeout`），對 Apple 端點的請求可能無限期掛住。其他 client（holodex/youtube/groq）都有 30~60s 逾時。已補上 `Timeout: 30 * time.Second`。
+### 1.1 実在の API キーがバージョン管理にコミットされた **[追跡は修正済、手動ローテーションが必要]**
+`backend/.env` に実在の `HOLODEX_API_KEY`、`HOLODEX_EDITOR_TOKEN`、`GROQ_API_KEY`、`YOUTUBE_API_KEY` が含まれ、`backend/bin/server`（10 MB のビルド成果物）もコミットされていました。どちらも `backend/.gitignore` に入っていたものですが、gitignore 追加前に先にコミットしてしまったものです。
 
-### 2.2 迴圈內 `defer resp.Body.Close()` **[已修復]**
-`service/holodex_service.go` 的 `SyncSetoriToHolodex` 在「逐首 performance PUT 到 Holodex」的迴圈內用 `defer resp.Body.Close()`，所有回應 body 會累積到整個函式結束才關閉（連線洩漏）。已改為迴圈內讀取後立即 `resp.Body.Close()`。
-> 相同 pattern 也存在於 `pkg/holodex/client.go` 的 `AddSongs()`，但該函式目前無呼叫者（死碼），未動。
+- **実施済**：`git rm --cached backend/.env backend/bin/server`（ファイルはディスクに残し、インデックスからのみ削除）。
+- **未対応**：キーは git 履歴に残っている → **すべてのトークンをローテーション**してください。リポジトリが外部に漏れる可能性がある場合は `git filter-repo` / BFG で `.env` の履歴を除去してください。
 
-### 2.3 `POST /api/streams` 是會誤導的 stub **[已修復]**
-`handleCreateStream` 原本回 `200 OK` + `{"message":"TODO: Create stream"}`，會讓呼叫端誤以為建立成功（前端 `streamApi` 並未呼叫它）。已改為回 `501 Not Implemented` 並提示改用 Holodex 同步。
+### 1.2 認証なし + CORS 全開放 **[一部修正]**
+`internal/handler/router.go` がすべてのオリジンに `Access-Control-Allow-Origin: *` を返しており、元々すべての書き込みエンドポイントに認証がありませんでした。
 
----
-
-## 3. 低 — 效能（架構）
-
-### 3.1 列表查詢的 N+1 **[已修復]**
-原本：
-- `SongService.GetAll`：對每首歌各跑一次 `GetPerformanceCount` 與 `FindBySongID`（iTunes）。
-- `StreamService.GetAll`：對每筆 stream 各跑一次 `GetTags` / `GetSingers` / `GetChannelOwner`。
-
-已改為批次查詢（`= ANY($1)`）：新增 `SongRepository.GetPerformanceCounts`、`SongItunesRepository.FindBySongIDs`、`StreamRepository.GetTagsForStreams`、`StreamRepository.GetSingersForStreams`，每個列表端點固定 3 次查詢（list + 2 批次），不再隨筆數線性增加。`toSongResponse` 拆出 `buildSongResponse` 供批次與單筆共用。
-
-### 3.2 RateLimiter 在持鎖期間 `Sleep`
-`pkg/ratelimit/ratelimit.go` 的 `Wait()` 在達到上限時於持有 `mu` 的情況下 `time.Sleep`（最長可達整個 window）。對目前「同步一次一個」的使用情境可接受（實際上達成了序列化的效果），但屬反模式，高併發時所有 goroutine 會被卡住。
+- **実施済**：任意選択の Bearer トークンゲートを追加。`API_AUTH_TOKEN` を設定すると POST/PUT/DELETE に `Authorization: Bearer <token>` が必要になります（GET と `/health` は公開のまま）。未設定時は公開で起動時に警告を表示します。フロントエンドの `VITE_API_TOKEN` が自動で付与します。非破壊的で、ローカル開発には影響しません。
+- **未対応**：CORS オリジンホワイトリスト。複数ユーザー/ロールが必要になった場合は完全な JWT ログインを導入（`config.JWTSecret`、`models.User` はまだ予約のみ）。
 
 ---
 
-## 4. 低 — 可維護性 / 死碼
+## 2. 中 — 正確性 / リソース
 
-未被任何呼叫者使用的程式（僅定義）：
-- `service/end_time_estimate_service.go`：`addRateLimit()`、`ParseTimestamp()`（與 `pkg/comment` 內的時間戳解析重複）
-- `pkg/comment/estimator.go`：`EstimateEndTimes()`、`AssignOrderIndex()`（結束時間估算實際走 service 層）
+### 2.1 iTunes client にタイムアウトなし **[修正済]**
+`pkg/itunes/client.go` の `NewClient()` が `&http.Client{}`（`Timeout` なし）を使っていたため、Apple エンドポイントへのリクエストが無期限にハングする可能性がありました。他の client（holodex/youtube/groq）は 30~60s のタイムアウトがあります。`Timeout: 30 * time.Second` を追加しました。
+
+### 2.2 ループ内での `defer resp.Body.Close()` **[修正済]**
+`service/holodex_service.go` の `SyncSetoriToHolodex` で、「performance ごとに Holodex へ PUT」するループ内で `defer resp.Body.Close()` を使っていました。すべてのレスポンスボディが関数終了まで閉じられず、接続リークが発生していました。ループ内で読み込み後に即時 `resp.Body.Close()` するよう修正しました。
+> 同じパターンが `pkg/holodex/client.go` の `AddSongs()` にもありますが、現在は呼び出し元がない（デッドコード）ため未修正。
+
+### 2.3 `POST /api/streams` が誤解を招くスタブだった **[修正済]**
+`handleCreateStream` が `200 OK` + `{"message":"TODO: Create stream"}` を返しており、呼び出し側が作成成功と誤解する恐れがありました（フロントの `streamApi` は実際には呼んでいませんでした）。`501 Not Implemented` を返し、Holodex 同期を使うようメッセージを変更しました。
+
+---
+
+## 3. 低 — パフォーマンス（アーキテクチャ）
+
+### 3.1 リストクエリの N+1 **[修正済]**
+元々：
+- `SongService.GetAll`：曲ごとに `GetPerformanceCount` と `FindBySongID`（iTunes）を 1 回ずつ実行。
+- `StreamService.GetAll`：stream ごとに `GetTags` / `GetSingers` / `GetChannelOwner` を 1 回ずつ実行。
+
+バッチクエリ（`= ANY($1)`）に変更：`SongRepository.GetPerformanceCounts`、`SongItunesRepository.FindBySongIDs`、`StreamRepository.GetTagsForStreams`、`StreamRepository.GetSingersForStreams` を追加。各リストエンドポイントは固定 3 クエリ（list + 2 バッチ）で、件数に比例した線形増加がなくなりました。`toSongResponse` を `buildSongResponse` に分離してバッチと単一で共有。
+
+### 3.2 RateLimiter がロック保持中に `Sleep`
+`pkg/ratelimit/ratelimit.go` の `Wait()` が上限に達したときに `mu` を保持したまま `time.Sleep` します（window 全体に達する可能性）。現在「一度に 1 チャンネル同期」というユースケースでは許容できます（事実上直列化できている）が、アンチパターンであり、高並行時には全 goroutine がブロックされます。
+
+---
+
+## 4. 低 — 保守性 / デッドコード
+
+呼び出し元が一切存在しないコード（定義のみ）：
+- `service/end_time_estimate_service.go`：`addRateLimit()`、`ParseTimestamp()`（`pkg/comment` 内のタイムスタンプ解析と重複）
+- `pkg/comment/estimator.go`：`EstimateEndTimes()`、`AssignOrderIndex()`（終了時間推定は実際には service 層で行う）
 - `pkg/comment/dedup.go`：`MergeSongs()`
 - `pkg/ratelimit`：`CanRequest()`
 - `pkg/holodex/client.go`：`AddSongs()`、`GetChannelVideos()`、`SearchVideos()`
 - `internal/repository/stream_repository.go`：`FindByDateRange()`、`CheckHashChanged()`、`UpdateStatus()`
 
-其他：
-- `dto.AnalyzeCommentsResponse.RawComments` / 前端 `AnalyzeCommentsResponse.raw_comments` 從未由後端填值。
-- `config.Load()` 簽章回傳 `error` 但永不出錯。
-- `handleItunesSearch` / `handleItunesQueryByID` 每次請求都 `itunes.NewClient()` 並重建 `songRepo`，可改為注入既有實例。
-- `models.User` / `dto.LoginRequest`/`LoginResponse` 為未實作認證預留。
+その他：
+- `dto.AnalyzeCommentsResponse.RawComments` / フロント `AnalyzeCommentsResponse.raw_comments` はバックエンドが一度も値を設定していない。
+- `config.Load()` のシグネチャは `error` を返すが、決してエラーを返さない。
+- `handleItunesSearch` / `handleItunesQueryByID` はリクエストごとに `itunes.NewClient()` と `songRepo` の再構築を行っている。既存インスタンスを注入するよう変更可能。
+- `models.User` / `dto.LoginRequest`/`LoginResponse` は未実装の認証用に予約されている。
 
 ---
 
-## 5. 前端
+## 5. フロントエンド
 
-整體狀況良好：`tsc` 通過、`any` 使用極少（集中在 `YoutubePlayer` 對 YT IFrame API 與少數 axios error handler）。
+全体的に良好：`tsc` 通過、`any` の使用は極めて少ない（`YoutubePlayer` の YT IFrame API と少数の axios エラーハンドラに集中）。
 
-- **`pages/StreamDetailPage.tsx`（2329 行）**：主編輯介面，邏輯/狀態高度集中，是最該拆分的檔案（播放器、留言分析、時間軸、Holodex 建議、AI 正規化可各自抽成元件 + hooks）。
-- `components/YoutubePlayer.tsx` 使用 module-level 的 `playerInstance` 單例，多個播放器同頁時會互相干擾（目前僅單一使用情境）。
-- 無前端測試。
+- **`pages/StreamDetailPage.tsx`（2329 行）**：主編集画面。ロジックと状態が高度に集中しており、最も分割すべきファイル（プレイヤー、コメント分析、タイムライン、Holodex 提案、AI 正規化をそれぞれコンポーネント + hooks に抽出可能）。
+- `components/YoutubePlayer.tsx` は module レベルの `playerInstance` シングルトンを使用しており、同一ページに複数プレイヤーがあると干渉する（現在は単一使用のみの前提）。
+- フロントエンドテストなし。
 
 ---
 
-## 已套用的修復摘要
+## 適用済み修正のサマリー
 
-| 檔案 | 變更 |
+| ファイル | 変更 |
 |------|------|
-| `backend/pkg/itunes/client.go` | 補上 HTTP client 30s 逾時 |
-| `backend/internal/service/holodex_service.go` | 修正迴圈內 `defer` body 洩漏 |
-| `backend/internal/handler/router.go` | `POST /api/streams` 改回 501；新增選用 Bearer token 認證 middleware |
-| `backend/internal/config/config.go` | 新增 `API_AUTH_TOKEN` 設定 |
-| `backend/pkg/comment/dedup.go` | `mergeParsedSong` 對齊註解（優先較完整藝人名、非估計結束時間） |
-| `backend/internal/repository/*`, `service/*` | 列表端點 N+1 改為批次查詢 |
-| `frontend/src/api/client.ts` | 設定 `VITE_API_TOKEN` 時自動附帶 Bearer token |
-| `backend/.env.example` | 新增 `API_AUTH_TOKEN` 說明 |
-| （git 索引 + 歷史） | 移除追蹤並從歷史清除 `backend/.env`、`backend/bin/server` |
-| 文件 | 新增 `README.md`、本 `CODE_REVIEW.md` |
+| `backend/pkg/itunes/client.go` | HTTP client に 30s タイムアウトを追加 |
+| `backend/internal/service/holodex_service.go` | ループ内 `defer` body リークを修正 |
+| `backend/internal/handler/router.go` | `POST /api/streams` を 501 に変更；任意 Bearer トークン認証ミドルウェアを追加 |
+| `backend/internal/config/config.go` | `API_AUTH_TOKEN` 設定を追加 |
+| `backend/pkg/comment/dedup.go` | `mergeParsedSong` のコメントを整合（完全なアーティスト名を優先、推定終了時間は非優先） |
+| `backend/internal/repository/*`, `service/*` | リストエンドポイントの N+1 をバッチクエリに変更 |
+| `frontend/src/api/client.ts` | `VITE_API_TOKEN` 設定時に自動で Bearer トークンを付与 |
+| `backend/.env.example` | `API_AUTH_TOKEN` の説明を追加 |
+| （git インデックス + 履歴） | `backend/.env`、`backend/bin/server` の追跡を解除し履歴から除去 |
+| ドキュメント | `README.md`、本 `CODE_REVIEW.md` を追加 |

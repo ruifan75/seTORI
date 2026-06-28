@@ -50,7 +50,7 @@ func TestNoApplauseReturnsNil(t *testing.T) {
 	}
 }
 
-// TestAgainstRealFile：設 CHATEND_SAMPLE=/abs/path/to/xxx.live_chat.json 才會跑，
+// TestAgainstRealFile：CHATEND_SAMPLE=/abs/path/to/xxx.live_chat.json を設定した場合のみ実行、
 // 用來和 Python 版輸出對照（人工比對印出的 ends）。
 func TestAgainstRealFile(t *testing.T) {
 	path := os.Getenv("CHATEND_SAMPLE")

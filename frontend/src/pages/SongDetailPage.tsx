@@ -19,7 +19,7 @@ function formatTime(seconds: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
-// 歌曲搜尋輸入元件的 Props
+// 楽曲検索入力コンポーネントの Props
 interface SongSearchInputProps {
   value: string;
   onChange: (value: string) => void;
@@ -28,7 +28,7 @@ interface SongSearchInputProps {
   excludeSongId?: string;
 }
 
-// 歌曲搜尋輸入元件（帶自動完成）
+// 楽曲検索入力コンポーネント（オートコンプリート付き）
 function SongSearchInput({ value, onChange, onSelectSong, placeholder, excludeSongId }: SongSearchInputProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -37,7 +37,7 @@ function SongSearchInput({ value, onChange, onSelectSong, placeholder, excludeSo
   const inputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Debounce 搜尋
+  // Debounce 検索
   useEffect(() => {
     if (searchQuery.length < 2) {
       setSuggestions([]);
@@ -60,7 +60,7 @@ function SongSearchInput({ value, onChange, onSelectSong, placeholder, excludeSo
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  // 點擊外部關閉下拉選單
+  // 外部クリックでドロップダウンを閉じる
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (
@@ -100,7 +100,7 @@ function SongSearchInput({ value, onChange, onSelectSong, placeholder, excludeSo
         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
       />
 
-      {/* 搜尋建議下拉選單 */}
+      {/* 検索候補ドロップダウン */}
       {isOpen && (value.length >= 2 || isLoading) && (
         <div ref={dropdownRef} className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-64 overflow-y-auto">
           {isLoading ? (
@@ -149,7 +149,7 @@ export default function SongDetailPage() {
     itunes_ids: [],
   });
 
-  // iTunes 搜尋相關狀態
+  // iTunes 検索関連状態
   const [itunesSearchQuery, setItunesSearchQuery] = useState('');
   const [itunesSearchResults, setItunesSearchResults] = useState<ITunesSearchResult[]>([]);
   const [showItunesSearch, setShowItunesSearch] = useState(false);
@@ -418,7 +418,7 @@ export default function SongDetailPage() {
   const handleRemoveItunes = async (itunesId: number) => {
     const updated = (editedSong.itunes_ids || []).filter(i => i.itunes_id !== itunesId);
     
-    // 削除したのがプライマリの場合、最初のものをプライマリに設定
+    // 削除したものがプライマリの場合、最初のものをプライマリに設定
     if (updated.length > 0 && !updated.some(i => i.is_primary)) {
       updated[0].is_primary = true;
     }

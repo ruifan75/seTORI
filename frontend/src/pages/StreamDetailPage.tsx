@@ -9,7 +9,7 @@ import { useToast } from '../components/ui/Toast';
 import YoutubePlayer, { youtubePlayerSeekTo, youtubePlayerGetCurrentTime } from '../components/YoutubePlayer';
 
 
-// 可編輯的直播資訊
+// 編集可能な配信情報
 interface EditableStreamInfo {
   title: string;
   streamDate: string;
@@ -30,26 +30,26 @@ interface EditableSong {
   end: number;
   tags: string[];
   singerIds: string[];
-  // 新增欄位
-  matchedSongId: string | null; // 配對到的歌曲 ID，null 表示要新增
-  artUrl: string | null; // 封面圖 URL
-  itunesId: number | null; // Holodex 提供的 iTunes ID
-  trackDuration: number | null; // iTunes 歌曲長度（秒）
-  originalName: string; // 追蹤原始名稱（用於判斷是否有修改）
-  originalArtist: string; // 追蹤原始藝人
-  // AI 正規化追蹤
-  aiNormalizedName?: string; // AI 修改前的名稱（如果有被 AI 修改）
-  aiNormalizedArtist?: string; // AI 修改前的藝人（如果有被 AI 修改）
-  // 時間估計標記
-  isEndTimeEstimated?: boolean; // 結束時間是否為估計値
-  // 合併追蹤
-  mergedFrom?: string[]; // AI 正規化後被合併的原始曲名
-  // 自由文字 tag
+  // 追加フィールド
+  matchedSongId: string | null; // マッチした楽曲ID、null は新規作成を示す
+  artUrl: string | null; // アートワークURL
+  itunesId: number | null; // Holodex が提供する iTunes ID
+  trackDuration: number | null; // iTunes 楽曲長（秒）
+  originalName: string; // 元の名称を追跡（変更判定用）
+  originalArtist: string; // 元のアーティストを追跡
+  // AI 正規化追跡
+  aiNormalizedName?: string; // AI 変更前の名称（変更された場合）
+  aiNormalizedArtist?: string; // AI 変更前のアーティスト（変更された場合）
+  // 時間推定マーク
+  isEndTimeEstimated?: boolean; // 終了時間が推定値かどうか
+  // マージ追跡
+  mergedFrom?: string[]; // AI 正規化後にマージされた元の曲名
+  // 自由テキストタグ
   customTags: string[];
 }
 
-// AI 正規化後合併重複歌曲
-// 條件：name 完全一致 + artist 完全一致 + start 時間差 ≤ 30s
+// AI 正規化後に重複楽曲をマージ
+// 条件：name が完全一致 + artist が完全一致 + start の時間差 ≤ 30s
 function mergeDuplicateSongs(songs: EditableSong[]): EditableSong[] {
   const result: EditableSong[] = [];
 
@@ -62,11 +62,11 @@ function mergeDuplicateSongs(songs: EditableSong[]): EditableSong[] {
         existing.artist === song.artist &&
         Math.abs(existing.start - song.start) <= 30
       ) {
-        // Merge: 保留資訊較完整的一方
+        // Merge: 情報がより完全な方を保持
         const hasRealEnd = (s: EditableSong) => s.end > 0 && !s.isEndTimeEstimated;
         const preferSong = hasRealEnd(song) && !hasRealEnd(existing);
 
-        // 記錄被吸收方的原始名稱（AI 修改前的名稱）
+        // 吸収された側の元の名称を記録（AI 変更前の名称）
         const absorbedName = preferSong
           ? (existing.aiNormalizedName || existing.originalName)
           : (song.aiNormalizedName || song.originalName);
@@ -109,7 +109,7 @@ function mergeDuplicateSongs(songs: EditableSong[]): EditableSong[] {
   return result;
 }
 
-// 歌曲搜尋輸入元件的 Props
+// 楽曲検索入力コンポーネントの Props
 interface SongSearchInputProps {
   value: string;
   onChange: (value: string) => void;
@@ -118,7 +118,7 @@ interface SongSearchInputProps {
   showToast?: (message: string, type?: 'success' | 'error' | 'info') => void;
 }
 
-// 歌曲搜尋輸入元件（帶自動完成）
+// 楽曲検索入力コンポーネント（オートコンプリート付き）
 function SongSearchInput({ value, onChange, onSelectSong, placeholder, showToast }: SongSearchInputProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -128,7 +128,7 @@ function SongSearchInput({ value, onChange, onSelectSong, placeholder, showToast
   const inputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Debounce 搜尋（同時搜尋 DB 和 iTunes）
+  // Debounce 検索（DB と iTunes を同時検索）
   useEffect(() => {
     if (searchQuery.length < 1) {
       setDbSuggestions([]);
@@ -139,13 +139,13 @@ function SongSearchInput({ value, onChange, onSelectSong, placeholder, showToast
     const timer = setTimeout(async () => {
       setIsLoading(true);
       try {
-        // 並行搜尋 DB 和 iTunes
+        // DB と iTunes を並行検索
         const [dbResult, itunesResult] = await Promise.all([
           songApi.list(1, 5, searchQuery).catch(() => ({ songs: [], pagination: { page: 1, limit: 5, total: 0, total_pages: 0 } })),
           itunesApi.search(searchQuery).catch(() => ({ results: [] }))
         ]);
         setDbSuggestions(dbResult.songs);
-        setItunesSuggestions(itunesResult.results.slice(0, 5)); // 限制 iTunes 結果數量
+        setItunesSuggestions(itunesResult.results.slice(0, 5)); // iTunes 結果数を制限
       } catch {
         setDbSuggestions([]);
         setItunesSuggestions([]);
@@ -157,7 +157,7 @@ function SongSearchInput({ value, onChange, onSelectSong, placeholder, showToast
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  // 點擊外部關閉下拉選單
+  // 外部クリックでドロップダウンを閉じる
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (
@@ -193,7 +193,7 @@ function SongSearchInput({ value, onChange, onSelectSong, placeholder, showToast
   };
 
   const handleSelectItunes = (itunes: ITunesSearchResult) => {
-    // 如果這個 iTunes 結果已經在資料庫中，直接綁定到該 song
+    // この iTunes 結果が既にデータベースに存在する場合、その song に直接紐付ける
     if (itunes.existing_song) {
       const existingSong: Song = {
         id: itunes.existing_song.id,
@@ -217,9 +217,9 @@ function SongSearchInput({ value, onChange, onSelectSong, placeholder, showToast
         showToast(`「${existingSong.name}」を選択しました（データベース内）`, 'success');
       }
     } else {
-      // 純 iTunes 結果，創建臨時對象
+      // 純粋な iTunes 結果、一時オブジェクトを作成
       const tempSong: Song = {
-        id: '', // 空 ID 表示這是新歌曲
+        id: '', // 空 ID は新規楽曲であることを示す
         name: itunes.track_name,
         original_artist: itunes.artist_name,
         arts: itunes.artwork_url,
@@ -263,7 +263,7 @@ function SongSearchInput({ value, onChange, onSelectSong, placeholder, showToast
         placeholder={placeholder}
       />
 
-      {/* 搜尋建議下拉選單 */}
+      {/* 検索候補ドロップダウン */}
       {isOpen && (dbSuggestions.length > 0 || itunesSuggestions.length > 0 || isLoading) && (
         <div
           ref={dropdownRef}
@@ -406,14 +406,14 @@ function SongSearchInput({ value, onChange, onSelectSong, placeholder, showToast
   );
 }
 
-// 演唱者搜尋輸入元件的 Props
+// 歌手検索入力コンポーネントの Props
 interface SingerSearchInputProps {
   onSelectSinger: (singer: Singer) => void;
   excludeIds?: string[];
   placeholder?: string;
 }
 
-// 演唱者搜尋輸入元件（帶自動完成）
+// 歌手検索入力コンポーネント（オートコンプリート付き）
 function SingerSearchInput({ onSelectSinger, excludeIds = [], placeholder }: SingerSearchInputProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -433,7 +433,7 @@ function SingerSearchInput({ onSelectSinger, excludeIds = [], placeholder }: Sin
       setIsLoading(true);
       try {
         const results = await singerApi.search(searchQuery, 10);
-        // 過濾掉已選擇的
+        // 選択済みを除外
         setSuggestions(results.filter((s) => !excludeIds.includes(s.id)));
       } catch {
         setSuggestions([]);
@@ -445,7 +445,7 @@ function SingerSearchInput({ onSelectSinger, excludeIds = [], placeholder }: Sin
     return () => clearTimeout(timer);
   }, [searchQuery, excludeIds]);
 
-  // 點擊外部關閉下拉選單
+  // 外部クリックでドロップダウンを閉じる
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (
@@ -488,7 +488,7 @@ function SingerSearchInput({ onSelectSinger, excludeIds = [], placeholder }: Sin
         placeholder={placeholder || "チャンネル名を入力して検索"}
       />
 
-      {/* 搜尋建議下拉選單 */}
+      {/* 検索候補ドロップダウン */}
       {isOpen && (suggestions.length > 0 || isLoading) && (
         <div
           ref={dropdownRef}
@@ -566,7 +566,7 @@ function parseTime(timeStr: string): number {
   } else if (parts.length === 2) {
     return parts[0] * 60 + parts[1];
   } else if (parts.length === 1) {
-    // 如果只有一個數字，視為秒數
+    // 数字のみの場合、秒数とみなす
     return parts[0];
   }
   return 0;
@@ -583,7 +583,7 @@ function formatTimeInput(seconds: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
-// 格式化時長，顯示為 "+MM:SS" 或 "+H:MM:SS"
+// 長さをフォーマットし "+MM:SS" または "+H:MM:SS" で表示
 function formatDuration(seconds: number | null): string {
   if (seconds === null || seconds === 0) return '+??:??';
   
@@ -598,7 +598,7 @@ function formatDuration(seconds: number | null): string {
 }
 
 function formatStreamDate(dateStr: string): string {
-  // 將 ISO 格式的日期轉換為本地時區的格式
+  // ISO 形式の日付をローカルタイムゾーンの形式に変換
   const date = new Date(dateStr);
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -642,7 +642,7 @@ export default function StreamDetailPage() {
     queryKey: ['stream', id],
     queryFn: () => streamApi.get(id!),
     enabled: !!id,
-    staleTime: 0, // 確保每次進入頁面都重新載入
+    staleTime: 0, // ページに入るたびに再読み込みを保証
   });
 
   const { data: streamTagsData = [] } = useQuery({
@@ -657,15 +657,15 @@ export default function StreamDetailPage() {
   });
   const PERFORMANCE_TAGS = perfTagsData.map((t) => ({ id: t.id, label: t.display_name, color: t.color }));
 
-  // 當 stream 資料載入後，設置頻道擁有者和 timeline 資料
+  // stream データ読み込み後に、チャンネルオーナーとタイムラインを設定
   useEffect(() => {
     setChannelOwner(stream?.channel_owner || null);
-    // 載入儲存的 timeline 資料（沒有時也清空）
+    // 保存されたタイムラインデータを読み込み（ない場合はクリア）
     setHolodexTimelineSongs(stream?.holodex_timeline_songs || []);
     setCommentTimelineSongs(stream?.comment_timeline_songs || []);
   }, [stream]);
 
-  // 編輯模式時避免整頁滾動（改用區塊內滾動）
+  // 編集モード時はページ全体のスクロールを避ける（ブロック内スクロールに変更）
   useEffect(() => {
     if (!isEditing) return;
     const prevBodyOverflow = document.body.style.overflow;
@@ -679,7 +679,7 @@ export default function StreamDetailPage() {
     };
   }, [isEditing]);
 
-  // 定期更新播放器當前時間（每秒）
+  // プレイヤーの現在時刻を定期更新（1秒ごと）
   useEffect(() => {
     const interval = setInterval(() => {
       const time = youtubePlayerGetCurrentTime();
@@ -689,7 +689,7 @@ export default function StreamDetailPage() {
     return () => clearInterval(interval);
   }, []);
 
-  // 更新 Stream 資訊
+  // Stream 情報を更新
   const updateStreamMutation = useMutation({
     mutationFn: (req: UpdateStreamRequest) => streamApi.update(id!, req),
     onSuccess: () => {
@@ -700,7 +700,7 @@ export default function StreamDetailPage() {
     },
   });
 
-  // 確認並直接建立演出記錄
+  // 確認して直接パフォーマンス記録を作成
   const createPerformancesMutation = useMutation({
     mutationFn: (performances: CreatePerformanceItem[]) =>
       performanceApi.create(id!, { performances }),
