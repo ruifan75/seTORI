@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ruifan75/setori/internal/dto"
+	"github.com/ruifan75/setori/internal/logger"
 	"github.com/ruifan75/setori/internal/repository"
 	"github.com/ruifan75/setori/pkg/chatend"
 	"github.com/ruifan75/setori/pkg/util"
@@ -70,55 +70,93 @@ func (s *ChatEndService) AnalyzeStream(videoID string) error {
 	if err := s.streamRepo.Update(stream); err != nil {
 		return fmt.Errorf("update stream: %w", err)
 	}
-	log.Printf("[chatend] %s: %d/%d 曲の拍手終了を取得", videoID, updated, len(songs))
+	logger.Infof("[chatend] %s: %d/%d 曲の拍手終了を取得", videoID, updated, len(songs))
 	return nil
 }
 
-// DetectEndsForSongs 用 live chat 拍手為給定 songs（含 start）偵測 end，回傳填好 end 的 songs 與更新數。
-// 不寫 DB —— 供分析流程在持久化前呼叫。live chat 不可用時原樣返回（end 維持估計值）。
+// DetectEnds 用 live chat 拍手為給定的 start 秒數偵測曲末 end，回傳 start→end 對應。
+// 不寫 DB —— comment / holodex 兩個分析流程共用。live chat 不可用時回傳空 map。
+func (s *ChatEndService) DetectEnds(videoID string, durationSeconds int, starts []int) map[int]int {
+	if len(starts) == 0 {
+		return nil
+	}
+	chatPath, err := s.fetchLiveChat(videoID)
+	if err != nil {
+		logger.Warnf("[chatend] %s: live chat 不可用、end 推定をスキップ: %v", videoID, err)
+		return nil
+	}
+	events, err := chatend.ParseLiveChatFile(chatPath)
+	if err != nil {
+		logger.Warnf("[chatend] %s: parse live chat 失敗: %v", videoID, err)
+		return nil
+	}
+
+	fstarts := make([]float64, len(starts))
+	for i, st := range starts {
+		fstarts[i] = float64(st)
+	}
+	ends := chatend.DetectEnds(fstarts, events, float64(durationSeconds), chatend.DefaultOptions())
+	endByStart := make(map[int]int, len(ends))
+	for _, e := range ends {
+		if e.End != nil {
+			endByStart[int(e.Start)] = int(*e.End)
+		}
+	}
+	return endByStart
+}
+
+// DetectEndsForSongs 對 comment songs 套用拍手 end 偵測。
+// 策略（配合使用者偏好）：
+// - 如果原本就有 explicit end（comment 提供的 range 時間），則保留它，並把 chat 偵測值放到 ChatEnd。
+// - 只有原本沒有 explicit end 時，才使用 chat 偵測的值。
+// - 同時計算 EndDiff，方便前端在差異大時提醒使用者檢查。
 func (s *ChatEndService) DetectEndsForSongs(videoID string, durationSeconds int, songs []dto.CommentSong) ([]dto.CommentSong, int) {
 	if len(songs) == 0 {
 		return songs, 0
 	}
-	chatPath, err := s.fetchLiveChat(videoID)
-	if err != nil {
-		log.Printf("[chatend] %s: live chat 不可用、end 推定をスキップ: %v", videoID, err)
-		return songs, 0
-	}
-	events, err := chatend.ParseLiveChatFile(chatPath)
-	if err != nil {
-		log.Printf("[chatend] %s: parse live chat 失敗: %v", videoID, err)
-		return songs, 0
-	}
-
-	starts := make([]float64, len(songs))
+	starts := make([]int, len(songs))
 	for i, sg := range songs {
-		starts[i] = float64(sg.Start)
+		starts[i] = sg.Start
 	}
-	ends := chatend.DetectEnds(starts, events, float64(durationSeconds), chatend.DefaultOptions())
-	endByStart := make(map[int]float64, len(ends))
-	for _, e := range ends {
-		if e.End != nil {
-			endByStart[int(e.Start)] = *e.End
-		}
-	}
-
+	endByStart := s.DetectEnds(videoID, durationSeconds, starts)
 	updated := 0
+
 	for i := range songs {
-		if end, ok := endByStart[songs[i].Start]; ok {
-			songs[i].End = int(end)
-			songs[i].IsEndTimeEstimated = false // 拍手は視聴者の即時反応なので非推定とみなす
+		chatEnd, hasChat := endByStart[songs[i].Start]
+		if !hasChat {
+			continue
+		}
+
+		hasExplicitEnd := songs[i].End > 0 && !songs[i].IsEndTimeEstimated
+
+		if hasExplicitEnd {
+			// 保留 comment 的 explicit end，只記錄 chat 建議值
+			songs[i].ChatEnd = chatEnd
+			songs[i].EndDiff = abs(songs[i].End - chatEnd)
+			// 不改 End 和 IsEndTimeEstimated
+		} else {
+			// 原本沒有明確 end，用 chat 的
+			songs[i].End = chatEnd
+			songs[i].IsEndTimeEstimated = false
+			songs[i].ChatEnd = chatEnd // 讓前端知道這是 chat 值
 			updated++
 		}
 	}
 	return songs, updated
 }
 
+func abs(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
 // AnalyzeStreamAsync 在背景跑 AnalyzeStream（sync 時呼叫，不擋主流程）。
 func (s *ChatEndService) AnalyzeStreamAsync(videoID string) {
 	go func() {
 		if err := s.AnalyzeStream(videoID); err != nil {
-			log.Printf("[chatend] analyze error (%s): %v", videoID, err)
+			logger.Warnf("[chatend] analyze error (%s): %v", videoID, err)
 		}
 	}()
 }
@@ -128,13 +166,13 @@ func (s *ChatEndService) AnalyzeStreamAsync(videoID string) {
 func (s *ChatEndService) Backfill(concurrency int) {
 	ids, err := s.streamRepo.FindIDsWithCommentSongs()
 	if err != nil {
-		log.Printf("[chatend] backfill: list streams failed: %v", err)
+		logger.Warnf("[chatend] backfill: list streams failed: %v", err)
 		return
 	}
 	if concurrency < 1 {
 		concurrency = 1
 	}
-	log.Printf("[chatend] backfill 開始: %d 件 (concurrency=%d)", len(ids), concurrency)
+	logger.Infof("[chatend] backfill 開始: %d 件 (concurrency=%d)", len(ids), concurrency)
 
 	sem := make(chan struct{}, concurrency)
 	var wg sync.WaitGroup
@@ -146,15 +184,15 @@ func (s *ChatEndService) Backfill(concurrency int) {
 			defer wg.Done()
 			defer func() { <-sem }()
 			if err := s.AnalyzeStream(id); err != nil {
-				log.Printf("[chatend] backfill %s: %v", id, err)
+				logger.Warnf("[chatend] backfill %s: %v", id, err)
 			}
 			if n := atomic.AddInt64(&done, 1); n%10 == 0 || int(n) == len(ids) {
-				log.Printf("[chatend] backfill 進捗: %d/%d", n, len(ids))
+				logger.Infof("[chatend] backfill 進捗: %d/%d", n, len(ids))
 			}
 		}(id)
 	}
 	wg.Wait()
-	log.Printf("[chatend] backfill 完了: %d 件", len(ids))
+	logger.Infof("[chatend] backfill 完了: %d 件", len(ids))
 }
 
 // fetchLiveChat 用 yt-dlp 下載 live chat replay（已下載則用快取）。

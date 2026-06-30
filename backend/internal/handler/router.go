@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -13,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/ruifan75/setori/internal/config"
 	"github.com/ruifan75/setori/internal/dto"
+	"github.com/ruifan75/setori/internal/logger"
 	"github.com/ruifan75/setori/internal/models"
 	"github.com/ruifan75/setori/internal/repository"
 	"github.com/ruifan75/setori/internal/service"
@@ -88,7 +88,7 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	}
 
 	if cfg.APIAuthToken == "" {
-		log.Printf("[WARN] API_AUTH_TOKEN が未設定です：書き込み API は現在公開です。本番環境ではこの値を設定して認証を有効にしてください")
+		logger.Warnf("API_AUTH_TOKEN が未設定です：書き込み API は現在公開です。本番環境ではこの値を設定して認証を有効にしてください")
 	}
 
 	r.setupRoutes()
@@ -168,6 +168,10 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("GET /api/ai-providers/{id}/models", r.handleListAIProviderModels)
 	r.mux.HandleFunc("POST /api/ai-providers/models/preview", r.handlePreviewAIProviderModels)
 
+	// Log management (for admin)
+	r.mux.HandleFunc("GET /api/logs", r.handleGetLogs)
+	r.mux.HandleFunc("PUT /api/logs/level", r.handleSetLogLevel)
+
 	// iTunes API
 	r.mux.HandleFunc("GET /api/itunes/search", r.handleItunesSearch)
 	r.mux.HandleFunc("GET /api/itunes/{id}", r.handleItunesQueryByID)
@@ -194,12 +198,20 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// リクエストを記録
-	log.Printf("[%s] %s %s", req.Method, req.URL.Path, req.RemoteAddr)
+	if req.URL.Path == "/api/logs" {
+		logger.Debugf("[%s] %s %s", req.Method, req.URL.Path, req.RemoteAddr)
+	} else {
+		logger.Infof("[%s] %s %s", req.Method, req.URL.Path, req.RemoteAddr)
+	}
 
 	r.mux.ServeHTTP(w, req)
 
 	// リクエストを記録完成時間
-	log.Printf("[%s] %s completed in %v", req.Method, req.URL.Path, time.Since(start))
+	if req.URL.Path == "/api/logs" {
+		logger.Debugf("[%s] %s completed in %v", req.Method, req.URL.Path, time.Since(start))
+	} else {
+		logger.Infof("[%s] %s completed in %v", req.Method, req.URL.Path, time.Since(start))
+	}
 }
 
 // Health check handler
@@ -502,6 +514,7 @@ func (r *Router) handleUpdateStream(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	logger.Infof("stream %s metadata updated (title=%s, processed=%v)", id, streamReq.Title, streamReq.IsProcessed)
 	respondJSON(w, http.StatusOK, result)
 }
 
@@ -698,6 +711,7 @@ func (r *Router) handleSyncHolodex(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	logger.Infof("holodex sync channel %s completed: synced=%d new=%d", syncReq.ChannelID, result.SyncedCount, len(result.NewStreams))
 	respondJSON(w, http.StatusOK, result)
 }
 
@@ -714,6 +728,7 @@ func (r *Router) handleSyncHolodexVideo(w http.ResponseWriter, req *http.Request
 		return
 	}
 
+	logger.Infof("holodex sync video %s completed", videoID)
 	respondJSON(w, http.StatusOK, result)
 }
 
@@ -802,6 +817,7 @@ func (r *Router) handleCreatePerformances(w http.ResponseWriter, req *http.Reque
 		return
 	}
 
+	logger.Infof("created %d performances for stream %s", len(createReq.Performances), streamID)
 	respondJSON(w, http.StatusOK, result)
 }
 
@@ -817,6 +833,7 @@ func (r *Router) handleDeletePerformances(w http.ResponseWriter, req *http.Reque
 		return
 	}
 
+	logger.Infof("deleted all performances for stream %s", streamID)
 	respondJSON(w, http.StatusOK, dto.SuccessResponse{
 		Success: true,
 		Message: "すべての演奏記録を削除しました",
@@ -860,6 +877,7 @@ func (r *Router) handleAnalyzeComments(w http.ResponseWriter, req *http.Request)
 		return
 	}
 
+	logger.Infof("/comments/analyze completed for %s: %d songs (AI used or cached)", videoID, len(result.Songs))
 	respondJSON(w, http.StatusOK, result)
 }
 
@@ -1074,6 +1092,7 @@ func (r *Router) handleBatchAINormalization(w http.ResponseWriter, req *http.Req
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	logger.Infof("AI normalization requested for %d items, warning=%s", len(batchReq.Items), result.Warning)
 	respondJSON(w, http.StatusOK, result)
 }
 
@@ -1113,14 +1132,14 @@ func (r *Router) handleItunesSearch(w http.ResponseWriter, req *http.Request) {
 		// 檢查是否已在資料庫中
 		existingSong, err := songRepo.FindByItunesID(itunesItem.ItunesID)
 		if err != nil {
-			log.Printf("[WARN] Error checking iTunes ID %d: %v", itunesItem.ItunesID, err)
+			logger.Warnf("Error checking iTunes ID %d: %v", itunesItem.ItunesID, err)
 		}
 
 		if existingSong != nil {
 			// 取得演唱次數
 			perfCount, err := songRepo.GetPerformanceCount(existingSong.ID)
 			if err != nil {
-				log.Printf("[WARN] Error counting performances for song %s: %v", existingSong.ID, err)
+				logger.Warnf("Error counting performances for song %s: %v", existingSong.ID, err)
 				perfCount = 0
 			}
 
@@ -1188,13 +1207,14 @@ func (r *Router) handleItunesQueryByID(w http.ResponseWriter, req *http.Request)
 
 func toAIProviderResponse(p models.AIProvider) dto.AIProviderResponse {
 	resp := dto.AIProviderResponse{
-		ID:       p.ID,
-		Name:     p.Name,
-		BaseURL:  p.BaseURL,
-		Model:    p.Model,
-		Enabled:  p.Enabled,
-		Priority: p.Priority,
-		HasKey:   p.APIKey != "",
+		ID:             p.ID,
+		Name:           p.Name,
+		BaseURL:        p.BaseURL,
+		Model:          p.Model,
+		Enabled:        p.Enabled,
+		Priority:       p.Priority,
+		TimeoutSeconds: p.TimeoutSeconds,
+		HasKey:         p.APIKey != "",
 	}
 	if n := len(p.APIKey); n > 0 {
 		hint := p.APIKey
@@ -1221,12 +1241,13 @@ func (r *Router) handleListAIProviders(w http.ResponseWriter, req *http.Request)
 
 func (r *Router) handleCreateAIProvider(w http.ResponseWriter, req *http.Request) {
 	var body struct {
-		Name     string `json:"name"`
-		BaseURL  string `json:"base_url"`
-		Model    string `json:"model"`
-		APIKey   string `json:"api_key"`
-		Enabled  *bool  `json:"enabled"`
-		Priority int    `json:"priority"`
+		Name           string `json:"name"`
+		BaseURL        string `json:"base_url"`
+		Model          string `json:"model"`
+		APIKey         string `json:"api_key"`
+		Enabled        *bool  `json:"enabled"`
+		Priority       int    `json:"priority"`
+		TimeoutSeconds int    `json:"timeout_seconds"`
 	}
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 		respondError(w, http.StatusBadRequest, "無効なリクエスト形式")
@@ -1241,13 +1262,18 @@ func (r *Router) handleCreateAIProvider(w http.ResponseWriter, req *http.Request
 	if body.Enabled != nil {
 		enabled = *body.Enabled
 	}
+	timeoutSec := body.TimeoutSeconds
+	if timeoutSec <= 0 {
+		timeoutSec = 60
+	}
 	p := &models.AIProvider{
-		Name:     body.Name,
-		BaseURL:  body.BaseURL,
-		Model:    body.Model,
-		APIKey:   body.APIKey,
-		Enabled:  enabled,
-		Priority: body.Priority,
+		Name:           body.Name,
+		BaseURL:        body.BaseURL,
+		Model:          body.Model,
+		APIKey:         body.APIKey,
+		Enabled:        enabled,
+		Priority:       body.Priority,
+		TimeoutSeconds: timeoutSec,
 	}
 	if err := r.aiProviderRepo.Create(p); err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
@@ -1274,12 +1300,13 @@ func (r *Router) handleUpdateAIProvider(w http.ResponseWriter, req *http.Request
 	}
 
 	var body struct {
-		Name     *string `json:"name"`
-		BaseURL  *string `json:"base_url"`
-		Model    *string `json:"model"`
-		APIKey   *string `json:"api_key"`
-		Enabled  *bool   `json:"enabled"`
-		Priority *int    `json:"priority"`
+		Name           *string `json:"name"`
+		BaseURL        *string `json:"base_url"`
+		Model          *string `json:"model"`
+		APIKey         *string `json:"api_key"`
+		Enabled        *bool   `json:"enabled"`
+		Priority       *int    `json:"priority"`
+		TimeoutSeconds *int    `json:"timeout_seconds"`
 	}
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 		respondError(w, http.StatusBadRequest, "無効なリクエスト形式")
@@ -1300,6 +1327,9 @@ func (r *Router) handleUpdateAIProvider(w http.ResponseWriter, req *http.Request
 	}
 	if body.Priority != nil {
 		existing.Priority = *body.Priority
+	}
+	if body.TimeoutSeconds != nil && *body.TimeoutSeconds > 0 {
+		existing.TimeoutSeconds = *body.TimeoutSeconds
 	}
 	// API key 只有在有提供且非空時才更新（留空表示保持原值）
 	if body.APIKey != nil && *body.APIKey != "" {
@@ -1422,6 +1452,43 @@ func respondJSON(w http.ResponseWriter, status int, data interface{}) {
 
 // respondError 回傳錯誤回應
 func respondError(w http.ResponseWriter, status int, message string) {
-	log.Printf("[ERROR] status=%d message=%s", status, message)
+	logger.Errorf("status=%d message=%s", status, message)
 	respondJSON(w, status, dto.ErrorResponse{Error: message})
+}
+
+// ========== Log Management Handlers ==========
+
+func (r *Router) handleGetLogs(w http.ResponseWriter, req *http.Request) {
+	limit := 100
+	if l := req.URL.Query().Get("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 1000 {
+			limit = parsed
+		}
+	}
+
+	entries := logger.GetRecent(limit)
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"logs":  entries,
+		"level": logger.GetLevel(),
+	})
+}
+
+func (r *Router) handleSetLogLevel(w http.ResponseWriter, req *http.Request) {
+	var body struct {
+		Level string `json:"level"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		respondError(w, http.StatusBadRequest, "無効なリクエスト形式")
+		return
+	}
+
+	upper := strings.ToUpper(body.Level)
+	if upper != "DEBUG" && upper != "INFO" && upper != "WARN" && upper != "ERROR" {
+		respondError(w, http.StatusBadRequest, "無効なログレベル（DEBUG/INFO/WARN/ERROR）")
+		return
+	}
+
+	logger.SetLevel(upper)
+	logger.Infof("log level changed to %s", upper)
+	respondJSON(w, http.StatusOK, map[string]string{"level": upper})
 }

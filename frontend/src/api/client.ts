@@ -31,6 +31,7 @@ import type {
   AIProvider,
   AIProviderInput,
   AIModelInfo,
+  LogsResponse,
 } from './types';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080';
@@ -345,6 +346,20 @@ export const aiProviderApi = {
   previewModels: async (input: { base_url: string; api_key: string }): Promise<AIModelInfo[]> => {
     const { data } = await api.post('/api/ai-providers/models/preview', input);
     return data.models ?? [];
+  },
+};
+
+// ========== Logs API ==========
+
+export const logsApi = {
+  list: async (limit = 100): Promise<LogsResponse> => {
+    const { data } = await api.get(`/api/logs?limit=${limit}`);
+    return data;
+  },
+
+  setLevel: async (level: string): Promise<{ level: string }> => {
+    const { data } = await api.put('/api/logs/level', { level });
+    return data;
   },
 };
 

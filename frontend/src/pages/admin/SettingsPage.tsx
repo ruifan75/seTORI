@@ -296,13 +296,20 @@ function ProviderRow({ p, idx, total, onUpdate, onDelete, onMove }: {
   onMove: (idx: number, dir: -1 | 1) => void;
 }) {
   const [model, setModel] = useState(p.model);
+  const [timeoutSec, setTimeoutSec] = useState(p.timeout_seconds || 60);
 
   // 外部で model が更新されたら input に反映
   useEffect(() => { setModel(p.model); }, [p.model]);
+  useEffect(() => { setTimeoutSec(p.timeout_seconds || 60); }, [p.timeout_seconds]);
 
   const saveModel = (value?: string) => {
     const m = (value ?? model).trim();
     if (m && m !== p.model) onUpdate(p.id, { model: m });
+  };
+
+  const saveTimeout = () => {
+    const v = Math.max(10, Math.min(300, Number(timeoutSec) || 60));
+    if (v !== p.timeout_seconds) onUpdate(p.id, { timeout_seconds: v });
   };
 
   return (
@@ -344,6 +351,22 @@ function ProviderRow({ p, idx, total, onUpdate, onDelete, onMove }: {
               disabledTitle="API キーが必要です"
             />
           </div>
+          <span className="mx-1">·</span>
+          <label className="text-xs text-gray-400 flex items-center gap-1" title="この provider の AI 呼び出しタイムアウト秒数。OpenRouter など遅いものは大きく（90〜180）">
+            timeout
+            <input
+              type="number"
+              min={10}
+              max={300}
+              step={5}
+              value={timeoutSec}
+              onChange={(e) => setTimeoutSec(parseInt(e.target.value) || 60)}
+              onBlur={saveTimeout}
+              onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+              className="w-14 px-1 py-0.5 font-mono text-gray-700 border border-gray-200 rounded text-right"
+            />
+            <span>s</span>
+          </label>
           <span className="truncate">· {p.base_url} · key {p.key_hint ?? (p.has_key ? '****' : 'なし')}</span>
         </div>
       </div>
@@ -385,6 +408,7 @@ function AIProviderSection() {
   const [baseUrl, setBaseUrl] = useState('');
   const [model, setModel] = useState('');
   const [apiKey, setApiKey] = useState('');
+  const [timeoutSec, setTimeoutSec] = useState(60);
 
   // 優先度の並び替え：隣の provider と priority を入れ替える
   const move = (idx: number, dir: -1 | 1) => {
@@ -406,6 +430,7 @@ function AIProviderSection() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim() || !baseUrl.trim() || !model.trim() || !apiKey.trim()) return;
+    const t = Math.max(10, Math.min(300, timeoutSec || 60));
     createMutation.mutate(
       {
         name: name.trim(),
@@ -413,6 +438,7 @@ function AIProviderSection() {
         model: model.trim(),
         api_key: apiKey.trim(),
         priority: providers.length,
+        timeout_seconds: t,
       },
       {
         onSuccess: () => {
@@ -420,6 +446,7 @@ function AIProviderSection() {
           setBaseUrl('');
           setModel('');
           setApiKey('');
+          setTimeoutSec(60);
         },
       }
     );
@@ -431,6 +458,7 @@ function AIProviderSection() {
       <p className="text-gray-500 mb-6">
         歌名の正規化・コメント解析に使う OpenAI 互換 LLM プロバイダーを設定します。
         上にあるもの（優先度が高いもの）から使い、失敗・レート制限時に次へ自動で切り替えます（▲▼ で並び替え）。
+        各 provider の timeout（秒）は個別に調整可能。OpenRouter など遅いものは 90〜180 に設定するとタイムアウトしにくくなります。
         API キーは保存後は表示されません（末尾のみ）。
       </p>
 
@@ -508,6 +536,19 @@ function AIProviderSection() {
             placeholder="API キー"
             className="flex-1 min-w-[12rem] px-3 py-1.5 text-sm border border-gray-300 rounded-lg"
           />
+          <label className="flex items-center gap-1 text-sm text-gray-600" title="タイムアウト秒数（遅い provider は 90〜180 に）">
+            timeout
+            <input
+              type="number"
+              min={10}
+              max={300}
+              step={5}
+              value={timeoutSec}
+              onChange={(e) => setTimeoutSec(parseInt(e.target.value) || 60)}
+              className="w-16 px-2 py-1.5 text-sm border border-gray-300 rounded-lg text-right font-mono"
+            />
+            <span className="text-xs">s</span>
+          </label>
           <button
             type="submit"
             disabled={createMutation.isPending || !name.trim() || !baseUrl.trim() || !model.trim() || !apiKey.trim()}

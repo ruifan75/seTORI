@@ -98,15 +98,16 @@ type FilterKeyword struct {
 
 // AIProvider AI provider 設定（OpenAI 相容端點）
 type AIProvider struct {
-	ID        int       `json:"id"`
-	Name      string    `json:"name"`
-	BaseURL   string    `json:"base_url"`
-	Model     string    `json:"model"`
-	APIKey    string    `json:"-"` // 不輸出 API key
-	Enabled   bool      `json:"enabled"`
-	Priority  int       `json:"priority"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID             int       `json:"id"`
+	Name           string    `json:"name"`
+	BaseURL        string    `json:"base_url"`
+	Model          string    `json:"model"`
+	APIKey         string    `json:"-"` // 不輸出 API key
+	Enabled        bool      `json:"enabled"`
+	Priority       int       `json:"priority"`
+	TimeoutSeconds int       `json:"timeout_seconds"` // 單次 AI 呼叫的超時秒數（不同 provider 可不同）
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 // User 使用者

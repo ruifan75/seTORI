@@ -42,9 +42,15 @@ interface EditableSong {
   aiNormalizedArtist?: string; // AI 変更前のアーティスト（変更された場合）
   // 時間推定マーク
   isEndTimeEstimated?: boolean; // 終了時間が推定値かどうか
+  // Chat 拍手偵測參考值（當與 comment explicit end 差異大時提醒）
+  chatEnd?: number;
+  endDiff?: number;
+  // 來源追蹤與還原
+  originalCommentEnd?: number; // 來自 comment 分析的原始明確 end（用於還原）
+  endSource?: 'comment' | 'chat' | 'holodex' | 'itunes' | 'manual';
   // マージ追跡
   mergedFrom?: string[]; // AI 正規化後にマージされた元の曲名
-  // 自由テキストタグ
+  // 自由文本タグ
   customTags: string[];
 }
 
@@ -907,6 +913,10 @@ export default function StreamDetailPage() {
           aiNormalizedName: nameChanged ? song.name : undefined,
           aiNormalizedArtist: artistChanged ? song.original_artist : undefined,
           isEndTimeEstimated: song.is_end_time_estimated,
+          chatEnd: song.chat_end,
+          endDiff: song.end_diff,
+          originalCommentEnd: song.end, // 載入時的 end 視為 comment 原始值
+          endSource: song.end > 0 && !song.is_end_time_estimated ? 'comment' : undefined,
           customTags: [],
         });
       }
@@ -1023,6 +1033,43 @@ export default function StreamDetailPage() {
       }
 
       updated[index] = { ...song, [field]: value };
+
+      // 手動修改結束時間時，清除 chat 比較資訊並標記來源
+      if (field === 'end') {
+        updated[index].chatEnd = undefined;
+        updated[index].endDiff = undefined;
+        updated[index].endSource = 'manual';
+      }
+
+      return updated;
+    });
+  };
+
+  // 套用特定來源的結束時間
+  const applyEndSource = (index: number, source: 'chat' | 'comment', newEnd?: number) => {
+    setEditableSongs((prev) => {
+      const updated = [...prev];
+      const s = updated[index];
+
+      if (source === 'chat' && s.chatEnd !== undefined) {
+        updated[index] = {
+          ...s,
+          end: s.chatEnd,
+          endSource: 'chat',
+          isEndTimeEstimated: false,
+        };
+      } else if (source === 'comment' && s.originalCommentEnd !== undefined) {
+        updated[index] = {
+          ...s,
+          end: s.originalCommentEnd,
+          endSource: 'comment',
+          isEndTimeEstimated: false,
+          chatEnd: undefined, // 清除比較狀態
+          endDiff: undefined,
+        };
+      } else if (newEnd !== undefined) {
+        updated[index] = { ...s, end: newEnd, endSource: source as any };
+      }
       return updated;
     });
   };
@@ -1984,6 +2031,36 @@ export default function StreamDetailPage() {
                             </svg>
                             <span>推定時間 - 要確認</span>
                           </div>
+                        )}
+                        {/* Chat 與 Comment end 差異過大警告 + 套用按鈕 */}
+                        {song.endDiff !== undefined && song.endDiff >= 10 && (
+                          <div className="mt-1 flex items-center gap-2 text-xs text-amber-700 bg-amber-50 px-2 py-1 rounded">
+                            <div className="flex items-center gap-1">
+                              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                                <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                              </svg>
+                              <span>
+                                Chat 與 comment 差 {song.endDiff} 秒
+                                {song.chatEnd !== undefined && `（Chat: ${formatTimeInput(song.chatEnd)}）`}
+                              </span>
+                            </div>
+                            <button
+                              onClick={() => applyEndSource(index, 'chat')}
+                              className="px-2 py-0.5 bg-amber-200 hover:bg-amber-300 text-amber-800 rounded text-xs font-medium"
+                            >
+                              套用 Chat 值
+                            </button>
+                          </div>
+                        )}
+
+                        {/* 還原為 Comment 原始 end 的按鈕 */}
+                        {song.originalCommentEnd !== undefined && song.end !== song.originalCommentEnd && (
+                          <button
+                            onClick={() => applyEndSource(index, 'comment')}
+                            className="mt-1 text-xs text-blue-600 hover:text-blue-800 underline"
+                          >
+                            還原為 Comment 原始值 ({song.originalCommentEnd ? formatTimeInput(song.originalCommentEnd) : ''})
+                          </button>
                         )}
                       </div>
                     </div>

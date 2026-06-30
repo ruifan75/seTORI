@@ -3,10 +3,10 @@ package service
 import (
 	"errors"
 	"fmt"
-	"log"
 	"sync"
 	"time"
 
+	"github.com/ruifan75/setori/internal/logger"
 	"github.com/ruifan75/setori/internal/models"
 	"github.com/ruifan75/setori/internal/repository"
 	"github.com/ruifan75/setori/pkg/ai"
@@ -50,7 +50,8 @@ func (s *AIService) SimpleChat(systemPrompt, userMessage string) (string, error)
 		if s.fallbackKey == "" {
 			return "", errors.New("no AI provider configured")
 		}
-		return ai.NewClient(s.fallbackKey).SimpleChat(systemPrompt, userMessage)
+		// fallback 使用較長的預設 timeout（60s）
+		return ai.NewClientWithTimeout("", "", s.fallbackKey, 60*time.Second).SimpleChat(systemPrompt, userMessage)
 	}
 
 	// 依 priority 順序嘗試（providers 已由 repo 依 priority ASC 排序）：
@@ -66,6 +67,7 @@ func (s *AIService) SimpleChat(systemPrompt, userMessage string) (string, error)
 		attempted++
 		resp, err := s.tryProvider(p, systemPrompt, userMessage)
 		if err == nil {
+			logger.Infof("AI provider succeeded: %q (model=%s)", p.Name, p.Model)
 			return resp, nil
 		}
 		lastErr = err
@@ -76,6 +78,7 @@ func (s *AIService) SimpleChat(systemPrompt, userMessage string) (string, error)
 		for _, p := range providers {
 			resp, err := s.tryProvider(p, systemPrompt, userMessage)
 			if err == nil {
+				logger.Infof("AI provider succeeded (second round): %q", p.Name)
 				return resp, nil
 			}
 			lastErr = err
@@ -84,7 +87,8 @@ func (s *AIService) SimpleChat(systemPrompt, userMessage string) (string, error)
 
 	// 全部 provider 失敗 → 最後再試環境變數 fallback
 	if s.fallbackKey != "" {
-		if resp, err := ai.NewClient(s.fallbackKey).SimpleChat(systemPrompt, userMessage); err == nil {
+		if resp, err := ai.NewClientWithTimeout("", "", s.fallbackKey, 60*time.Second).SimpleChat(systemPrompt, userMessage); err == nil {
+			logger.Infof("AI fallback (env key) succeeded")
 			return resp, nil
 		}
 	}
@@ -97,7 +101,11 @@ func (s *AIService) SimpleChat(systemPrompt, userMessage string) (string, error)
 
 // tryProvider 呼叫單一 provider，並在 429/5xx 時設定冷卻
 func (s *AIService) tryProvider(p models.AIProvider, systemPrompt, userMessage string) (string, error) {
-	client := ai.NewClientWith(p.BaseURL, p.Model, p.APIKey)
+	timeout := 60 * time.Second
+	if p.TimeoutSeconds > 0 {
+		timeout = time.Duration(p.TimeoutSeconds) * time.Second
+	}
+	client := ai.NewClientWithTimeout(p.BaseURL, p.Model, p.APIKey, timeout)
 	resp, err := client.SimpleChat(systemPrompt, userMessage)
 	if err == nil {
 		return resp, nil
@@ -105,9 +113,9 @@ func (s *AIService) tryProvider(p models.AIProvider, systemPrompt, userMessage s
 
 	if shouldCooldown(err) {
 		s.setCooldown(p.ID)
-		log.Printf("[WARN] AI provider %q rate-limited/unavailable, cooling down %s: %v", p.Name, aiCooldownDuration, err)
+		logger.Warnf("AI provider %q rate-limited/unavailable, cooling down %s: %v", p.Name, aiCooldownDuration, err)
 	} else {
-		log.Printf("[WARN] AI provider %q failed: %v", p.Name, err)
+		logger.Warnf("AI provider %q failed: %v", p.Name, err)
 	}
 	return "", fmt.Errorf("provider %q: %w", p.Name, err)
 }

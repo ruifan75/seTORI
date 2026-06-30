@@ -8,11 +8,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"time"
 
 	"github.com/ruifan75/setori/internal/dto"
+	"github.com/ruifan75/setori/internal/logger"
 	"github.com/ruifan75/setori/internal/models"
 	"github.com/ruifan75/setori/internal/repository"
 	"github.com/ruifan75/setori/pkg/ai"
@@ -74,7 +74,7 @@ func (s *HolodexService) getChannelPhotoURL(channelID string, holodexPhoto strin
 			return photo
 		}
 		// YouTube 取得失敗，記錄並嘗試使用 Holodex
-		log.Printf("YouTube photo fetch failed for %s: %v, falling back to Holodex", channelID, err)
+		logger.Warnf("YouTube photo fetch failed for %s: %v, falling back to Holodex", channelID, err)
 	}
 
 	// 2. 使用 Holodex API 提供的 photo URL
@@ -127,7 +127,7 @@ func (s *HolodexService) SyncChannelInfo(channelID string) error {
 
 // SyncChannel 同步頻道的所有直播
 func (s *HolodexService) SyncChannel(channelID string, limit int, forceUpdate bool) (*dto.SyncHolodexResponse, error) {
-	log.Printf("チャンネル同期開始: %s", channelID)
+	logger.Infof("チャンネル同期開始: %s", channelID)
 
 	// 先同步頻道資訊
 	channel, err := s.client.GetChannel(channelID)
@@ -184,12 +184,12 @@ func (s *HolodexService) SyncChannel(channelID string, limit int, forceUpdate bo
 
 		for i, video := range videos {
 			result.Processed = offset + i + 1
-			log.Printf("処理中 [%d/%d]: %s - %s", result.Processed, result.TotalStreams, video.ID, video.Title)
+			logger.Infof("処理中 [%d/%d]: %s - %s", result.Processed, result.TotalStreams, video.ID, video.Title)
 
 			syncStatus, err := s.syncVideo(video, channelID, forceUpdate)
 			if err != nil {
 				// 記錄錯誤但繼續處理
-				log.Printf("同期失敗 (video: %s): %v", video.ID, err)
+				logger.Warnf("同期失敗 (video: %s): %v", video.ID, err)
 				result.Skipped = append(result.Skipped, video.ID)
 				continue
 			}
@@ -217,7 +217,7 @@ func (s *HolodexService) SyncChannel(channelID string, limit int, forceUpdate bo
 	result.InProgress = false
 	result.Message = fmt.Sprintf("同期完了: %d 件新規, %d 件更新, %d 件スキップ",
 		len(result.NewStreams), len(result.Updated), len(result.Skipped))
-	log.Printf("チャンネル同期完了: %s - %s", channelID, result.Message)
+	logger.Infof("チャンネル同期完了: %s - %s", channelID, result.Message)
 
 	return result, nil
 }
@@ -275,6 +275,7 @@ func (s *HolodexService) syncVideo(video holodex.Video, channelID string, forceU
 	if err := s.streamRepo.Upsert(stream); err != nil {
 		return "", fmt.Errorf("upsert stream: %w", err)
 	}
+	logger.Infof("[holodex] upserted stream %s (existing=%v, force=%v)", video.ID, existing != nil, forceUpdate)
 
 	// 處理 topic_id -> 設定標籤
 	if video.TopicID != "" {
@@ -330,6 +331,7 @@ func (s *HolodexService) syncVideo(video holodex.Video, channelID string, forceU
 	// 同步時自動分析並儲存 Comment 資料
 	if existing == nil || forceUpdate {
 		s.loadAndSaveComments(video.ID)
+		logger.Infof("[holodex] triggered comment analysis for %s", video.ID)
 	}
 
 	if existing == nil {
@@ -512,18 +514,20 @@ func (s *HolodexService) GetVideoComments(videoID string) ([]string, error) {
 func (s *HolodexService) loadAndSaveComments(videoID string) {
 	comments, err := s.GetVideoComments(videoID)
 	if err != nil {
-		log.Printf("get comments error (video: %s): %v", videoID, err)
+		logger.Warnf("get comments error (video: %s): %v", videoID, err)
 		return
 	}
 
 	commentRawJSON, err := json.Marshal(comments)
 	if err != nil {
-		log.Printf("marshal comment raw error (video: %s): %v", videoID, err)
+		logger.Warnf("marshal comment raw error (video: %s): %v", videoID, err)
 		return
 	}
 
 	if err := s.streamRepo.SaveCommentRaw(videoID, commentRawJSON); err != nil {
-		log.Printf("save comment raw error (video: %s): %v", videoID, err)
+		logger.Warnf("save comment raw error (video: %s): %v", videoID, err)
+	} else {
+		logger.Infof("[holodex] saved %d raw comments for %s", len(comments), videoID)
 	}
 }
 
@@ -585,7 +589,7 @@ func (s *HolodexService) SyncSetoriToHolodex(streamID string) (*dto.SyncHolodexR
 		for _, song := range holodexVideo.Songs {
 			if song.ITunesID > 0 {
 				existingSongs[song.ITunesID] = true
-				log.Printf("Found existing song in Holodex: iTunes ID %d (%s)", song.ITunesID, song.Name)
+				logger.Debugf("Found existing song in Holodex: iTunes ID %d (%s)", song.ITunesID, song.Name)
 			}
 		}
 	}
@@ -647,7 +651,7 @@ func (s *HolodexService) SyncSetoriToHolodex(streamID string) (*dto.SyncHolodexR
 
 								// 檢查這首歌是否已經存在於 Holodex（僅當有 iTunes ID 時）
 								if existingSongs[primaryItunesID] {
-									log.Printf("⊘ Skipped: %s (iTunes: %d) - already exists in Holodex", song.Name, primaryItunesID)
+									logger.Debugf("⊘ Skipped: %s (iTunes: %d) - already exists in Holodex", song.Name, primaryItunesID)
 									skippedCount++
 									continue
 								}
@@ -722,14 +726,14 @@ func (s *HolodexService) SyncSetoriToHolodex(streamID string) (*dto.SyncHolodexR
 						resp.Body.Close()
 						if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 							if primaryItunesID > 0 {
-								log.Printf("✓ Synced: %s (iTunes: %d)", song.Name, primaryItunesID)
+								logger.Infof("✓ Synced: %s (iTunes: %d)", song.Name, primaryItunesID)
 							} else {
-								log.Printf("✓ Synced: %s (no iTunes ID)", song.Name)
+								logger.Infof("✓ Synced: %s (no iTunes ID)", song.Name)
 							}
 							syncedCount++
 						} else {
 							errMsg := fmt.Sprintf("%s: API error %d: %s", song.Name, resp.StatusCode, string(body))
-							log.Printf("✗ %s", errMsg)
+							logger.Warnf("✗ %s", errMsg)
 							errors = append(errors, errMsg)
 						}
 					}
@@ -744,7 +748,7 @@ func (s *HolodexService) SyncSetoriToHolodex(streamID string) (*dto.SyncHolodexR
 	}
 	if len(errors) > 0 {
 		message = fmt.Sprintf("同期完了: %d 曲成功、%d 曲既に存在、%d 曲失敗", syncedCount, skippedCount, len(errors))
-		log.Printf("Errors during sync: %v", errors)
+		logger.Warnf("Errors during sync: %v", errors)
 	}
 
 	return &dto.SyncHolodexResponse{

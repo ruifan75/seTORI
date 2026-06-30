@@ -230,6 +230,10 @@ type CommentSong struct {
 	OriginalComment    string `json:"original_comment"`
 	IsEndTimeEstimated bool   `json:"is_end_time_estimated"`
 
+	// Chat 拍手偵測相關（用來跟 comment explicit end 比較）
+	ChatEnd int `json:"chat_end,omitempty"` // chat 偵測出的結束秒數（如果有）
+	EndDiff int `json:"end_diff,omitempty"` // |end - chat_end|，只有兩邊都有值時才填
+
 	// ↓ 折り込んだ正規化結果（分析時に AI 正規化＋DB 照合まで実行し、ここに保存・再利用する）
 	NormalizedName          string   `json:"normalized_name,omitempty"`
 	NormalizedNameReading   string   `json:"normalized_name_reading,omitempty"`
@@ -432,12 +436,13 @@ type ItunesSearchResponseWithSongs struct {
 
 // AIProviderResponse AI provider 設定（不含 API key，僅回傳末四碼提示）
 type AIProviderResponse struct {
-	ID       int    `json:"id"`
-	Name     string `json:"name"`
-	BaseURL  string `json:"base_url"`
-	Model    string `json:"model"`
-	Enabled  bool   `json:"enabled"`
-	Priority int    `json:"priority"`
-	HasKey   bool   `json:"has_key"`
-	KeyHint  string `json:"key_hint,omitempty"`
+	ID             int    `json:"id"`
+	Name           string `json:"name"`
+	BaseURL        string `json:"base_url"`
+	Model          string `json:"model"`
+	Enabled        bool   `json:"enabled"`
+	Priority       int    `json:"priority"`
+	TimeoutSeconds int    `json:"timeout_seconds"`
+	HasKey         bool   `json:"has_key"`
+	KeyHint        string `json:"key_hint,omitempty"`
 }

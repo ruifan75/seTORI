@@ -14,6 +14,7 @@ type Config struct {
 	JWTSecret          string
 	APIAuthToken       string
 	Environment        string
+	LogLevel           string
 }
 
 // Load 環境変数から設定を読み込み
@@ -29,6 +30,7 @@ func Load() (*Config, error) {
 		// Authorization: Bearer <token> を要求。空欄時は公開（ローカル開発向け）。
 		APIAuthToken: getEnv("API_AUTH_TOKEN", ""),
 		Environment:  getEnv("ENVIRONMENT", "development"),
+		LogLevel:     getEnv("LOG_LEVEL", "INFO"),
 	}
 
 	return cfg, nil

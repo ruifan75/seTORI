@@ -15,8 +15,8 @@ func TestParseCommentsWithAIVerbatimGuard(t *testing.T) {
 		"1:23 曲名A アーティストA\n2:34 テスト曲/正アーティスト/2020",
 	}
 	ai := fakeChatter{response: `[
-		{"line":1,"start":83,"end":0,"is_song":true,"name":"曲名A","artist":"アーティストA"},
-		{"line":2,"start":154,"end":0,"is_song":true,"name":"テスト曲","artist":"偽アーティスト"}
+		{"line":1,"is_song":true,"start_ts":"1:23","name":"曲名A","artist":"アーティストA"},
+		{"line":2,"is_song":true,"start_ts":"2:34","name":"テスト曲","artist":"偽アーティスト"}
 	]`}
 
 	got, err := ParseCommentsWithAI(ai, comments)

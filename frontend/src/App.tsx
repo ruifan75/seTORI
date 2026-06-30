@@ -11,6 +11,7 @@ import SingersPage from './pages/SingersPage';
 import SingerDetailPage from './pages/SingerDetailPage';
 import SyncPage from './pages/admin/SyncPage';
 import SettingsPage from './pages/admin/SettingsPage';
+import LogsPage from './pages/admin/LogsPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -37,6 +38,7 @@ function App() {
               <Route path="singers/:id" element={<SingerDetailPage />} />
               <Route path="admin/sync" element={<SyncPage />} />
               <Route path="admin/settings" element={<SettingsPage />} />
+              <Route path="admin/logs" element={<LogsPage />} />
             </Route>
           </Routes>
         </BrowserRouter>

@@ -5,9 +5,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log"
 
 	"github.com/ruifan75/setori/internal/dto"
+	"github.com/ruifan75/setori/internal/logger"
 	"github.com/ruifan75/setori/internal/models"
 	"github.com/ruifan75/setori/internal/repository"
 	"github.com/ruifan75/setori/pkg/ai"
@@ -61,12 +61,14 @@ func (s *CommentService) AnalyzeComments(videoID string, force bool) (*dto.Analy
 		if cachedHash.Valid && cachedHash.String == rawHash {
 			var cached []dto.CommentSong
 			if err := json.Unmarshal(stream.CommentSongs, &cached); err == nil && len(cached) > 0 {
+				logger.Infof("/comments/analyze cache hit for %s (%d songs)", videoID, len(cached))
 				return &dto.AnalyzeCommentsResponse{Songs: cached}, nil
 			}
 		}
 	}
 
 	// 1. 取得原始留言（DB 優先，否則 Holodex 抓取）
+	logger.Infof("starting comment analysis for %s (force=%v, raw len=%d)", videoID, force, len(stream.CommentRaw))
 	comments, err := s.getComments(videoID, stream)
 	if err != nil {
 		return nil, err
@@ -78,7 +80,7 @@ func (s *CommentService) AnalyzeComments(videoID string, force bool) (*dto.Analy
 	// 3. 過濾 + 去重 + 驗證（先過濾避免非歌曲項目影響去重）
 	filterKW, keepKW, err := s.loadFilterKeywords()
 	if err != nil {
-		log.Printf("failed to load filter keywords, skipping filter: %v", err)
+		logger.Warnf("failed to load filter keywords, skipping filter: %v", err)
 	}
 	filteredSongs := comment.FilterSongs(parsedSongs, filterKW, keepKW)
 	deduped := comment.DeduplicateSongs(filteredSongs)
@@ -113,11 +115,12 @@ func (s *CommentService) AnalyzeComments(videoID string, force bool) (*dto.Analy
 	if rawHash != "" {
 		if songsJSON, mErr := json.Marshal(songs); mErr == nil {
 			if err := s.streamRepo.SaveCommentSongs(videoID, songsJSON, rawHash); err != nil {
-				log.Printf("[comment] save comment_songs failed (%s): %v", videoID, err)
+				logger.Warnf("[comment] save comment_songs failed (%s): %v", videoID, err)
 			}
 		}
 	}
 
+	logger.Infof("comment analysis completed for %s: %d songs", videoID, len(songs))
 	return &dto.AnalyzeCommentsResponse{Songs: songs}, nil
 }
 
@@ -132,8 +135,13 @@ func (s *CommentService) normalizeInto(songs []dto.CommentSong) {
 	}
 	resp, err := s.normalizationService.BatchAINormalization(items)
 	if err != nil {
-		log.Printf("[comment] normalization failed, keeping raw extraction: %v", err)
+		logger.Warnf("[comment] normalization failed, keeping raw extraction: %v", err)
 		return
+	}
+	if resp.Warning != "" {
+		logger.Infof("Normalization used fallback for some items: %s", resp.Warning)
+	} else {
+		logger.Infof("Batch AI normalization succeeded for %d items", len(items))
 	}
 	for _, sug := range resp.Suggestions {
 		if sug.Index < 0 || sug.Index >= len(songs) {
@@ -185,14 +193,14 @@ func (s *CommentService) BackfillCommentSongs() (int, error) {
 
 		songsJSON, err := json.Marshal(parsed)
 		if err != nil {
-			log.Printf("backfill marshal error (video: %s): %v", stream.ID, err)
+			logger.Warnf("backfill marshal error (video: %s): %v", stream.ID, err)
 			continue
 		}
 		songsJSON = util.SanitizeJSONB(songsJSON)
 
 		stream.CommentSongs = songsJSON
 		if err := s.streamRepo.Update(&stream); err != nil {
-			log.Printf("backfill update error (video: %s): %v", stream.ID, err)
+			logger.Warnf("backfill update error (video: %s): %v", stream.ID, err)
 			continue
 		}
 		count++
@@ -221,16 +229,18 @@ func (s *CommentService) loadFilterKeywords() (filterKW, keepKW []string, err er
 }
 
 // parseComments 於 edit-time 解析留言：優先用 AI hybrid（AI 選取歌曲行 + 正則抽取文字），
-// 失敗、無歌曲或未設定 Groq key 時退回純正則。
+// AI 成功時（含 0 曲）採用 AI 結果；僅在 AI 失敗或未設定 client 時退回純正則。
 func (s *CommentService) parseComments(comments []string) []comment.ParsedSong {
 	if s.aiClient != nil {
 		songs, err := comment.ParseCommentsWithAI(s.aiClient, comments)
 		if err != nil {
-			log.Printf("AI comment parse failed, falling back to regex: %v", err)
-		} else if len(songs) > 0 {
+			logger.Warnf("AI comment parse failed, falling back to regex: %v", err)
+		} else {
+			logger.Infof("Using AI-extracted songs for analysis (%d songs)", len(songs))
 			return songs
 		}
 	}
+	logger.Infof("Using regex-only comment parse (no AI client or AI failed)")
 	return comment.ParseComments(comments)
 }
 

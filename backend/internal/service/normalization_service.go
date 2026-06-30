@@ -3,10 +3,10 @@ package service
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"strings"
 
 	"github.com/ruifan75/setori/internal/dto"
+	"github.com/ruifan75/setori/internal/logger"
 	"github.com/ruifan75/setori/internal/models"
 	"github.com/ruifan75/setori/internal/repository"
 	"github.com/ruifan75/setori/pkg/ai"
@@ -30,43 +30,50 @@ func NewNormalizationService(
 	}
 }
 
-// 批量處理用的 system prompt
-const batchSystemPrompt = `你是一個專門處理日本歌曲資料正規化的助手。你將收到多首歌曲，請一次處理所有歌曲。
+// バッチ処理用の system prompt (日本語版)
+const batchSystemPrompt = `**最重要: 応答は純粋なJSON配列「のみ」を出力せよ。前後に ** や "Output only JSON." などの一切のテキストを付けるな。必ず [ で始まり ] で終わること。**
 
-你的任務是：
-1. 從原始歌曲名稱中提取正規化的歌名
-   - 去除「演出版本標記」（如 Acoustic Ver., Short Ver. 等，這些是表演方式的標籤）
-   - 保留「歌曲版本標記」（如 Remix, Cover 等，因為這代表不同的歌曲）
-   - 如果歌名同時包含日文和英文/羅馬字（如「ぼくらのレットイットビー / Bokura no Let It Be」），只保留日文原名
-   - 如果原曲名本來就是英文（如「First Love」「Lemon」「KICK BACK」），保留英文原名，不要轉成カタカナ
-   - 移除多餘的空格和符號
-2. 為歌名和藝人名提供平假名讀音（ふりがな）
-3. 識別演出版本標籤
+あなたは日本語楽曲データの正規化を専門とするアシスタントです。複数の楽曲を受け取り、一度にすべて処理してください。
 
-【重要】tags 欄位只能使用以下 7 種標籤 ID（不能使用其他值）：
-- acoustic（原曲名含有 Acoustic, アコースティック 等）
-- piano（原曲名含有 Piano, ピアノ 等）
-- 弾き語り（原曲名含有 弾き語り）
-- acappella（原曲名含有 A Cappella, アカペラ 等）
-- short（原曲名含有 Short, ショート 等）
-- full（原曲名含有 Full, フル 等）
-- medley（原曲名含有 Medley, メドレー 等）
+タスク：
+1. 元の楽曲名から正規化された歌名を抽出
+   - 「演奏バージョンの表記」（Acoustic Ver., Short Ver. など、演奏方法を示すタグ）を除去
+   - 「楽曲バージョンの表記」（Remix, Cover など）は異なる楽曲を表すため保持
+   - 歌名に日本語と英語/ローマ字の両方が含まれる場合（例：「ぼくらのレットイットビー / Bokura no Let It Be」）、日本語の原名のみ保持
+   - 元の曲名が英語の場合（「First Love」「Lemon」「KICK BACK」）は英語のまま保持し、カタカナに変換しない
+   - 余分なスペースや記号を除去
+2. 歌名とアーティスト名に平仮名ふりがなを提供
+3. 演奏バージョンタグを識別
 
-注意：Remix、Cover、Live 版本等是不同的歌曲，應該保留在歌名中，不要移除。
+【重要】tags フィールドは以下の7種のタグIDのみ使用可能：
+- acoustic（原曲名に Acoustic, アコースティック などを含む）
+- piano（原曲名に Piano, ピアノ などを含む）
+- 弾き語り（原曲名に 弾き語り を含む）
+- acappella（原曲名に A Cappella, アカペラ などを含む）
+- short（原曲名に Short, ショート などを含む）
+- full（原曲名に Full, フル などを含む）
+- medley（原曲名に Medley, メドレー などを含む）
 
-請以 JSON 陣列格式回應，每個元素包含：
-- index: 對應輸入的歌曲編號 (number, 從 0 開始)
-- normalized_name: 正規化後的歌名 (string)
-- normalized_name_reading: 歌名的平假名讀音 (string)
-- original_artist: 原唱藝人 (string)
-- original_artist_reading: 藝人名的平假名讀音 (string)
-- tags: 偵測到的版本標籤，只能是上述 7 種之一 (array of strings)
-- confidence: 信心度 0.0-1.0 (number)
+注意：Remix、Cover、Live バージョンなどは異なる楽曲なので、歌名に保持してください。除去しないでください。
 
-只回應 JSON 陣列，不要有其他文字。格式範例：
-[{"index":0,"normalized_name":"...","normalized_name_reading":"...","original_artist":"...","original_artist_reading":"...","tags":[],"confidence":0.9}]`
+JSON配列形式で応答してください。各要素：
+- index: 入力楽曲の番号 (number, 0から開始)
+- normalized_name: 正規化後の歌名 (string)
+- normalized_name_reading: 歌名の平仮名読み (string)
+- original_artist: 原曲アーティスト (string)
+- original_artist_reading: アーティスト名の平仮名読み (string)
+- tags: 検出されたバージョンタグ（上記7種のみ） (array of strings)
+- confidence: 信頼度 0.0-1.0 (number)
 
-// BatchAISuggestion 批量 AI 回應的單項格式
+JSON配列のみ応答し、他のテキストは含めないでください。例：
+[{"index":0,"normalized_name":"...","normalized_name_reading":"...","original_artist":"...","original_artist_reading":"...","tags":[],"confidence":0.9}]
+
+**最重要（最後に繰り返す）**:
+- 絶対にJSON配列として出力せよ。 [ {..}, {..} ] の形。
+- オブジェクトをカンマで並べただけの出力は厳禁。
+- 余計な文字は1文字も書くな。出力は [ で始まり ] で終わる純粋な配列のみ。`
+
+// BatchAISuggestion バッチ AI 応答の単一項目フォーマット
 type BatchAISuggestion struct {
 	Index                 int      `json:"index"`
 	NormalizedName        string   `json:"normalized_name"`
@@ -77,30 +84,42 @@ type BatchAISuggestion struct {
 	Confidence            float64  `json:"confidence"`
 }
 
-// BatchAINormalization 批量 AI 正規化（一次請求處理所有歌曲）
+// BatchAINormalization バッチ AI 正規化（1回の呼び出しで全楽曲を処理）
 func (s *NormalizationService) BatchAINormalization(items []dto.AINormalizationItem) (*dto.BatchAINormalizationResponse, error) {
 	if len(items) == 0 {
 		return &dto.BatchAINormalizationResponse{Suggestions: []dto.AISuggestionResult{}}, nil
 	}
 
-	// 構建包含所有歌曲的用戶訊息
+	// すべての楽曲を含むユーザーメッセージを構築
 	userMessage := s.buildBatchMessage(items)
 
-	// 一次呼叫 AI 處理所有歌曲
+	logger.Debugf("AI normalization input userMessage: %s", userMessage)
+
+	// AI を1回呼んで全楽曲を処理
 	var warning string
 	var suggestionMap map[int]BatchAISuggestion
 
+	logger.Infof("AI batch normalization: items=%d, prompt_len=%d", len(items), len(userMessage))
+
 	response, err := s.aiClient.SimpleChat(batchSystemPrompt, userMessage)
 	if err != nil {
-		// AI 呼叫失敗，記錄警告但繼續執行 DB 配對
-		log.Printf("[WARN] AI batch chat failed: %v", err)
+		// AI 呼び出し失敗。警告を記録し、DB照合のみ続行
+		logger.Warnf("AI batch chat failed: %v", err)
 		warning = fmt.Sprintf("AI正規化に失敗しました（%v）。DB照合のみ実行しました。", err)
 		suggestionMap = make(map[int]BatchAISuggestion)
 	} else {
-		// 解析批量回應
+		logger.Infof("AI batch normalization: response_len=%d", len(response))
+		logger.Debugf("AI normalization raw response: %s", response)
+
+		// バッチ応答をパース
 		batchSuggestions, parseErr := s.parseBatchAIResponse(response)
 		if parseErr != nil {
-			log.Printf("[WARN] AI response parse failed: %v", parseErr)
+			// レスポンスが長い場合は先頭と末尾を表示して切り詰めを検知しやすくする
+			respPreview := response
+			if len(respPreview) > 1500 {
+				respPreview = respPreview[:800] + " ... [truncated] ... " + respPreview[len(respPreview)-400:]
+			}
+			logger.Warnf("AI response parse failed: %v, response_preview: %s", parseErr, respPreview)
 			warning = "AI応答の解析に失敗しました。DB照合のみ実行しました。"
 			suggestionMap = make(map[int]BatchAISuggestion)
 		} else {
@@ -108,10 +127,14 @@ func (s *NormalizationService) BatchAINormalization(items []dto.AINormalizationI
 			for _, s := range batchSuggestions {
 				suggestionMap[s.Index] = s
 			}
+			logger.Infof("AI batch normalization parse succeeded: %d suggestions", len(batchSuggestions))
+			for i, sug := range batchSuggestions {
+				logger.Debugf("AI norm sug %d: name=%q artist=%q", i, sug.NormalizedName, sug.OriginalArtist)
+			}
 		}
 	}
 
-	// 將 AI 回應轉換為結果，並填補缺失的項目（AI 失敗時全部使用原始資料）
+	// AI 応答を結果に変換し、欠損項目を補完（AI失敗時は元データを使用）
 	suggestions := make([]dto.AISuggestionResult, len(items))
 	for i, item := range items {
 		if aiSugg, ok := suggestionMap[i]; ok {
@@ -126,10 +149,11 @@ func (s *NormalizationService) BatchAINormalization(items []dto.AINormalizationI
 				Reasoning:             "",
 			}
 
-			// 嘗試配對現有歌曲：iTunes ID 優先 → 歌名 + 藝人
+			// 既存楽曲とのマッチを試行（iTunes ID 優先 → 歌名 + アーティスト）
 			s.matchAndPopulateSong(&suggestions[i], &item, aiSugg.NormalizedName, aiSugg.OriginalArtist)
 		} else {
-			// AI 沒有返回此項目或 AI 失敗，使用原始資料
+			// AI がこの項目を返さなかった、または失敗した場合は元データを使用
+
 			suggestions[i] = dto.AISuggestionResult{
 				Index:                 i,
 				NormalizedName:        item.Name,
@@ -141,7 +165,8 @@ func (s *NormalizationService) BatchAINormalization(items []dto.AINormalizationI
 				Reasoning:             "",
 			}
 
-			// 仍然嘗試 DB 配對
+			// それでも DB マッチを試行
+
 			s.matchAndPopulateSong(&suggestions[i], &item, item.Name, item.OriginalArtist)
 		}
 	}
@@ -149,16 +174,16 @@ func (s *NormalizationService) BatchAINormalization(items []dto.AINormalizationI
 	return &dto.BatchAINormalizationResponse{Suggestions: suggestions, Warning: warning}, nil
 }
 
-// buildBatchMessage 構建包含所有歌曲的批量訊息
+// buildBatchMessage 構築包含所有楽曲のバッチメッセージ
 func (s *NormalizationService) buildBatchMessage(items []dto.AINormalizationItem) string {
 	var sb strings.Builder
 
-	sb.WriteString("請處理以下歌曲清單：\n\n")
+	sb.WriteString("以下の楽曲リストを処理してください：\n\n")
 
 	for i, item := range items {
-		sb.WriteString(fmt.Sprintf("[%d] 歌名: %s", i, item.Name))
+		sb.WriteString(fmt.Sprintf("[%d] 楽曲名: %s", i, item.Name))
 		if item.OriginalArtist != "" {
-			sb.WriteString(fmt.Sprintf(" / 藝人: %s", item.OriginalArtist))
+			sb.WriteString(fmt.Sprintf(" / アーティスト: %s", item.OriginalArtist))
 		}
 		sb.WriteString("\n")
 	}
@@ -167,7 +192,7 @@ func (s *NormalizationService) buildBatchMessage(items []dto.AINormalizationItem
 }
 
 // matchAndPopulateSong 嘗試匹配 DB 歌曲並填入資訊
-// 優先順序：iTunes ID → 歌名 + 藝人
+// 優先順序：iTunes ID → 歌名 + アーティスト
 func (s *NormalizationService) matchAndPopulateSong(result *dto.AISuggestionResult, item *dto.AINormalizationItem, normalizedName, normalizedArtist string) {
 	var matchedSong *models.Song
 	var matchReason string
@@ -227,19 +252,25 @@ func (s *NormalizationService) matchAndPopulateSong(result *dto.AISuggestionResu
 	}
 }
 
-// parseBatchAIResponse 解析批量 AI 回應
+// parseBatchAIResponse バッチ AI 応答をパース
 func (s *NormalizationService) parseBatchAIResponse(response string) ([]BatchAISuggestion, error) {
-	response = strings.TrimSpace(response)
+	response = ai.CleanJSONResponse(response)
 
-	// 移除可能的 markdown 代碼塊標記
-	response = strings.TrimPrefix(response, "```json")
-	response = strings.TrimPrefix(response, "```")
-	response = strings.TrimSuffix(response, "```")
-	response = strings.TrimSpace(response)
-
+	// Use Decoder to tolerate trailing data after the JSON array
+	decoder := json.NewDecoder(strings.NewReader(response))
 	var suggestions []BatchAISuggestion
-	if err := json.Unmarshal([]byte(response), &suggestions); err != nil {
-		return nil, fmt.Errorf("unmarshal batch AI response: %w, response: %s", err, response)
+	if err := decoder.Decode(&suggestions); err != nil {
+		// 長い場合はプレビュー
+		preview := response
+		if len(preview) > 1500 {
+			preview = preview[:800] + " ... [truncated] ... " + preview[len(preview)-400:]
+		}
+		errMsg := fmt.Sprintf("unmarshal batch AI response: %v", err)
+		trimmed := strings.TrimSpace(response)
+		if !strings.HasSuffix(trimmed, "]") && strings.HasPrefix(trimmed, "[") {
+			errMsg += " (response looks truncated: does not end with ']')"
+		}
+		return nil, fmt.Errorf("%s, response_preview: %s", errMsg, preview)
 	}
 
 	return suggestions, nil

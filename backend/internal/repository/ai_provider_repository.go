@@ -15,11 +15,11 @@ func NewAIProviderRepository(db *sql.DB) *AIProviderRepository {
 	return &AIProviderRepository{db: db}
 }
 
-const aiProviderColumns = "id, name, base_url, model, api_key, enabled, priority, created_at, updated_at"
+const aiProviderColumns = "id, name, base_url, model, api_key, enabled, priority, timeout_seconds, created_at, updated_at"
 
 func scanAIProvider(rows *sql.Rows) (models.AIProvider, error) {
 	var p models.AIProvider
-	err := rows.Scan(&p.ID, &p.Name, &p.BaseURL, &p.Model, &p.APIKey, &p.Enabled, &p.Priority, &p.CreatedAt, &p.UpdatedAt)
+	err := rows.Scan(&p.ID, &p.Name, &p.BaseURL, &p.Model, &p.APIKey, &p.Enabled, &p.Priority, &p.TimeoutSeconds, &p.CreatedAt, &p.UpdatedAt)
 	return p, err
 }
 
@@ -65,7 +65,7 @@ func (r *AIProviderRepository) FindEnabled() ([]models.AIProvider, error) {
 func (r *AIProviderRepository) FindByID(id int) (*models.AIProvider, error) {
 	var p models.AIProvider
 	err := r.db.QueryRow("SELECT "+aiProviderColumns+" FROM ai_providers WHERE id = $1", id).
-		Scan(&p.ID, &p.Name, &p.BaseURL, &p.Model, &p.APIKey, &p.Enabled, &p.Priority, &p.CreatedAt, &p.UpdatedAt)
+		Scan(&p.ID, &p.Name, &p.BaseURL, &p.Model, &p.APIKey, &p.Enabled, &p.Priority, &p.TimeoutSeconds, &p.CreatedAt, &p.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -78,10 +78,13 @@ func (r *AIProviderRepository) FindByID(id int) (*models.AIProvider, error) {
 // Create 建立 provider
 func (r *AIProviderRepository) Create(p *models.AIProvider) error {
 	query := `
-		INSERT INTO ai_providers (name, base_url, model, api_key, enabled, priority)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO ai_providers (name, base_url, model, api_key, enabled, priority, timeout_seconds)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		RETURNING id, created_at, updated_at`
-	err := r.db.QueryRow(query, p.Name, p.BaseURL, p.Model, p.APIKey, p.Enabled, p.Priority).
+	if p.TimeoutSeconds <= 0 {
+		p.TimeoutSeconds = 60
+	}
+	err := r.db.QueryRow(query, p.Name, p.BaseURL, p.Model, p.APIKey, p.Enabled, p.Priority, p.TimeoutSeconds).
 		Scan(&p.ID, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("create ai provider: %w", err)
@@ -93,9 +96,12 @@ func (r *AIProviderRepository) Create(p *models.AIProvider) error {
 func (r *AIProviderRepository) Update(p *models.AIProvider) error {
 	query := `
 		UPDATE ai_providers
-		SET name = $2, base_url = $3, model = $4, api_key = $5, enabled = $6, priority = $7, updated_at = NOW()
+		SET name = $2, base_url = $3, model = $4, api_key = $5, enabled = $6, priority = $7, timeout_seconds = $8, updated_at = NOW()
 		WHERE id = $1`
-	_, err := r.db.Exec(query, p.ID, p.Name, p.BaseURL, p.Model, p.APIKey, p.Enabled, p.Priority)
+	if p.TimeoutSeconds <= 0 {
+		p.TimeoutSeconds = 60
+	}
+	_, err := r.db.Exec(query, p.ID, p.Name, p.BaseURL, p.Model, p.APIKey, p.Enabled, p.Priority, p.TimeoutSeconds)
 	if err != nil {
 		return fmt.Errorf("update ai provider: %w", err)
 	}

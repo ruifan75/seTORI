@@ -7,37 +7,73 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/ruifan75/setori/internal/logger"
 	"github.com/ruifan75/setori/pkg/ai"
 	"github.com/ruifan75/setori/pkg/util"
 )
 
 // aiLineSelection AI 回傳的單行解析結果
+// 我們優先讓 AI 回傳「原文中出現的時間字串」（start_ts / end_ts），
+// 後端再用確定性的 parseTimestampString 轉成秒數。
+// 這樣即使留言格式很特殊，AI 也能準確指出「這一段文字是時間」。
 type aiLineSelection struct {
-	LineIndex int             `json:"line"`  // 1-based index of the input line
-	Start     json.RawMessage `json:"start"` // start seconds
-	End       json.RawMessage `json:"end"`   // end seconds (0 if unknown)
+	LineIndex int             `json:"line"`     // 1-based index of the input line
+	Start     json.RawMessage `json:"start"`    // legacy: numeric seconds or old format
+	End       json.RawMessage `json:"end"`      // legacy
+	StartTS   string          `json:"start_ts"` // 推薦：原文裡的時間字串，例如 "01:12:42" 或 "1:12:42"
+	EndTS     string          `json:"end_ts"`   // 推薦：如果行內有第二個時間
 	IsSong    bool            `json:"is_song"`
-	Name      string          `json:"name"`   // 曲名（原文逐字，需通過 verbatim 驗證）
-	Artist    string          `json:"artist"` // 歌手（原文逐字，需通過 verbatim 驗證）
+	Name      string          `json:"name"`     // 曲名（必須逐字出現在原始行）
+	Artist    string          `json:"artist"`   // 歌手（必須逐字出現在原始行）
 }
 
 const commentAISystemPrompt = `あなたはYouTubeのコメントから歌枠のセットリストを抽出するアシスタントです。
 
-入力は番号付きのコメント行です。各行について判定し、JSON配列のみを返してください:
-- 出力はJSON配列のみ（説明文やコードブロックは禁止）
-- 各要素は {"line":行番号,"start":開始秒数,"end":終了秒数,"is_song":true/false,"name":"曲名","artist":"歌手名"}
-- line は入力の行番号（1始まり）
-- start/end は秒数の整数。end が不明な場合は 0。1行に複数のタイムスタンプがあれば最初を start、2つ目を end とする
-- is_song: 歌曲なら true、雑談・開始・終了・告知などは false
+**最重要指示（必ず守れ）**:
+- 出力は**必ず "[" で始まり "]" で終わる純粋なJSON配列**にすること。
+- 1つでもオブジェクトだけ、またはオブジェクトをカンマで並べただけの出力は厳禁。
+- 前後に一切の説明文、"** Output only JSON."、"以下は" などのテキストを絶対に付けない。
+- コードブロック（バッククォート三つで囲む記法）も絶対に使用禁止。
+- 出力はJSON配列**のみ**。余計な文字は1つも書くな。
+
+入力は番号付きのコメント行です。**入力の各行について必ず1要素ずつ**判定し、JSON配列のみを返してください:
+- **必須**: 配列の要素数は入力行数と一致すること。行の省略・統合・スキップは厳禁。
+- 各要素は {"line":行番号,"is_song":true/false,"start_ts":"...","end_ts":"...","name":"曲名","artist":"歌手名"}
+- line は入力の行番号（1始まり）。1から入力行数まで、欠番なくすべて含めること。
+- is_song: 歌曲なら true、雑談・開演・幕開け・終了・閉幕・告知・スパチャ読みなどは false
+- start_ts / end_ts には、**入力行に実際に書かれているタイムスタンプ文字列をそのままコピー**してください。
+  例: "01:12:42", "1:12:42", "0:27:36", "58:35" など。自分で秒数に変換してはいけません。
+  1行に2つのタイムスタンプ（開始;終了）がある場合は、最初のものを start_ts、2つ目を end_ts に。
+  is_song=false の行でも、入力行にタイムスタンプがあれば start_ts を必ず含めること。
 - name と artist は【入力行に書かれている文字をそのままコピー】してください。翻訳・補完・表記の修正・並べ替えは一切禁止。入力に存在しない文字を出力してはいけません
-- name は曲名のみ、artist は歌手のみ。年号や「アニメ『X』OP」などの付加情報は含めない
+- is_song=true のとき: name は曲名のみ、artist は歌手のみ。年号や「アニメ『X』OP」などの付加情報は含めない
+- is_song=false のとき: name と artist は空文字列にする
 - artist が不明なら artist は空文字列にする
+
+正しい出力例（3行入力 → 3要素。非歌曲行も省略せず返す）:
+[
+  {"line":1,"is_song":false,"start_ts":"0:00:00","end_ts":"","name":"","artist":""},
+  {"line":2,"is_song":true,"start_ts":"0:13:25","end_ts":"","name":"Stand By You","artist":"Official髭男dism"},
+  {"line":3,"is_song":true,"start_ts":"0:13:24","end_ts":"0:17:28","name":"Stand By You","artist":"Official髭男dism"}
+]
 `
 
-var aiTimestampRe = regexp.MustCompile(`(\d{1,2}:\d{2}:\d{2})|(\d{1,2}:\d{2})`)
+// aiTimestampRe 用來預先篩選「可能包含時間戳」的行，減少送給 AI 的 token 量。
+// 故意寫得比較寬鬆（包含常見變形），但仍然不是萬能。
+// 如果某種極端格式還是漏掉，後續我們可以繼續放寬，或考慮直接把更多 raw lines 餵給 AI。
+var aiTimestampRe = regexp.MustCompile(`(\d{1,2}:\d{2}:\d{2})|(\d{1,2}:\d{2})|\[\s*\d{1,2}:\d{2}|\d{1,2}[:：]\d{2}`)
 
-// ParseCommentsWithAI uses an LLM to select and deduplicate song lines from raw comments.
-// AI only returns line indices; actual text is extracted from original lines via regex.
+// ParseCommentsWithAI uses an LLM to intelligently select song lines and identify
+// name/artist even in irregular formats.
+//
+// Strategy:
+// - We still do a loose pre-filter (extractTimestampLines) to reduce tokens.
+// - AI receives numbered lines and is asked to return raw timestamp *strings*
+//   exactly as they appear in the comment (start_ts / end_ts), plus verbatim name/artist.
+// - Backend always uses deterministic parsing (parseTimestampString + ParseComment)
+//   on either the AI-pointed raw strings or the full original line.
+// - This way AI handles "weird format recognition", while time calculation and
+//   safety (verbatim) stay reliable.
 func ParseCommentsWithAI(aiClient ai.Chatter, comments []string) ([]ParsedSong, error) {
 	if aiClient == nil {
 		return nil, fmt.Errorf("ai client is nil")
@@ -48,18 +84,33 @@ func ParseCommentsWithAI(aiClient ai.Chatter, comments []string) ([]ParsedSong, 
 		return nil, fmt.Errorf("no timestamp lines")
 	}
 
-	userMessage := "以下のコメント行から歌のセットリストを抽出してください。\n\n"
+	userMessage := fmt.Sprintf(
+		"以下のコメント行をすべて解析してください。入力は %d 行です。各行について is_song を判定し、**%d 要素**を含む純粋なJSON配列のみを返してください（行の省略禁止）。\n\n",
+		len(lines), len(lines),
+	)
 	for i, line := range lines {
 		userMessage += fmt.Sprintf("%d) %s\n", i+1, line)
 	}
 
+	logger.Debugf("AI comment input userMessage (len=%d): %s", len(userMessage), userMessage)
 	response, err := aiClient.SimpleChat(commentAISystemPrompt, userMessage)
 	if err != nil {
 		return nil, err
 	}
+	// 為了方便比對，完整記錄 AI 原始回覆（如果太長會被 console 截，但至少有）
+	logger.Debugf("AI comment raw response (len=%d): %s", len(response), response)
 
 	selections, err := parseAILineSelections(response)
+	if err == nil && len(selections) != len(lines) {
+		logger.Warnf("AI comment parse: expected %d line selections, got %d", len(lines), len(selections))
+	}
 	if err != nil {
+		// デバッグ用に元の応答も記録（長すぎる場合はプレビュー）
+		origPreview := response
+		if len(origPreview) > 600 {
+			origPreview = origPreview[:300] + " ... [truncated] ... " + origPreview[len(origPreview)-200:]
+		}
+		logger.Warnf("AI raw response (before clean): %s", origPreview)
 		return nil, err
 	}
 
@@ -74,10 +125,37 @@ func ParseCommentsWithAI(aiClient ai.Chatter, comments []string) ([]ParsedSong, 
 
 		originalLine := lines[sel.LineIndex-1]
 
-		// 正則 baseline（AI 不可用 / 未通過驗證時的保底）
+		// 先用全文 ParseComment 做 baseline（處理大部分常見格式 + 歌曲拆分）
 		parsed := ParseComment(originalLine)
 		if parsed == nil {
 			parsed = &ParsedSong{OriginalComment: originalLine, IsEndTimeEstimated: true}
+		}
+
+		// 優先採用 AI 指出的「原文原始時間字串」（這是針對特殊格式的主要改善點）
+		// AI 會把留言裡實際出現的時間文字（例如 "1:12:42" 或 "0:13:24 ; 0:17:28" 的片段）抄給我們
+		if sel.StartTS != "" {
+			if ts := parseTimestampString(sel.StartTS); ts > 0 {
+				parsed.Start = ts
+			}
+		}
+		if sel.EndTS != "" {
+			if ts := parseTimestampString(sel.EndTS); ts > 0 {
+				parsed.End = ts
+				parsed.IsEndTimeEstimated = false
+			}
+		}
+
+		// Legacy fallback：如果新欄位沒有值，才試舊的 numeric start/end
+		if parsed.Start == 0 {
+			if start := parseAISeconds(sel.Start); start > 0 {
+				parsed.Start = start
+			}
+		}
+		if parsed.End == 0 {
+			if end := parseAISeconds(sel.End); end > 0 {
+				parsed.End = end
+				parsed.IsEndTimeEstimated = false
+			}
 		}
 
 		// AI 抽取的歌名/歌手：僅在「逐字出現在原始行」時才採用，杜絕幻覺竄改
@@ -88,21 +166,18 @@ func ParseCommentsWithAI(aiClient ai.Chatter, comments []string) ([]ParsedSong, 
 			parsed.OriginalArtist = artist
 		}
 
-		// 時間：AI 有提供就用 AI 的
-		if start := parseAISeconds(sel.Start); start > 0 {
-			parsed.Start = start
-		}
-		if end := parseAISeconds(sel.End); end > 0 {
-			parsed.End = end
-			parsed.IsEndTimeEstimated = false
-		}
-
 		if parsed.Name == "" {
 			continue
 		}
 		result = append(result, *parsed)
 	}
 
+	logger.Infof("AI comment parse succeeded, extracted %d songs from %d timestamp lines", len(result), len(lines))
+
+	// 額外記錄每首歌的來源，方便對照 AI 輸出 vs 實際結果
+	for i, p := range result {
+		logger.Debugf("AI parsed song %d: start=%d name=%q artist=%q from line=%s", i, p.Start, p.Name, p.OriginalArtist, p.OriginalComment)
+	}
 	return result, nil
 }
 
@@ -144,16 +219,21 @@ func extractTimestampLines(comments []string) []string {
 }
 
 func parseAILineSelections(response string) ([]aiLineSelection, error) {
-	response = strings.TrimSpace(response)
-	response = strings.TrimPrefix(response, "```json")
-	response = strings.TrimPrefix(response, "```")
-	response = strings.TrimSuffix(response, "```")
-	response = strings.TrimSpace(response)
+	response = ai.CleanJSONResponse(response)
 
+	// Use Decoder instead of Unmarshal to be tolerant of extra data after the JSON array
+	// (common when LLMs add trailing text or extra ] )
+	decoder := json.NewDecoder(strings.NewReader(response))
 	var items []aiLineSelection
-	if err := json.Unmarshal([]byte(response), &items); err != nil {
-		return nil, fmt.Errorf("unmarshal AI response: %w", err)
+	if err := decoder.Decode(&items); err != nil {
+		// ログ用にプレビューを付ける
+		preview := response
+		if len(preview) > 800 {
+			preview = preview[:400] + " ... [truncated] ... " + preview[len(preview)-300:]
+		}
+		return nil, fmt.Errorf("unmarshal AI response: %w, response_preview: %s", err, preview)
 	}
+	// ignore any extra data after the array
 	return items, nil
 }
 

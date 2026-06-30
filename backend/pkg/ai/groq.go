@@ -7,9 +7,12 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/ruifan75/setori/internal/logger"
 )
 
 const (
@@ -41,23 +44,32 @@ type Client struct {
 	baseURL    string // OpenAI 互換 base、例: https://api.groq.com/openai/v1
 }
 
-// NewClient デフォルトの Groq クライアントを作成（後方互換）
+// NewClient デフォルトの Groq クライアントを作成（後方互換）。デフォルト timeout は 60 秒。
 func NewClient(apiKey string) *Client {
 	return NewClientWith(groqBaseURL, groqModel, apiKey)
 }
 
-// NewClientWith 指定 base URL とモデルで OpenAI 互換クライアントを作成
+// NewClientWith 指定 base URL とモデルで OpenAI 互換クライアントを作成（デフォルト timeout 60秒）
 func NewClientWith(baseURL, model, apiKey string) *Client {
+	return NewClientWithTimeout(baseURL, model, apiKey, 60*time.Second)
+}
+
+// NewClientWithTimeout 指定 base URL / モデル / timeout でクライアントを作成。
+// timeout は http.Client の全体リクエストタイムアウト（生成が長い provider 向けに大きくできる）。
+func NewClientWithTimeout(baseURL, model, apiKey string, timeout time.Duration) *Client {
 	if baseURL == "" {
 		baseURL = groqBaseURL
 	}
 	if model == "" {
 		model = groqModel
 	}
+	if timeout <= 0 {
+		timeout = 60 * time.Second
+	}
 	return &Client{
 		apiKey: apiKey,
 		httpClient: &http.Client{
-			Timeout: 60 * time.Second,
+			Timeout: timeout,
 		},
 		model:   model,
 		baseURL: baseURL,
@@ -102,7 +114,7 @@ func (c *Client) Chat(messages []ChatMessage) (*ChatResponse, error) {
 		Model:       c.model,
 		Messages:    messages,
 		Temperature: 0.1, // より一貫した結果を得るため低めの温度を使用
-		MaxTokens:   2048,
+		MaxTokens:   8192,
 	}
 
 	jsonBody, err := json.Marshal(reqBody)
@@ -158,7 +170,82 @@ func (c *Client) SimpleChat(systemPrompt, userMessage string) (string, error) {
 		return "", fmt.Errorf("no response choices")
 	}
 
-	return resp.Choices[0].Message.Content, nil
+	content := resp.Choices[0].Message.Content
+	finishReason := resp.Choices[0].FinishReason
+	if finishReason == "length" {
+		logger.Warnf("AI response may be truncated (finish_reason=length, model=%s)", c.model)
+	}
+	if resp.Usage.TotalTokens > 0 {
+		logger.Infof("AI usage: prompt=%d, completion=%d, total=%d (model=%s)", resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.TotalTokens, c.model)
+	}
+
+	return content, nil
+}
+
+// CleanJSONResponse は LLM が余計なテキストを付与した場合でも、純粋な JSON 配列/オブジェクトを抽出する
+func CleanJSONResponse(resp string) string {
+	resp = strings.TrimSpace(resp)
+
+	// よくある悪い接頭辞を除去（大文字小文字・記号のバリエーション対応）
+	prefixes := []string{
+		"** Output only JSON.",
+		"**Output only JSON.",
+		"Output only JSON.",
+		"以下はJSONです。",
+		"以下は",
+		"JSON:",
+		"```json",
+		"```",
+		"**",
+		"応答:",
+	}
+	for _, p := range prefixes {
+		resp = strings.TrimPrefix(resp, p)
+		resp = strings.TrimSpace(resp)
+	}
+
+	// 最初の [ または { から始まるように
+	if idx := strings.Index(resp, "["); idx > 0 {
+		resp = resp[idx:]
+	} else if idx := strings.Index(resp, "{"); idx > 0 {
+		resp = resp[idx:]
+	}
+
+	// LLMがよくやるミス: オブジェクトをカンマで並べただけ、または単一オブジェクトを出力（配列にしていない）
+	// 必ず配列にラップする
+	trimmed := strings.TrimSpace(resp)
+	if strings.HasPrefix(trimmed, "{") && !strings.HasPrefix(trimmed, "[") {
+		resp = "[" + trimmed + "]"
+	}
+
+	// 最後の ] または } で終わるように
+	if strings.HasPrefix(resp, "[") {
+		if end := strings.LastIndex(resp, "]"); end != -1 {
+			resp = resp[:end+1]
+		}
+	} else if strings.HasPrefix(resp, "{") {
+		if end := strings.LastIndex(resp, "}"); end != -1 {
+			resp = resp[:end+1]
+		}
+	}
+
+	resp = strings.TrimSpace(resp)
+	resp = strings.TrimSuffix(resp, "```")
+	resp = strings.TrimSpace(resp)
+
+	// 末尾のカンマを除去（LLMがよくやる）
+	resp = regexp.MustCompile(`,\s*([}\]])`).ReplaceAllString(resp, "$1")
+
+	resp = strings.TrimSpace(resp)
+
+	// もしまだ { で始まっていて [ で始まっていないなら、強制的に配列にラップ
+	// これでカンマ区切りのオブジェクト列挙や単一オブジェクトの場合を確実にカバー
+	trimmed = strings.TrimSpace(resp)
+	if strings.HasPrefix(trimmed, "{") && !strings.HasPrefix(trimmed, "[") {
+		resp = "[" + trimmed + "]"
+	}
+
+	return strings.TrimSpace(resp)
 }
 
 // ModelInfo モデル選択 UI 用のメタデータ。chat（テキスト生成）に使えるモデルのみ返す

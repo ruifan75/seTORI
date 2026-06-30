@@ -245,6 +245,11 @@ export interface CommentSong {
   original_artist: string;
   original_comment: string;
   is_end_time_estimated: boolean;
+
+  // Chat 拍手偵測結果（用來跟 comment explicit end 比較）
+  chat_end?: number;
+  end_diff?: number; // |end - chat_end|，只有兩邊都有值時才會有
+
   // 分析時に折り込んだ正規化結果（あれば）
   normalized_name?: string;
   normalized_name_reading?: string;
@@ -364,6 +369,7 @@ export interface AIProvider {
   model: string;
   enabled: boolean;
   priority: number;
+  timeout_seconds: number;
   has_key: boolean;
   key_hint?: string;
 }
@@ -375,6 +381,7 @@ export interface AIProviderInput {
   api_key?: string;
   enabled?: boolean;
   priority?: number;
+  timeout_seconds?: number;
 }
 
 // プロバイダーから取得した chat 利用可能なモデル情報
@@ -396,6 +403,18 @@ export interface SuccessResponse {
   success: boolean;
   message?: string;
 }
+
+export interface LogEntry {
+  time: string;
+  level: string;
+  message: string;
+}
+
+export interface LogsResponse {
+  logs: LogEntry[];
+  level: string;
+}
+
 // ========== 終了時間推定 ==========
 
 export interface SongEndTimeEstimateRequest {
