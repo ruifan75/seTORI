@@ -62,13 +62,16 @@ func mergeParsedSong(existing, incoming ParsedSong) ParsedSong {
 		merged.OriginalArtist = incoming.OriginalArtist
 	}
 
-	// 結束時間：優先「有值且非估計」的版本
+	// 時間：優先使用 comment 本身提供起訖時間的版本，start/end 要成對保留。
 	switch {
+	case !hasExplicitEnd(merged) && hasExplicitEnd(incoming):
+		merged.Start = incoming.Start
+		merged.End = incoming.End
+		merged.IsEndTimeEstimated = false
 	case merged.End == 0 && incoming.End > 0:
 		merged.End = incoming.End
 		merged.IsEndTimeEstimated = incoming.IsEndTimeEstimated
 	case incoming.End > 0 && merged.IsEndTimeEstimated && !incoming.IsEndTimeEstimated:
-		// 既有的是估計值，incoming 是實際值 → 用實際值取代
 		merged.End = incoming.End
 		merged.IsEndTimeEstimated = false
 	}
@@ -84,6 +87,10 @@ func mergeParsedSong(existing, incoming ParsedSong) ParsedSong {
 	}
 
 	return merged
+}
+
+func hasExplicitEnd(song ParsedSong) bool {
+	return song.End > 0 && !song.IsEndTimeEstimated
 }
 
 func abs(x int) int {
