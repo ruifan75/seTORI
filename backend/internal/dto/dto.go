@@ -279,10 +279,24 @@ type SongSuggestion struct {
 	OriginalArtist string   `json:"original_artist"`
 	StartSeconds   int      `json:"start_seconds"`
 	EndSeconds     int      `json:"end_seconds"`
-	Tags           []string `json:"tags"`
+	Tags           []string `json:"tags"`       // 正規化で検出した版本タグ
 	SingerIDs      []string `json:"singer_ids"` // 預設為頻道擁有者
 	ArtURL         *string  `json:"art_url,omitempty"`
 	ItunesID       *int64   `json:"itunes_id,omitempty"` // Holodex 提供的 iTunes ID
+
+	// ↓ 折り込んだ正規化結果（AnalyzeHolodexSongs 時に AI 正規化＋DB 照合し埋め込む。CommentSong と対称）
+	NormalizedName          string  `json:"normalized_name,omitempty"`
+	NormalizedNameReading   string  `json:"normalized_name_reading,omitempty"`
+	NormalizedArtist        string  `json:"normalized_artist,omitempty"`
+	NormalizedArtistReading string  `json:"normalized_artist_reading,omitempty"`
+	Confidence              float64 `json:"confidence,omitempty"`
+	MatchedSongID            *string `json:"matched_song_id,omitempty"`
+	MatchedSongName          *string `json:"matched_song_name,omitempty"`
+	MatchedSongNameReading   *string `json:"matched_song_name_reading,omitempty"`
+	MatchedSongArtist        *string `json:"matched_song_artist,omitempty"`
+	MatchedSongArtistReading *string `json:"matched_song_artist_reading,omitempty"`
+	MatchedSongArtURL        *string `json:"matched_song_art_url,omitempty"`
+	MatchedSongItunesID      *int64  `json:"matched_song_itunes_id,omitempty"`
 }
 
 // 載入 Holodex 歌曲的回應

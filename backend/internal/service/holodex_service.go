@@ -31,8 +31,16 @@ type HolodexService struct {
 	perfRepo       *repository.PerformanceRepository
 	songRepo       *repository.SongRepository
 	songItunesRepo *repository.SongItunesRepository
-	editorToken    string
-	aiClient       *ai.Client
+	editorToken          string
+	aiClient             *ai.Client
+	normalizationService *NormalizationService
+	chatEndService       *ChatEndService
+}
+
+// SetAnalysisServices 注入正規化・拍手 end 偵測服務（AnalyzeHolodexSongs 用）。
+func (s *HolodexService) SetAnalysisServices(norm *NormalizationService, chatEnd *ChatEndService) {
+	s.normalizationService = norm
+	s.chatEndService = chatEnd
 }
 
 func NewHolodexService(
@@ -621,6 +629,159 @@ func (s *HolodexService) loadAndSaveComments(videoID string) {
 		logger.Warnf("save comment raw error (video: %s): %v", videoID, err)
 	} else {
 		logger.Infof("[holodex] saved %d raw comments for %s", len(comments), videoID)
+	}
+}
+
+// holodexDataSong holodex_data JSONB に埋め込まれた song の最小形。
+type holodexDataSong struct {
+	Name           string `json:"name"`
+	OriginalArtist string `json:"original_artist"`
+	ArtURL         string `json:"art"`
+	ITunesID       int64  `json:"itunesid"`
+	Start          int    `json:"start"`
+	End            int    `json:"end"`
+}
+
+// AnalyzeHolodexSongs 從 stored holodex_data 解析歌曲，正規化＋DB 照合＋拍手 end 補完，並持久化。
+// 以既有の holodex_hash をキャッシュキーとし、Holodex 資料が変わっていなければ AI を再実行しない。
+// Holodex が明示的に end を持つ曲はそれを優先（人力キュレーションのため最も正確）。
+func (s *HolodexService) AnalyzeHolodexSongs(videoID string, force bool) ([]dto.SongSuggestion, error) {
+	stream, err := s.streamRepo.FindByID(videoID)
+	if err != nil {
+		return nil, fmt.Errorf("find stream: %w", err)
+	}
+	if stream == nil {
+		return nil, fmt.Errorf("stream not found: %s", videoID)
+	}
+
+	holodexHash := ""
+	if stream.HolodexHash.Valid {
+		holodexHash = stream.HolodexHash.String
+	}
+
+	// キャッシュ命中：holodex_data が変わっていない → そのまま返す（AI なし）
+	if !force && holodexHash != "" {
+		cached, cachedHash, _ := s.streamRepo.GetHolodexSongsCache(videoID)
+		if cachedHash.Valid && cachedHash.String == holodexHash && len(cached) > 0 {
+			var songs []dto.SongSuggestion
+			if err := json.Unmarshal(cached, &songs); err == nil && len(songs) > 0 {
+				return songs, nil
+			}
+		}
+	}
+
+	// 1. stored holodex_data から songs を解析
+	var parsed struct {
+		Songs []holodexDataSong `json:"songs"`
+	}
+	if len(stream.HolodexData) == 0 || json.Unmarshal(stream.HolodexData, &parsed) != nil || len(parsed.Songs) == 0 {
+		return []dto.SongSuggestion{}, nil
+	}
+
+	songs := make([]dto.SongSuggestion, len(parsed.Songs))
+	hasExplicitEnd := make([]bool, len(parsed.Songs))
+	for i, sg := range parsed.Songs {
+		songs[i] = dto.SongSuggestion{
+			Name:           sg.Name,
+			OriginalArtist: sg.OriginalArtist,
+			StartSeconds:   sg.Start,
+			EndSeconds:     sg.End,
+			Tags:           []string{},
+			SingerIDs:      []string{},
+		}
+		hasExplicitEnd[i] = sg.End > 0 // Holodex 明示 end（人力）
+		if sg.ArtURL != "" {
+			art := sg.ArtURL
+			songs[i].ArtURL = &art
+		}
+		if sg.ITunesID > 0 {
+			id := sg.ITunesID
+			songs[i].ItunesID = &id
+		}
+	}
+
+	// 2. 正規化（AI 正規化＋DB 照合）を折り込む
+	s.normalizeHolodexInto(songs)
+
+	// 3. 拍手 end：Holodex に明示 end が無い曲だけ補完（explicit end を上書きしない）
+	if s.chatEndService != nil {
+		var duration int
+		if stream.DurationSeconds.Valid {
+			duration = int(stream.DurationSeconds.Int32)
+		}
+		starts := make([]int, 0, len(songs))
+		for i := range songs {
+			if !hasExplicitEnd[i] {
+				starts = append(starts, songs[i].StartSeconds)
+			}
+		}
+		if endByStart := s.chatEndService.DetectEnds(videoID, duration, starts); len(endByStart) > 0 {
+			for i := range songs {
+				if hasExplicitEnd[i] {
+					continue
+				}
+				if end, ok := endByStart[songs[i].StartSeconds]; ok {
+					songs[i].EndSeconds = end
+				}
+			}
+		}
+	}
+
+	// 4. まだ end が無い曲は次曲の start をフォールバックに使う
+	for i := range songs {
+		if songs[i].EndSeconds == 0 && i+1 < len(songs) {
+			songs[i].EndSeconds = songs[i+1].StartSeconds
+		}
+	}
+
+	// 5. 永続化（holodex_songs_normalized + holodex_hash）→ 次回はキャッシュを直接読む
+	if holodexHash != "" {
+		if b, mErr := json.Marshal(songs); mErr == nil {
+			if err := s.streamRepo.SaveHolodexSongs(videoID, b, holodexHash); err != nil {
+				logger.Warnf("[holodex] save normalized songs failed (%s): %v", videoID, err)
+			}
+		}
+	}
+
+	return songs, nil
+}
+
+// normalizeHolodexInto SongSuggestion に AI 正規化＋DB 照合結果を埋め込む（in-place）。
+func (s *HolodexService) normalizeHolodexInto(songs []dto.SongSuggestion) {
+	if s.normalizationService == nil || len(songs) == 0 {
+		return
+	}
+	items := make([]dto.AINormalizationItem, len(songs))
+	for i, sg := range songs {
+		items[i] = dto.AINormalizationItem{
+			Name:           sg.Name,
+			OriginalArtist: sg.OriginalArtist,
+			ItunesID:       sg.ItunesID,
+			ArtURL:         sg.ArtURL,
+		}
+	}
+	resp, err := s.normalizationService.BatchAINormalization(items)
+	if err != nil {
+		logger.Warnf("[holodex] normalization failed, keeping raw: %v", err)
+		return
+	}
+	for _, sug := range resp.Suggestions {
+		if sug.Index < 0 || sug.Index >= len(songs) {
+			continue
+		}
+		songs[sug.Index].NormalizedName = sug.NormalizedName
+		songs[sug.Index].NormalizedNameReading = sug.NormalizedNameReading
+		songs[sug.Index].NormalizedArtist = sug.OriginalArtist
+		songs[sug.Index].NormalizedArtistReading = sug.OriginalArtistReading
+		songs[sug.Index].Tags = sug.Tags
+		songs[sug.Index].Confidence = sug.Confidence
+		songs[sug.Index].MatchedSongID = sug.MatchedSongID
+		songs[sug.Index].MatchedSongName = sug.MatchedSongName
+		songs[sug.Index].MatchedSongNameReading = sug.MatchedSongNameReading
+		songs[sug.Index].MatchedSongArtist = sug.MatchedSongArtist
+		songs[sug.Index].MatchedSongArtistReading = sug.MatchedSongArtistReading
+		songs[sug.Index].MatchedSongArtURL = sug.MatchedSongArtURL
+		songs[sug.Index].MatchedSongItunesID = sug.MatchedSongItunesID
 	}
 }
 

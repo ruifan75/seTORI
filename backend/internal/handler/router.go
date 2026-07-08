@@ -66,6 +66,8 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	chatEndService := service.NewChatEndService(streamRepo, "", "")
 	// CommentService は分析時に正規化・拍手 end を内部で実行する（抽出→正規化→end→キャッシュ）
 	commentService := service.NewCommentService(holodexService, streamRepo, filterKeywordRepo, aiService, normalizationService, chatEndService)
+	// HolodexService も AnalyzeHolodexSongs で正規化・拍手 end を実行する（holodex_hash キャッシュ）
+	holodexService.SetAnalysisServices(normalizationService, chatEndService)
 	performanceService := service.NewPerformanceService(perfRepo, songRepo, songItunesRepo)
 	itunesClient := itunes.NewClient()
 	endTimeEstimateService := service.NewEndTimeEstimateService(itunesClient)
@@ -131,6 +133,7 @@ func (r *Router) setupRoutes() {
 
 	// Load songs from Holodex (without adding to normalization queue)
 	r.mux.HandleFunc("GET /api/streams/{id}/holodex-songs", r.handleLoadHolodexSongs)
+	r.mux.HandleFunc("POST /api/streams/{id}/holodex-songs/analyze", r.handleAnalyzeHolodexSongs)
 
 	// Estimate end times
 	r.mux.HandleFunc("POST /api/streams/{id}/estimate-end-times", r.handleEstimateEndTimes)
@@ -918,6 +921,27 @@ func (r *Router) handleAnalyzeComments(w http.ResponseWriter, req *http.Request)
 
 	logger.Infof("/comments/analyze completed for %s: %d songs (AI used or cached)", videoID, len(result.Songs))
 	respondJSON(w, http.StatusOK, result)
+}
+
+// handleAnalyzeHolodexSongs stored holodex_data を正規化＋DB 照合＋拍手 end 補完し、
+// holodex_hash をキーにキャッシュして返す。?force=true でキャッシュ無視。
+func (r *Router) handleAnalyzeHolodexSongs(w http.ResponseWriter, req *http.Request) {
+	videoID := req.PathValue("id")
+	if videoID == "" {
+		respondError(w, http.StatusBadRequest, "無効な動画ID")
+		return
+	}
+
+	force := req.URL.Query().Get("force") == "true"
+
+	songs, err := r.holodexService.AnalyzeHolodexSongs(videoID, force)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	logger.Infof("/holodex-songs/analyze completed for %s: %d songs (AI used or cached)", videoID, len(songs))
+	respondJSON(w, http.StatusOK, map[string]any{"songs": songs})
 }
 
 // handleAnalyzeChatEnds 手動觸發：用 live chat 拍手偵測該歌回各首歌的 end（背景執行）

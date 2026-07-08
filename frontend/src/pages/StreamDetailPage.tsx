@@ -822,45 +822,76 @@ export default function StreamDetailPage() {
     },
   });
 
-  const loadFromHolodex = () => {
+  const [holodexAnalyzeLoading, setHolodexAnalyzeLoading] = useState(false);
+
+  // force=true で快取を無視し AI 再分析（再正規化）。通常はキャッシュ済み結果を秒読みする。
+  const loadFromHolodex = async (force = false) => {
+    if (!id) return;
     if (!stream?.holodex_timeline_songs || stream.holodex_timeline_songs.length === 0) {
       showToast('Holodexデータがありません', 'info');
       return;
     }
+    setHolodexAnalyzeLoading(true);
+    try {
+      // 分析（正規化＋DB照合＋拍手end）を実行し、結果をそのまま反映する
+      const analyzed = await holodexApi.analyzeSongs(id, force);
+      const sortedSongs = [...analyzed].sort((a, b) => a.start_seconds - b.start_seconds);
+      setHolodexTimelineSongs(sortedSongs);
 
-    // 按開始時間排序
-    const sortedSongs = [...stream.holodex_timeline_songs].sort((a, b) => a.start_seconds - b.start_seconds);
-    
-    // 從已載入的 stream 資料中讀取
-    setHolodexTimelineSongs(sortedSongs);
+      const defaultSingerIds = stream.participants?.map((p) => p.id) || (channelOwner ? [channelOwner.id] : []);
 
-    // 獲取預設的歌手ID（從participants或channelOwner）
-    const defaultSingerIds = stream.participants?.map((p) => p.id) || (channelOwner ? [channelOwner.id] : []);
+      const songs: EditableSong[] = [];
+      for (let index = 0; index < sortedSongs.length; index++) {
+        const song = sortedSongs[index];
+        const hasMatch = !!song.matched_song_id;
+        const finalName = hasMatch && song.matched_song_name
+          ? song.matched_song_name : (song.normalized_name || song.name);
+        const finalNameReading = hasMatch && song.matched_song_name_reading != null
+          ? song.matched_song_name_reading : (song.normalized_name_reading || '');
+        const finalArtist = hasMatch && song.matched_song_artist
+          ? song.matched_song_artist : (song.normalized_artist || song.original_artist);
+        const finalArtistReading = hasMatch && song.matched_song_artist_reading != null
+          ? song.matched_song_artist_reading : (song.normalized_artist_reading || '');
+        const artUrl = (hasMatch ? song.matched_song_art_url : undefined) || song.art_url || null;
+        const itunesId = song.matched_song_itunes_id || song.itunes_id || null;
+        const trackDuration = itunesId ? await fetchTrackDurationByItunesId(itunesId) : null;
+        const nameChanged = finalName !== song.name;
+        const artistChanged = finalArtist !== song.original_artist;
 
-    // 轉換為可編輯歌曲
-    const songs: EditableSong[] = sortedSongs.map((song, index) => ({
-      id: `holodex-${index}`,
-      name: song.name,
-      nameReading: '',
-      artist: song.original_artist,
-      artistReading: '',
-      start: song.start_seconds,
-      end: song.end_seconds,
-      tags: song.tags,
-      singerIds: song.singer_ids.length > 0 ? song.singer_ids : defaultSingerIds,
-      matchedSongId: null,
-      artUrl: song.art_url || null,
-      itunesId: song.itunes_id || null,
-      trackDuration: null,
-      originalName: song.name,
-      originalArtist: song.original_artist,
-      aiNormalizedName: undefined,
-      aiNormalizedArtist: undefined,
-      isEndTimeEstimated: false,
-      customTags: [],
-    }));
-    setEditableSongs(songs);
-    showToast(`Holodexから${songs.length}曲を読み込みました`, 'success');
+        songs.push({
+          id: `holodex-${index}`,
+          name: finalName,
+          nameReading: finalNameReading,
+          artist: finalArtist,
+          artistReading: finalArtistReading,
+          start: song.start_seconds,
+          end: song.end_seconds,
+          tags: song.tags || [],
+          singerIds: song.singer_ids.length > 0 ? song.singer_ids : defaultSingerIds,
+          matchedSongId: song.matched_song_id || null,
+          artUrl,
+          itunesId,
+          trackDuration,
+          originalName: finalName,
+          originalArtist: finalArtist,
+          aiNormalizedName: nameChanged ? song.name : undefined,
+          aiNormalizedArtist: artistChanged ? song.original_artist : undefined,
+          isEndTimeEstimated: false,
+          customTags: [],
+        });
+      }
+
+      const merged = mergeDuplicateSongs(songs);
+      const mergedCount = songs.length - merged.length;
+      setEditableSongs(merged);
+      const mergeMsg = mergedCount > 0 ? `（${mergedCount}曲の重複をマージ）` : '';
+      showToast(`Holodexから${merged.length}曲を読み込みました${mergeMsg}`, 'success');
+    } catch (error) {
+      showToast('Holodex分析に失敗しました', 'error');
+      console.error('Holodex analysis failed:', error);
+    } finally {
+      setHolodexAnalyzeLoading(false);
+    }
   };
 
   const [commentAnalyzeLoading, setCommentAnalyzeLoading] = useState(false);
@@ -1730,12 +1761,22 @@ export default function StreamDetailPage() {
                   {syncToHolodexMutation.isPending ? 'Holodex へ同期中...' : 'seTORI から Holodex へ同期'}
                 </button>
                 <button
-                  onClick={loadFromHolodex}
-                  disabled={!stream?.holodex_timeline_songs || stream.holodex_timeline_songs.length === 0}
+                  onClick={() => loadFromHolodex(false)}
+                  disabled={!stream?.holodex_timeline_songs || stream.holodex_timeline_songs.length === 0 || holodexAnalyzeLoading}
                   className="px-3 py-1.5 text-sm bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
                 >
-                  Holodex データを読み込む
+                  {holodexAnalyzeLoading ? 'Holodex分析中...' : 'Holodex データを読み込む'}
                 </button>
+                {stream?.holodex_timeline_songs && stream.holodex_timeline_songs.length > 0 && (
+                  <button
+                    onClick={() => loadFromHolodex(true)}
+                    disabled={holodexAnalyzeLoading}
+                    title="キャッシュを無視して AI で再分析・再正規化します"
+                    className="px-3 py-1.5 text-sm bg-blue-50 text-blue-700 border border-blue-300 font-medium rounded-lg hover:bg-blue-100 transition-colors disabled:opacity-50"
+                  >
+                    再分析
+                  </button>
+                )}
                 <button
                   onClick={() => loadFromComments(false)}
                   disabled={!stream?.has_comment_raw || commentAnalyzeLoading}

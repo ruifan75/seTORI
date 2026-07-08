@@ -16,6 +16,7 @@ import type {
   UpdateSingerRequest,
   SyncHolodexRequest,
   SyncHolodexResponse,
+  SongSuggestion,
   AnalyzeCommentsResponse,
   SuccessResponse,
   LoadHolodexSongsResponse,
@@ -207,6 +208,12 @@ export const holodexApi = {
   syncSetoriToHolodex: async (streamId: string): Promise<SyncHolodexResponse> => {
     const { data } = await api.post(`/api/sync/holodex/to-holodex/${streamId}`);
     return data;
+  },
+
+  // stored holodex_data を正規化＋DB照合＋拍手end補完（holodex_hash キャッシュ）。force=true で再分析
+  analyzeSongs: async (videoId: string, force = false): Promise<SongSuggestion[]> => {
+    const { data } = await api.post(`/api/streams/${videoId}/holodex-songs/analyze${force ? '?force=true' : ''}`);
+    return data.songs ?? [];
   },
 };
 

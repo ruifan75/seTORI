@@ -297,6 +297,20 @@ export interface SongSuggestion {
   singer_ids: string[];
   art_url?: string;
   itunes_id?: number; // Holodex 提供的 iTunes ID
+
+  // analyzeSongs 時に折り込んだ正規化結果（あれば）
+  normalized_name?: string;
+  normalized_name_reading?: string;
+  normalized_artist?: string;
+  normalized_artist_reading?: string;
+  confidence?: number;
+  matched_song_id?: string;
+  matched_song_name?: string;
+  matched_song_name_reading?: string;
+  matched_song_artist?: string;
+  matched_song_artist_reading?: string;
+  matched_song_art_url?: string;
+  matched_song_itunes_id?: number;
 }
 
 export interface LoadHolodexSongsResponse {
