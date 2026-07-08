@@ -50,8 +50,8 @@
 
 ## 4. YouTube Data API（読、任意） — `YOUTUBE_API_KEY`
 
-- **コード位置**：`pkg/youtube/client.go` — `GET /youtube/v3/channels?part=snippet&id=` でチャンネルアバターを取得（high → medium → default 優先）。
-- **用途**：`HolodexService.getChannelPhotoURL` がチャンネル/歌手同期時に **優先的に** YouTube 高解像度アバターを使用。取得できないか key 未設定時は Holodex の `photo`、さらに Holodex 静的画像にフォールバック。
+- **コード位置**：`pkg/youtube/client.go` — `GET /youtube/v3/channels?part=snippet&id=` または `forHandle=` でチャンネル情報を取得（アバターは high → medium → default 優先）。
+- **用途**：`HolodexService.getChannelPhotoURL` がチャンネル/歌手同期時に **優先的に** YouTube 高解像度アバターを使用。取得できないか key 未設定時は Holodex の `photo`、さらに Holodex 静的画像にフォールバック。`POST /api/singers` では Holodex に存在しないチャンネルを追加するための fallback として、Channel ID または `@handle` から YouTube の channel snippet を取得してローカル DB に保存する。この fallback には `YOUTUBE_API_KEY` が必要。fallback 登録されたチャンネルのみ、所属などのメタデータを手動編集できる。
 - **呼び出しトリガー**（間接、チャンネル同期時）：`POST /api/sync/holodex`、`POST /api/sync/holodex/video/{id}`、`POST /api/singers`。
 - **制限**：デフォルトでプロジェクトあたり 10,000 units/日（`channels.list` は約 1 unit/回）。
 

@@ -24,7 +24,7 @@ func (r *SingerRepository) FindAll(limit, offset int) ([]models.Singer, int, err
 	}
 
 	query := `
-		SELECT id, name, english_name, photo_url, organization, created_at, updated_at
+		SELECT id, name, english_name, photo_url, organization, metadata_source, created_at, updated_at
 		FROM singers
 		ORDER BY name ASC
 		LIMIT $1 OFFSET $2`
@@ -39,7 +39,7 @@ func (r *SingerRepository) FindAll(limit, offset int) ([]models.Singer, int, err
 	for rows.Next() {
 		var s models.Singer
 		err := rows.Scan(&s.ID, &s.Name, &s.EnglishName, &s.PhotoURL,
-			&s.Organization, &s.CreatedAt, &s.UpdatedAt)
+			&s.Organization, &s.MetadataSource, &s.CreatedAt, &s.UpdatedAt)
 		if err != nil {
 			return nil, 0, fmt.Errorf("scan singer: %w", err)
 		}
@@ -52,13 +52,13 @@ func (r *SingerRepository) FindAll(limit, offset int) ([]models.Singer, int, err
 // FindByID 根據 Channel ID 取得演唱者
 func (r *SingerRepository) FindByID(id string) (*models.Singer, error) {
 	query := `
-		SELECT id, name, english_name, photo_url, organization, created_at, updated_at
+		SELECT id, name, english_name, photo_url, organization, metadata_source, created_at, updated_at
 		FROM singers WHERE id = $1`
 
 	var s models.Singer
 	err := r.db.QueryRow(query, id).Scan(
 		&s.ID, &s.Name, &s.EnglishName, &s.PhotoURL,
-		&s.Organization, &s.CreatedAt, &s.UpdatedAt)
+		&s.Organization, &s.MetadataSource, &s.CreatedAt, &s.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -71,15 +71,17 @@ func (r *SingerRepository) FindByID(id string) (*models.Singer, error) {
 // Create 建立新演唱者
 func (r *SingerRepository) Create(s *models.Singer) error {
 	query := `
-		INSERT INTO singers (id, name, english_name, photo_url, organization)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO singers (id, name, english_name, photo_url, organization, metadata_source)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING created_at, updated_at`
 
-	err := r.db.QueryRow(query, s.ID, s.Name, s.EnglishName, s.PhotoURL, s.Organization).
+	source := normalizeSingerMetadataSource(s.MetadataSource)
+	err := r.db.QueryRow(query, s.ID, s.Name, s.EnglishName, s.PhotoURL, s.Organization, source).
 		Scan(&s.CreatedAt, &s.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("create singer: %w", err)
 	}
+	s.MetadataSource = source
 	return nil
 }
 
@@ -87,35 +89,56 @@ func (r *SingerRepository) Create(s *models.Singer) error {
 func (r *SingerRepository) Update(s *models.Singer) error {
 	query := `
 		UPDATE singers
-		SET name = $2, english_name = $3, photo_url = $4, organization = $5, updated_at = NOW()
+		SET name = $2, english_name = $3, photo_url = $4, organization = $5, metadata_source = $6, updated_at = NOW()
 		WHERE id = $1
 		RETURNING updated_at`
 
-	err := r.db.QueryRow(query, s.ID, s.Name, s.EnglishName, s.PhotoURL, s.Organization).
+	source := normalizeSingerMetadataSource(s.MetadataSource)
+	err := r.db.QueryRow(query, s.ID, s.Name, s.EnglishName, s.PhotoURL, s.Organization, source).
 		Scan(&s.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("update singer: %w", err)
 	}
+	s.MetadataSource = source
 	return nil
 }
 
 // Upsert 建立或更新演唱者（用於 Holodex 同步）
 func (r *SingerRepository) Upsert(s *models.Singer) error {
 	query := `
-		INSERT INTO singers (id, name, english_name, photo_url, organization)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO singers (id, name, english_name, photo_url, organization, metadata_source)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT (id) DO UPDATE SET
 			name = EXCLUDED.name,
 			english_name = EXCLUDED.english_name,
 			photo_url = EXCLUDED.photo_url,
 			organization = EXCLUDED.organization,
+			metadata_source = EXCLUDED.metadata_source,
 			updated_at = NOW()
+		RETURNING created_at, updated_at`
+
+	source := normalizeSingerMetadataSource(s.MetadataSource)
+	err := r.db.QueryRow(query, s.ID, s.Name, s.EnglishName, s.PhotoURL, s.Organization, source).
+		Scan(&s.CreatedAt, &s.UpdatedAt)
+	if err != nil {
+		return fmt.Errorf("upsert singer: %w", err)
+	}
+	s.MetadataSource = source
+	return nil
+}
+
+// UpdateManualMetadata updates user-editable metadata without changing the source.
+func (r *SingerRepository) UpdateManualMetadata(s *models.Singer) error {
+	query := `
+		UPDATE singers
+		SET name = $2, english_name = $3, photo_url = $4, organization = $5, updated_at = NOW()
+		WHERE id = $1
 		RETURNING created_at, updated_at`
 
 	err := r.db.QueryRow(query, s.ID, s.Name, s.EnglishName, s.PhotoURL, s.Organization).
 		Scan(&s.CreatedAt, &s.UpdatedAt)
 	if err != nil {
-		return fmt.Errorf("upsert singer: %w", err)
+		return fmt.Errorf("update singer metadata: %w", err)
 	}
 	return nil
 }
@@ -163,7 +186,7 @@ func (r *SingerRepository) GetPerformanceCount(singerID string) (int, error) {
 // Search 搜尋演唱者
 func (r *SingerRepository) Search(query string, limit int) ([]models.Singer, error) {
 	sqlQuery := `
-		SELECT id, name, english_name, photo_url, organization, created_at, updated_at
+		SELECT id, name, english_name, photo_url, organization, metadata_source, created_at, updated_at
 		FROM singers
 		WHERE name ILIKE $1 OR english_name ILIKE $1
 		ORDER BY name ASC
@@ -180,7 +203,7 @@ func (r *SingerRepository) Search(query string, limit int) ([]models.Singer, err
 	for rows.Next() {
 		var s models.Singer
 		err := rows.Scan(&s.ID, &s.Name, &s.EnglishName, &s.PhotoURL,
-			&s.Organization, &s.CreatedAt, &s.UpdatedAt)
+			&s.Organization, &s.MetadataSource, &s.CreatedAt, &s.UpdatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("scan singer: %w", err)
 		}
@@ -193,7 +216,7 @@ func (r *SingerRepository) Search(query string, limit int) ([]models.Singer, err
 // FindByOrganization 根據組織取得演唱者
 func (r *SingerRepository) FindByOrganization(org string) ([]models.Singer, error) {
 	query := `
-		SELECT id, name, english_name, photo_url, organization, created_at, updated_at
+		SELECT id, name, english_name, photo_url, organization, metadata_source, created_at, updated_at
 		FROM singers
 		WHERE organization = $1
 		ORDER BY name ASC`
@@ -208,7 +231,7 @@ func (r *SingerRepository) FindByOrganization(org string) ([]models.Singer, erro
 	for rows.Next() {
 		var s models.Singer
 		err := rows.Scan(&s.ID, &s.Name, &s.EnglishName, &s.PhotoURL,
-			&s.Organization, &s.CreatedAt, &s.UpdatedAt)
+			&s.Organization, &s.MetadataSource, &s.CreatedAt, &s.UpdatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("scan singer: %w", err)
 		}
@@ -216,4 +239,11 @@ func (r *SingerRepository) FindByOrganization(org string) ([]models.Singer, erro
 	}
 
 	return singers, nil
+}
+
+func normalizeSingerMetadataSource(source string) string {
+	if source == "" {
+		return "holodex"
+	}
+	return source
 }

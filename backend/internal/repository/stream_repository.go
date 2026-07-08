@@ -330,7 +330,7 @@ func (r *StreamRepository) GetSingersForStreams(streamIDs []string) (participant
 	}
 
 	query := `
-		SELECT ss.stream_id, ss.is_owner, s.id, s.name, s.english_name, s.photo_url, s.organization, s.created_at, s.updated_at
+		SELECT ss.stream_id, ss.is_owner, s.id, s.name, s.english_name, s.photo_url, s.organization, s.metadata_source, s.created_at, s.updated_at
 		FROM singers s
 		JOIN stream_singers ss ON s.id = ss.singer_id
 		WHERE ss.stream_id = ANY($1)`
@@ -346,7 +346,7 @@ func (r *StreamRepository) GetSingersForStreams(streamIDs []string) (participant
 		var isOwner bool
 		var sg models.Singer
 		if err := rows.Scan(&streamID, &isOwner, &sg.ID, &sg.Name, &sg.EnglishName,
-			&sg.PhotoURL, &sg.Organization, &sg.CreatedAt, &sg.UpdatedAt); err != nil {
+			&sg.PhotoURL, &sg.Organization, &sg.MetadataSource, &sg.CreatedAt, &sg.UpdatedAt); err != nil {
 			return nil, nil, fmt.Errorf("scan stream singer: %w", err)
 		}
 		participants[streamID] = append(participants[streamID], sg)
@@ -459,7 +459,7 @@ func (r *StreamRepository) CheckHashChanged(id, newHash string) (bool, error) {
 // GetSingers 取得參與此直播的所有歌手
 func (r *StreamRepository) GetSingers(streamID string) ([]models.Singer, error) {
 	query := `
-		SELECT s.id, s.name, s.english_name, s.photo_url, s.organization, s.created_at, s.updated_at
+		SELECT s.id, s.name, s.english_name, s.photo_url, s.organization, s.metadata_source, s.created_at, s.updated_at
 		FROM singers s
 		JOIN stream_singers ss ON s.id = ss.singer_id
 		WHERE ss.stream_id = $1`
@@ -473,7 +473,7 @@ func (r *StreamRepository) GetSingers(streamID string) ([]models.Singer, error) 
 	var singers []models.Singer
 	for rows.Next() {
 		var s models.Singer
-		err := rows.Scan(&s.ID, &s.Name, &s.EnglishName, &s.PhotoURL, &s.Organization, &s.CreatedAt, &s.UpdatedAt)
+		err := rows.Scan(&s.ID, &s.Name, &s.EnglishName, &s.PhotoURL, &s.Organization, &s.MetadataSource, &s.CreatedAt, &s.UpdatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("scan singer: %w", err)
 		}
@@ -486,14 +486,14 @@ func (r *StreamRepository) GetSingers(streamID string) ([]models.Singer, error) 
 // GetChannelOwner 取得此直播的頻道擁有者
 func (r *StreamRepository) GetChannelOwner(streamID string) (*models.Singer, error) {
 	query := `
-		SELECT s.id, s.name, s.english_name, s.photo_url, s.organization, s.created_at, s.updated_at
+		SELECT s.id, s.name, s.english_name, s.photo_url, s.organization, s.metadata_source, s.created_at, s.updated_at
 		FROM singers s
 		JOIN stream_singers ss ON s.id = ss.singer_id
 		WHERE ss.stream_id = $1 AND ss.is_owner = TRUE
 		LIMIT 1`
 
 	var s models.Singer
-	err := r.db.QueryRow(query, streamID).Scan(&s.ID, &s.Name, &s.EnglishName, &s.PhotoURL, &s.Organization, &s.CreatedAt, &s.UpdatedAt)
+	err := r.db.QueryRow(query, streamID).Scan(&s.ID, &s.Name, &s.EnglishName, &s.PhotoURL, &s.Organization, &s.MetadataSource, &s.CreatedAt, &s.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil // 沒有設定頻道擁有者
 	}

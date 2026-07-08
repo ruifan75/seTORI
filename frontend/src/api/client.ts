@@ -12,6 +12,8 @@ import type {
   SingerListResponse,
   SingerDetailResponse,
   SingerPerformanceListResponse,
+  CreateSingerResponse,
+  UpdateSingerRequest,
   SyncHolodexRequest,
   SyncHolodexResponse,
   AnalyzeCommentsResponse,
@@ -34,7 +36,11 @@ import type {
   LogsResponse,
 } from './types';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080';
+const DEFAULT_API_BASE_URL =
+  typeof window !== 'undefined'
+    ? `${window.location.protocol}//${window.location.hostname}:8080`
+    : 'http://localhost:8080';
+const API_BASE_URL = import.meta.env.VITE_API_URL || DEFAULT_API_BASE_URL;
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -173,9 +179,14 @@ export const singerApi = {
     return data;
   },
 
-  // 新增 singer（透過 Holodex 同步）
-  create: async (channelId: string): Promise<SyncHolodexResponse> => {
-    const { data } = await api.post('/api/singers', { id: channelId, name: 'Syncing...' });
+  // 新增 singer（優先 Holodex，找不到時 fallback 到 YouTube Data API）
+  create: async (channelInput: string): Promise<CreateSingerResponse> => {
+    const { data } = await api.post('/api/singers', { id: channelInput });
+    return data;
+  },
+
+  update: async (id: string, req: UpdateSingerRequest): Promise<Singer> => {
+    const { data } = await api.put(`/api/singers/${id}`, req);
     return data;
   },
 };

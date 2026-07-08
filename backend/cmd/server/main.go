@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net"
 	"net/http"
 	"os"
 
@@ -50,9 +51,14 @@ func main() {
 	if port == "" {
 		port = "8080"
 	}
+	host := os.Getenv("HOST")
+	if host == "" {
+		host = "0.0.0.0"
+	}
 
-	logger.Infof("サーバーを起動します: http://localhost:%s", port)
-	if err := http.ListenAndServe(":"+port, router); err != nil {
+	addr := net.JoinHostPort(host, port)
+	logger.Infof("サーバーを起動します: http://%s", addr)
+	if err := http.ListenAndServe(addr, router); err != nil {
 		logger.Errorf("サーバーの起動に失敗しました: %v", err)
 		os.Exit(1)
 	}

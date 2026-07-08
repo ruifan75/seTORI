@@ -3,6 +3,7 @@ package handler
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -121,6 +122,7 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("GET /api/singers/{id}/streams", r.handleGetSingerStreams)
 	r.mux.HandleFunc("GET /api/singers/{id}/performances", r.handleGetSingerPerformances)
 	r.mux.HandleFunc("POST /api/singers", r.handleCreateSinger)
+	r.mux.HandleFunc("PUT /api/singers/{id}", r.handleUpdateSinger)
 
 	// Holodex sync
 	r.mux.HandleFunc("POST /api/sync/holodex", r.handleSyncHolodex)
@@ -514,7 +516,7 @@ func (r *Router) handleUpdateStream(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	logger.Infof("stream %s metadata updated (title=%s, processed=%v)", id, streamReq.Title, streamReq.IsProcessed)
+	logger.Infof("stream %s metadata updated (title=%v, processed=%v)", id, streamReq.Title, streamReq.IsProcessed)
 	respondJSON(w, http.StatusOK, result)
 }
 
@@ -667,23 +669,60 @@ func (r *Router) handleCreateSinger(w http.ResponseWriter, req *http.Request) {
 		respondError(w, http.StatusBadRequest, "無効なリクエスト形式")
 		return
 	}
+	singerReq.ID = strings.TrimSpace(singerReq.ID)
 
-	if singerReq.ID == "" || singerReq.Name == "" {
-		respondError(w, http.StatusBadRequest, "チャンネルIDと名前は必須です")
+	if singerReq.ID == "" {
+		respondError(w, http.StatusBadRequest, "チャンネルID、handle、またはURLは必須です")
 		return
 	}
 
 	// 只同步頻道資訊，不同步直播
-	if err := r.holodexService.SyncChannelInfo(singerReq.ID); err != nil {
+	singer, err := r.holodexService.SyncChannelInfo(singerReq.ID)
+	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	// 返回成功訊息
-	respondJSON(w, http.StatusCreated, map[string]string{
-		"message": "チャンネルを追加しました",
-		"id":      singerReq.ID,
+	respondJSON(w, http.StatusCreated, dto.CreateSingerResponse{
+		Message: "チャンネルを追加しました",
+		ID:      singer.ID,
+		Name:    singer.Name,
 	})
+}
+
+func (r *Router) handleUpdateSinger(w http.ResponseWriter, req *http.Request) {
+	id := req.PathValue("id")
+	if id == "" {
+		respondError(w, http.StatusBadRequest, "チャンネルIDは必須です")
+		return
+	}
+
+	var singerReq dto.UpdateSingerRequest
+	if err := json.NewDecoder(req.Body).Decode(&singerReq); err != nil {
+		respondError(w, http.StatusBadRequest, "無効なリクエスト形式")
+		return
+	}
+
+	result, err := r.singerService.UpdateManualMetadata(id, &singerReq)
+	if err != nil {
+		if errors.Is(err, service.ErrSingerMetadataManagedByHolodex) {
+			respondError(w, http.StatusForbidden, err.Error())
+			return
+		}
+		if errors.Is(err, service.ErrSingerNameRequired) {
+			respondError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if result == nil {
+		respondError(w, http.StatusNotFound, "チャンネルが見つかりません")
+		return
+	}
+
+	respondJSON(w, http.StatusOK, result)
 }
 
 // ========== Holodex Sync Handlers ==========

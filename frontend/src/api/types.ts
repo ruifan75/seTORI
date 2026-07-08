@@ -96,6 +96,8 @@ export interface Singer {
   english_name?: string;
   photo_url?: string;
   organization?: string;
+  metadata_source: string;
+  can_edit_metadata: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -117,7 +119,20 @@ export interface SingerPerformanceListResponse {
 }
 
 export interface CreateSingerRequest {
-  id: string; // YouTube Channel ID
+  id: string; // YouTube Channel ID / @handle / URL
+  name?: string;
+  english_name?: string;
+  photo_url?: string;
+  organization?: string;
+}
+
+export interface CreateSingerResponse {
+  message: string;
+  id: string;
+  name: string;
+}
+
+export interface UpdateSingerRequest {
   name: string;
   english_name?: string;
   photo_url?: string;

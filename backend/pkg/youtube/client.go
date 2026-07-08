@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -54,16 +55,107 @@ type ChannelListResponse struct {
 	Items []Channel `json:"items"`
 }
 
-// GetChannel チャンネル情報を取得
+// ChannelLookup YouTube チャンネル検索条件
+type ChannelLookup struct {
+	ID     string
+	Handle string
+}
+
+// ParseChannelLookup Channel ID、@handle、YouTube URL を検索条件に変換する
+func ParseChannelLookup(input string) ChannelLookup {
+	raw := strings.TrimSpace(input)
+	raw = strings.TrimRight(raw, "/")
+	if raw == "" {
+		return ChannelLookup{}
+	}
+
+	normalizedURL := raw
+	if strings.Contains(raw, "youtube.com/") && !strings.Contains(raw, "://") {
+		normalizedURL = "https://" + raw
+	}
+
+	if parsed, err := url.Parse(normalizedURL); err == nil && parsed.Host != "" && isYouTubeHost(parsed.Host) {
+		parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+		if len(parts) > 0 {
+			if len(parts) >= 2 && parts[0] == "channel" && parts[1] != "" {
+				return ChannelLookup{ID: parts[1]}
+			}
+			if strings.HasPrefix(parts[0], "@") {
+				return ChannelLookup{Handle: normalizeHandle(parts[0])}
+			}
+		}
+	}
+
+	if strings.HasPrefix(raw, "@") {
+		return ChannelLookup{Handle: normalizeHandle(raw)}
+	}
+	if looksLikeChannelID(raw) {
+		return ChannelLookup{ID: raw}
+	}
+
+	return ChannelLookup{Handle: normalizeHandle(raw)}
+}
+
+func isYouTubeHost(host string) bool {
+	host = strings.ToLower(host)
+	return host == "youtube.com" || host == "www.youtube.com" || strings.HasSuffix(host, ".youtube.com")
+}
+
+func looksLikeChannelID(value string) bool {
+	return strings.HasPrefix(value, "UC") && len(value) >= 20
+}
+
+func normalizeHandle(handle string) string {
+	handle = strings.TrimSpace(handle)
+	handle = strings.Trim(handle, "/")
+	if handle == "" {
+		return ""
+	}
+	if strings.HasPrefix(handle, "@") {
+		return handle
+	}
+	return "@" + handle
+}
+
+// FindChannel Channel ID または @handle からチャンネル情報を取得
+func (c *Client) FindChannel(input string) (*Channel, error) {
+	lookup := ParseChannelLookup(input)
+	if lookup.ID != "" {
+		return c.GetChannel(lookup.ID)
+	}
+	if lookup.Handle != "" {
+		return c.GetChannelByHandle(lookup.Handle)
+	}
+	return nil, fmt.Errorf("channel input is required")
+}
+
+// GetChannel チャンネルIDでチャンネル情報を取得
 func (c *Client) GetChannel(channelID string) (*Channel, error) {
+	return c.getChannelByFilter("id", strings.TrimSpace(channelID))
+}
+
+// GetChannelByHandle @handle でチャンネル情報を取得
+func (c *Client) GetChannelByHandle(handle string) (*Channel, error) {
+	handle = normalizeHandle(handle)
+	if handle == "" {
+		return nil, fmt.Errorf("channel handle is required")
+	}
+
+	return c.getChannelByFilter("forHandle", handle)
+}
+
+func (c *Client) getChannelByFilter(filterName string, filterValue string) (*Channel, error) {
 	if c.apiKey == "" {
 		return nil, fmt.Errorf("YouTube API key not configured")
+	}
+	if strings.TrimSpace(filterValue) == "" {
+		return nil, fmt.Errorf("channel %s is required", filterName)
 	}
 
 	params := url.Values{}
 	params.Set("key", c.apiKey)
 	params.Set("part", "snippet")
-	params.Set("id", channelID)
+	params.Set(filterName, filterValue)
 
 	reqURL := fmt.Sprintf("%s/channels?%s", baseURL, params.Encode())
 
@@ -83,10 +175,29 @@ func (c *Client) GetChannel(channelID string) (*Channel, error) {
 	}
 
 	if len(result.Items) == 0 {
-		return nil, fmt.Errorf("channel not found: %s", channelID)
+		return nil, fmt.Errorf("channel not found for %s: %s", filterName, filterValue)
 	}
 
 	return &result.Items[0], nil
+}
+
+// BestThumbnailURL チャンネルアバター URL を高解像度優先で取得
+func BestThumbnailURL(channel *Channel) string {
+	if channel == nil {
+		return ""
+	}
+
+	if channel.Snippet.Thumbnails.High.URL != "" {
+		return channel.Snippet.Thumbnails.High.URL
+	}
+	if channel.Snippet.Thumbnails.Medium.URL != "" {
+		return channel.Snippet.Thumbnails.Medium.URL
+	}
+	if channel.Snippet.Thumbnails.Default.URL != "" {
+		return channel.Snippet.Thumbnails.Default.URL
+	}
+
+	return ""
 }
 
 // GetChannelPhoto チャンネルアバター URL を取得（高解像度を優先）
@@ -96,15 +207,9 @@ func (c *Client) GetChannelPhoto(channelID string) (string, error) {
 		return "", err
 	}
 
-	// 高解像度を優先使用
-	if channel.Snippet.Thumbnails.High.URL != "" {
-		return channel.Snippet.Thumbnails.High.URL, nil
-	}
-	if channel.Snippet.Thumbnails.Medium.URL != "" {
-		return channel.Snippet.Thumbnails.Medium.URL, nil
-	}
-	if channel.Snippet.Thumbnails.Default.URL != "" {
-		return channel.Snippet.Thumbnails.Default.URL, nil
+	thumbnailURL := BestThumbnailURL(channel)
+	if thumbnailURL != "" {
+		return thumbnailURL, nil
 	}
 
 	return "", fmt.Errorf("no thumbnail found for channel: %s", channelID)
@@ -112,5 +217,5 @@ func (c *Client) GetChannelPhoto(channelID string) (string, error) {
 
 // IsConfigured API Key が設定されているかを確認
 func (c *Client) IsConfigured() bool {
-	return c.apiKey != ""
+	return c != nil && c.apiKey != ""
 }

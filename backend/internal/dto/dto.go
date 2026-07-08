@@ -73,13 +73,15 @@ type UpdateSongRequest struct {
 // ========== 歌手 ==========
 
 type SingerResponse struct {
-	ID           string    `json:"id"`
-	Name         string    `json:"name"`
-	EnglishName  *string   `json:"english_name,omitempty"`
-	PhotoURL     *string   `json:"photo_url,omitempty"`
-	Organization *string   `json:"organization,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID              string    `json:"id"`
+	Name            string    `json:"name"`
+	EnglishName     *string   `json:"english_name,omitempty"`
+	PhotoURL        *string   `json:"photo_url,omitempty"`
+	Organization    *string   `json:"organization,omitempty"`
+	MetadataSource  string    `json:"metadata_source"`
+	CanEditMetadata bool      `json:"can_edit_metadata"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 type SingerListResponse struct {
@@ -100,7 +102,20 @@ type SingerPerformanceListResponse struct {
 }
 
 type CreateSingerRequest struct {
-	ID           string  `json:"id"` // YouTube Channel ID
+	ID           string  `json:"id"` // YouTube Channel ID / @handle / URL
+	Name         string  `json:"name,omitempty"`
+	EnglishName  *string `json:"english_name,omitempty"`
+	PhotoURL     *string `json:"photo_url,omitempty"`
+	Organization *string `json:"organization,omitempty"`
+}
+
+type CreateSingerResponse struct {
+	Message string `json:"message"`
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+}
+
+type UpdateSingerRequest struct {
 	Name         string  `json:"name"`
 	EnglishName  *string `json:"english_name,omitempty"`
 	PhotoURL     *string `json:"photo_url,omitempty"`
@@ -330,12 +345,12 @@ type AISuggestionResult struct {
 	MatchedSongID         *string  `json:"matched_song_id,omitempty"` // 如果匹配到現有歌曲
 	MatchReason           string   `json:"match_reason,omitempty"`    // 匹配原因（name, itunes_id）
 	// DB 歌曲資訊（匹配到時回傳）
-	MatchedSongName           *string `json:"matched_song_name,omitempty"`
-	MatchedSongNameReading    *string `json:"matched_song_name_reading,omitempty"`
-	MatchedSongArtist         *string `json:"matched_song_artist,omitempty"`
-	MatchedSongArtistReading  *string `json:"matched_song_artist_reading,omitempty"`
-	MatchedSongArtURL         *string `json:"matched_song_art_url,omitempty"`
-	MatchedSongItunesID       *int64  `json:"matched_song_itunes_id,omitempty"`
+	MatchedSongName          *string `json:"matched_song_name,omitempty"`
+	MatchedSongNameReading   *string `json:"matched_song_name_reading,omitempty"`
+	MatchedSongArtist        *string `json:"matched_song_artist,omitempty"`
+	MatchedSongArtistReading *string `json:"matched_song_artist_reading,omitempty"`
+	MatchedSongArtURL        *string `json:"matched_song_art_url,omitempty"`
+	MatchedSongItunesID      *int64  `json:"matched_song_itunes_id,omitempty"`
 }
 
 // 批量 AI 正規化回應

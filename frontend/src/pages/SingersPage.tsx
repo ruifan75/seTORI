@@ -34,16 +34,21 @@ export default function SingersPage() {
     e.preventDefault();
     if (!channelInput.trim()) return;
 
-    // 入力から Channel ID を抽出
-    let channelId = channelInput.trim();
+    // 入力から Channel ID または @handle を抽出
+    let channelValue = channelInput.trim();
 
     // YouTube URL の場合は Channel ID を抽出
-    const urlMatch = channelInput.match(/youtube\.com\/channel\/([^/?]+)/);
-    if (urlMatch) {
-      channelId = urlMatch[1];
+    const channelUrlMatch = channelValue.match(/youtube\.com\/channel\/([^/?#]+)/);
+    if (channelUrlMatch) {
+      channelValue = channelUrlMatch[1];
     }
 
-    syncMutation.mutate(channelId);
+    const handleUrlMatch = channelValue.match(/youtube\.com\/@([^/?#]+)/);
+    if (handleUrlMatch) {
+      channelValue = `@${handleUrlMatch[1]}`;
+    }
+
+    syncMutation.mutate(channelValue);
   };
 
   return (
@@ -138,17 +143,17 @@ export default function SingersPage() {
             <form onSubmit={handleAddSinger}>
               <div className="mb-4">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  YouTube Channel ID
+                  YouTube Channel ID / Handle
                 </label>
                 <input
                   type="text"
                   value={channelInput}
                   onChange={(e) => setChannelInput(e.target.value)}
-                  placeholder="UCxxxxxxxxxxxxxxxxxxxxxx"
+                  placeholder="UCxxxxxxxxxxxxxxxxxxxxxx または @handle"
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                 />
                 <p className="mt-2 text-sm text-gray-500">
-                  YouTube Channel URL またはChannel ID を入力してください
+                  YouTube Channel URL、@handle、またはChannel ID を入力してください
                 </p>
               </div>
 

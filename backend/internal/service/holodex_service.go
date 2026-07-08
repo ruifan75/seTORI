@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/ruifan75/setori/internal/dto"
@@ -95,16 +96,127 @@ type SyncResult struct {
 }
 
 // SyncChannelInfo 只同步頻道資訊，不同步直播
-func (s *HolodexService) SyncChannelInfo(channelID string) error {
+func (s *HolodexService) SyncChannelInfo(channelInput string) (*models.Singer, error) {
+	lookup := youtube.ParseChannelLookup(channelInput)
+	var holodexErr error
+	if lookup.ID != "" {
+		singer, err := s.syncHolodexChannelInfo(lookup.ID)
+		if err == nil {
+			return singer, nil
+		}
+		if !holodex.IsNotFound(err) {
+			return nil, err
+		}
+
+		holodexErr = err
+		logger.Warnf("Holodex channel fetch failed for %s: %v; trying YouTube fallback", lookup.ID, err)
+	} else {
+		channel, err := s.getYouTubeChannel(channelInput)
+		if err != nil {
+			return nil, fmt.Errorf("get channel from YouTube: %w", err)
+		}
+
+		singer, err := s.syncHolodexChannelInfo(channel.ID)
+		if err == nil {
+			return singer, nil
+		}
+		if !holodex.IsNotFound(err) {
+			return nil, err
+		}
+
+		holodexErr = err
+		logger.Warnf("Holodex channel fetch failed for resolved channel %s: %v; using YouTube fallback", channel.ID, err)
+		return s.syncYouTubeChannelInfoFromChannel(channel)
+	}
+
+	singer, err := s.syncYouTubeChannelInfo(channelInput)
+	if err != nil {
+		if holodexErr != nil {
+			return nil, fmt.Errorf("get channel from Holodex: %v; YouTube fallback: %w", holodexErr, err)
+		}
+		return nil, fmt.Errorf("get channel from YouTube: %w", err)
+	}
+
+	return singer, nil
+}
+
+func (s *HolodexService) syncHolodexChannelInfo(channelID string) (*models.Singer, error) {
 	channel, err := s.client.GetChannel(channelID)
 	if err != nil {
-		return fmt.Errorf("get channel: %w", err)
+		return nil, fmt.Errorf("get channel: %w", err)
 	}
 
 	// Upsert Singer
+	singer := s.singerFromHolodexChannel(channel)
+	if err := s.singerRepo.Upsert(singer); err != nil {
+		return nil, fmt.Errorf("upsert singer: %w", err)
+	}
+
+	return singer, nil
+}
+
+func (s *HolodexService) syncYouTubeChannelInfo(channelInput string) (*models.Singer, error) {
+	channel, err := s.getYouTubeChannel(channelInput)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.syncYouTubeChannelInfoFromChannel(channel)
+}
+
+func (s *HolodexService) getYouTubeChannel(channelInput string) (*youtube.Channel, error) {
+	if !s.youtubeClient.IsConfigured() {
+		return nil, fmt.Errorf("YouTube API key not configured")
+	}
+
+	channel, err := s.youtubeClient.FindChannel(channelInput)
+	if err != nil {
+		return nil, err
+	}
+	if channel.ID == "" {
+		return nil, fmt.Errorf("YouTube channel response did not include an ID")
+	}
+
+	return channel, nil
+}
+
+func (s *HolodexService) syncYouTubeChannelInfoFromChannel(channel *youtube.Channel) (*models.Singer, error) {
+	name := strings.TrimSpace(channel.Snippet.Title)
+	if name == "" {
+		name = channel.ID
+	}
+
 	singer := &models.Singer{
-		ID:   channel.ID,
-		Name: channel.Name,
+		ID:             channel.ID,
+		Name:           name,
+		MetadataSource: "youtube",
+	}
+	if photoURL := youtube.BestThumbnailURL(channel); photoURL != "" {
+		singer.PhotoURL = sql.NullString{String: photoURL, Valid: true}
+	}
+	if existing, err := s.singerRepo.FindByID(channel.ID); err != nil {
+		return nil, fmt.Errorf("find existing singer: %w", err)
+	} else if existing != nil {
+		singer.EnglishName = existing.EnglishName
+		singer.Organization = existing.Organization
+		if !singer.PhotoURL.Valid {
+			singer.PhotoURL = existing.PhotoURL
+		}
+	}
+
+	if err := s.singerRepo.Upsert(singer); err != nil {
+		return nil, fmt.Errorf("upsert singer: %w", err)
+	}
+
+	logger.Infof("channel info synced from YouTube fallback: %s (%s)", singer.ID, singer.Name)
+	return singer, nil
+}
+
+func (s *HolodexService) singerFromHolodexChannel(channel *holodex.Channel) *models.Singer {
+	singer := &models.Singer{
+		ID:             channel.ID,
+		Name:           channel.Name,
+		MetadataSource: "holodex",
 	}
 	if channel.EnglishName != "" {
 		singer.EnglishName = sql.NullString{String: channel.EnglishName, Valid: true}
@@ -118,11 +230,7 @@ func (s *HolodexService) SyncChannelInfo(channelID string) error {
 		singer.Organization = sql.NullString{String: channel.Org, Valid: true}
 	}
 
-	if err := s.singerRepo.Upsert(singer); err != nil {
-		return fmt.Errorf("upsert singer: %w", err)
-	}
-
-	return nil
+	return singer
 }
 
 // SyncChannel 同步頻道的所有直播
@@ -136,22 +244,7 @@ func (s *HolodexService) SyncChannel(channelID string, limit int, forceUpdate bo
 	}
 
 	// Upsert Singer
-	singer := &models.Singer{
-		ID:   channel.ID,
-		Name: channel.Name,
-	}
-	if channel.EnglishName != "" {
-		singer.EnglishName = sql.NullString{String: channel.EnglishName, Valid: true}
-	}
-	// 優先使用 YouTube 大頭貼
-	photoURL := s.getChannelPhotoURL(channel.ID, channel.Photo)
-	if photoURL != "" {
-		singer.PhotoURL = sql.NullString{String: photoURL, Valid: true}
-	}
-	if channel.Org != "" {
-		singer.Organization = sql.NullString{String: channel.Org, Valid: true}
-	}
-
+	singer := s.singerFromHolodexChannel(channel)
 	if err := s.singerRepo.Upsert(singer); err != nil {
 		return nil, fmt.Errorf("upsert singer: %w", err)
 	}

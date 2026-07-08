@@ -10,13 +10,14 @@ import (
 
 // Singer 歌手/VTuber
 type Singer struct {
-	ID           string         `json:"id"`           // YouTube Channel ID
-	Name         string         `json:"name"`         // 表示名
-	EnglishName  sql.NullString `json:"english_name"` // 英語名
-	PhotoURL     sql.NullString `json:"photo_url"`    // アバター URL
-	Organization sql.NullString `json:"organization"` // 所属組織
-	CreatedAt    time.Time      `json:"created_at"`
-	UpdatedAt    time.Time      `json:"updated_at"`
+	ID             string         `json:"id"`              // YouTube Channel ID
+	Name           string         `json:"name"`            // 表示名
+	EnglishName    sql.NullString `json:"english_name"`    // 英語名
+	PhotoURL       sql.NullString `json:"photo_url"`       // アバター URL
+	Organization   sql.NullString `json:"organization"`    // 所属組織
+	MetadataSource string         `json:"metadata_source"` // holodex / youtube
+	CreatedAt      time.Time      `json:"created_at"`
+	UpdatedAt      time.Time      `json:"updated_at"`
 }
 
 // Song 楽曲 Master
@@ -54,20 +55,20 @@ type Stream struct {
 	CommentRaw      []byte         `json:"comment_raw"`   // JSONB - Raw comment list
 	CommentSongs    []byte         `json:"comment_songs"` // JSONB - Parsed songs (undeduped)
 	IsProcessed     bool           `json:"is_processed"`  // 處理完成
-	IsHidden        bool           `json:"is_hidden"`    // 隱藏
+	IsHidden        bool           `json:"is_hidden"`     // 隱藏
 	CreatedAt       time.Time      `json:"created_at"`
 	UpdatedAt       time.Time      `json:"updated_at"`
 }
 
 // Performance 演出紀錄
 type Performance struct {
-	ID            uuid.UUID     `json:"id"`
-	StreamID      string        `json:"stream_id"`
-	SongID        uuid.UUID     `json:"song_id"`
-	StartSeconds  int           `json:"start_seconds"`
-	EndSeconds    int           `json:"end_seconds"`
-	OrderIndex    int           `json:"order_index"`
-	HolodexSongID uuid.NullUUID   `json:"holodex_song_id"`
+	ID            uuid.UUID      `json:"id"`
+	StreamID      string         `json:"stream_id"`
+	SongID        uuid.UUID      `json:"song_id"`
+	StartSeconds  int            `json:"start_seconds"`
+	EndSeconds    int            `json:"end_seconds"`
+	OrderIndex    int            `json:"order_index"`
+	HolodexSongID uuid.NullUUID  `json:"holodex_song_id"`
 	CustomTags    pq.StringArray `json:"custom_tags"`
 	CreatedAt     time.Time      `json:"created_at"`
 }

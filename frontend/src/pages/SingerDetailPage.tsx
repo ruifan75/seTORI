@@ -17,6 +17,13 @@ export default function SingerDetailPage() {
   const [streamPage, setStreamPage] = useState(1);
   const [perfPage, setPerfPage] = useState(1);
   const [syncMode, setSyncMode] = useState<'new' | 'all'>('new');
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editForm, setEditForm] = useState({
+    name: '',
+    english_name: '',
+    photo_url: '',
+    organization: '',
+  });
   // Filter states - デフォルトでは非表示を除外
   const [processedFilter, setProcessedFilter] = useState<ProcessedFilter>('all');
   const [hiddenFilter, setHiddenFilter] = useState<HiddenFilter>('false');
@@ -53,6 +60,38 @@ export default function SingerDetailPage() {
       queryClient.invalidateQueries({ queryKey: ['singerStreams', id] });
     },
   });
+
+  const updateMutation = useMutation({
+    mutationFn: () => singerApi.update(id!, {
+      name: editForm.name,
+      english_name: editForm.english_name,
+      photo_url: editForm.photo_url,
+      organization: editForm.organization,
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['singer', id] });
+      queryClient.invalidateQueries({ queryKey: ['singers'] });
+      setShowEditModal(false);
+    },
+  });
+
+  const openEditModal = () => {
+    if (!singer) return;
+    updateMutation.reset();
+    setEditForm({
+      name: singer.name,
+      english_name: singer.english_name || '',
+      photo_url: singer.photo_url || '',
+      organization: singer.organization || '',
+    });
+    setShowEditModal(true);
+  };
+
+  const handleUpdateSinger = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editForm.name.trim()) return;
+    updateMutation.mutate();
+  };
 
   const formatTime = (seconds: number) => {
     const h = Math.floor(seconds / 3600);
@@ -118,6 +157,17 @@ export default function SingerDetailPage() {
             </div>
           </div>
           <div className="flex gap-3">
+            {singer.can_edit_metadata && (
+              <button
+                onClick={openEditModal}
+                className="px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors flex items-center gap-2"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
+                </svg>
+                編集
+              </button>
+            )}
             <a
               href={`https://www.youtube.com/channel/${singer.id}`}
               target="_blank"
@@ -158,6 +208,87 @@ export default function SingerDetailPage() {
           </div>
         )}
       </div>
+
+      {showEditModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-lg mx-4">
+            <h2 className="text-xl font-bold text-gray-900 mb-4">チャンネル情報を編集</h2>
+            <form onSubmit={handleUpdateSinger} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  チャンネル名
+                </label>
+                <input
+                  type="text"
+                  value={editForm.name}
+                  onChange={(e) => setEditForm((prev) => ({ ...prev, name: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  English Name
+                </label>
+                <input
+                  type="text"
+                  value={editForm.english_name}
+                  onChange={(e) => setEditForm((prev) => ({ ...prev, english_name: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  所属
+                </label>
+                <input
+                  type="text"
+                  value={editForm.organization}
+                  onChange={(e) => setEditForm((prev) => ({ ...prev, organization: e.target.value }))}
+                  placeholder="Independents"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Photo URL
+                </label>
+                <input
+                  type="url"
+                  value={editForm.photo_url}
+                  onChange={(e) => setEditForm((prev) => ({ ...prev, photo_url: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                />
+              </div>
+
+              {updateMutation.isError && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+                  {(updateMutation.error as Error).message}
+                </div>
+              )}
+
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    updateMutation.reset();
+                    setShowEditModal(false);
+                  }}
+                  className="px-4 py-2 text-gray-700 hover:text-gray-900"
+                >
+                  キャンセル
+                </button>
+                <button
+                  type="submit"
+                  disabled={updateMutation.isPending || !editForm.name.trim()}
+                  className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50"
+                >
+                  {updateMutation.isPending ? '保存中...' : '保存'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="border-b border-gray-200">

@@ -116,20 +116,20 @@ docker compose up -d        # PostgreSQL 16 on :5432 (postgres/postgres/setori)
 ```bash
 cd backend
 cp .env.example .env        # API キーを記入（下記の環境変数を参照）
-go run ./cmd/server/main.go # 起動時に自動でマイグレーションを実行、:8080 でリッスン
+go run ./cmd/server/main.go # 起動時に自動でマイグレーションを実行、0.0.0.0:8080 でリッスン
 ```
 
-ヘルスチェック：`curl http://localhost:8080/health` → `{"status":"ok"}`
+ヘルスチェック：`curl http://localhost:8080/health` → `{"status":"ok"}`。同一 LAN からは `http://<server-ip>:8080/health`。
 
 ### 3. フロントエンドの起動
 
 ```bash
 cd frontend
 npm install
-npm run dev                 # Vite dev server on :5173
+npm run dev                 # Vite dev server on 0.0.0.0:5173
 ```
 
-フロントエンドはデフォルトで `http://localhost:8080` に接続します。`VITE_API_URL` で上書き可能（`frontend/.env` を作成）。
+フロントエンドはデフォルトで現在の hostname の `:8080` に接続します。同一 LAN から `http://<server-ip>:5173` を開いた場合、API は自動で `http://<server-ip>:8080` になります。`VITE_API_URL` で上書き可能です（`frontend/.env` を作成）。
 
 ### 本番ビルド
 
@@ -150,13 +150,14 @@ cd frontend && npm run build                          # dist/ に出力
 | `HOLODEX_API_KEY` | ✓ | Holodex API キー（配信/セットリスト同期用） |
 | `HOLODEX_EDITOR_TOKEN` | — | セットリストを Holodex にアップロードする際の編集者トークン |
 | `GROQ_API_KEY` | — | AI 正規化/コメントフィルタ。未設定時は純粋な正規表現にフォールバック |
-| `YOUTUBE_API_KEY` | — | チャンネルの高解像度アバター取得用。未設定時は Holodex にフォールバック |
+| `YOUTUBE_API_KEY` | — | チャンネルの高解像度アバター取得、および Holodex 未登録チャンネル追加時の YouTube fallback 用。未設定時は Holodex 登録済みチャンネルのみ追加可能 |
 | `JWT_SECRET` | — | 予約フィールド（未使用） |
 | `API_AUTH_TOKEN` | — | 設定時は書き込み操作（POST/PUT/DELETE）に `Authorization: Bearer <token>` が必要。空欄時は公開（[セキュリティ](#セキュリティ注意事項)参照） |
 | `ENVIRONMENT` | — | `development` / `production` |
+| `HOST` | — | バックエンドの bind address。デフォルト `0.0.0.0` |
 | `PORT` | — | バックエンドのポート。デフォルト `8080` |
 
-フロントエンド：`VITE_API_URL`（任意、デフォルト `http://localhost:8080`）、`VITE_API_TOKEN`（任意、バックエンドで `API_AUTH_TOKEN` 有効時に Bearer トークンを付与）。
+フロントエンド：`VITE_API_URL`（任意、デフォルトは現在の hostname の `:8080`）、`VITE_API_TOKEN`（任意、バックエンドで `API_AUTH_TOKEN` 有効時に Bearer トークンを付与）。
 
 > 各外部 API（Holodex / Groq / YouTube / iTunes）の実際の用途、トリガールート、課金感度は **[`docs/EXTERNAL_APIS.md`](./docs/EXTERNAL_APIS.md)** にまとめています。
 
@@ -190,7 +191,8 @@ cd frontend && npm run build                          # dist/ に出力
 | POST | `/api/comments/backfill` | comment_songs を補完 |
 | **Singers** | | |
 | GET | `/api/singers` · `/search` · `/{id}` · `/{id}/streams` · `/{id}/performances` | 一覧/検索/詳細/配信/歌唱 |
-| POST | `/api/singers` | Holodex 同期によりチャンネル情報から新規追加 |
+| POST | `/api/singers` | Holodex 同期によりチャンネル情報から新規追加。Holodex 未登録時は YouTube fallback |
+| PUT | `/api/singers/{id}` | Holodex 未登録（YouTube fallback）チャンネルの手動メタデータ更新 |
 | **Holodex Sync** | | |
 | POST | `/api/sync/holodex` | チャンネル全体を同期 |
 | POST | `/api/sync/holodex/video/{id}` | 単一動画を同期 |
@@ -207,7 +209,7 @@ cd frontend && npm run build                          # dist/ に出力
 
 主なテーブル（完全な定義は `backend/internal/database/migrations/` を参照）：
 
-- `singers` — VTuber、PK は YouTube チャンネル ID
+- `singers` — VTuber、PK は YouTube チャンネル ID。`metadata_source=holodex` は Holodex 管理、`youtube` は手動編集可能な fallback 登録
 - `songs` — 楽曲マスター、一意キー `(name, original_artist)`；`song_itunes` で iTunes Track と 1:N 紐付け
 - `streams` — 歌枠、PK は YouTube 動画 ID；`holodex_data` / `comment_raw` / `comment_songs` は JSONB
 - `performances` — 歌唱記録、一意キー `(stream_id, song_id, start_seconds)`

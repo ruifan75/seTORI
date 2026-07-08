@@ -3,6 +3,7 @@ package holodex
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -19,6 +20,22 @@ type Client struct {
 	apiKey      string
 	httpClient  *http.Client
 	rateLimiter *ratelimit.RateLimiter
+}
+
+// APIError Holodex API のステータス付きエラー
+type APIError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *APIError) Error() string {
+	return fmt.Sprintf("API error: status=%d body=%s", e.StatusCode, e.Body)
+}
+
+// IsNotFound エラーが Holodex の 404 かを判定する
+func IsNotFound(err error) bool {
+	var apiErr *APIError
+	return errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound
 }
 
 // NewClient Holodex クライアントを新規作成
@@ -236,7 +253,7 @@ func (c *Client) get(endpoint string, params url.Values, result interface{}) err
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("API error: status=%d body=%s", resp.StatusCode, string(body))
+		return &APIError{StatusCode: resp.StatusCode, Body: string(body)}
 	}
 
 	body, err := io.ReadAll(resp.Body)
