@@ -15,13 +15,7 @@ export default function HomePage() {
   });
 
   return (
-    <div className="space-y-8">
-      {/* Hero */}
-      <section className="text-center py-12 bg-gradient-to-r from-indigo-500 to-purple-600 rounded-2xl text-white">
-        <h1 className="text-4xl font-bold mb-4">seTORI</h1>
-        <p className="text-xl opacity-90">VTuber 歌枠セットリスト</p>
-      </section>
-
+    <div className="space-y-6">
       {/* Recent Streams */}
       <section>
         <div className="flex justify-between items-center mb-4">
@@ -70,7 +64,7 @@ export default function HomePage() {
         {songsLoading ? (
           <Loading />
         ) : (
-          <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
+          <div className="bg-white rounded-lg shadow-sm border overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>

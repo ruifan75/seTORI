@@ -377,6 +377,99 @@ func (r *StreamRepository) RemoveTag(streamID, tagID string) error {
 	return nil
 }
 
+// FindByTagID は指定タグが付いた配信を新しい順で返す（タグ検索用、非表示は除外）。
+func (r *StreamRepository) FindByTagID(tagID string, limit, offset int) ([]models.Stream, int, error) {
+	var total int
+	err := r.db.QueryRow(`
+		SELECT COUNT(*)
+		FROM streams s
+		JOIN stream_stream_tags sst ON sst.stream_id = s.id
+		WHERE sst.tag_id = $1 AND s.is_hidden = FALSE`, tagID).Scan(&total)
+	if err != nil {
+		return nil, 0, fmt.Errorf("count streams by tag: %w", err)
+	}
+
+	rows, err := r.db.Query(`
+		SELECT s.id, s.title, s.stream_date, s.duration_seconds, s.thumbnail_url, s.holodex_data, s.holodex_hash, s.comment_raw, s.comment_songs, s.is_processed, s.is_hidden, s.created_at, s.updated_at
+		FROM streams s
+		JOIN stream_stream_tags sst ON sst.stream_id = s.id
+		WHERE sst.tag_id = $1 AND s.is_hidden = FALSE
+		ORDER BY s.stream_date DESC
+		LIMIT $2 OFFSET $3`, tagID, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("query streams by tag: %w", err)
+	}
+	defer rows.Close()
+
+	var streams []models.Stream
+	for rows.Next() {
+		var s models.Stream
+		err := rows.Scan(&s.ID, &s.Title, &s.StreamDate, &s.DurationSeconds,
+			&s.ThumbnailURL, &s.HolodexData, &s.HolodexHash, &s.CommentRaw, &s.CommentSongs, &s.IsProcessed, &s.IsHidden, &s.CreatedAt, &s.UpdatedAt)
+		if err != nil {
+			return nil, 0, fmt.Errorf("scan stream: %w", err)
+		}
+		streams = append(streams, s)
+	}
+	return streams, total, rows.Err()
+}
+
+// SearchByTitle はタイトル部分一致（大小無視）で配信を検索する（グローバル検索用）。
+// 非表示の配信も対象に含める（検索は明示的な操作のため）。
+func (r *StreamRepository) SearchByTitle(query string, limit int) ([]models.Stream, error) {
+	rows, err := r.db.Query(`
+		SELECT id, title, stream_date, thumbnail_url, is_processed, is_hidden
+		FROM streams
+		WHERE title ILIKE '%' || $1 || '%'
+		ORDER BY stream_date DESC
+		LIMIT $2`, query, limit)
+	if err != nil {
+		return nil, fmt.Errorf("search streams by title: %w", err)
+	}
+	defer rows.Close()
+
+	var streams []models.Stream
+	for rows.Next() {
+		var s models.Stream
+		if err := rows.Scan(&s.ID, &s.Title, &s.StreamDate, &s.ThumbnailURL, &s.IsProcessed, &s.IsHidden); err != nil {
+			return nil, fmt.Errorf("scan stream search result: %w", err)
+		}
+		streams = append(streams, s)
+	}
+	return streams, rows.Err()
+}
+
+// applyTagRulesSQL は tag_keyword_rules を配信タイトルへ ILIKE 部分一致で照合し、
+// 一致したタグを stream_stream_tags に「追加」する（既存タグは消さない・冪等）。
+const applyTagRulesSQL = `
+	INSERT INTO stream_stream_tags (stream_id, tag_id)
+	SELECT s.id, r.tag_id
+	FROM streams s
+	JOIN tag_keyword_rules r ON s.title ILIKE '%' || r.keyword || '%'`
+
+// ApplyTagRulesToStream 單一配信套用自動標籤規則，回傳新增的標籤數。
+func (r *StreamRepository) ApplyTagRulesToStream(streamID string) (int64, error) {
+	res, err := r.db.Exec(applyTagRulesSQL+`
+		WHERE s.id = $1
+		ON CONFLICT (stream_id, tag_id) DO NOTHING`, streamID)
+	if err != nil {
+		return 0, fmt.Errorf("apply tag rules to stream: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
+}
+
+// ApplyTagRulesToAll 全配信に自動標籤規則を套用し、新增的標籤總數を回傳（バックフィル用）。
+func (r *StreamRepository) ApplyTagRulesToAll() (int64, error) {
+	res, err := r.db.Exec(applyTagRulesSQL + `
+		ON CONFLICT (stream_id, tag_id) DO NOTHING`)
+	if err != nil {
+		return 0, fmt.Errorf("apply tag rules to all: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return n, nil
+}
+
 // ========== 分析快取（comment / holodex 正規化結果，以來源 hash 為鍵） ==========
 
 // SaveCommentRaw 只更新 comment_raw（同步時用，不動 comment_songs/其他大欄位）

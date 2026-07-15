@@ -136,6 +136,68 @@ func (r *PerformanceRepository) FindBySongID(songID uuid.UUID, limit, offset int
 	return performances, total, nil
 }
 
+// FindByTagID は指定の演出タグが付いた演出を新しい順で返す（タグ検索用、非表示配信は除外）。
+func (r *PerformanceRepository) FindByTagID(tagID string, limit, offset int) ([]PerformanceWithDetails, int, error) {
+	var total int
+	err := r.db.QueryRow(`
+		SELECT COUNT(*)
+		FROM performances p
+		JOIN streams st ON p.stream_id = st.id
+		JOIN performance_performance_tags ppt ON ppt.performance_id = p.id
+		WHERE ppt.tag_id = $1 AND st.is_hidden = FALSE
+	`, tagID).Scan(&total)
+	if err != nil {
+		return nil, 0, fmt.Errorf("count performances by tag: %w", err)
+	}
+
+	query := `
+		SELECT p.id, p.stream_id, p.song_id, p.start_seconds, p.end_seconds, p.order_index,
+		       p.holodex_song_id, p.custom_tags, p.created_at,
+		       st.title AS stream_title, st.stream_date, st.thumbnail_url,
+		       s.name AS song_name, s.original_artist, s.arts
+		FROM performances p
+		JOIN streams st ON p.stream_id = st.id
+		JOIN songs s ON p.song_id = s.id
+		JOIN performance_performance_tags ppt ON ppt.performance_id = p.id
+		WHERE ppt.tag_id = $1 AND st.is_hidden = FALSE
+		ORDER BY st.stream_date DESC, p.order_index ASC
+		LIMIT $2 OFFSET $3`
+
+	rows, err := r.db.Query(query, tagID, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("query performances by tag: %w", err)
+	}
+	defer rows.Close()
+
+	var performances []PerformanceWithDetails
+	for rows.Next() {
+		var p PerformanceWithDetails
+		err := rows.Scan(&p.ID, &p.StreamID, &p.SongID, &p.StartSeconds, &p.EndSeconds,
+			&p.OrderIndex, &p.HolodexSongID, &p.CustomTags, &p.CreatedAt,
+			&p.StreamTitle, &p.StreamDate, &p.ThumbnailURL,
+			&p.SongName, &p.OriginalArtist, &p.Arts)
+		if err != nil {
+			return nil, 0, fmt.Errorf("scan performance: %w", err)
+		}
+
+		tags, err := r.GetTags(p.ID)
+		if err != nil {
+			return nil, 0, err
+		}
+		p.Tags = tags
+
+		singers, err := r.GetSingers(p.ID)
+		if err != nil {
+			return nil, 0, err
+		}
+		p.Singers = singers
+
+		performances = append(performances, p)
+	}
+
+	return performances, total, rows.Err()
+}
+
 // Create 建立新演出
 func (r *PerformanceRepository) Create(p *models.Performance) error {
 	p.ID = uuid.New()

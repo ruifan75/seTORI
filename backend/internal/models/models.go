@@ -97,6 +97,14 @@ type FilterKeyword struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// TagKeywordRule タイトルの文字列マッチで stream_tag を自動付与するルール
+type TagKeywordRule struct {
+	ID        int       `json:"id"`
+	TagID     string    `json:"tag_id"`
+	Keyword   string    `json:"keyword"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 // AIProvider AI provider 設定（OpenAI 相容端點）
 type AIProvider struct {
 	ID             int       `json:"id"`
@@ -111,13 +119,36 @@ type AIProvider struct {
 	UpdatedAt      time.Time `json:"updated_at"`
 }
 
+// Role 権限セット（RBAC）。permissions は権限キーの配列で '*' は全権限。
+type Role struct {
+	ID          uuid.UUID      `json:"id"`
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Permissions pq.StringArray `json:"permissions"`
+	IsSystem    bool           `json:"is_system"` // 組み込みロール（削除不可）
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
+}
+
 // User 使用者
 type User struct {
-	ID           uuid.UUID    `json:"id"`
-	Username     string       `json:"username"`
-	DisplayName  string       `json:"display_name"`
-	PasswordHash string       `json:"-"` // 不輸出密碼 hash
-	Role         string       `json:"role"`
-	CreatedAt    time.Time    `json:"created_at"`
-	LastLogin    sql.NullTime `json:"last_login"`
+	ID           uuid.UUID  `json:"id"`
+	Username     string     `json:"username"`
+	DisplayName  string     `json:"display_name"`
+	PasswordHash string     `json:"-"` // 不輸出密碼 hash
+	RoleID       uuid.UUID  `json:"role_id"`
+	RoleName     string     `json:"role"`        // roles.name（表示用、JOIN で補完）
+	Permissions  []string   `json:"permissions"` // role の permissions（認証時に補完）
+	IsActive     bool       `json:"is_active"`
+	LastLogin    *time.Time `json:"last_login"` // 未ログインなら null
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+}
+
+// Session Bearer トークンのセッション。DB には token の SHA-256 ハッシュのみ保存する。
+type Session struct {
+	TokenHash string    `json:"-"`
+	UserID    uuid.UUID `json:"user_id"`
+	ExpiresAt time.Time `json:"expires_at"`
+	CreatedAt time.Time `json:"created_at"`
 }

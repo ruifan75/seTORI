@@ -190,6 +190,10 @@ type PerformanceResponse struct {
 	Singers        []SingerResponse         `json:"singers"`
 	YouTubeURL     string                   `json:"youtube_url"`
 	CreatedAt      time.Time                `json:"created_at"`
+	// タグ検索など配信横断の一覧でのみ設定される（配信詳細では省略）
+	StreamTitle  string  `json:"stream_title,omitempty"`
+	StreamDate   string  `json:"stream_date,omitempty"`
+	ThumbnailURL *string `json:"thumbnail_url,omitempty"`
 }
 
 // 用於歌曲詳情頁的反向查詢
@@ -285,11 +289,11 @@ type SongSuggestion struct {
 	ItunesID       *int64   `json:"itunes_id,omitempty"` // Holodex 提供的 iTunes ID
 
 	// ↓ 折り込んだ正規化結果（AnalyzeHolodexSongs 時に AI 正規化＋DB 照合し埋め込む。CommentSong と対称）
-	NormalizedName          string  `json:"normalized_name,omitempty"`
-	NormalizedNameReading   string  `json:"normalized_name_reading,omitempty"`
-	NormalizedArtist        string  `json:"normalized_artist,omitempty"`
-	NormalizedArtistReading string  `json:"normalized_artist_reading,omitempty"`
-	Confidence              float64 `json:"confidence,omitempty"`
+	NormalizedName           string  `json:"normalized_name,omitempty"`
+	NormalizedNameReading    string  `json:"normalized_name_reading,omitempty"`
+	NormalizedArtist         string  `json:"normalized_artist,omitempty"`
+	NormalizedArtistReading  string  `json:"normalized_artist_reading,omitempty"`
+	Confidence               float64 `json:"confidence,omitempty"`
 	MatchedSongID            *string `json:"matched_song_id,omitempty"`
 	MatchedSongName          *string `json:"matched_song_name,omitempty"`
 	MatchedSongNameReading   *string `json:"matched_song_name_reading,omitempty"`
@@ -388,6 +392,45 @@ type LoginResponse struct {
 		DisplayName string    `json:"display_name"`
 		Role        string    `json:"role"`
 	} `json:"user"`
+}
+
+// ========== グローバル検索 ==========
+
+// SearchStreamItem 検索結果の配信（軽量版）
+type SearchStreamItem struct {
+	ID           string    `json:"id"`
+	Title        string    `json:"title"`
+	StreamDate   time.Time `json:"stream_date"`
+	ThumbnailURL *string   `json:"thumbnail_url,omitempty"`
+	IsProcessed  bool      `json:"is_processed"`
+	IsHidden     bool      `json:"is_hidden"`
+}
+
+// SearchTagItem 検索結果のタグ（使用件数付き）
+type SearchTagItem struct {
+	ID          string `json:"id"`
+	DisplayName string `json:"display_name"`
+	Color       string `json:"color"`
+	Count       int    `json:"count"`
+}
+
+// GlobalSearchResponse 統一検索の結果。
+// 入力が YouTube URL / video ID の場合は video_id を返し、テキスト検索はスキップする。
+type GlobalSearchResponse struct {
+	Query           string             `json:"query"`
+	VideoID         string             `json:"video_id,omitempty"`
+	VideoRegistered bool               `json:"video_registered"`
+	Songs           []SongResponse     `json:"songs"`
+	Streams         []SearchStreamItem `json:"streams"`
+	Singers         []SingerResponse   `json:"singers"`
+	StreamTags      []SearchTagItem    `json:"stream_tags"`
+	PerformanceTags []SearchTagItem    `json:"performance_tags"`
+}
+
+// TagPerformanceListResponse タグ検索（演出）のページング付き結果
+type TagPerformanceListResponse struct {
+	Performances []PerformanceResponse `json:"performances"`
+	Pagination   PaginationResponse    `json:"pagination"`
 }
 
 // ========== 通用回應 ==========

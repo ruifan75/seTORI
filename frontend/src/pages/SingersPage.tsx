@@ -4,11 +4,13 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { singerApi } from '../api/client';
 import Loading from '../components/ui/Loading';
 import Pagination from '../components/ui/Pagination';
+import { useAuthStore, hasPermission, PERM } from '../store/auth';
 
 export default function SingersPage() {
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const page = parseInt(searchParams.get('page') || '1');
+  const canEdit = hasPermission(useAuthStore((s) => s.user), PERM.CONTENT_EDIT);
   const [showAddModal, setShowAddModal] = useState(false);
   const [channelInput, setChannelInput] = useState('');
 
@@ -56,15 +58,17 @@ export default function SingersPage() {
       <div className="flex justify-between items-center">
         <h1 className="text-3xl font-bold text-gray-900">チャンネル一覧</h1>
 
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-2"
-        >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
-          チャンネルを追加
-        </button>
+        {canEdit && (
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-2"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            チャンネルを追加
+          </button>
+        )}
       </div>
 
       {isLoading ? (

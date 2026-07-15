@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { filterKeywordApi, tagApi, aiProviderApi } from '../../api/client';
+import { filterKeywordApi, tagApi, tagRuleApi, aiProviderApi } from '../../api/client';
 import { useToast } from '../../components/ui/Toast';
-import type { FilterKeyword, StreamTag, PerformanceTag, AIProvider, AIProviderInput, AIModelInfo } from '../../api/types';
+import { useAuthStore, hasPermission, PERM } from '../../store/auth';
+import type { FilterKeyword, StreamTag, PerformanceTag, TagKeywordRule, AIProvider, AIProviderInput, AIModelInfo } from '../../api/types';
 
 function KeywordSection({
   title,
@@ -562,6 +563,135 @@ function AIProviderSection() {
   );
 }
 
+// TagRuleRow 単一 stream tag に対するキーワードルールの表示・追加・削除。
+function TagRuleRow({ tag, rules, onAdd, onDelete, isAdding }: {
+  tag: StreamTag;
+  rules: TagKeywordRule[];
+  onAdd: (tagId: string, keyword: string) => void;
+  onDelete: (id: number) => void;
+  isAdding: boolean;
+}) {
+  const [kw, setKw] = useState('');
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const t = kw.trim();
+    if (t) { onAdd(tag.id, t); setKw(''); }
+  };
+  return (
+    <div className="flex flex-wrap items-center gap-2 px-3 py-2 border rounded-lg">
+      <span
+        className="inline-flex items-center px-2.5 py-1 text-sm border rounded-full shrink-0"
+        style={{ backgroundColor: tag.color + '20', color: tag.color, borderColor: tag.color + '40' }}
+        title={tag.id}
+      >
+        {tag.display_name}
+      </span>
+      <span className="text-gray-300">←</span>
+      <div className="flex flex-wrap gap-1 flex-1 min-w-[8rem]">
+        {rules.length === 0 && <span className="text-xs text-gray-400">ルールなし</span>}
+        {rules.map((r) => (
+          <span key={r.id} className="inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-gray-100 text-gray-700 rounded">
+            {r.keyword}
+            <button onClick={() => onDelete(r.id)} className="hover:text-red-600" title="削除">&times;</button>
+          </span>
+        ))}
+      </div>
+      <form onSubmit={handleSubmit} className="flex gap-1">
+        <input
+          type="text"
+          value={kw}
+          onChange={(e) => setKw(e.target.value)}
+          placeholder="含む語（例: 雑談）"
+          className="w-36 px-2 py-1 text-sm border border-gray-300 rounded-lg"
+        />
+        <button
+          type="submit"
+          disabled={isAdding || !kw.trim()}
+          className="px-2.5 py-1 text-sm text-white rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50"
+        >
+          追加
+        </button>
+      </form>
+    </div>
+  );
+}
+
+function TagRuleSection() {
+  const queryClient = useQueryClient();
+  const { showToast } = useToast();
+
+  const { data: streamTags = [] } = useQuery({ queryKey: ['stream-tags'], queryFn: tagApi.listStreamTags });
+  const { data: rules = [], isLoading } = useQuery({ queryKey: ['tag-rules'], queryFn: tagRuleApi.list });
+
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['tag-rules'] });
+
+  const createMutation = useMutation({
+    mutationFn: ({ tagId, keyword }: { tagId: string; keyword: string }) => tagRuleApi.create(tagId, keyword),
+    onSuccess: () => invalidate(),
+    onError: (err: Error) => showToast(`追加エラー: ${err.message}`, 'error'),
+  });
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => tagRuleApi.delete(id),
+    onSuccess: () => invalidate(),
+    onError: (err: Error) => showToast(`削除エラー: ${err.message}`, 'error'),
+  });
+  const backfillMutation = useMutation({
+    mutationFn: () => tagRuleApi.backfill(),
+    onSuccess: (r) => {
+      showToast(r.message, 'success');
+      queryClient.invalidateQueries({ queryKey: ['streams'] });
+    },
+    onError: (err: Error) => showToast(`適用エラー: ${err.message}`, 'error'),
+  });
+
+  const rulesByTag = new Map<string, TagKeywordRule[]>();
+  for (const r of rules) {
+    const arr = rulesByTag.get(r.tag_id) ?? [];
+    arr.push(r);
+    rulesByTag.set(r.tag_id, arr);
+  }
+
+  return (
+    <div className="bg-white rounded-lg shadow-sm border p-6">
+      <div className="flex items-start justify-between mb-2 gap-4">
+        <h2 className="text-xl font-bold text-gray-900">タイトル自動タグ付けルール</h2>
+        <button
+          onClick={() => backfillMutation.mutate()}
+          disabled={backfillMutation.isPending}
+          className="shrink-0 px-3 py-1.5 text-sm text-white font-medium rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50"
+          title="既存の全配信にルールを適用します"
+        >
+          {backfillMutation.isPending ? '適用中...' : '全配信に適用'}
+        </button>
+      </div>
+      <p className="text-gray-500 mb-6">
+        配信タイトルに指定の語を「含む」場合に、そのタグを自動で付与します（大小文字は無視・部分一致）。
+        1配信に複数タグ可。付与のみで既存タグは消えません。同期時にも自動適用され、「全配信に適用」で既存分へ一括付与できます。
+        新しい種別（雑談・ゲームなど）は先に「配信タグ管理」でタグを作ってからルールを追加してください。
+      </p>
+
+      {isLoading ? (
+        <p className="text-gray-400">読み込み中...</p>
+      ) : streamTags.length === 0 ? (
+        <p className="text-sm text-gray-400">先に「配信タグ管理」でタグを作成してください。</p>
+      ) : (
+        <div className="space-y-2">
+          {streamTags.map((tag: StreamTag) => (
+            <TagRuleRow
+              key={tag.id}
+              tag={tag}
+              rules={rulesByTag.get(tag.id) ?? []}
+              onAdd={(tagId, keyword) => createMutation.mutate({ tagId, keyword })}
+              onDelete={(id) => deleteMutation.mutate(id)}
+              isAdding={createMutation.isPending}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function SettingsPage() {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
@@ -656,12 +786,15 @@ export default function SettingsPage() {
   const filterKeywords = keywords.filter((kw) => kw.type === 'filter');
   const keepKeywords = keywords.filter((kw) => kw.type === 'keep');
 
+  const me = useAuthStore((s) => s.user);
+  const canManageAI = hasPermission(me, PERM.AI_MANAGE);
+
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       <h1 className="text-3xl font-bold text-gray-900">設定</h1>
 
-      {/* AI Providers */}
-      <AIProviderSection />
+      {/* AI Providers（要 ai:manage） */}
+      {canManageAI && <AIProviderSection />}
 
       {/* Filter Keywords */}
       <div className="bg-white rounded-lg shadow-sm border p-6">
@@ -719,6 +852,9 @@ export default function SettingsPage() {
           />
         )}
       </div>
+
+      {/* Title-based auto-tagging rules */}
+      <TagRuleSection />
 
       {/* Performance Tags */}
       <div className="bg-white rounded-lg shadow-sm border p-6">

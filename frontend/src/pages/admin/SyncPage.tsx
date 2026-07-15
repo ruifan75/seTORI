@@ -48,7 +48,7 @@ export default function SyncPage() {
   };
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       <h1 className="text-3xl font-bold text-gray-900">Holodex 同期</h1>
 
       {/* Sync by Channel */}

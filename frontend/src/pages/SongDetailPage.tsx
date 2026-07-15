@@ -7,6 +7,7 @@ import Loading from '../components/ui/Loading';
 import Pagination from '../components/ui/Pagination';
 import Tag from '../components/ui/Tag';
 import { useToast } from '../components/ui/Toast';
+import { useAuthStore, hasPermission, PERM } from '../store/auth';
 
 function formatTime(seconds: number): string {
   const h = Math.floor(seconds / 3600);
@@ -133,6 +134,7 @@ export default function SongDetailPage() {
   const { showToast } = useToast();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const canEdit = hasPermission(useAuthStore((s) => s.user), PERM.CONTENT_EDIT);
   const [isEditing, setIsEditing] = useState(false);
   const [mergeTargetId, setMergeTargetId] = useState('');
   const [mergeTargetQuery, setMergeTargetQuery] = useState('');
@@ -805,12 +807,14 @@ export default function SongDetailPage() {
                       <p className="text-gray-500 text-sm mt-1">{song.original_artist_reading}</p>
                     )}
                   </div>
-                  <button
-                    onClick={toggleEditing}
-                    className="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
-                  >
-                    編集
-                  </button>
+                  {canEdit && (
+                    <button
+                      onClick={toggleEditing}
+                      className="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+                    >
+                      編集
+                    </button>
+                  )}
                 </div>
               </>
             )}

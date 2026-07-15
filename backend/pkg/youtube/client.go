@@ -96,6 +96,71 @@ func ParseChannelLookup(input string) ChannelLookup {
 	return ChannelLookup{Handle: normalizeHandle(raw)}
 }
 
+// ParseVideoID は入力（動画 URL または生の video ID）から YouTube video ID を抽出する。
+// 対応形式: watch?v=ID / youtu.be/ID / live/ID / shorts/ID / embed/ID / 生の11文字ID。
+// 抽出できなければ空文字を返す。
+func ParseVideoID(input string) string {
+	raw := strings.TrimSpace(input)
+	if raw == "" {
+		return ""
+	}
+
+	// 生の video ID（11文字の [A-Za-z0-9_-]）
+	if looksLikeVideoID(raw) {
+		return raw
+	}
+
+	normalizedURL := raw
+	if (strings.Contains(raw, "youtube.com/") || strings.Contains(raw, "youtu.be/")) && !strings.Contains(raw, "://") {
+		normalizedURL = "https://" + raw
+	}
+
+	parsed, err := url.Parse(normalizedURL)
+	if err != nil || parsed.Host == "" {
+		return ""
+	}
+
+	host := strings.ToLower(parsed.Host)
+	if host == "youtu.be" {
+		id := strings.Trim(parsed.Path, "/")
+		if looksLikeVideoID(id) {
+			return id
+		}
+		return ""
+	}
+	if !isYouTubeHost(host) {
+		return ""
+	}
+
+	// youtube.com/watch?v=ID
+	if id := parsed.Query().Get("v"); looksLikeVideoID(id) {
+		return id
+	}
+	// youtube.com/{live,shorts,embed}/ID
+	parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+	if len(parts) >= 2 {
+		switch parts[0] {
+		case "live", "shorts", "embed":
+			if looksLikeVideoID(parts[1]) {
+				return parts[1]
+			}
+		}
+	}
+	return ""
+}
+
+func looksLikeVideoID(value string) bool {
+	if len(value) != 11 {
+		return false
+	}
+	for _, c := range value {
+		if !(c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-' || c == '_') {
+			return false
+		}
+	}
+	return true
+}
+
 func isYouTubeHost(host string) bool {
 	host = strings.ToLower(host)
 	return host == "youtube.com" || host == "www.youtube.com" || strings.HasSuffix(host, ".youtube.com")

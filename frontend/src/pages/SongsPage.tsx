@@ -27,7 +27,7 @@ export default function SongsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
         <h1 className="text-3xl font-bold text-gray-900">楽曲一覧</h1>
 
         {/* Search */}
@@ -37,11 +37,11 @@ export default function SongsPage() {
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             placeholder="楽曲名・アーティスト名で検索"
-            className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent w-64"
+            className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent flex-1 sm:flex-none sm:w-64 min-w-0"
           />
           <button
             type="submit"
-            className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+            className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors shrink-0"
           >
             検索
           </button>
@@ -66,13 +66,14 @@ export default function SongsPage() {
                 <table className="w-full table-fixed divide-y divide-gray-200">
                   <thead className="bg-gray-50">
                     <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-[45%]">
+                      <th className="px-4 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-[72%] sm:w-[45%]">
                         楽曲名
                       </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-[40%]">
+                      {/* モバイルではアーティスト列を隠し、曲名の下に表示する */}
+                      <th className="hidden sm:table-cell px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sm:w-[40%]">
                         アーティスト
                       </th>
-                      <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-[15%]">
+                      <th className="px-4 sm:px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-[28%] sm:w-[15%]">
                         歌唱回数
                       </th>
                     </tr>
@@ -80,7 +81,7 @@ export default function SongsPage() {
                   <tbody className="bg-white divide-y divide-gray-200">
                     {data?.songs.map((song) => (
                       <tr key={song.id} className="hover:bg-gray-50">
-                        <td className="px-6 py-4 max-w-0">
+                        <td className="px-4 sm:px-6 py-4 max-w-0">
                           <Link
                             to={`/songs/${song.id}`}
                             className="text-indigo-600 hover:text-indigo-900 font-medium block truncate"
@@ -88,13 +89,14 @@ export default function SongsPage() {
                             {song.name}
                           </Link>
                           {song.name_reading && (
-                            <p className="text-xs text-gray-400 mt-0.5 truncate">{song.name_reading}</p>
+                            <p className="text-xs text-gray-400 mt-0.5 truncate hidden sm:block">{song.name_reading}</p>
                           )}
+                          <p className="text-xs text-gray-500 mt-0.5 truncate sm:hidden">{song.original_artist}</p>
                         </td>
-                        <td className="px-6 py-4 text-gray-500 max-w-0">
+                        <td className="hidden sm:table-cell px-6 py-4 text-gray-500 max-w-0">
                           <span className="block truncate">{song.original_artist}</span>
                         </td>
-                        <td className="px-6 py-4 text-right">
+                        <td className="px-4 sm:px-6 py-4 text-right">
                           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
                             {song.performance_count}回
                           </span>

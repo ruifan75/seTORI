@@ -18,7 +18,9 @@ import (
 	"github.com/ruifan75/setori/internal/repository"
 	"github.com/ruifan75/setori/internal/service"
 	"github.com/ruifan75/setori/pkg/ai"
+	"github.com/ruifan75/setori/pkg/auth"
 	"github.com/ruifan75/setori/pkg/itunes"
+	"github.com/ruifan75/setori/pkg/youtube"
 )
 
 // Router HTTP ルーター
@@ -39,6 +41,7 @@ type Router struct {
 	tagRepo              *repository.TagRepository
 	aiProviderRepo       *repository.AIProviderRepository
 	chatEndService       *service.ChatEndService
+	authService          *service.AuthService
 }
 
 // NewRouter 新しいルーターを作成
@@ -52,6 +55,7 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	filterKeywordRepo := repository.NewFilterKeywordRepository(db)
 	tagRepo := repository.NewTagRepository(db)
 	aiProviderRepo := repository.NewAIProviderRepository(db)
+	authRepo := repository.NewAuthRepository(db)
 
 	// AI サービス：複数 provider ローテーション + failover、未設定時は GROQ_API_KEY にフォールバック
 	aiService := service.NewAIService(aiProviderRepo, cfg.GroqAPIKey)
@@ -71,6 +75,7 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	performanceService := service.NewPerformanceService(perfRepo, songRepo, songItunesRepo)
 	itunesClient := itunes.NewClient()
 	endTimeEstimateService := service.NewEndTimeEstimateService(itunesClient)
+	authService := service.NewAuthService(authRepo)
 
 	r := &Router{
 		db:                   db,
@@ -88,19 +93,41 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 		tagRepo:              tagRepo,
 		aiProviderRepo:       aiProviderRepo,
 		chatEndService:       chatEndService,
-	}
-
-	if cfg.APIAuthToken == "" {
-		logger.Warnf("API_AUTH_TOKEN が未設定です：書き込み API は現在公開です。本番環境ではこの値を設定して認証を有効にしてください")
+		authService:          authService,
 	}
 
 	r.setupRoutes()
 	return r
 }
 
+// AuthService は main.go でのブートストラップ（初期管理者作成）に使う。
+func (r *Router) AuthService() *service.AuthService {
+	return r.authService
+}
+
 func (r *Router) setupRoutes() {
 	// Health check
 	r.mux.HandleFunc("GET /health", r.handleHealth)
+
+	// 認証
+	r.mux.HandleFunc("POST /api/auth/login", r.handleLogin)
+	r.mux.HandleFunc("POST /api/auth/logout", r.handleLogout)
+	r.mux.HandleFunc("GET /api/auth/me", r.handleMe)
+
+	// ユーザー・ロール・権限管理（要 users:manage）
+	r.mux.HandleFunc("GET /api/users", r.handleListUsers)
+	r.mux.HandleFunc("POST /api/users", r.handleCreateUser)
+	r.mux.HandleFunc("PUT /api/users/{id}", r.handleUpdateUser)
+	r.mux.HandleFunc("PUT /api/users/{id}/password", r.handleChangeUserPassword)
+	r.mux.HandleFunc("DELETE /api/users/{id}", r.handleDeleteUser)
+	r.mux.HandleFunc("GET /api/roles", r.handleListRoles)
+	r.mux.HandleFunc("POST /api/roles", r.handleCreateRole)
+	r.mux.HandleFunc("PUT /api/roles/{id}", r.handleUpdateRole)
+	r.mux.HandleFunc("DELETE /api/roles/{id}", r.handleDeleteRole)
+	r.mux.HandleFunc("GET /api/permissions", r.handleListPermissions)
+
+	// 統一検索（楽曲・歌枠・チャンネル・YouTube URL/video ID）
+	r.mux.HandleFunc("GET /api/search", r.handleGlobalSearch)
 
 	// API routes - Songs
 	r.mux.HandleFunc("GET /api/songs", r.handleListSongs)
@@ -154,6 +181,10 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("POST /api/filter-keywords", r.handleCreateFilterKeyword)
 	r.mux.HandleFunc("DELETE /api/filter-keywords/{id}", r.handleDeleteFilterKeyword)
 
+	// タグ検索（タグが付いた配信・演出の一覧）
+	r.mux.HandleFunc("GET /api/stream-tags/{id}/streams", r.handleGetStreamsByTag)
+	r.mux.HandleFunc("GET /api/performance-tags/{id}/performances", r.handleGetPerformancesByTag)
+
 	// Tag management
 	r.mux.HandleFunc("GET /api/stream-tags", r.handleListStreamTags)
 	r.mux.HandleFunc("POST /api/stream-tags", r.handleCreateStreamTag)
@@ -161,6 +192,12 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("GET /api/performance-tags", r.handleListPerformanceTags)
 	r.mux.HandleFunc("POST /api/performance-tags", r.handleCreatePerformanceTag)
 	r.mux.HandleFunc("DELETE /api/performance-tags/{id}", r.handleDeletePerformanceTag)
+
+	// タイトル自動タグ付けルール（stream tag をタイトルの文字列一致で付与）
+	r.mux.HandleFunc("GET /api/tag-keyword-rules", r.handleListTagKeywordRules)
+	r.mux.HandleFunc("POST /api/tag-keyword-rules", r.handleCreateTagKeywordRule)
+	r.mux.HandleFunc("DELETE /api/tag-keyword-rules/{id}", r.handleDeleteTagKeywordRule)
+	r.mux.HandleFunc("POST /api/tag-rules/backfill", r.handleBackfillTagRules)
 
 	// AI normalization (for direct editing flow)
 	r.mux.HandleFunc("POST /api/ai/normalize", r.handleBatchAINormalization)
@@ -196,9 +233,23 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// 認証 middleware：API_AUTH_TOKEN 設定時は書き込み操作に Bearer token が必要
-	if !r.authorized(req) {
-		respondError(w, http.StatusUnauthorized, "認証が必要です")
+	// 認証：Bearer トークンから現在のユーザーを解決（未ログインなら nil）
+	user, err := r.resolveUser(req)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "認証処理に失敗しました")
+		return
+	}
+	if user != nil {
+		req = withUser(req, user)
+	}
+
+	// 認可：メソッド＋パスから必要権限を求めて判定
+	if !authorize(req.Method, req.URL.Path, user) {
+		if user == nil {
+			respondError(w, http.StatusUnauthorized, "ログインが必要です")
+		} else {
+			respondError(w, http.StatusForbidden, "この操作を行う権限がありません")
+		}
 		return
 	}
 
@@ -222,6 +273,124 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 // Health check handler
 func (r *Router) handleHealth(w http.ResponseWriter, req *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// ========== Global Search Handler ==========
+
+// handleGlobalSearch 楽曲・歌枠・チャンネルを横断検索する。
+// 入力が YouTube URL / video ID の場合は video_id と登録状況を返し、テキスト検索はスキップする。
+func (r *Router) handleGlobalSearch(w http.ResponseWriter, req *http.Request) {
+	query := strings.TrimSpace(req.URL.Query().Get("q"))
+	if query == "" {
+		respondError(w, http.StatusBadRequest, "検索キーワードが必要です")
+		return
+	}
+
+	limit, _ := strconv.Atoi(req.URL.Query().Get("limit"))
+	if limit < 1 || limit > 20 {
+		limit = 5
+	}
+
+	resp := dto.GlobalSearchResponse{
+		Query:           query,
+		Songs:           []dto.SongResponse{},
+		Streams:         []dto.SearchStreamItem{},
+		Singers:         []dto.SingerResponse{},
+		StreamTags:      []dto.SearchTagItem{},
+		PerformanceTags: []dto.SearchTagItem{},
+	}
+
+	// YouTube URL / video ID 判定。該当すればテキスト検索はせず登録状況のみ返す。
+	if videoID := youtube.ParseVideoID(query); videoID != "" {
+		resp.VideoID = videoID
+		registered, err := r.streamService.Exists(videoID)
+		if err != nil {
+			respondError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		resp.VideoRegistered = registered
+		respondJSON(w, http.StatusOK, resp)
+		return
+	}
+
+	// テキスト検索：楽曲・歌枠・チャンネルを横断。個別の失敗は空リストで続行する。
+	if songs, err := r.songService.GetAll(1, limit, query); err != nil {
+		logger.Warnf("global search songs failed: %v", err)
+	} else if songs != nil {
+		resp.Songs = songs.Songs
+	}
+
+	if streams, err := r.streamService.SearchByTitle(query, limit); err != nil {
+		logger.Warnf("global search streams failed: %v", err)
+	} else {
+		resp.Streams = streams
+	}
+
+	if singers, err := r.singerService.Search(query, limit); err != nil {
+		logger.Warnf("global search singers failed: %v", err)
+	} else {
+		resp.Singers = singers
+	}
+
+	// タグ（id / 表示名の部分一致、使用件数付き）
+	if tags, err := r.tagRepo.SearchStreamTags(query, limit); err != nil {
+		logger.Warnf("global search stream tags failed: %v", err)
+	} else {
+		resp.StreamTags = toSearchTagItems(tags)
+	}
+	if tags, err := r.tagRepo.SearchPerformanceTags(query, limit); err != nil {
+		logger.Warnf("global search performance tags failed: %v", err)
+	} else {
+		resp.PerformanceTags = toSearchTagItems(tags)
+	}
+
+	respondJSON(w, http.StatusOK, resp)
+}
+
+func toSearchTagItems(tags []repository.TagWithCount) []dto.SearchTagItem {
+	items := make([]dto.SearchTagItem, len(tags))
+	for i, t := range tags {
+		items[i] = dto.SearchTagItem{ID: t.ID, DisplayName: t.DisplayName, Color: t.Color, Count: t.Count}
+	}
+	return items
+}
+
+// ========== Tag Search Handlers ==========
+
+// handleGetStreamsByTag 指定タグが付いた配信一覧（タグ検索ページ）
+func (r *Router) handleGetStreamsByTag(w http.ResponseWriter, req *http.Request) {
+	tagID := req.PathValue("id")
+	if tagID == "" {
+		respondError(w, http.StatusBadRequest, "無効なタグID")
+		return
+	}
+	page, _ := strconv.Atoi(req.URL.Query().Get("page"))
+	limit, _ := strconv.Atoi(req.URL.Query().Get("limit"))
+
+	result, err := r.streamService.GetByTag(tagID, page, limit)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, result)
+}
+
+// handleGetPerformancesByTag 指定の演出タグが付いた演出一覧（タグ検索ページ）
+func (r *Router) handleGetPerformancesByTag(w http.ResponseWriter, req *http.Request) {
+	tagID := req.PathValue("id")
+	if tagID == "" {
+		respondError(w, http.StatusBadRequest, "無効なタグID")
+		return
+	}
+	page, _ := strconv.Atoi(req.URL.Query().Get("page"))
+	limit, _ := strconv.Atoi(req.URL.Query().Get("limit"))
+
+	result, err := r.streamService.GetPerformancesByTag(tagID, page, limit)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, result)
 }
 
 // ========== Song Handlers ==========
@@ -1136,6 +1305,68 @@ func (r *Router) handleDeletePerformanceTag(w http.ResponseWriter, req *http.Req
 	respondJSON(w, http.StatusOK, map[string]string{"message": "タグを削除しました"})
 }
 
+// ========== Tag Keyword Rule Handlers ==========
+
+func (r *Router) handleListTagKeywordRules(w http.ResponseWriter, req *http.Request) {
+	rules, err := r.tagRepo.FindAllTagKeywordRules()
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, rules)
+}
+
+func (r *Router) handleCreateTagKeywordRule(w http.ResponseWriter, req *http.Request) {
+	var body struct {
+		TagID   string `json:"tag_id"`
+		Keyword string `json:"keyword"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		respondError(w, http.StatusBadRequest, "無効なリクエスト形式")
+		return
+	}
+	body.TagID = strings.TrimSpace(body.TagID)
+	body.Keyword = strings.TrimSpace(body.Keyword)
+	if body.TagID == "" || body.Keyword == "" {
+		respondError(w, http.StatusBadRequest, "tag_id とキーワードは必須です")
+		return
+	}
+
+	rule, err := r.tagRepo.CreateTagKeywordRule(body.TagID, body.Keyword)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusCreated, rule)
+}
+
+func (r *Router) handleDeleteTagKeywordRule(w http.ResponseWriter, req *http.Request) {
+	id, err := strconv.Atoi(req.PathValue("id"))
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "無効なID")
+		return
+	}
+	if err := r.tagRepo.DeleteTagKeywordRule(id); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"message": "ルールを削除しました"})
+}
+
+// handleBackfillTagRules 全配信にルールを適用して既存配信にタグを付与する。
+func (r *Router) handleBackfillTagRules(w http.ResponseWriter, req *http.Request) {
+	added, err := r.streamService.ApplyTagRulesToAll()
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	logger.Infof("tag rule backfill added %d tag assignments", added)
+	respondJSON(w, http.StatusOK, map[string]any{
+		"message": fmt.Sprintf("%d 件のタグを付与しました", added),
+		"added":   added,
+	})
+}
+
 // ========== Batch AI Normalization Handler ==========
 
 func (r *Router) handleBatchAINormalization(w http.ResponseWriter, req *http.Request) {
@@ -1473,35 +1704,81 @@ func (r *Router) handlePreviewAIProviderModels(w http.ResponseWriter, req *http.
 	respondJSON(w, http.StatusOK, map[string]any{"models": modelList})
 }
 
-// ========== Auth ==========
+// ========== Auth / ACL ==========
 
-// authorized 判斷請求是否通過認證。
-// 規則：未設定 API_AUTH_TOKEN 時一律放行（公開）；
-// 設定後，安全方法（GET/HEAD/OPTIONS）與 /health 仍公開，
-// 其餘寫入操作需帶 Authorization: Bearer <token>。
-func (r *Router) authorized(req *http.Request) bool {
-	if r.cfg.APIAuthToken == "" {
-		return true
+// resolveUser は Bearer トークンから現在のユーザーを解決する。
+// 未ログインなら (nil, nil)。後方互換として、静的 API_AUTH_TOKEN に一致する場合は
+// 全権限を持つ疑似管理者として扱う（既存のスクリプト/デプロイ向け）。
+func (r *Router) resolveUser(req *http.Request) (*models.User, error) {
+	token := bearerToken(req)
+	if token == "" {
+		return nil, nil
+	}
+	if r.cfg.APIAuthToken != "" && token == r.cfg.APIAuthToken {
+		return &models.User{
+			Username:    "api-token",
+			DisplayName: "API Token",
+			RoleName:    "admin",
+			Permissions: []string{auth.PermAll},
+			IsActive:    true,
+		}, nil
+	}
+	return r.authService.Authenticate(token)
+}
+
+// authorize はメソッド＋パスに必要な権限を求め、user がそれを満たすか判定する。
+func authorize(method, path string, user *models.User) bool {
+	perm, needsAuth := requiredPermission(method, path)
+	if !needsAuth {
+		return true // 公開（未ログインでも可）
+	}
+	if user == nil {
+		return false // 要ログイン
+	}
+	if perm == "" {
+		return true // ログイン済みなら誰でも可（例：/api/auth/me）
+	}
+	return auth.HasPermission(user.Permissions, perm)
+}
+
+// requiredPermission はエンドポイントに必要な権限キーと、認証要否を返す。
+// needsAuth=false は公開エンドポイント。perm="" は「ログイン済みなら誰でも可」。
+//
+// 方針：GET などの読み取りは基本公開（閲覧）。書き込みは content:edit。
+// 管理系リソース（ユーザー/ロール/AIプロバイダー/ログ/同期）は読み取りも含めて専用権限が必要。
+func requiredPermission(method, path string) (perm string, needsAuth bool) {
+	if method == http.MethodOptions {
+		return "", false
 	}
 
-	token := strings.TrimSpace(strings.TrimPrefix(req.Header.Get("Authorization"), "Bearer "))
-	authed := token == r.cfg.APIAuthToken
-
-	// AI provider 設定一律需要認證（含 GET）——避免外洩 provider 設定
-	if strings.HasPrefix(req.URL.Path, "/api/ai-providers") {
-		return authed
+	// 公開・認証のみ（特定権限不要）のエンドポイント
+	switch path {
+	case "/health", "/api/auth/login":
+		return "", false
+	case "/api/auth/logout", "/api/auth/me":
+		return "", true
 	}
 
-	// 其餘：安全方法（GET/HEAD/OPTIONS）與 /health 維持公開
-	switch req.Method {
-	case http.MethodGet, http.MethodHead, http.MethodOptions:
-		return true
-	}
-	if req.URL.Path == "/health" {
-		return true
+	// 管理系リソースはメソッドを問わず専用権限が必要
+	switch {
+	case strings.HasPrefix(path, "/api/users"),
+		strings.HasPrefix(path, "/api/roles"),
+		path == "/api/permissions":
+		return auth.PermUsersManage, true
+	case strings.HasPrefix(path, "/api/ai-providers"):
+		return auth.PermAIManage, true
+	case strings.HasPrefix(path, "/api/logs"):
+		return auth.PermLogsView, true
+	case strings.HasPrefix(path, "/api/sync"):
+		return auth.PermSyncRun, true
 	}
 
-	return authed
+	// それ以外：安全メソッドは公開閲覧、書き込みは content:edit
+	switch method {
+	case http.MethodGet, http.MethodHead:
+		return "", false
+	}
+	return auth.PermContentEdit, true
 }
 
 // ========== Helper Functions ==========

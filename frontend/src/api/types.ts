@@ -202,6 +202,10 @@ export interface Performance {
   singers: Singer[];
   youtube_url: string;
   created_at: string;
+  // タグ検索など配信横断の一覧でのみ設定される
+  stream_title?: string;
+  stream_date?: string;
+  thumbnail_url?: string;
 }
 
 export interface StreamDetailResponse extends Stream {
@@ -389,6 +393,48 @@ export interface FilterKeyword {
   created_at: string;
 }
 
+// ========== グローバル検索 ==========
+
+export interface SearchStreamItem {
+  id: string;
+  title: string;
+  stream_date: string;
+  thumbnail_url?: string;
+  is_processed: boolean;
+  is_hidden: boolean;
+}
+
+export interface SearchTagItem {
+  id: string;
+  display_name: string;
+  color: string;
+  count: number;
+}
+
+export interface GlobalSearchResponse {
+  query: string;
+  video_id?: string;      // 入力が YouTube URL / video ID のとき
+  video_registered: boolean;
+  songs: Song[];
+  streams: SearchStreamItem[];
+  singers: Singer[];
+  stream_tags: SearchTagItem[];
+  performance_tags: SearchTagItem[];
+}
+
+export interface TagPerformanceListResponse {
+  performances: Performance[];
+  pagination: PaginationResponse;
+}
+
+// タイトル自動タグ付けルール（キーワードを含めば stream tag を付与）
+export interface TagKeywordRule {
+  id: number;
+  tag_id: string;
+  keyword: string;
+  created_at: string;
+}
+
 // ========== AI Provider ==========
 
 export interface AIProvider {
@@ -473,4 +519,53 @@ export interface EstimateEndTimesRequest {
 export interface EstimateEndTimesResponse {
   estimates: SongEndTimeEstimate[];
   message?: string;
+}
+
+// ========== 認証・ACL ==========
+
+export interface AuthUser {
+  id: string;
+  username: string;
+  display_name: string;
+  role: string;          // roles.name
+  role_id: string;
+  permissions: string[]; // role の権限（'*' は全権限）
+  is_active: boolean;
+  last_login?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface LoginResponse {
+  token: string;
+  user: AuthUser;
+}
+
+export interface Role {
+  id: string;
+  name: string;
+  description: string;
+  permissions: string[];
+  is_system: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface PermissionInfo {
+  key: string;
+  description: string;
+}
+
+export interface CreateUserRequest {
+  username: string;
+  display_name: string;
+  password: string;
+  role_id: string;
+  is_active: boolean;
+}
+
+export interface UpdateUserRequest {
+  display_name: string;
+  role_id: string;
+  is_active: boolean;
 }

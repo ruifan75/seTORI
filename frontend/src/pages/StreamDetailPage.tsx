@@ -6,6 +6,7 @@ import type { Singer, CreatePerformanceItem, AINormalizationItem, Song, UpdateSt
 import Loading from '../components/ui/Loading';
 import Tag from '../components/ui/Tag';
 import { useToast } from '../components/ui/Toast';
+import { useAuthStore, hasPermission, PERM } from '../store/auth';
 import YoutubePlayer, { youtubePlayerSeekTo, youtubePlayerGetCurrentTime } from '../components/YoutubePlayer';
 
 
@@ -620,6 +621,7 @@ export default function StreamDetailPage() {
   const { id } = useParams<{ id: string }>();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
+  const canEdit = hasPermission(useAuthStore((s) => s.user), PERM.CONTENT_EDIT);
 
   const [isEditing, setIsEditing] = useState(false);
   const [editableSongs, setEditableSongs] = useState<EditableSong[]>([]);
@@ -1605,6 +1607,7 @@ export default function StreamDetailPage() {
                 </svg>
                 YouTubeで見る
               </a>
+              {canEdit && (
               <button
                 onClick={toggleEditing}
                 className={`inline-flex items-center gap-2 px-4 py-2 font-medium rounded-lg transition-colors ${
@@ -1618,6 +1621,7 @@ export default function StreamDetailPage() {
                 </svg>
                 {isEditing ? '編集を閉じる' : '編集'}
               </button>
+              )}
             </div>
           </div>
         </div>

@@ -13,6 +13,8 @@ type Config struct {
 	GroqAPIKey         string
 	JWTSecret          string
 	APIAuthToken       string
+	BootstrapAdminUser string
+	BootstrapAdminPass string
 	Environment        string
 	LogLevel           string
 }
@@ -29,8 +31,11 @@ func Load() (*Config, error) {
 		// APIAuthToken が設定されている場合、書き込み操作（POST/PUT/DELETE/PATCH）に対し
 		// Authorization: Bearer <token> を要求。空欄時は公開（ローカル開発向け）。
 		APIAuthToken: getEnv("API_AUTH_TOKEN", ""),
-		Environment:  getEnv("ENVIRONMENT", "development"),
-		LogLevel:     getEnv("LOG_LEVEL", "INFO"),
+		// 初回起動時、ユーザーが 0 件なら作成する管理者アカウント。
+		BootstrapAdminUser: getEnv("ADMIN_USERNAME", "admin"),
+		BootstrapAdminPass: getEnv("ADMIN_PASSWORD", "admin"),
+		Environment:        getEnv("ENVIRONMENT", "development"),
+		LogLevel:           getEnv("LOG_LEVEL", "INFO"),
 	}
 
 	return cfg, nil

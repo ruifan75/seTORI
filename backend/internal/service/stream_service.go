@@ -22,6 +22,43 @@ func NewStreamService(streamRepo *repository.StreamRepository, perfRepo *reposit
 	}
 }
 
+// ApplyTagRulesToAll は全配信にタイトル自動タグ付けルールを適用し、追加されたタグ数を返す。
+func (s *StreamService) ApplyTagRulesToAll() (int64, error) {
+	return s.streamRepo.ApplyTagRulesToAll()
+}
+
+// SearchByTitle はタイトル部分一致で配信を検索する（グローバル検索用）。
+func (s *StreamService) SearchByTitle(query string, limit int) ([]dto.SearchStreamItem, error) {
+	streams, err := s.streamRepo.SearchByTitle(query, limit)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]dto.SearchStreamItem, 0, len(streams))
+	for _, st := range streams {
+		item := dto.SearchStreamItem{
+			ID:          st.ID,
+			Title:       st.Title,
+			StreamDate:  st.StreamDate,
+			IsProcessed: st.IsProcessed,
+			IsHidden:    st.IsHidden,
+		}
+		if st.ThumbnailURL.Valid {
+			item.ThumbnailURL = &st.ThumbnailURL.String
+		}
+		items = append(items, item)
+	}
+	return items, nil
+}
+
+// Exists は配信が登録済みかを返す（グローバル検索の video ID 照合用）。
+func (s *StreamService) Exists(id string) (bool, error) {
+	st, err := s.streamRepo.FindByID(id)
+	if err != nil {
+		return false, err
+	}
+	return st != nil, nil
+}
+
 // GetAll 取得歌回列表（預設不顯示隱藏的）
 func (s *StreamService) GetAll(page, limit int) (*dto.StreamListResponse, error) {
 	if page < 1 {
@@ -67,6 +104,88 @@ func (s *StreamService) GetAll(page, limit int) (*dto.StreamListResponse, error)
 			Limit:      limit,
 			Total:      total,
 			TotalPages: totalPages,
+		},
+	}, nil
+}
+
+// GetByTag は指定タグが付いた配信一覧を返す（タグ検索ページ用）。
+func (s *StreamService) GetByTag(tagID string, page, limit int) (*dto.StreamListResponse, error) {
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+	offset := (page - 1) * limit
+
+	streams, total, err := s.streamRepo.FindByTagID(tagID, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("get streams by tag: %w", err)
+	}
+
+	streamIDs := make([]string, len(streams))
+	for i, stream := range streams {
+		streamIDs[i] = stream.ID
+	}
+	tagsMap, err := s.streamRepo.GetTagsForStreams(streamIDs)
+	if err != nil {
+		return nil, fmt.Errorf("get stream tags: %w", err)
+	}
+	participantsMap, ownersMap, err := s.streamRepo.GetSingersForStreams(streamIDs)
+	if err != nil {
+		return nil, fmt.Errorf("get stream singers: %w", err)
+	}
+
+	streamResponses := make([]dto.StreamResponse, len(streams))
+	for i, stream := range streams {
+		streamResponses[i] = s.toStreamResponse(stream, tagsMap[stream.ID], participantsMap[stream.ID], ownersMap[stream.ID])
+	}
+
+	return &dto.StreamListResponse{
+		Streams: streamResponses,
+		Pagination: dto.PaginationResponse{
+			Page:       page,
+			Limit:      limit,
+			Total:      total,
+			TotalPages: (total + limit - 1) / limit,
+		},
+	}, nil
+}
+
+// GetPerformancesByTag は指定の演出タグが付いた演出一覧を返す（タグ検索ページ用）。
+func (s *StreamService) GetPerformancesByTag(tagID string, page, limit int) (*dto.TagPerformanceListResponse, error) {
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+	offset := (page - 1) * limit
+
+	performances, total, err := s.perfRepo.FindByTagID(tagID, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("get performances by tag: %w", err)
+	}
+
+	responses := make([]dto.PerformanceResponse, len(performances))
+	for i, perf := range performances {
+		resp := s.toPerformanceResponse(perf)
+		// タグ検索は配信横断の一覧なので、どの配信かの文脈を補う
+		resp.StreamTitle = perf.StreamTitle
+		resp.StreamDate = perf.StreamDate
+		if perf.ThumbnailURL.Valid {
+			resp.ThumbnailURL = &perf.ThumbnailURL.String
+		}
+		responses[i] = resp
+	}
+
+	return &dto.TagPerformanceListResponse{
+		Performances: responses,
+		Pagination: dto.PaginationResponse{
+			Page:       page,
+			Limit:      limit,
+			Total:      total,
+			TotalPages: (total + limit - 1) / limit,
 		},
 	}, nil
 }

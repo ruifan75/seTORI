@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { singerApi, holodexApi } from '../api/client';
+import { useAuthStore, hasPermission, PERM } from '../store/auth';
 import Loading from '../components/ui/Loading';
 import Pagination from '../components/ui/Pagination';
 import Tag from '../components/ui/Tag';
@@ -13,9 +14,29 @@ type HiddenFilter = 'all' | 'true' | 'false';
 export default function SingerDetailPage() {
   const { id } = useParams<{ id: string }>();
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState<TabType>('streams');
-  const [streamPage, setStreamPage] = useState(1);
-  const [perfPage, setPerfPage] = useState(1);
+  const authUser = useAuthStore((s) => s.user);
+  const canEdit = hasPermission(authUser, PERM.CONTENT_EDIT);
+  const canSync = hasPermission(authUser, PERM.SYNC_RUN);
+  // タブ・ページ・フィルタは URL クエリに保持する。
+  // 詳細ページへ遷移して「戻る」した際に state だとリセットされるため（URL なら復元される）。
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab: TabType = searchParams.get('tab') === 'performances' ? 'performances' : 'streams';
+  const streamPage = Math.max(1, parseInt(searchParams.get('page') || '1') || 1);
+  const perfPage = Math.max(1, parseInt(searchParams.get('ppage') || '1') || 1);
+
+  // 複数キーを一括更新（null は削除＝デフォルト値）。replace で履歴を汚さない。
+  const updateParams = (updates: Record<string, string | null>) => {
+    const next = new URLSearchParams(searchParams);
+    for (const [k, v] of Object.entries(updates)) {
+      if (v === null) next.delete(k);
+      else next.set(k, v);
+    }
+    setSearchParams(next, { replace: true });
+  };
+
+  const setActiveTab = (t: TabType) => updateParams({ tab: t === 'streams' ? null : t });
+  const setStreamPage = (p: number) => updateParams({ page: p <= 1 ? null : String(p) });
+  const setPerfPage = (p: number) => updateParams({ ppage: p <= 1 ? null : String(p) });
   const [syncMode, setSyncMode] = useState<'new' | 'all'>('new');
   const [showEditModal, setShowEditModal] = useState(false);
   const [editForm, setEditForm] = useState({
@@ -25,8 +46,13 @@ export default function SingerDetailPage() {
     organization: '',
   });
   // Filter states - デフォルトでは非表示を除外
-  const [processedFilter, setProcessedFilter] = useState<ProcessedFilter>('all');
-  const [hiddenFilter, setHiddenFilter] = useState<HiddenFilter>('false');
+  // フィルタも URL に保持（processed のデフォルトは all、hidden のデフォルトは false=非表示を除く）
+  const processedParam = searchParams.get('processed');
+  const processedFilter: ProcessedFilter =
+    processedParam === 'true' || processedParam === 'false' ? processedParam : 'all';
+  const hiddenParam = searchParams.get('hidden');
+  const hiddenFilter: HiddenFilter =
+    hiddenParam === 'all' || hiddenParam === 'true' ? hiddenParam : 'false';
 
   // Singer detail
   const { data: singer, isLoading: singerLoading } = useQuery({
@@ -119,25 +145,25 @@ export default function SingerDetailPage() {
     <div className="space-y-6">
       {/* Header */}
       <div className="bg-white rounded-lg shadow-sm border p-6">
-        <div className="flex items-start gap-6">
+        <div className="flex flex-wrap items-start gap-4 sm:gap-6">
           {singer.photo_url ? (
             <img
               src={singer.photo_url}
               alt={singer.name}
-              className="w-24 h-24 rounded-full object-cover"
+              className="w-16 h-16 sm:w-24 sm:h-24 rounded-full object-cover"
               onError={(e) => {
                 e.currentTarget.onerror = null;
                 e.currentTarget.src = `https://holodex.net/statics/channelImg/${singer.id}/50.png`;
               }}
             />
           ) : (
-            <div className="w-24 h-24 rounded-full bg-gray-200 flex items-center justify-center">
+            <div className="w-16 h-16 sm:w-24 sm:h-24 rounded-full bg-gray-200 flex items-center justify-center">
               <svg className="w-12 h-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
               </svg>
             </div>
           )}
-          <div className="flex-1">
+          <div className="flex-1 min-w-0">
             <h1 className="text-2xl font-bold text-gray-900">{singer.name}</h1>
             {singer.english_name && (
               <p className="text-gray-500 mt-1">{singer.english_name}</p>
@@ -156,8 +182,8 @@ export default function SingerDetailPage() {
               </div>
             </div>
           </div>
-          <div className="flex gap-3">
-            {singer.can_edit_metadata && (
+          <div className="flex flex-wrap gap-3 w-full sm:w-auto">
+            {singer.can_edit_metadata && canEdit && (
               <button
                 onClick={openEditModal}
                 className="px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors flex items-center gap-2"
@@ -179,6 +205,7 @@ export default function SingerDetailPage() {
               </svg>
               YouTube
             </a>
+            {canSync && (
             <div className="flex gap-2">
               <select
                 value={syncMode}
@@ -199,6 +226,7 @@ export default function SingerDetailPage() {
                 {syncMutation.isPending ? '同期中...' : '同期'}
               </button>
             </div>
+            )}
           </div>
         </div>
 
@@ -328,8 +356,9 @@ export default function SingerDetailPage() {
                 <select
                   value={processedFilter}
                   onChange={(e) => {
-                    setProcessedFilter(e.target.value as ProcessedFilter);
-                    setStreamPage(1);
+                    const v = e.target.value;
+                    // フィルタ変更時は1ページ目へ戻す（page キーを削除）
+                    updateParams({ processed: v === 'all' ? null : v, page: null });
                   }}
                   className="text-sm border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
                 >
@@ -344,8 +373,8 @@ export default function SingerDetailPage() {
                 <select
                   value={hiddenFilter}
                   onChange={(e) => {
-                    setHiddenFilter(e.target.value as HiddenFilter);
-                    setStreamPage(1);
+                    const v = e.target.value;
+                    updateParams({ hidden: v === 'false' ? null : v, page: null });
                   }}
                   className="text-sm border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
                 >
@@ -375,7 +404,7 @@ export default function SingerDetailPage() {
                     }`}
                   >
                     {/* Thumbnail */}
-                    <div className="relative w-48 flex-shrink-0">
+                    <div className="relative w-28 sm:w-48 flex-shrink-0">
                       {stream.thumbnail_url ? (
                         <img
                           src={stream.thumbnail_url}
@@ -452,7 +481,7 @@ export default function SingerDetailPage() {
             </div>
           ) : (
             <>
-              <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
+              <div className="bg-white rounded-lg shadow-sm border overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">
                     <tr>

@@ -23,14 +23,14 @@ import (
 )
 
 type HolodexService struct {
-	client         *holodex.Client
-	youtubeClient  *youtube.Client
-	itunesClient   *itunes.Client
-	streamRepo     *repository.StreamRepository
-	singerRepo     *repository.SingerRepository
-	perfRepo       *repository.PerformanceRepository
-	songRepo       *repository.SongRepository
-	songItunesRepo *repository.SongItunesRepository
+	client               *holodex.Client
+	youtubeClient        *youtube.Client
+	itunesClient         *itunes.Client
+	streamRepo           *repository.StreamRepository
+	singerRepo           *repository.SingerRepository
+	perfRepo             *repository.PerformanceRepository
+	songRepo             *repository.SongRepository
+	songItunesRepo       *repository.SongItunesRepository
 	editorToken          string
 	aiClient             *ai.Client
 	normalizationService *NormalizationService
@@ -269,6 +269,7 @@ func (s *HolodexService) SyncChannel(channelID string, limit int, forceUpdate bo
 	offset := 0
 	totalVideos := 0
 
+	// 1) 自家頻道が投稿した歌枠（channel_id フィルタ）
 	for {
 		videos, err := s.client.GetAllStreams(channelID, pageSize, offset)
 		if err != nil {
@@ -282,30 +283,7 @@ func (s *HolodexService) SyncChannel(channelID string, limit int, forceUpdate bo
 
 		totalVideos += len(videos)
 		result.TotalStreams = totalVideos
-
-		for i, video := range videos {
-			result.Processed = offset + i + 1
-			logger.Infof("処理中 [%d/%d]: %s - %s", result.Processed, result.TotalStreams, video.ID, video.Title)
-
-			syncStatus, err := s.syncVideo(video, channelID, forceUpdate)
-			if err != nil {
-				// 記錄錯誤但繼續處理
-				logger.Warnf("同期失敗 (video: %s): %v", video.ID, err)
-				result.Skipped = append(result.Skipped, video.ID)
-				continue
-			}
-
-			switch syncStatus {
-			case "new":
-				result.NewStreams = append(result.NewStreams, video.ID)
-				result.SyncedCount++
-			case "updated":
-				result.Updated = append(result.Updated, video.ID)
-				result.SyncedCount++
-			case "skipped":
-				result.Skipped = append(result.Skipped, video.ID)
-			}
-		}
+		s.applySyncedVideos(videos, channelID, forceUpdate, result)
 
 		// 如果返回的數量少於 pageSize，表示已經是最後一頁
 		if len(videos) < pageSize {
@@ -315,12 +293,66 @@ func (s *HolodexService) SyncChannel(channelID string, limit int, forceUpdate bo
 		offset += pageSize
 	}
 
+	// 2) 他チャンネルの枠にゲスト参加した歌枠（mentioned_channel_id）。
+	//    別チャンネル投稿なので上の channel_id 取得では拾えない。
+	//    取得失敗は致命的ではないため、ここまでの結果を保持して続行する。
+	collabOffset := 0
+	for {
+		collabs, err := s.client.GetChannelCollabs(channelID, pageSize, collabOffset)
+		if err != nil {
+			logger.Warnf("コラボ取得失敗 (channel: %s): %v", channelID, err)
+			break
+		}
+
+		if len(collabs) == 0 {
+			break
+		}
+
+		totalVideos += len(collabs)
+		result.TotalStreams = totalVideos
+		s.applySyncedVideos(collabs, channelID, forceUpdate, result)
+
+		if len(collabs) < pageSize {
+			break
+		}
+
+		collabOffset += pageSize
+	}
+
 	result.InProgress = false
 	result.Message = fmt.Sprintf("同期完了: %d 件新規, %d 件更新, %d 件スキップ",
 		len(result.NewStreams), len(result.Updated), len(result.Skipped))
 	logger.Infof("チャンネル同期完了: %s - %s", channelID, result.Message)
 
 	return result, nil
+}
+
+// applySyncedVideos 取得済みの動画群を syncVideo で処理し、結果を集計する。
+// channelID は擁有者が video から取れない場合の後備。自家投稿・コラボ両方で共用する。
+func (s *HolodexService) applySyncedVideos(videos []holodex.Video, channelID string, forceUpdate bool, result *dto.SyncHolodexResponse) {
+	for _, video := range videos {
+		result.Processed++
+		logger.Infof("処理中 [%d/%d]: %s - %s", result.Processed, result.TotalStreams, video.ID, video.Title)
+
+		syncStatus, err := s.syncVideo(video, channelID, forceUpdate)
+		if err != nil {
+			// 記錄錯誤但繼續處理
+			logger.Warnf("同期失敗 (video: %s): %v", video.ID, err)
+			result.Skipped = append(result.Skipped, video.ID)
+			continue
+		}
+
+		switch syncStatus {
+		case "new":
+			result.NewStreams = append(result.NewStreams, video.ID)
+			result.SyncedCount++
+		case "updated":
+			result.Updated = append(result.Updated, video.ID)
+			result.SyncedCount++
+		case "skipped":
+			result.Skipped = append(result.Skipped, video.ID)
+		}
+	}
 }
 
 // syncVideo 同步單一影片
@@ -384,9 +416,29 @@ func (s *HolodexService) syncVideo(video holodex.Video, channelID string, forceU
 		s.streamRepo.AddTag(video.ID, video.TopicID)
 	}
 
+	// タイトルの文字列マッチによる自動タグ付け（Holodex topic で拾えない種別を補完・追加のみ）
+	if _, err := s.streamRepo.ApplyTagRulesToStream(video.ID); err != nil {
+		logger.Warnf("apply tag rules failed (video: %s): %v", video.ID, err)
+	}
+
+	// 影片擁有者（上傳頻道）。collab 影片的擁有者是主辦頻道，不是被同步的頻道，
+	// 因此優先從 video 取得，取不到時才退回傳入的 channelID。
+	ownerID := channelID
+	if video.Channel != nil && video.Channel.ID != "" {
+		ownerID = video.Channel.ID
+	} else if video.ChannelID != "" {
+		ownerID = video.ChannelID
+	}
+	// 擁有者與被同步的頻道不同（＝collab，主辦頻道是別人）時，
+	// stream_singers 有指向 singers 的外鍵，需先 upsert 擁有者頻道。
+	// （同步自家頻道時擁有者已在 SyncChannel/SyncVideo 先 upsert，故略過以免用較少的清單資料覆蓋）
+	if ownerID != channelID && video.Channel != nil && video.Channel.ID == ownerID {
+		s.singerRepo.Upsert(s.singerFromHolodexChannel(video.Channel))
+	}
+
 	// 處理 mentions -> 同步參與者
 	// 先同步所有被提及的頻道，然後設定為此直播的參與者
-	singerIDs := []string{channelID} // 頻道擁有者一定要包含
+	singerIDs := []string{ownerID} // 頻道擁有者一定要包含
 
 	for _, mention := range video.Mentions {
 		// 同步被提及的頻道為 Singer
@@ -421,7 +473,7 @@ func (s *HolodexService) syncVideo(video holodex.Video, channelID string, forceU
 	}
 
 	// 設定此直播的所有參與者
-	if err := s.streamRepo.SetSingers(video.ID, singerIDs, channelID); err != nil {
+	if err := s.streamRepo.SetSingers(video.ID, singerIDs, ownerID); err != nil {
 		// 記錄錯誤但不中斷同步
 		fmt.Printf("set stream singers error: %v\n", err)
 	}

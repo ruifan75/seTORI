@@ -227,6 +227,28 @@ func (c *Client) GetAllStreams(channelID string, limit int, offset int) ([]Video
 	return videos, nil
 }
 
+// GetChannelCollabs はこのチャンネルがコラボ参加した歌枠を取得する。
+// mentioned_channel_id は「他チャンネルが投稿し、このチャンネルを mention した動画」を返し、
+// 自チャンネル投稿は除外される。GetAllStreams（channel_id）と相補的に使うことで、
+// 別チャンネルのコラボ配信（例：他の人の枠にゲスト出演した歌枠）も取り込める。
+func (c *Client) GetChannelCollabs(channelID string, limit int, offset int) ([]Video, error) {
+	params := url.Values{}
+	params.Set("mentioned_channel_id", channelID)
+	params.Set("type", "stream")
+	params.Set("limit", fmt.Sprintf("%d", limit))
+	params.Set("offset", fmt.Sprintf("%d", offset))
+	params.Set("include", "songs,mentions")
+	params.Set("status", "past")
+
+	var videos []Video
+	err := c.get("/videos", params, &videos)
+	if err != nil {
+		return nil, fmt.Errorf("get channel collabs: %w", err)
+	}
+
+	return videos, nil
+}
+
 // get GET リクエストを実行
 func (c *Client) get(endpoint string, params url.Values, result interface{}) error {
 	// rate limiter で送信可能になるまで待機

@@ -4,6 +4,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/ruifan75/setori/internal/config"
 	"github.com/ruifan75/setori/internal/database"
@@ -45,6 +46,22 @@ func main() {
 
 	// ルーターを設定
 	router := handler.NewRouter(db, cfg)
+
+	// 初期管理者アカウントをブートストラップ（ユーザーが 0 件のときのみ作成）
+	if err := router.AuthService().EnsureBootstrapAdmin(cfg.BootstrapAdminUser, cfg.BootstrapAdminPass); err != nil {
+		logger.Errorf("初期管理者の作成に失敗しました: %v", err)
+		os.Exit(1)
+	}
+
+	// 期限切れセッションを定期的に掃除
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		router.AuthService().PurgeExpiredSessions()
+		for range ticker.C {
+			router.AuthService().PurgeExpiredSessions()
+		}
+	}()
 
 	// サーバーを起動
 	port := os.Getenv("PORT")

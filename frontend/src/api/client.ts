@@ -31,10 +31,19 @@ import type {
   FilterKeyword,
   StreamTag,
   PerformanceTag,
+  TagKeywordRule,
+  GlobalSearchResponse,
+  TagPerformanceListResponse,
   AIProvider,
   AIProviderInput,
   AIModelInfo,
   LogsResponse,
+  AuthUser,
+  LoginResponse,
+  Role,
+  PermissionInfo,
+  CreateUserRequest,
+  UpdateUserRequest,
 } from './types';
 
 const DEFAULT_API_BASE_URL =
@@ -50,19 +59,38 @@ const api = axios.create({
   },
 });
 
-// 認證攔截器 - 若有設定 VITE_API_TOKEN，附帶 Bearer token（後端啟用 API_AUTH_TOKEN 時需要）
-const API_TOKEN = import.meta.env.VITE_API_TOKEN;
-if (API_TOKEN) {
-  api.interceptors.request.use((config) => {
-    config.headers.Authorization = `Bearer ${API_TOKEN}`;
-    return config;
-  });
+// 認證：ログイン中のセッショントークンを保持。無い場合は環境変数 VITE_API_TOKEN
+// （旧来の静的トークン）にフォールバックする。auth store が setAuthToken で更新する。
+const ENV_API_TOKEN = import.meta.env.VITE_API_TOKEN as string | undefined;
+let authToken: string | null = null;
+
+export function setAuthToken(token: string | null) {
+  authToken = token;
+}
+
+api.interceptors.request.use((config) => {
+  const token = authToken || ENV_API_TOKEN;
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+// セッション失効（401）時に呼ばれるハンドラ。auth store が登録する。
+let onUnauthorized: (() => void) | null = null;
+export function setUnauthorizedHandler(fn: (() => void) | null) {
+  onUnauthorized = fn;
 }
 
 // 錯誤攔截器 - 提取後端錯誤訊息
 api.interceptors.response.use(
   (response) => response,
   (error) => {
+    const url: string = error.config?.url ?? '';
+    // ログイン以外で 401 の場合はセッション失効とみなしてログアウト処理を促す
+    if (error.response?.status === 401 && !url.includes('/api/auth/login')) {
+      onUnauthorized?.();
+    }
     // 提取後端回傳的錯誤訊息
     if (error.response?.data?.error) {
       error.message = error.response.data.error;
@@ -330,6 +358,44 @@ export const tagApi = {
   deletePerformanceTag: async (id: string): Promise<void> => {
     await api.delete(`/api/performance-tags/${id}`);
   },
+
+  // タグが付いた配信一覧（タグ検索ページ）
+  getStreamsByTag: async (tagId: string, page = 1, limit = 20): Promise<StreamListResponse> => {
+    const params = new URLSearchParams({ page: String(page), limit: String(limit) });
+    const { data } = await api.get(`/api/stream-tags/${encodeURIComponent(tagId)}/streams?${params}`);
+    return data;
+  },
+
+  // タグが付いた演出一覧（タグ検索ページ）
+  getPerformancesByTag: async (tagId: string, page = 1, limit = 20): Promise<TagPerformanceListResponse> => {
+    const params = new URLSearchParams({ page: String(page), limit: String(limit) });
+    const { data } = await api.get(`/api/performance-tags/${encodeURIComponent(tagId)}/performances?${params}`);
+    return data;
+  },
+};
+
+// ========== タイトル自動タグ付けルール API ==========
+
+export const tagRuleApi = {
+  list: async (): Promise<TagKeywordRule[]> => {
+    const { data } = await api.get('/api/tag-keyword-rules');
+    return data;
+  },
+
+  create: async (tagId: string, keyword: string): Promise<TagKeywordRule> => {
+    const { data } = await api.post('/api/tag-keyword-rules', { tag_id: tagId, keyword });
+    return data;
+  },
+
+  delete: async (id: number): Promise<void> => {
+    await api.delete(`/api/tag-keyword-rules/${id}`);
+  },
+
+  // 全配信にルールを適用（既存配信へのバックフィル）。追加されたタグ数を返す。
+  backfill: async (): Promise<{ message: string; added: number }> => {
+    const { data } = await api.post('/api/tag-rules/backfill');
+    return data;
+  },
 };
 
 // ========== AI Provider API ==========
@@ -377,6 +443,89 @@ export const logsApi = {
 
   setLevel: async (level: string): Promise<{ level: string }> => {
     const { data } = await api.put('/api/logs/level', { level });
+    return data;
+  },
+};
+
+// ========== グローバル検索 API ==========
+
+export const searchApi = {
+  global: async (q: string, limit = 5): Promise<GlobalSearchResponse> => {
+    const params = new URLSearchParams({ q, limit: String(limit) });
+    const { data } = await api.get(`/api/search?${params}`);
+    return data;
+  },
+};
+
+// ========== 認證 API ==========
+
+export const authApi = {
+  login: async (username: string, password: string): Promise<LoginResponse> => {
+    const { data } = await api.post('/api/auth/login', { username, password });
+    return data;
+  },
+
+  logout: async (): Promise<void> => {
+    await api.post('/api/auth/logout');
+  },
+
+  me: async (): Promise<AuthUser> => {
+    const { data } = await api.get('/api/auth/me');
+    return data;
+  },
+};
+
+// ========== ユーザー管理 API（要 users:manage） ==========
+
+export const userApi = {
+  list: async (): Promise<AuthUser[]> => {
+    const { data } = await api.get('/api/users');
+    return data;
+  },
+
+  create: async (req: CreateUserRequest): Promise<AuthUser> => {
+    const { data } = await api.post('/api/users', req);
+    return data;
+  },
+
+  update: async (id: string, req: UpdateUserRequest): Promise<AuthUser> => {
+    const { data } = await api.put(`/api/users/${id}`, req);
+    return data;
+  },
+
+  changePassword: async (id: string, password: string): Promise<void> => {
+    await api.put(`/api/users/${id}/password`, { password });
+  },
+
+  delete: async (id: string): Promise<void> => {
+    await api.delete(`/api/users/${id}`);
+  },
+};
+
+// ========== ロール管理 API（要 users:manage） ==========
+
+export const roleApi = {
+  list: async (): Promise<Role[]> => {
+    const { data } = await api.get('/api/roles');
+    return data;
+  },
+
+  create: async (name: string, description: string, permissions: string[]): Promise<Role> => {
+    const { data } = await api.post('/api/roles', { name, description, permissions });
+    return data;
+  },
+
+  update: async (id: string, description: string, permissions: string[]): Promise<Role> => {
+    const { data } = await api.put(`/api/roles/${id}`, { description, permissions });
+    return data;
+  },
+
+  delete: async (id: string): Promise<void> => {
+    await api.delete(`/api/roles/${id}`);
+  },
+
+  listPermissions: async (): Promise<PermissionInfo[]> => {
+    const { data } = await api.get('/api/permissions');
     return data;
   },
 };
