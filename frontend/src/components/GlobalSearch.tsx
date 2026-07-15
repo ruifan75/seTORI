@@ -132,9 +132,9 @@ export default function GlobalSearch({ autoFocus = false }: { autoFocus?: boolea
                 <button
                   onClick={() => syncMutation.mutate(data.video_id!)}
                   disabled={syncMutation.isPending}
-                  className="w-full text-left px-3 py-2 rounded-lg bg-emerald-50 hover:bg-emerald-100 transition-colors disabled:opacity-60"
+                  className="w-full text-left px-3 py-2 rounded-lg bg-indigo-50 hover:bg-indigo-100 transition-colors disabled:opacity-60"
                 >
-                  <span className="text-sm font-medium text-emerald-700">
+                  <span className="text-sm font-medium text-indigo-700">
                     {syncMutation.isPending ? '同期中...' : '未登録の動画 — Holodexから同期して開く'}
                   </span>
                   <span className="block text-xs text-gray-500 font-mono mt-0.5">{data.video_id}</span>

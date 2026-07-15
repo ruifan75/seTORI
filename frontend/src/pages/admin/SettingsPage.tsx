@@ -658,7 +658,7 @@ function TagRuleSection() {
         <button
           onClick={() => backfillMutation.mutate()}
           disabled={backfillMutation.isPending}
-          className="shrink-0 px-3 py-1.5 text-sm text-white font-medium rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50"
+          className="shrink-0 px-3 py-1.5 text-sm text-white font-medium rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50"
           title="既存の全配信にルールを適用します"
         >
           {backfillMutation.isPending ? '適用中...' : '全配信に適用'}
