@@ -514,6 +514,7 @@ export default function SongDetailPage() {
       artUrl: song.arts,
       singerNames: perf.singers?.map((s) => s.name) ?? [],
       streamTitle: perf.stream_title,
+      streamDate: perf.stream_date,
       start: perf.start_seconds,
       end: perf.end_seconds,
     }));

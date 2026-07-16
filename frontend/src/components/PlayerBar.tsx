@@ -161,10 +161,19 @@ export default function PlayerBar() {
                 <span className="w-8 h-8 bg-gray-100 rounded shrink-0" />
               )}
               <span className="flex-1 min-w-0">
-                <span className={`block text-sm truncate ${i === index ? 'text-indigo-700 font-medium' : 'text-gray-900'}`}>
-                  {t.songName}
+                <span className="flex items-baseline gap-1.5 min-w-0">
+                  <span className={`text-sm truncate ${i === index ? 'text-indigo-700 font-medium' : 'text-gray-900'}`}>
+                    {t.songName}
+                  </span>
+                  {t.artist && <span className="text-[11px] text-gray-400 truncate shrink-0">{t.artist}</span>}
                 </span>
-                <span className="block text-xs text-gray-400 truncate">{t.artist}</span>
+                {/* 同一曲を複数配信から再生するケースでは配信タイトル・日付が識別子になる */}
+                <span className="block text-xs text-gray-400 truncate">
+                  {t.streamDate && (
+                    <span className="font-mono">{new Date(t.streamDate).toLocaleDateString('ja-JP')} · </span>
+                  )}
+                  {t.streamTitle}
+                </span>
               </span>
               <span className="text-xs font-mono text-gray-400 shrink-0">
                 {t.end > t.start ? fmt(t.end - t.start) : '--:--'}

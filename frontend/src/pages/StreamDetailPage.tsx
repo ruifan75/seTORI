@@ -1817,6 +1817,7 @@ export default function StreamDetailPage() {
                       artUrl: perf.arts,
                       singerNames: perf.singers?.map((s) => s.name) ?? [],
                       streamTitle: stream.title,
+                      streamDate: stream.stream_date,
                       start: perf.start_seconds,
                       end: perf.end_seconds,
                     })),

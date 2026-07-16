@@ -10,6 +10,7 @@ export interface PlayerTrack {
   artUrl?: string;
   singerNames: string[];
   streamTitle?: string;
+  streamDate?: string; // 配信日（同一曲を複数配信から再生するときの区別用）
   start: number;
   end: number; // 0 の場合は動画終了まで
 }
