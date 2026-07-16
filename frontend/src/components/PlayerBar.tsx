@@ -142,7 +142,17 @@ export default function PlayerBar() {
         <div className="absolute bottom-full right-2 mb-1 w-[26rem] max-w-[calc(100vw-1rem)] max-h-80 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-xl">
           <div className="px-3 py-2 border-b flex items-center justify-between sticky top-0 bg-white">
             <span className="text-sm font-medium text-gray-700">再生キュー（{queue.length}曲）</span>
-            <button onClick={() => setQueueOpen(false)} className="text-gray-400 hover:text-gray-600">✕</button>
+            <span className="flex items-center gap-3">
+              <Link
+                to="/queue"
+                onClick={() => setQueueOpen(false)}
+                className="text-xs text-indigo-600 hover:text-indigo-800"
+                title="キューを全画面で表示"
+              >
+                拡大表示 →
+              </Link>
+              <button onClick={() => setQueueOpen(false)} className="text-gray-400 hover:text-gray-600">✕</button>
+            </span>
           </div>
           {queue.map((t, i) => (
             <div
@@ -160,7 +170,12 @@ export default function PlayerBar() {
               ) : (
                 <span className="w-8 h-8 bg-gray-100 rounded shrink-0" />
               )}
-              <span className="flex-1 min-w-0">
+              <span
+                className="flex-1 min-w-0"
+                title={`${t.songName}${t.artist ? ` / ${t.artist}` : ''}\n${
+                  t.streamDate ? `${new Date(t.streamDate).toLocaleDateString('ja-JP')} · ` : ''
+                }${t.streamTitle ?? ''}`}
+              >
                 <span className="flex items-baseline gap-1.5 min-w-0">
                   <span className={`text-sm truncate ${i === index ? 'text-indigo-700 font-medium' : 'text-gray-900'}`}>
                     {t.songName}
@@ -211,18 +226,41 @@ export default function PlayerBar() {
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 min-w-0">
             {track.songId ? (
-              <Link to={`/songs/${track.songId}`} className="text-sm font-medium text-gray-900 hover:text-indigo-600 truncate">
+              <Link to={`/songs/${track.songId}`} title={track.songName} className="text-sm font-medium text-gray-900 hover:text-indigo-600 truncate">
                 {track.songName}
               </Link>
             ) : (
-              <span className="text-sm font-medium text-gray-900 truncate">{track.songName}</span>
+              <span className="text-sm font-medium text-gray-900 truncate" title={track.songName}>{track.songName}</span>
             )}
-            <span className="text-xs text-gray-500 truncate hidden md:inline">{track.artist}</span>
+            {track.artist && (
+              <Link
+                to={`/artists?search=${encodeURIComponent(track.artist)}`}
+                title={`アーティスト: ${track.artist}`}
+                className="text-xs text-gray-500 hover:text-indigo-600 truncate hidden md:inline"
+              >
+                {track.artist}
+              </Link>
+            )}
           </div>
           <div className="flex items-center gap-2 text-xs text-gray-400 min-w-0">
-            {track.singerNames.length > 0 && <span className="truncate">{track.singerNames.join('、')}</span>}
+            {track.singers.length > 0 && (
+              <span className="truncate shrink-0">
+                {track.singers.map((s, i) => (
+                  <span key={s.id}>
+                    {i > 0 && '、'}
+                    <Link to={`/singers/${s.id}`} className="hover:text-indigo-600" title={s.name}>
+                      {s.name}
+                    </Link>
+                  </span>
+                ))}
+              </span>
+            )}
             {track.streamTitle && (
-              <Link to={`/streams/${track.streamId}`} className="truncate hover:text-gray-600 hidden lg:inline">
+              <Link
+                to={`/streams/${track.streamId}`}
+                title={track.streamTitle}
+                className="truncate hover:text-gray-600 hidden lg:inline"
+              >
                 {track.streamTitle}
               </Link>
             )}

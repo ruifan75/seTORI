@@ -51,7 +51,7 @@ export default function TagPage() {
       songName: p.song_name,
       artist: p.original_artist,
       artUrl: p.arts,
-      singerNames: p.singers.map((s) => s.name),
+      singers: p.singers.map((s) => ({ id: s.id, name: s.name })),
       streamTitle: p.stream_title,
       streamDate: p.stream_date,
       start: p.start_seconds,

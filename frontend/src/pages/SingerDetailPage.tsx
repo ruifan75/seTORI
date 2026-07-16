@@ -84,7 +84,7 @@ export default function SingerDetailPage() {
       songId: perf.song_id,
       songName: perf.song_name ?? '(不明)',
       artist: '',
-      singerNames: perf.singers?.map((s) => s.name) ?? [],
+      singers: perf.singers?.map((s) => ({ id: s.id, name: s.name })) ?? [],
       streamTitle: perf.stream_title,
       streamDate: perf.stream_date,
       start: perf.start_seconds,

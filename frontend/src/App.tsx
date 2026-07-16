@@ -17,6 +17,7 @@ import TagPage from './pages/TagPage';
 import ArtistsPage from './pages/ArtistsPage';
 import ArtistDetailPage from './pages/ArtistDetailPage';
 import SearchPage from './pages/SearchPage';
+import QueuePage from './pages/QueuePage';
 import SyncPage from './pages/admin/SyncPage';
 import SettingsPage from './pages/admin/SettingsPage';
 import LogsPage from './pages/admin/LogsPage';
@@ -56,6 +57,7 @@ function App() {
               <Route path="artists" element={<ArtistsPage />} />
               <Route path="artists/:id" element={<ArtistDetailPage />} />
               <Route path="search" element={<SearchPage />} />
+              <Route path="queue" element={<QueuePage />} />
               <Route
                 path="admin/sync"
                 element={<RequirePermission permission={PERM.SYNC_RUN}><SyncPage /></RequirePermission>}

@@ -8,7 +8,7 @@ export interface PlayerTrack {
   songName: string;
   artist: string;
   artUrl?: string;
-  singerNames: string[];
+  singers: { id: string; name: string }[]; // 歌唱チャンネル（リンク用に id も保持）
   streamTitle?: string;
   streamDate?: string; // 配信日（同一曲を複数配信から再生するときの区別用）
   start: number;
