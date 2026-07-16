@@ -42,6 +42,7 @@ type Router struct {
 	aiProviderRepo       *repository.AIProviderRepository
 	chatEndService       *service.ChatEndService
 	artistService        *service.ArtistService
+	batchAnalyzeService  *service.BatchAnalyzeService
 	authService          *service.AuthService
 }
 
@@ -75,6 +76,7 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	commentService := service.NewCommentService(holodexService, streamRepo, filterKeywordRepo, aiService, normalizationService, chatEndService)
 	// HolodexService も AnalyzeHolodexSongs で正規化・拍手 end を実行する（holodex_hash キャッシュ）
 	holodexService.SetAnalysisServices(normalizationService, chatEndService)
+	batchAnalyzeService := service.NewBatchAnalyzeService(commentService, streamRepo)
 	performanceService := service.NewPerformanceService(perfRepo, songRepo, songItunesRepo, artistRepo)
 	itunesClient := itunes.NewClient()
 	endTimeEstimateService := service.NewEndTimeEstimateService(itunesClient)
@@ -97,6 +99,7 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 		aiProviderRepo:       aiProviderRepo,
 		chatEndService:       chatEndService,
 		artistService:        artistService,
+		batchAnalyzeService:  batchAnalyzeService,
 		authService:          authService,
 	}
 
@@ -135,6 +138,11 @@ func (r *Router) setupRoutes() {
 	// 複合条件の配信検索（キーワード × チャンネル × タグ AND）。
 	// リテラルパターンのため /api/streams/{id} より優先マッチする。
 	r.mux.HandleFunc("GET /api/streams/search", r.handleSearchStreams)
+
+	// 未処理配信の一括プレ分析（背景ジョブ、singleton）
+	r.mux.HandleFunc("POST /api/streams/batch-analyze", r.handleStartBatchAnalyze)
+	r.mux.HandleFunc("POST /api/streams/batch-analyze/cancel", r.handleCancelBatchAnalyze)
+	r.mux.HandleFunc("GET /api/streams/batch-analyze/status", r.handleBatchAnalyzeStatus)
 
 	// API routes - Songs
 	r.mux.HandleFunc("GET /api/songs", r.handleListSongs)
@@ -398,6 +406,27 @@ func (r *Router) handleSearchStreams(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	respondJSON(w, http.StatusOK, result)
+}
+
+// ========== Batch Analyze Handlers ==========
+
+// handleStartBatchAnalyze 未処理配信の一括プレ分析を開始する（content:edit）。
+func (r *Router) handleStartBatchAnalyze(w http.ResponseWriter, req *http.Request) {
+	if err := r.batchAnalyzeService.Start(); err != nil {
+		respondError(w, http.StatusConflict, err.Error())
+		return
+	}
+	logger.Infof("batch analyze started")
+	respondJSON(w, http.StatusAccepted, map[string]string{"message": "一括分析を開始しました"})
+}
+
+func (r *Router) handleCancelBatchAnalyze(w http.ResponseWriter, req *http.Request) {
+	r.batchAnalyzeService.Cancel()
+	respondJSON(w, http.StatusOK, map[string]string{"message": "キャンセルを要求しました"})
+}
+
+func (r *Router) handleBatchAnalyzeStatus(w http.ResponseWriter, req *http.Request) {
+	respondJSON(w, http.StatusOK, r.batchAnalyzeService.Status())
 }
 
 // ========== Artist Handlers ==========

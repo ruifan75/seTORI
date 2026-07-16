@@ -414,6 +414,30 @@ func (r *StreamRepository) FindByTagID(tagID string, limit, offset int) ([]model
 	return streams, total, rows.Err()
 }
 
+// FindUnprocessedWithComments は未処理・非隠しで comment_raw を持つ配信（id/title のみ）を
+// 古い順に返す（一括分析の対象抽出）。
+func (r *StreamRepository) FindUnprocessedWithComments() ([]models.Stream, error) {
+	rows, err := r.db.Query(`
+		SELECT id, title FROM streams
+		WHERE is_processed = FALSE AND is_hidden = FALSE
+		  AND comment_raw IS NOT NULL AND comment_raw != 'null'
+		ORDER BY stream_date ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("query unprocessed streams: %w", err)
+	}
+	defer rows.Close()
+
+	var streams []models.Stream
+	for rows.Next() {
+		var s models.Stream
+		if err := rows.Scan(&s.ID, &s.Title); err != nil {
+			return nil, fmt.Errorf("scan stream: %w", err)
+		}
+		streams = append(streams, s)
+	}
+	return streams, rows.Err()
+}
+
 // SearchStreams は複合条件（タイトル部分一致 × 参加チャンネル × タグの AND）で配信を検索する。
 // Holodex の検索（org/topic/channel の組み合わせ）に相当。非表示は除外。
 func (r *StreamRepository) SearchStreams(q, singerID string, tagIDs []string, limit, offset int) ([]models.Stream, int, error) {

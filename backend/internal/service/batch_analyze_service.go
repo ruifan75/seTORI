@@ -1,0 +1,176 @@
+package service
+
+import (
+	"errors"
+	"sync"
+	"time"
+
+	"github.com/ruifan75/setori/internal/dto"
+	"github.com/ruifan75/setori/internal/logger"
+	"github.com/ruifan75/setori/internal/repository"
+)
+
+// BatchAnalyzeService は未処理配信の一括プレ分析ジョブ（singleton）。
+// 逐次で AnalyzeComments（抽出→AI正規化→拍手end→キャッシュ）を回す。
+// setlist の自動作成はしない：結果はキャッシュに載るだけで、確認・保存は人が行う。
+//
+// AI 冷却への配慮：
+//   - 配信間に固定インターバルを挟んでリクエストを平滑化
+//   - AI が失敗（全プロバイダー冷却等）した配信は、冷却明けを待って
+//     force=true（劣化キャッシュを無視）で再試行。規定回数失敗したら記録して先へ進む
+//   - キャッシュ済みの配信は AI を呼ばず秒で通過する（hash キャッシュ）
+type BatchAnalyzeService struct {
+	commentService *CommentService
+	streamRepo     *repository.StreamRepository
+
+	mu        sync.Mutex
+	running   bool
+	cancelled bool
+	status    dto.BatchAnalyzeStatus
+}
+
+const (
+	batchStreamInterval = 2 * time.Second  // 配信間のインターバル
+	batchCooldownWait   = 90 * time.Second // AI 失敗時の冷却待ち
+	batchMaxAttempts    = 3                // 配信ごとの最大試行回数
+)
+
+var ErrBatchAlreadyRunning = errors.New("一括分析は既に実行中です")
+
+func NewBatchAnalyzeService(commentService *CommentService, streamRepo *repository.StreamRepository) *BatchAnalyzeService {
+	return &BatchAnalyzeService{commentService: commentService, streamRepo: streamRepo}
+}
+
+// Start はジョブを開始する（実行中なら ErrBatchAlreadyRunning）。
+func (s *BatchAnalyzeService) Start() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.running {
+		return ErrBatchAlreadyRunning
+	}
+	s.running = true
+	s.cancelled = false
+	s.status = dto.BatchAnalyzeStatus{Running: true}
+
+	go s.run()
+	return nil
+}
+
+// Cancel は実行中のジョブに停止を要求する（処理中の1件が終わり次第停止）。
+func (s *BatchAnalyzeService) Cancel() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.running {
+		s.cancelled = true
+	}
+}
+
+// Status は進捗のスナップショットを返す。
+func (s *BatchAnalyzeService) Status() dto.BatchAnalyzeStatus {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.status
+}
+
+func (s *BatchAnalyzeService) isCancelled() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cancelled
+}
+
+func (s *BatchAnalyzeService) update(fn func(*dto.BatchAnalyzeStatus)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	fn(&s.status)
+}
+
+func (s *BatchAnalyzeService) run() {
+	defer func() {
+		s.mu.Lock()
+		s.running = false
+		s.status.Running = false
+		s.status.Current = ""
+		if s.cancelled {
+			s.status.Message = "キャンセルされました"
+		} else if s.status.Failed > 0 {
+			s.status.Message = "完了（一部失敗あり）"
+		} else {
+			s.status.Message = "完了"
+		}
+		s.mu.Unlock()
+		logger.Infof("[batch-analyze] finished: done=%d failed=%d", s.status.Done, s.status.Failed)
+	}()
+
+	streams, err := s.streamRepo.FindUnprocessedWithComments()
+	if err != nil {
+		logger.Warnf("[batch-analyze] list streams failed: %v", err)
+		s.update(func(st *dto.BatchAnalyzeStatus) { st.Message = "対象の取得に失敗しました" })
+		return
+	}
+
+	s.update(func(st *dto.BatchAnalyzeStatus) { st.Total = len(streams) })
+	logger.Infof("[batch-analyze] started: %d streams", len(streams))
+
+	for _, stream := range streams {
+		if s.isCancelled() {
+			return
+		}
+		s.update(func(st *dto.BatchAnalyzeStatus) { st.Current = stream.Title })
+
+		if s.processOne(stream.ID) {
+			s.update(func(st *dto.BatchAnalyzeStatus) { st.Done++ })
+		} else if s.isCancelled() {
+			return
+		} else {
+			s.update(func(st *dto.BatchAnalyzeStatus) {
+				st.Failed++
+				st.FailedIDs = append(st.FailedIDs, stream.ID)
+			})
+		}
+
+		time.Sleep(batchStreamInterval)
+	}
+}
+
+// processOne は1配信を分析する。AI 劣化（warning あり）は冷却待ち後に force で再試行。
+func (s *BatchAnalyzeService) processOne(videoID string) bool {
+	force := false
+	for attempt := 1; attempt <= batchMaxAttempts; attempt++ {
+		if s.isCancelled() {
+			return false
+		}
+
+		resp, err := s.commentService.AnalyzeComments(videoID, force)
+		if err == nil && resp.Warning == "" {
+			return true
+		}
+		if err != nil {
+			logger.Warnf("[batch-analyze] %s attempt %d failed: %v", videoID, attempt, err)
+		} else {
+			logger.Warnf("[batch-analyze] %s attempt %d AI degraded: %s", videoID, attempt, resp.Warning)
+		}
+
+		if attempt == batchMaxAttempts {
+			return false
+		}
+		// 劣化結果がキャッシュに載っているため、次は force で作り直す。
+		// AI プロバイダーの冷却明けを待ってから再試行する。
+		force = true
+		if !s.sleepInterruptible(batchCooldownWait) {
+			return false
+		}
+	}
+	return false
+}
+
+// sleepInterruptible はキャンセルに反応しつつ待機する。継続可否を返す。
+func (s *BatchAnalyzeService) sleepInterruptible(d time.Duration) bool {
+	const step = time.Second
+	for waited := time.Duration(0); waited < d; waited += step {
+		if s.isCancelled() {
+			return false
+		}
+		time.Sleep(step)
+	}
+	return !s.isCancelled()
+}

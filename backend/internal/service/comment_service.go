@@ -100,7 +100,7 @@ func (s *CommentService) AnalyzeComments(videoID string, force bool) (*dto.Analy
 	}
 
 	// 5. 折り込んだ正規化（AI 正規化＋DB 照合し、結果を各曲に埋め込む）
-	s.normalizeInto(songs)
+	aiWarning := s.normalizeInto(songs)
 
 	// 6. live chat の拍手で end を推定（start 基準でマッチ。利用不可なら据え置き）
 	if s.chatEndService != nil {
@@ -121,13 +121,14 @@ func (s *CommentService) AnalyzeComments(videoID string, force bool) (*dto.Analy
 	}
 
 	logger.Infof("comment analysis completed for %s: %d songs", videoID, len(songs))
-	return &dto.AnalyzeCommentsResponse{Songs: songs}, nil
+	return &dto.AnalyzeCommentsResponse{Songs: songs, Warning: aiWarning}, nil
 }
 
 // normalizeInto 對 songs 跑 AI 正規化＋DB 照合，把結果填回每首 song（in-place）。
-func (s *CommentService) normalizeInto(songs []dto.CommentSong) {
+// AI が失敗して抽出のみになった場合は warning 文字列を返す（成功時は空）。
+func (s *CommentService) normalizeInto(songs []dto.CommentSong) string {
 	if s.normalizationService == nil || len(songs) == 0 {
-		return
+		return ""
 	}
 	items := make([]dto.AINormalizationItem, len(songs))
 	for i, sg := range songs {
@@ -136,7 +137,7 @@ func (s *CommentService) normalizeInto(songs []dto.CommentSong) {
 	resp, err := s.normalizationService.BatchAINormalization(items)
 	if err != nil {
 		logger.Warnf("[comment] normalization failed, keeping raw extraction: %v", err)
-		return
+		return fmt.Sprintf("AI正規化に失敗しました: %v", err)
 	}
 	if resp.Warning != "" {
 		logger.Infof("Normalization used fallback for some items: %s", resp.Warning)
@@ -161,6 +162,8 @@ func (s *CommentService) normalizeInto(songs []dto.CommentSong) {
 		songs[sug.Index].MatchedSongArtURL = sug.MatchedSongArtURL
 		songs[sug.Index].MatchedSongItunesID = sug.MatchedSongItunesID
 	}
+	// BatchAINormalization の Warning（AI 呼び出し失敗・応答解析失敗）をそのまま伝える
+	return resp.Warning
 }
 
 // hashBytes 計算 JSONB 內容的 sha256（空內容回傳空字串）。

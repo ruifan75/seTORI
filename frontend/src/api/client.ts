@@ -18,6 +18,7 @@ import type {
   SyncHolodexResponse,
   SongSuggestion,
   AnalyzeCommentsResponse,
+  BatchAnalyzeStatus,
   SuccessResponse,
   LoadHolodexSongsResponse,
   CreatePerformancesRequest,
@@ -259,6 +260,26 @@ export const commentApi = {
 
   analyze: async (videoId: string, force = false): Promise<AnalyzeCommentsResponse> => {
     const { data } = await api.post(`/api/streams/${videoId}/comments/analyze${force ? '?force=true' : ''}`);
+    return data;
+  },
+};
+
+// ========== 一括プレ分析 API ==========
+
+export const batchAnalyzeApi = {
+  // 未処理配信の一括プレ分析を開始（背景ジョブ・singleton）
+  start: async (): Promise<{ message: string }> => {
+    const { data } = await api.post('/api/streams/batch-analyze');
+    return data;
+  },
+
+  cancel: async (): Promise<{ message: string }> => {
+    const { data } = await api.post('/api/streams/batch-analyze/cancel');
+    return data;
+  },
+
+  status: async (): Promise<BatchAnalyzeStatus> => {
+    const { data } = await api.get('/api/streams/batch-analyze/status');
     return data;
   },
 };

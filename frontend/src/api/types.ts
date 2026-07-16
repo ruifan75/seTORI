@@ -288,6 +288,18 @@ export interface CommentSong {
 export interface AnalyzeCommentsResponse {
   songs: CommentSong[];
   raw_comments: string[];
+  warning?: string; // AI 正規化が失敗し抽出のみで返した場合
+}
+
+// 未処理配信の一括プレ分析ジョブの進捗
+export interface BatchAnalyzeStatus {
+  running: boolean;
+  total: number;
+  done: number;
+  failed: number;
+  current?: string;
+  failed_ids?: string[];
+  message?: string;
 }
 
 // ========== 直接パフォーマンス作成 ==========

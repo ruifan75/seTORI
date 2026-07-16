@@ -273,6 +273,20 @@ type CommentSong struct {
 type AnalyzeCommentsResponse struct {
 	Songs       []CommentSong `json:"songs"`
 	RawComments []string      `json:"raw_comments"`
+	// AI 正規化が失敗（全プロバイダー冷却等）し、抽出のみで返した場合に設定される。
+	// バッチ分析はこれを見て冷却待ち後に force 再試行する。
+	Warning string `json:"warning,omitempty"`
+}
+
+// BatchAnalyzeStatus 未処理配信の一括分析ジョブの進捗
+type BatchAnalyzeStatus struct {
+	Running   bool     `json:"running"`
+	Total     int      `json:"total"`
+	Done      int      `json:"done"`
+	Failed    int      `json:"failed"`
+	Current   string   `json:"current,omitempty"`    // 処理中の配信タイトル
+	FailedIDs []string `json:"failed_ids,omitempty"` // AI 失敗が解消しなかった配信
+	Message   string   `json:"message,omitempty"`
 }
 
 // ========== 直接建立演出 ==========

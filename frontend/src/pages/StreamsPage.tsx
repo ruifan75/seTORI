@@ -1,17 +1,44 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router-dom';
-import { streamApi } from '../api/client';
+import { streamApi, batchAnalyzeApi } from '../api/client';
 import Loading from '../components/ui/Loading';
 import Pagination from '../components/ui/Pagination';
 import Tag from '../components/ui/Tag';
+import { useToast } from '../components/ui/Toast';
+import { useAuthStore, hasPermission, PERM } from '../store/auth';
 
 export default function StreamsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const page = parseInt(searchParams.get('page') || '1');
+  const { showToast } = useToast();
+  const queryClient = useQueryClient();
+  const canEdit = hasPermission(useAuthStore((s) => s.user), PERM.CONTENT_EDIT);
 
   const { data, isLoading } = useQuery({
     queryKey: ['streams', page],
     queryFn: () => streamApi.list(page, 20),
+  });
+
+  // 一括プレ分析：実行中は 3 秒ごとに進捗をポーリング
+  const { data: batchStatus } = useQuery({
+    queryKey: ['batch-analyze-status'],
+    queryFn: batchAnalyzeApi.status,
+    enabled: canEdit,
+    refetchInterval: (query) => (query.state.data?.running ? 3000 : false),
+  });
+
+  const startBatchMutation = useMutation({
+    mutationFn: batchAnalyzeApi.start,
+    onSuccess: () => {
+      showToast('一括分析を開始しました（バックグラウンドで実行されます）', 'success');
+      queryClient.invalidateQueries({ queryKey: ['batch-analyze-status'] });
+    },
+    onError: (err: Error) => showToast(err.message, 'error'),
+  });
+
+  const cancelBatchMutation = useMutation({
+    mutationFn: batchAnalyzeApi.cancel,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['batch-analyze-status'] }),
   });
 
   const handlePageChange = (newPage: number) => {
@@ -20,7 +47,59 @@ export default function StreamsPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-3xl font-bold text-gray-900">歌枠一覧</h1>
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
+        <h1 className="text-3xl font-bold text-gray-900">歌枠一覧</h1>
+        {canEdit && !batchStatus?.running && (
+          <button
+            onClick={() => startBatchMutation.mutate()}
+            disabled={startBatchMutation.isPending}
+            title="未処理の配信をまとめてプレ分析します（抽出→AI正規化→拍手end をキャッシュ。setlist の作成は行いません）"
+            className="px-3 py-2 text-sm bg-indigo-50 text-indigo-700 border border-indigo-200 font-medium rounded-lg hover:bg-indigo-100 transition-colors disabled:opacity-50 shrink-0"
+          >
+            未処理を一括分析
+          </button>
+        )}
+      </div>
+
+      {/* 一括分析の進捗 */}
+      {canEdit && batchStatus && (batchStatus.running || batchStatus.total > 0) && (
+        <div className={`rounded-lg border p-3 text-sm flex flex-wrap items-center gap-3 ${
+          batchStatus.running ? 'bg-indigo-50 border-indigo-200' : 'bg-white border-gray-200'
+        }`}>
+          {batchStatus.running ? (
+            <>
+              <svg className="animate-spin h-4 w-4 text-indigo-500 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+              <span className="font-medium text-indigo-700">
+                一括分析中 {batchStatus.done + batchStatus.failed}/{batchStatus.total}
+              </span>
+              {batchStatus.current && (
+                <span className="text-gray-500 truncate max-w-md">{batchStatus.current}</span>
+              )}
+              <button
+                onClick={() => cancelBatchMutation.mutate()}
+                className="ml-auto text-xs text-gray-500 hover:text-gray-800 underline shrink-0"
+              >
+                キャンセル
+              </button>
+            </>
+          ) : (
+            <>
+              <span className="text-gray-600">
+                一括分析 {batchStatus.message}：成功 {batchStatus.done} 件
+                {batchStatus.failed > 0 && `・失敗 ${batchStatus.failed} 件`}
+              </span>
+              {batchStatus.failed > 0 && batchStatus.failed_ids && (
+                <span className="text-xs text-gray-400 truncate max-w-md" title={batchStatus.failed_ids.join(', ')}>
+                  （{batchStatus.failed_ids.slice(0, 3).join(', ')}{batchStatus.failed_ids.length > 3 ? ' …' : ''}）
+                </span>
+              )}
+            </>
+          )}
+        </div>
+      )}
 
       {isLoading ? (
         <Loading />
