@@ -235,16 +235,29 @@ export default function ArtistDetailPage() {
                 <tbody className="bg-white divide-y divide-gray-200">
                   {songs.map((song) => (
                     <tr key={song.id} className="hover:bg-gray-50">
-                      <td className="px-4 sm:px-6 py-4 max-w-0">
-                        <Link
-                          to={`/songs/${song.id}`}
-                          className="text-indigo-600 hover:text-indigo-900 font-medium block truncate"
-                        >
-                          {song.name}
-                        </Link>
-                        {song.name_reading && (
-                          <p className="text-xs text-gray-400 mt-0.5 truncate">{song.name_reading}</p>
-                        )}
+                      <td className="px-4 sm:px-6 py-3 max-w-0">
+                        <div className="flex items-center gap-3">
+                          {song.arts ? (
+                            <img src={song.arts} alt="" loading="lazy" className="w-10 h-10 object-cover rounded shrink-0" />
+                          ) : (
+                            <div className="w-10 h-10 bg-gray-100 rounded shrink-0 flex items-center justify-center">
+                              <svg className="w-5 h-5 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z" />
+                              </svg>
+                            </div>
+                          )}
+                          <div className="min-w-0">
+                            <Link
+                              to={`/songs/${song.id}`}
+                              className="text-indigo-600 hover:text-indigo-900 font-medium block truncate"
+                            >
+                              {song.name}
+                            </Link>
+                            {song.name_reading && (
+                              <p className="text-xs text-gray-400 mt-0.5 truncate">{song.name_reading}</p>
+                            )}
+                          </div>
+                        </div>
                       </td>
                       <td className="px-4 sm:px-6 py-4 text-right">
                         <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">

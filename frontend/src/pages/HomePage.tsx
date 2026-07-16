@@ -82,13 +82,24 @@ export default function HomePage() {
               <tbody className="bg-white divide-y divide-gray-200">
                 {songsData?.songs.map((song) => (
                   <tr key={song.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <Link
-                        to={`/songs/${song.id}`}
-                        className="text-indigo-600 hover:text-indigo-900 font-medium"
-                      >
-                        {song.name}
-                      </Link>
+                    <td className="px-6 py-3">
+                      <div className="flex items-center gap-3">
+                        {song.arts ? (
+                          <img src={song.arts} alt="" loading="lazy" className="w-10 h-10 object-cover rounded shrink-0" />
+                        ) : (
+                          <div className="w-10 h-10 bg-gray-100 rounded shrink-0 flex items-center justify-center">
+                            <svg className="w-5 h-5 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z" />
+                            </svg>
+                          </div>
+                        )}
+                        <Link
+                          to={`/songs/${song.id}`}
+                          className="text-indigo-600 hover:text-indigo-900 font-medium truncate"
+                        >
+                          {song.name}
+                        </Link>
+                      </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-gray-500">
                       {song.original_artist}
