@@ -8,6 +8,7 @@ import Pagination from '../components/ui/Pagination';
 import Tag from '../components/ui/Tag';
 import { useToast } from '../components/ui/Toast';
 import { useAuthStore, hasPermission, PERM } from '../store/auth';
+import { usePlayerStore, type PlayerTrack } from '../store/player';
 
 function formatTime(seconds: number): string {
   const h = Math.floor(seconds / 3600);
@@ -502,6 +503,23 @@ export default function SongDetailPage() {
 
   const { song, performances, pagination } = data;
 
+  // この曲の歌唱記録をグローバルプレイヤーのキューに載せて startIndex から再生
+  const playAll = (startIndex: number) => {
+    const tracks: PlayerTrack[] = performances.map((perf) => ({
+      performanceId: perf.id,
+      streamId: perf.stream_id,
+      songId: song.id,
+      songName: song.name,
+      artist: song.original_artist,
+      artUrl: song.arts,
+      singerNames: perf.singers?.map((s) => s.name) ?? [],
+      streamTitle: perf.stream_title,
+      start: perf.start_seconds,
+      end: perf.end_seconds,
+    }));
+    usePlayerStore.getState().playTracks(tracks, startIndex);
+  };
+
   return (
     <div className="space-y-6">
       {/* Song Header */}
@@ -855,7 +873,19 @@ export default function SongDetailPage() {
 
       {/* Performances List */}
       <div>
-        <h2 className="text-2xl font-bold text-gray-900 mb-4">歌唱履歴</h2>
+        <div className="flex items-center gap-3 mb-4">
+          <h2 className="text-2xl font-bold text-gray-900">歌唱履歴</h2>
+          {performances.length > 0 && (
+            <button
+              onClick={() => playAll(0)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm bg-indigo-600 text-white font-medium rounded-full hover:bg-indigo-700 transition-colors"
+              title="この曲の歌唱をまとめて連続再生"
+            >
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+              すべて再生
+            </button>
+          )}
+        </div>
 
         {performances.length === 0 ? (
           <div className="text-center py-12 text-gray-500 bg-white rounded-lg border">
@@ -864,18 +894,17 @@ export default function SongDetailPage() {
         ) : (
           <>
             <div className="space-y-4">
-              {performances.map((perf) => (
+              {performances.map((perf, perfIndex) => (
                 <div
                   key={perf.id}
                   className="bg-white rounded-lg shadow-sm border overflow-hidden hover:shadow-md transition-shadow"
                 >
                   <div className="flex">
-                    {/* Thumbnail */}
-                    <a
-                      href={perf.youtube_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex-shrink-0 relative group"
+                    {/* Thumbnail：クリックでサイト内プレイヤー再生 */}
+                    <button
+                      onClick={() => playAll(perfIndex)}
+                      className="flex-shrink-0 relative group text-left"
+                      title="この歌唱から連続再生"
                     >
                       {perf.thumbnail_url ? (
                         <img
@@ -890,7 +919,7 @@ export default function SongDetailPage() {
                       )}
                       {/* Play overlay */}
                       <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 flex items-center justify-center transition-all">
-                        <div className="w-12 h-12 rounded-full bg-red-600 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="w-12 h-12 rounded-full bg-indigo-600 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                           <svg className="w-6 h-6 text-white ml-1" fill="currentColor" viewBox="0 0 24 24">
                             <path d="M8 5v14l11-7z" />
                           </svg>
@@ -900,7 +929,7 @@ export default function SongDetailPage() {
                       <div className="absolute bottom-1 right-1 bg-black bg-opacity-80 text-white text-xs px-1.5 py-0.5 rounded">
                         {formatTime(perf.start_seconds)}
                       </div>
-                    </a>
+                    </button>
 
                     {/* Content */}
                     <div className="flex-1 p-4">
@@ -928,14 +957,24 @@ export default function SongDetailPage() {
                             })()}
                           </p>
                         </div>
-                        <a
-                          href={perf.youtube_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex-shrink-0 ml-4 px-3 py-1.5 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 transition-colors"
-                        >
-                          再生
-                        </a>
+                        <div className="flex-shrink-0 ml-4 flex items-center gap-2">
+                          <button
+                            onClick={() => playAll(perfIndex)}
+                            className="px-3 py-1.5 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors"
+                            title="この歌唱から連続再生"
+                          >
+                            ▶ 再生
+                          </button>
+                          <a
+                            href={perf.youtube_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-xs text-gray-400 hover:text-red-600"
+                            title="YouTubeで開く"
+                          >
+                            YouTube
+                          </a>
+                        </div>
                       </div>
 
                       {/* Tags */}

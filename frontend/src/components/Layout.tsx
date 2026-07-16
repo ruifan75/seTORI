@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore, hasPermission, PERM } from '../store/auth';
 import GlobalSearch from './GlobalSearch';
+import PlayerBar from './PlayerBar';
 
 const navItems = [
   { path: '/', label: 'ホーム' },
@@ -237,6 +238,8 @@ export default function Layout() {
         )}
       </main>
 
+      {/* グローバル再生バー（キューがあるときのみ表示、ページ遷移しても再生継続） */}
+      <PlayerBar />
     </div>
   );
 }

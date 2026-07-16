@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { singerApi, holodexApi } from '../api/client';
 import { useAuthStore, hasPermission, PERM } from '../store/auth';
+import { usePlayerStore, type PlayerTrack } from '../store/player';
 import Loading from '../components/ui/Loading';
 import Pagination from '../components/ui/Pagination';
 import Tag from '../components/ui/Tag';
@@ -74,6 +75,22 @@ export default function SingerDetailPage() {
     queryFn: () => singerApi.getPerformances(id!, perfPage, 20),
     enabled: !!id && activeTab === 'performances',
   });
+
+  // 歌唱曲一覧をキューに載せて startIndex から連続再生
+  const playPerformancesFrom = (startIndex: number) => {
+    const tracks: PlayerTrack[] = (performances?.performances ?? []).map((perf) => ({
+      performanceId: perf.id,
+      streamId: perf.stream_id,
+      songId: perf.song_id,
+      songName: perf.song_name ?? '(不明)',
+      artist: '',
+      singerNames: perf.singers?.map((s) => s.name) ?? [],
+      streamTitle: perf.stream_title,
+      start: perf.start_seconds,
+      end: perf.end_seconds,
+    }));
+    usePlayerStore.getState().playTracks(tracks, startIndex);
+  };
 
   // Sync mutation
   const syncMutation = useMutation({
@@ -503,7 +520,7 @@ export default function SingerDetailPage() {
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {performances?.performances.map((perf) => (
+                    {performances?.performances.map((perf, perfIndex) => (
                       <tr key={perf.id} className="hover:bg-gray-50">
                         <td className="px-4 py-4">
                           {perf.song_id ? (
@@ -544,16 +561,15 @@ export default function SingerDetailPage() {
                           {formatTime(perf.start_seconds)}
                         </td>
                         <td className="px-4 py-4 text-right">
-                          <a
-                            href={perf.youtube_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-red-100 text-red-600 hover:bg-red-200 transition-colors"
+                          <button
+                            onClick={() => playPerformancesFrom(perfIndex)}
+                            className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-indigo-100 text-indigo-600 hover:bg-indigo-200 transition-colors"
+                            title="この歌唱から連続再生"
                           >
                             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
                               <path d="M8 5v14l11-7z" />
                             </svg>
-                          </a>
+                          </button>
                         </td>
                       </tr>
                     ))}

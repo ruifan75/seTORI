@@ -7,6 +7,7 @@ import Loading from '../components/ui/Loading';
 import Tag from '../components/ui/Tag';
 import { useToast } from '../components/ui/Toast';
 import { useAuthStore, hasPermission, PERM } from '../store/auth';
+import { usePlayerStore } from '../store/player';
 import YoutubePlayer, { youtubePlayerSeekTo, youtubePlayerGetCurrentTime } from '../components/YoutubePlayer';
 import TimestampTweaker from '../components/TimestampTweaker';
 
@@ -640,6 +641,11 @@ export default function StreamDetailPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editableSongs.length]);
+
+  // 編集モード中はグローバルプレイヤーを一時停止（ページ内プレイヤーとの二重再生を防ぐ）
+  useEffect(() => {
+    if (isEditing) usePlayerStore.getState().setPlaying(false);
+  }, [isEditing]);
 
   // 曲を選択してプレイヤーをその開始位置へ（Holodex の編集フローと同じ）
   const selectSong = (index: number, seek = true) => {
@@ -1794,9 +1800,37 @@ export default function StreamDetailPage() {
       <div className="w-full min-[1300px]:basis-3/5 min-[1300px]:shrink-0 min-w-0 min-h-0 min-[1300px]:self-stretch min-[1300px]:pr-6 flex flex-col">
         {/* Setlist Section - Unified View */}
         <div className="flex flex-col gap-3 mb-4 flex-none shrink-0">
-          <h2 className="text-2xl font-bold text-gray-900">
-            セットリスト ({isEditing ? editableSongs.length : stream.performances.length}曲)
-          </h2>
+          <div className="flex items-center gap-3">
+            <h2 className="text-2xl font-bold text-gray-900">
+              セットリスト ({isEditing ? editableSongs.length : stream.performances.length}曲)
+            </h2>
+            {!isEditing && stream.performances.length > 0 && (
+              <button
+                onClick={() => {
+                  usePlayerStore.getState().playTracks(
+                    stream.performances.map((perf) => ({
+                      performanceId: perf.id,
+                      streamId: perf.stream_id,
+                      songId: perf.song_id,
+                      songName: perf.song_name,
+                      artist: perf.original_artist,
+                      artUrl: perf.arts,
+                      singerNames: perf.singers?.map((s) => s.name) ?? [],
+                      streamTitle: stream.title,
+                      start: perf.start_seconds,
+                      end: perf.end_seconds,
+                    })),
+                    0
+                  );
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm bg-indigo-600 text-white font-medium rounded-full hover:bg-indigo-700 transition-colors"
+                title="セットリストをグローバルプレイヤーで連続再生"
+              >
+                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                連続再生
+              </button>
+            )}
+          </div>
 
           {/* Edit Mode Actions */}
           {isEditing && (
