@@ -25,6 +25,38 @@ export default function PlayerBar() {
   const currentVideoRef = useRef<string>('');
   const [progress, setProgress] = useState(0); // 区間内の経過秒
   const [expanded, setExpanded] = useState(false);
+  // 音量は自前 UI で管理（縮小時の iframe は小さすぎて操作できないためロックする）
+  const [volume, setVolume] = useState<number>(() => {
+    const saved = Number(localStorage.getItem('setori_player_volume'));
+    return Number.isFinite(saved) && saved >= 0 && saved <= 100 ? saved : 80;
+  });
+  const [muted, setMuted] = useState(false);
+
+  const applyVolume = (v: number, m: boolean) => {
+    const p = playerRef.current;
+    if (!p || !readyRef.current) return;
+    try {
+      p.setVolume(v);
+      if (m) p.mute();
+      else p.unMute();
+    } catch {
+      /* noop */
+    }
+  };
+
+  const changeVolume = (v: number) => {
+    setVolume(v);
+    const m = v === 0 ? true : false;
+    setMuted(m);
+    localStorage.setItem('setori_player_volume', String(v));
+    applyVolume(v, m);
+  };
+
+  const toggleMute = () => {
+    const m = !muted;
+    setMuted(m);
+    applyVolume(volume, m);
+  };
 
   // Esc で縮小
   useEffect(() => {
@@ -57,6 +89,7 @@ export default function PlayerBar() {
           onReady: () => {
             readyRef.current = true;
             currentVideoRef.current = track.streamId;
+            applyVolume(volume, muted);
           },
           onStateChange: (e: any) => {
             // 動画自体が終わった（end 未設定 or 区間が動画末尾）→ 次へ
@@ -171,6 +204,36 @@ export default function PlayerBar() {
     </div>
   );
 
+  // 音量コントロール（自前 UI。iframe 側の操作はロックしているため）
+  const volumeControl = (dark: boolean) => (
+    <div className="flex items-center gap-1.5 shrink-0">
+      <button
+        onClick={toggleMute}
+        className={dark ? 'text-gray-400 hover:text-white' : 'text-gray-400 hover:text-gray-700'}
+        title={muted || volume === 0 ? 'ミュート解除' : 'ミュート'}
+      >
+        {muted || volume === 0 ? (
+          <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/>
+          </svg>
+        ) : (
+          <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
+          </svg>
+        )}
+      </button>
+      <input
+        type="range"
+        min={0}
+        max={100}
+        value={muted ? 0 : volume}
+        onChange={(e) => changeVolume(Number(e.target.value))}
+        className="w-20 h-1 accent-indigo-500 cursor-pointer"
+        title={`音量 ${muted ? 0 : volume}`}
+      />
+    </div>
+  );
+
   // コントロール（前へ/再生/次へ）
   const controls = (size: 'sm' | 'lg') => (
     <div className="flex items-center gap-1 shrink-0">
@@ -206,15 +269,25 @@ export default function PlayerBar() {
 
   return (
     <>
-      {/* 動画コンテナ：同一 DOM 要素を fixed 配置の切り替えだけで移動する */}
+      {/* 動画コンテナ：同一 DOM 要素を fixed 配置の切り替えだけで移動する。
+          拡大時は厳密な 16:9（幅と高さの両制約の小さい方）で黒帯を出さない */}
       <div
         className={
           expanded
-            ? 'fixed z-[60] top-16 left-2 right-2 h-[36vh] lg:h-auto lg:left-4 lg:right-[28rem] lg:bottom-40 bg-black rounded-lg overflow-hidden [&_iframe]:w-full [&_iframe]:h-full'
+            ? 'fixed z-[60] top-16 left-2 right-2 h-[36vh] lg:top-20 lg:left-8 lg:right-auto lg:h-auto lg:aspect-video lg:w-[min(calc(100vw-38rem),calc((100vh-17rem)*1.7778))] bg-black rounded-lg overflow-hidden [&_iframe]:w-full [&_iframe]:h-full'
             : 'fixed z-[45] bottom-2 left-3 w-32 h-[72px] hidden sm:block bg-black rounded overflow-hidden [&_iframe]:w-full [&_iframe]:h-full'
         }
       >
         <div ref={containerRef} className="w-full h-full" />
+        {/* 縮小時は小さすぎて YT コントロールを操作できないためロックし、
+            クリックで全画面に拡大する */}
+        {!expanded && (
+          <button
+            className="absolute inset-0 z-10 cursor-pointer"
+            onClick={() => setExpanded(true)}
+            title="クリックで全画面表示"
+          />
+        )}
       </div>
 
       {expanded ? (
@@ -302,12 +375,13 @@ export default function PlayerBar() {
                 <div className="flex items-center gap-4">
                   {controls('lg')}
                   {progressBar(true)}
+                  {volumeControl(true)}
                 </div>
               </div>
             </div>
 
             {/* 右：キュー一覧 */}
-            <div className="flex-1 lg:flex-none lg:w-[26rem] min-h-0 border-t lg:border-t-0 lg:border-l border-white/10 flex flex-col">
+            <div className="flex-1 lg:flex-none lg:w-[32rem] min-h-0 border-t lg:border-t-0 lg:border-l border-white/10 flex flex-col">
               <div className="px-4 py-2.5 text-sm font-medium text-gray-300 border-b border-white/10 shrink-0">
                 再生キュー（{queue.length}曲）
               </div>
@@ -498,6 +572,8 @@ export default function PlayerBar() {
             {controls('sm')}
 
             <div className="hidden sm:flex items-center flex-1 max-w-xs shrink-0">{progressBar(false)}</div>
+
+            <div className="hidden md:flex">{volumeControl(false)}</div>
 
             {/* 拡大・キュー・閉じる */}
             <div className="flex items-center gap-1 shrink-0">
