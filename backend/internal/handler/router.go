@@ -132,6 +132,9 @@ func (r *Router) setupRoutes() {
 
 	// 統一検索（楽曲・歌枠・チャンネル・YouTube URL/video ID）
 	r.mux.HandleFunc("GET /api/search", r.handleGlobalSearch)
+	// 複合条件の配信検索（キーワード × チャンネル × タグ AND）。
+	// リテラルパターンのため /api/streams/{id} より優先マッチする。
+	r.mux.HandleFunc("GET /api/streams/search", r.handleSearchStreams)
 
 	// API routes - Songs
 	r.mux.HandleFunc("GET /api/songs", r.handleListSongs)
@@ -372,6 +375,29 @@ func toSearchTagItems(tags []repository.TagWithCount) []dto.SearchTagItem {
 		items[i] = dto.SearchTagItem{ID: t.ID, DisplayName: t.DisplayName, Color: t.Color, Count: t.Count}
 	}
 	return items
+}
+
+// handleSearchStreams は複合条件（q × singer_id × tags AND）で配信を検索する。
+func (r *Router) handleSearchStreams(w http.ResponseWriter, req *http.Request) {
+	q := strings.TrimSpace(req.URL.Query().Get("q"))
+	singerID := strings.TrimSpace(req.URL.Query().Get("singer_id"))
+	var tagIDs []string
+	if raw := strings.TrimSpace(req.URL.Query().Get("tags")); raw != "" {
+		for _, t := range strings.Split(raw, ",") {
+			if t = strings.TrimSpace(t); t != "" {
+				tagIDs = append(tagIDs, t)
+			}
+		}
+	}
+	page, _ := strconv.Atoi(req.URL.Query().Get("page"))
+	limit, _ := strconv.Atoi(req.URL.Query().Get("limit"))
+
+	result, err := r.streamService.SearchStreams(q, singerID, tagIDs, page, limit)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, result)
 }
 
 // ========== Artist Handlers ==========

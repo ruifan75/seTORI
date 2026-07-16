@@ -414,6 +414,61 @@ func (r *StreamRepository) FindByTagID(tagID string, limit, offset int) ([]model
 	return streams, total, rows.Err()
 }
 
+// SearchStreams は複合条件（タイトル部分一致 × 参加チャンネル × タグの AND）で配信を検索する。
+// Holodex の検索（org/topic/channel の組み合わせ）に相当。非表示は除外。
+func (r *StreamRepository) SearchStreams(q, singerID string, tagIDs []string, limit, offset int) ([]models.Stream, int, error) {
+	where := "WHERE s.is_hidden = FALSE"
+	args := []any{}
+	i := 1
+	if q != "" {
+		where += fmt.Sprintf(" AND s.title ILIKE '%%' || $%d || '%%'", i)
+		args = append(args, q)
+		i++
+	}
+	if singerID != "" {
+		where += fmt.Sprintf(" AND EXISTS (SELECT 1 FROM stream_singers ss WHERE ss.stream_id = s.id AND ss.singer_id = $%d)", i)
+		args = append(args, singerID)
+		i++
+	}
+	if len(tagIDs) > 0 {
+		// 指定タグを「すべて」持つ配信（AND 条件）
+		where += fmt.Sprintf(" AND (SELECT COUNT(*) FROM stream_stream_tags sst WHERE sst.stream_id = s.id AND sst.tag_id = ANY($%d)) = %d", i, len(tagIDs))
+		args = append(args, pq.Array(tagIDs))
+		i++
+	}
+
+	var total int
+	if err := r.db.QueryRow("SELECT COUNT(*) FROM streams s "+where, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count searched streams: %w", err)
+	}
+
+	query := fmt.Sprintf(`
+		SELECT s.id, s.title, s.stream_date, s.duration_seconds, s.thumbnail_url, s.holodex_data, s.holodex_hash, s.comment_raw, s.comment_songs, s.is_processed, s.is_hidden, s.created_at, s.updated_at
+		FROM streams s
+		%s
+		ORDER BY s.stream_date DESC
+		LIMIT $%d OFFSET $%d`, where, i, i+1)
+	args = append(args, limit, offset)
+
+	rows, err := r.db.Query(query, args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("search streams: %w", err)
+	}
+	defer rows.Close()
+
+	var streams []models.Stream
+	for rows.Next() {
+		var s models.Stream
+		err := rows.Scan(&s.ID, &s.Title, &s.StreamDate, &s.DurationSeconds,
+			&s.ThumbnailURL, &s.HolodexData, &s.HolodexHash, &s.CommentRaw, &s.CommentSongs, &s.IsProcessed, &s.IsHidden, &s.CreatedAt, &s.UpdatedAt)
+		if err != nil {
+			return nil, 0, fmt.Errorf("scan stream: %w", err)
+		}
+		streams = append(streams, s)
+	}
+	return streams, total, rows.Err()
+}
+
 // SearchByTitle はタイトル部分一致（大小無視）で配信を検索する（グローバル検索用）。
 // 非表示の配信も対象に含める（検索は明示的な操作のため）。
 func (r *StreamRepository) SearchByTitle(query string, limit int) ([]models.Stream, error) {

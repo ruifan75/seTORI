@@ -494,6 +494,25 @@ export const searchApi = {
     const { data } = await api.get(`/api/search?${params}`);
     return data;
   },
+
+  // 複合条件の配信検索（キーワード × チャンネル × タグ AND）
+  searchStreams: async (opts: {
+    q?: string;
+    singerId?: string;
+    tags?: string[];
+    page?: number;
+    limit?: number;
+  }): Promise<StreamListResponse> => {
+    const params = new URLSearchParams({
+      page: String(opts.page ?? 1),
+      limit: String(opts.limit ?? 20),
+    });
+    if (opts.q) params.set('q', opts.q);
+    if (opts.singerId) params.set('singer_id', opts.singerId);
+    if (opts.tags && opts.tags.length > 0) params.set('tags', opts.tags.join(','));
+    const { data } = await api.get(`/api/streams/search?${params}`);
+    return data;
+  },
 };
 
 // ========== 認證 API ==========

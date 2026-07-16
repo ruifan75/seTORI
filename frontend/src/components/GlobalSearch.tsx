@@ -68,16 +68,12 @@ export default function GlobalSearch({ autoFocus = false }: { autoFocus?: boolea
       (e.target as HTMLInputElement).blur();
       return;
     }
-    if (e.key === 'Enter' && data) {
-      // Enter は最上位の結果へ：動画ID → 楽曲 → 歌枠 → チャンネル
-      if (data.video_id && data.video_registered) {
+    if (e.key === 'Enter') {
+      // 動画ID（登録済み）はそのまま直行、それ以外は詳細検索ページへ
+      if (data?.video_id && data.video_registered) {
         go(`/streams/${data.video_id}`);
-      } else if (data.songs.length > 0) {
-        go(`/songs/${data.songs[0].id}`);
-      } else if (data.streams.length > 0) {
-        go(`/streams/${data.streams[0].id}`);
-      } else if (data.singers.length > 0) {
-        go(`/singers/${data.singers[0].id}`);
+      } else if (debounced || query.trim()) {
+        go(`/search?q=${encodeURIComponent((debounced || query).trim())}`);
       }
     }
   };
@@ -280,6 +276,16 @@ export default function GlobalSearch({ autoFocus = false }: { autoFocus?: boolea
 
           {isFetching && !data && (
             <div className="px-3 py-4 text-sm text-gray-400 text-center">検索中...</div>
+          )}
+
+          {/* 詳細検索ページへ（Enter でも同じ） */}
+          {data && !data.video_id && (
+            <button
+              onClick={() => go(`/search?q=${encodeURIComponent(debounced)}`)}
+              className="w-full px-3 py-2.5 text-sm font-medium text-indigo-600 hover:bg-indigo-50 border-t transition-colors text-center"
+            >
+              「{debounced}」のすべての結果を見る →
+            </button>
           )}
         </div>
       )}

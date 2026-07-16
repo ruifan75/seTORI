@@ -108,21 +108,8 @@ func (s *StreamService) GetAll(page, limit int) (*dto.StreamListResponse, error)
 	}, nil
 }
 
-// GetByTag は指定タグが付いた配信一覧を返す（タグ検索ページ用）。
-func (s *StreamService) GetByTag(tagID string, page, limit int) (*dto.StreamListResponse, error) {
-	if page < 1 {
-		page = 1
-	}
-	if limit < 1 || limit > 100 {
-		limit = 20
-	}
-	offset := (page - 1) * limit
-
-	streams, total, err := s.streamRepo.FindByTagID(tagID, limit, offset)
-	if err != nil {
-		return nil, fmt.Errorf("get streams by tag: %w", err)
-	}
-
+// composeStreamList は stream 群にタグ・参加者をバッチで補完し、ページング付きレスポンスを組み立てる。
+func (s *StreamService) composeStreamList(streams []models.Stream, total, page, limit int) (*dto.StreamListResponse, error) {
 	streamIDs := make([]string, len(streams))
 	for i, stream := range streams {
 		streamIDs[i] = stream.ID
@@ -150,6 +137,36 @@ func (s *StreamService) GetByTag(tagID string, page, limit int) (*dto.StreamList
 			TotalPages: (total + limit - 1) / limit,
 		},
 	}, nil
+}
+
+// GetByTag は指定タグが付いた配信一覧を返す（タグ検索ページ用）。
+func (s *StreamService) GetByTag(tagID string, page, limit int) (*dto.StreamListResponse, error) {
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+	streams, total, err := s.streamRepo.FindByTagID(tagID, limit, (page-1)*limit)
+	if err != nil {
+		return nil, fmt.Errorf("get streams by tag: %w", err)
+	}
+	return s.composeStreamList(streams, total, page, limit)
+}
+
+// SearchStreams は複合条件（キーワード × 参加チャンネル × タグ AND）で配信を検索する。
+func (s *StreamService) SearchStreams(q, singerID string, tagIDs []string, page, limit int) (*dto.StreamListResponse, error) {
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+	streams, total, err := s.streamRepo.SearchStreams(q, singerID, tagIDs, limit, (page-1)*limit)
+	if err != nil {
+		return nil, fmt.Errorf("search streams: %w", err)
+	}
+	return s.composeStreamList(streams, total, page, limit)
 }
 
 // GetPerformancesByTag は指定の演出タグが付いた演出一覧を返す（タグ検索ページ用）。
