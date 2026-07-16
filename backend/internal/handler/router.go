@@ -41,6 +41,7 @@ type Router struct {
 	tagRepo              *repository.TagRepository
 	aiProviderRepo       *repository.AIProviderRepository
 	chatEndService       *service.ChatEndService
+	artistService        *service.ArtistService
 	authService          *service.AuthService
 }
 
@@ -56,12 +57,14 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	tagRepo := repository.NewTagRepository(db)
 	aiProviderRepo := repository.NewAIProviderRepository(db)
 	authRepo := repository.NewAuthRepository(db)
+	artistRepo := repository.NewArtistRepository(db)
 
 	// AI サービス：複数 provider ローテーション + failover、未設定時は GROQ_API_KEY にフォールバック
 	aiService := service.NewAIService(aiProviderRepo, cfg.GroqAPIKey)
 
 	// services を作成
-	songService := service.NewSongService(songRepo, perfRepo, songItunesRepo)
+	songService := service.NewSongService(songRepo, perfRepo, songItunesRepo, artistRepo)
+	artistService := service.NewArtistService(artistRepo, songRepo, aiService)
 	streamService := service.NewStreamService(streamRepo, perfRepo)
 	singerService := service.NewSingerService(singerRepo, streamRepo, perfRepo)
 	holodexService := service.NewHolodexService(cfg.HolodexAPIKey, cfg.YouTubeAPIKey, cfg.GroqAPIKey, streamRepo, singerRepo, cfg.HolodexEditorToken)
@@ -72,7 +75,7 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	commentService := service.NewCommentService(holodexService, streamRepo, filterKeywordRepo, aiService, normalizationService, chatEndService)
 	// HolodexService も AnalyzeHolodexSongs で正規化・拍手 end を実行する（holodex_hash キャッシュ）
 	holodexService.SetAnalysisServices(normalizationService, chatEndService)
-	performanceService := service.NewPerformanceService(perfRepo, songRepo, songItunesRepo)
+	performanceService := service.NewPerformanceService(perfRepo, songRepo, songItunesRepo, artistRepo)
 	itunesClient := itunes.NewClient()
 	endTimeEstimateService := service.NewEndTimeEstimateService(itunesClient)
 	authService := service.NewAuthService(authRepo)
@@ -93,6 +96,7 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 		tagRepo:              tagRepo,
 		aiProviderRepo:       aiProviderRepo,
 		chatEndService:       chatEndService,
+		artistService:        artistService,
 		authService:          authService,
 	}
 
@@ -143,6 +147,12 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("GET /api/streams/{id}", r.handleGetStream)
 	r.mux.HandleFunc("POST /api/streams", r.handleCreateStream)
 	r.mux.HandleFunc("PUT /api/streams/{id}", r.handleUpdateStream)
+
+	// API routes - Artists（原曲アーティスト）
+	r.mux.HandleFunc("GET /api/artists", r.handleListArtists)
+	r.mux.HandleFunc("GET /api/artists/{id}", r.handleGetArtist)
+	r.mux.HandleFunc("PUT /api/artists/{id}", r.handleUpdateArtist)
+	r.mux.HandleFunc("POST /api/ai/backfill-readings", r.handleBackfillReadings)
 
 	// API routes - Singers
 	r.mux.HandleFunc("GET /api/singers", r.handleListSingers)
@@ -296,6 +306,7 @@ func (r *Router) handleGlobalSearch(w http.ResponseWriter, req *http.Request) {
 		Songs:           []dto.SongResponse{},
 		Streams:         []dto.SearchStreamItem{},
 		Singers:         []dto.SingerResponse{},
+		Artists:         []dto.ArtistResponse{},
 		StreamTags:      []dto.SearchTagItem{},
 		PerformanceTags: []dto.SearchTagItem{},
 	}
@@ -332,6 +343,13 @@ func (r *Router) handleGlobalSearch(w http.ResponseWriter, req *http.Request) {
 		resp.Singers = singers
 	}
 
+	// 原曲アーティスト（名前・読みの部分一致）
+	if artists, err := r.artistService.GetAll(1, limit, query); err != nil {
+		logger.Warnf("global search artists failed: %v", err)
+	} else {
+		resp.Artists = artists.Artists
+	}
+
 	// タグ（id / 表示名の部分一致、使用件数付き）
 	if tags, err := r.tagRepo.SearchStreamTags(query, limit); err != nil {
 		logger.Warnf("global search stream tags failed: %v", err)
@@ -353,6 +371,77 @@ func toSearchTagItems(tags []repository.TagWithCount) []dto.SearchTagItem {
 		items[i] = dto.SearchTagItem{ID: t.ID, DisplayName: t.DisplayName, Color: t.Color, Count: t.Count}
 	}
 	return items
+}
+
+// ========== Artist Handlers ==========
+
+func (r *Router) handleListArtists(w http.ResponseWriter, req *http.Request) {
+	page, _ := strconv.Atoi(req.URL.Query().Get("page"))
+	limit, _ := strconv.Atoi(req.URL.Query().Get("limit"))
+	search := req.URL.Query().Get("search")
+
+	result, err := r.artistService.GetAll(page, limit, search)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, result)
+}
+
+func (r *Router) handleGetArtist(w http.ResponseWriter, req *http.Request) {
+	id, err := uuid.Parse(req.PathValue("id"))
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "無効なアーティストID")
+		return
+	}
+	page, _ := strconv.Atoi(req.URL.Query().Get("page"))
+	limit, _ := strconv.Atoi(req.URL.Query().Get("limit"))
+
+	result, err := r.artistService.GetByID(id, page, limit)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if result == nil {
+		respondError(w, http.StatusNotFound, "アーティストが見つかりません")
+		return
+	}
+	respondJSON(w, http.StatusOK, result)
+}
+
+// handleUpdateArtist は読み仮名を更新する（content:edit）。
+func (r *Router) handleUpdateArtist(w http.ResponseWriter, req *http.Request) {
+	id, err := uuid.Parse(req.PathValue("id"))
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "無効なアーティストID")
+		return
+	}
+	var body dto.UpdateArtistRequest
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		respondError(w, http.StatusBadRequest, "無効なリクエスト形式")
+		return
+	}
+
+	result, err := r.artistService.UpdateReading(id, body.NameReading)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if result == nil {
+		respondError(w, http.StatusNotFound, "アーティストが見つかりません")
+		return
+	}
+	respondJSON(w, http.StatusOK, result)
+}
+
+// handleBackfillReadings は読み仮名の AI 補完を実行する（1回で各対象最大30件処理）。
+func (r *Router) handleBackfillReadings(w http.ResponseWriter, req *http.Request) {
+	result, err := r.artistService.BackfillReadings()
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, result)
 }
 
 // ========== Tag Search Handlers ==========

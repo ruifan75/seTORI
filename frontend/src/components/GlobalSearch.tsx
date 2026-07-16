@@ -233,6 +233,27 @@ export default function GlobalSearch({ autoFocus = false }: { autoFocus?: boolea
                 </div>
               )}
 
+              {data.artists.length > 0 && (
+                <div className="py-1 border-t first:border-t-0">
+                  <div className="px-3 pt-2 pb-1 text-xs font-medium text-gray-400">アーティスト</div>
+                  {data.artists.map((artist) => (
+                    <button
+                      key={artist.id}
+                      onClick={() => go(`/artists/${artist.id}`)}
+                      className="w-full text-left px-3 py-2 hover:bg-gray-50 transition-colors"
+                    >
+                      <span className="text-sm text-gray-900 block truncate">
+                        {artist.name}
+                        <span className="text-xs text-gray-400 ml-2">{artist.song_count}曲</span>
+                      </span>
+                      {artist.name_reading && (
+                        <span className="text-xs text-gray-500 block truncate">{artist.name_reading}</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+
               {data.singers.length > 0 && (
                 <div className="py-1 border-t first:border-t-0">
                   <div className="px-3 pt-2 pb-1 text-xs font-medium text-gray-400">チャンネル</div>

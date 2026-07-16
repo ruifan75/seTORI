@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/ruifan75/setori/internal/dto"
+	"github.com/ruifan75/setori/internal/logger"
 	"github.com/ruifan75/setori/internal/models"
 	"github.com/ruifan75/setori/internal/repository"
 )
@@ -13,17 +14,20 @@ type PerformanceService struct {
 	perfRepo       *repository.PerformanceRepository
 	songRepo       *repository.SongRepository
 	songItunesRepo *repository.SongItunesRepository
+	artistRepo     *repository.ArtistRepository
 }
 
 func NewPerformanceService(
 	perfRepo *repository.PerformanceRepository,
 	songRepo *repository.SongRepository,
 	songItunesRepo *repository.SongItunesRepository,
+	artistRepo *repository.ArtistRepository,
 ) *PerformanceService {
 	return &PerformanceService{
 		perfRepo:       perfRepo,
 		songRepo:       songRepo,
 		songItunesRepo: songItunesRepo,
+		artistRepo:     artistRepo,
 	}
 }
 
@@ -166,6 +170,10 @@ func (s *PerformanceService) findOrCreateSong(item dto.CreatePerformanceItem) (*
 	}
 	if err := s.songRepo.Create(song); err != nil {
 		return nil, false, fmt.Errorf("create song: %w", err)
+	}
+	// artists / song_artists マッピングを同期（失敗は警告のみ）
+	if err := s.artistRepo.SyncSongArtist(song.ID, song.OriginalArtist); err != nil {
+		logger.Warnf("sync song artist mapping failed (song: %s): %v", song.ID, err)
 	}
 
 	return song, true, nil

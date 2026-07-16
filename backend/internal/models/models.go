@@ -32,6 +32,17 @@ type Song struct {
 	UpdatedAt             time.Time      `json:"updated_at"`
 }
 
+// Artist 原曲アーティスト（正規化テーブル）。
+// songs.original_artist（表示テキスト）と name で対応し、読みはここで一元管理する。
+type Artist struct {
+	ID          uuid.UUID      `json:"id"`
+	Name        string         `json:"name"`
+	NameReading sql.NullString `json:"name_reading"`
+	SongCount   int            `json:"song_count"` // JOIN で補完
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
+}
+
 // SongITunes 歌曲的 iTunes ID
 type SongITunes struct {
 	ID             uuid.UUID      `json:"id"`

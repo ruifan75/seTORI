@@ -394,6 +394,37 @@ type LoginResponse struct {
 	} `json:"user"`
 }
 
+// ========== アーティスト ==========
+
+type ArtistResponse struct {
+	ID          uuid.UUID `json:"id"`
+	Name        string    `json:"name"`
+	NameReading *string   `json:"name_reading,omitempty"`
+	SongCount   int       `json:"song_count"`
+}
+
+type ArtistListResponse struct {
+	Artists    []ArtistResponse   `json:"artists"`
+	Pagination PaginationResponse `json:"pagination"`
+}
+
+type ArtistDetailResponse struct {
+	Artist     ArtistResponse     `json:"artist"`
+	Songs      []SongResponse     `json:"songs"`
+	Pagination PaginationResponse `json:"pagination"`
+}
+
+type UpdateArtistRequest struct {
+	NameReading string `json:"name_reading"`
+}
+
+// BackfillReadingsResponse 読み仮名 AI 補完の結果
+type BackfillReadingsResponse struct {
+	ArtistsUpdated int    `json:"artists_updated"`
+	SongsUpdated   int    `json:"songs_updated"`
+	Warning        string `json:"warning,omitempty"`
+}
+
 // ========== グローバル検索 ==========
 
 // SearchStreamItem 検索結果の配信（軽量版）
@@ -423,6 +454,7 @@ type GlobalSearchResponse struct {
 	Songs           []SongResponse     `json:"songs"`
 	Streams         []SearchStreamItem `json:"streams"`
 	Singers         []SingerResponse   `json:"singers"`
+	Artists         []ArtistResponse   `json:"artists"`
 	StreamTags      []SearchTagItem    `json:"stream_tags"`
 	PerformanceTags []SearchTagItem    `json:"performance_tags"`
 }

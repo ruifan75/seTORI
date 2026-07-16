@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/ruifan75/setori/internal/dto"
+	"github.com/ruifan75/setori/internal/logger"
 	"github.com/ruifan75/setori/internal/models"
 	"github.com/ruifan75/setori/internal/repository"
 )
@@ -14,17 +15,28 @@ type SongService struct {
 	songRepo       *repository.SongRepository
 	perfRepo       *repository.PerformanceRepository
 	songItunesRepo *repository.SongItunesRepository
+	artistRepo     *repository.ArtistRepository
 }
 
 func NewSongService(
 	songRepo *repository.SongRepository,
 	perfRepo *repository.PerformanceRepository,
 	songItunesRepo *repository.SongItunesRepository,
+	artistRepo *repository.ArtistRepository,
 ) *SongService {
 	return &SongService{
 		songRepo:       songRepo,
 		perfRepo:       perfRepo,
 		songItunesRepo: songItunesRepo,
+		artistRepo:     artistRepo,
+	}
+}
+
+// syncArtistMapping は楽曲の original_artist と artists/song_artists を同期する。
+// 失敗しても楽曲操作自体は成功扱い（マッピングは検索用の付随データのため）。
+func (s *SongService) syncArtistMapping(song *models.Song) {
+	if err := s.artistRepo.SyncSongArtist(song.ID, song.OriginalArtist); err != nil {
+		logger.Warnf("sync song artist mapping failed (song: %s): %v", song.ID, err)
 	}
 }
 
@@ -166,6 +178,7 @@ func (s *SongService) Create(req *dto.CreateSongRequest) (*dto.SongResponse, err
 	if err != nil {
 		return nil, fmt.Errorf("create song: %w", err)
 	}
+	s.syncArtistMapping(song)
 
 	// 處理 iTunes IDs - 如果只有一個，自動設為 Primary
 	if len(req.ItunesIds) > 0 {
@@ -224,6 +237,7 @@ func (s *SongService) Update(id uuid.UUID, req *dto.UpdateSongRequest) (*dto.Son
 	if err != nil {
 		return nil, fmt.Errorf("update song: %w", err)
 	}
+	s.syncArtistMapping(song)
 
 	// 處理 iTunes IDs - 先刪除舊的，再添加新的
 	if len(req.ItunesIds) > 0 {

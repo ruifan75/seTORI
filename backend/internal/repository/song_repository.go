@@ -314,3 +314,41 @@ func (r *SongRepository) MergeSong(sourceSongID, targetSongID uuid.UUID) error {
 
 	return nil
 }
+
+// ListMissingNameReadings は曲名読みが未整備（曲名に漢字を含み、読みが空 or 読みに漢字が残る）
+// な楽曲を返す（AI 読み補完の対象抽出）。
+func (r *SongRepository) ListMissingNameReadings(limit int) ([]models.Song, error) {
+	rows, err := r.db.Query(`SELECT id, name, name_reading FROM songs ORDER BY name`)
+	if err != nil {
+		return nil, fmt.Errorf("list songs for readings: %w", err)
+	}
+	defer rows.Close()
+
+	var out []models.Song
+	for rows.Next() {
+		var s models.Song
+		if err := rows.Scan(&s.ID, &s.Name, &s.NameReading); err != nil {
+			return nil, fmt.Errorf("scan song: %w", err)
+		}
+		reading := ""
+		if s.NameReading.Valid {
+			reading = s.NameReading.String
+		}
+		if ContainsHan(s.Name) && (reading == "" || ContainsHan(reading)) {
+			out = append(out, s)
+			if len(out) >= limit {
+				break
+			}
+		}
+	}
+	return out, rows.Err()
+}
+
+// UpdateNameReading は曲名読みのみを更新する。
+func (r *SongRepository) UpdateNameReading(id uuid.UUID, reading string) error {
+	_, err := r.db.Exec(`UPDATE songs SET name_reading = NULLIF($2, ''), updated_at = NOW() WHERE id = $1`, id, reading)
+	if err != nil {
+		return fmt.Errorf("update song name reading: %w", err)
+	}
+	return nil
+}

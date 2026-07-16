@@ -14,6 +14,8 @@ import StreamDetailPage from './pages/StreamDetailPage';
 import SingersPage from './pages/SingersPage';
 import SingerDetailPage from './pages/SingerDetailPage';
 import TagPage from './pages/TagPage';
+import ArtistsPage from './pages/ArtistsPage';
+import ArtistDetailPage from './pages/ArtistDetailPage';
 import SyncPage from './pages/admin/SyncPage';
 import SettingsPage from './pages/admin/SettingsPage';
 import LogsPage from './pages/admin/LogsPage';
@@ -50,6 +52,8 @@ function App() {
               <Route path="singers" element={<SingersPage />} />
               <Route path="singers/:id" element={<SingerDetailPage />} />
               <Route path="tags/:kind/:id" element={<TagPage />} />
+              <Route path="artists" element={<ArtistsPage />} />
+              <Route path="artists/:id" element={<ArtistDetailPage />} />
               <Route
                 path="admin/sync"
                 element={<RequirePermission permission={PERM.SYNC_RUN}><SyncPage /></RequirePermission>}

@@ -6,6 +6,7 @@ import GlobalSearch from './GlobalSearch';
 const navItems = [
   { path: '/', label: 'ホーム' },
   { path: '/songs', label: '楽曲一覧' },
+  { path: '/artists', label: 'アーティスト' },
   { path: '/streams', label: '歌枠一覧' },
   { path: '/singers', label: 'チャンネル一覧' },
 ];

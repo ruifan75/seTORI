@@ -393,6 +393,32 @@ export interface FilterKeyword {
   created_at: string;
 }
 
+// ========== アーティスト ==========
+
+export interface Artist {
+  id: string;
+  name: string;
+  name_reading?: string;
+  song_count: number;
+}
+
+export interface ArtistListResponse {
+  artists: Artist[];
+  pagination: PaginationResponse;
+}
+
+export interface ArtistDetailResponse {
+  artist: Artist;
+  songs: Song[];
+  pagination: PaginationResponse;
+}
+
+export interface BackfillReadingsResponse {
+  artists_updated: number;
+  songs_updated: number;
+  warning?: string;
+}
+
 // ========== グローバル検索 ==========
 
 export interface SearchStreamItem {
@@ -418,6 +444,7 @@ export interface GlobalSearchResponse {
   songs: Song[];
   streams: SearchStreamItem[];
   singers: Singer[];
+  artists: Artist[];
   stream_tags: SearchTagItem[];
   performance_tags: SearchTagItem[];
 }

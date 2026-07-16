@@ -34,6 +34,10 @@ import type {
   TagKeywordRule,
   GlobalSearchResponse,
   TagPerformanceListResponse,
+  Artist,
+  ArtistListResponse,
+  ArtistDetailResponse,
+  BackfillReadingsResponse,
   AIProvider,
   AIProviderInput,
   AIModelInfo,
@@ -443,6 +447,35 @@ export const logsApi = {
 
   setLevel: async (level: string): Promise<{ level: string }> => {
     const { data } = await api.put('/api/logs/level', { level });
+    return data;
+  },
+};
+
+// ========== アーティスト API ==========
+
+export const artistApi = {
+  list: async (page = 1, limit = 50, search?: string): Promise<ArtistListResponse> => {
+    const params = new URLSearchParams({ page: String(page), limit: String(limit) });
+    if (search) params.set('search', search);
+    const { data } = await api.get(`/api/artists?${params}`);
+    return data;
+  },
+
+  get: async (id: string, page = 1, limit = 20): Promise<ArtistDetailResponse> => {
+    const params = new URLSearchParams({ page: String(page), limit: String(limit) });
+    const { data } = await api.get(`/api/artists/${id}?${params}`);
+    return data;
+  },
+
+  // 読み仮名の手動修正
+  updateReading: async (id: string, nameReading: string): Promise<Artist> => {
+    const { data } = await api.put(`/api/artists/${id}`, { name_reading: nameReading });
+    return data;
+  },
+
+  // 読み仮名の AI 補完（1回で各対象最大30件、連打で続き）
+  backfillReadings: async (): Promise<BackfillReadingsResponse> => {
+    const { data } = await api.post('/api/ai/backfill-readings');
     return data;
   },
 };
