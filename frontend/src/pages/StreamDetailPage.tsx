@@ -2093,6 +2093,7 @@ export default function StreamDetailPage() {
                         <TimestampTweaker
                           value={song.start}
                           mode="start"
+                          currentTime={currentPlayerTime}
                           onChange={(v) => handleSongChange(index, 'start', v)}
                         />
                       </div>
@@ -2181,6 +2182,7 @@ export default function StreamDetailPage() {
                           <TimestampTweaker
                             value={song.end}
                             mode="end"
+                            currentTime={currentPlayerTime}
                             onChange={(v) => handleSongChange(index, 'end', v)}
                           />
                         )}
