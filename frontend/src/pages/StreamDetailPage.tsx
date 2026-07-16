@@ -1805,21 +1805,22 @@ export default function StreamDetailPage() {
                 <button
                   onClick={() => syncVideoMutation.mutate()}
                   disabled={syncVideoMutation.isPending}
-                  className="px-3 py-1.5 text-sm bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
+                  className="px-3 py-1.5 text-sm bg-indigo-50 text-indigo-700 border border-indigo-200 font-medium rounded-lg hover:bg-indigo-100 transition-colors disabled:opacity-50"
                 >
                   {syncVideoMutation.isPending ? '同期中...' : 'Holodex から同期'}
                 </button>
                 <button
                   onClick={() => syncToHolodexMutation.mutate()}
                   disabled={syncToHolodexMutation.isPending}
-                  className="px-3 py-1.5 text-sm bg-red-600 text-white font-medium rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50"
+                  title="seTORI のセットリストを Holodex に書き込みます（外部サービスへの反映）"
+                  className="px-3 py-1.5 text-sm bg-amber-50 text-amber-700 border border-amber-300 font-medium rounded-lg hover:bg-amber-100 transition-colors disabled:opacity-50"
                 >
                   {syncToHolodexMutation.isPending ? 'Holodex へ同期中...' : 'seTORI から Holodex へ同期'}
                 </button>
                 <button
                   onClick={() => loadFromHolodex(false)}
                   disabled={!stream?.holodex_timeline_songs || stream.holodex_timeline_songs.length === 0 || holodexAnalyzeLoading}
-                  className="px-3 py-1.5 text-sm bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+                  className="px-3 py-1.5 text-sm bg-indigo-50 text-indigo-700 border border-indigo-200 font-medium rounded-lg hover:bg-indigo-100 transition-colors disabled:opacity-50"
                 >
                   {holodexAnalyzeLoading ? 'Holodex分析中...' : 'Holodex データを読み込む'}
                 </button>
@@ -1828,7 +1829,7 @@ export default function StreamDetailPage() {
                     onClick={() => loadFromHolodex(true)}
                     disabled={holodexAnalyzeLoading}
                     title="キャッシュを無視して AI で再分析・再正規化します"
-                    className="px-3 py-1.5 text-sm bg-blue-50 text-blue-700 border border-blue-300 font-medium rounded-lg hover:bg-blue-100 transition-colors disabled:opacity-50"
+                    className="px-3 py-1.5 text-sm bg-white text-gray-600 border border-gray-300 font-medium rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
                   >
                     再分析
                   </button>
@@ -1836,7 +1837,7 @@ export default function StreamDetailPage() {
                 <button
                   onClick={() => loadFromComments(false)}
                   disabled={!stream?.has_comment_raw || commentAnalyzeLoading}
-                  className="px-3 py-1.5 text-sm bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
+                  className="px-3 py-1.5 text-sm bg-indigo-50 text-indigo-700 border border-indigo-200 font-medium rounded-lg hover:bg-indigo-100 transition-colors disabled:opacity-50"
                 >
                   {commentAnalyzeLoading ? 'コメント分析中...' : 'コメント データを読み込む'}
                 </button>
@@ -1845,7 +1846,7 @@ export default function StreamDetailPage() {
                     onClick={() => loadFromComments(true)}
                     disabled={commentAnalyzeLoading}
                     title="キャッシュを無視して AI で再分析・再正規化します"
-                    className="px-3 py-1.5 text-sm bg-green-50 text-green-700 border border-green-300 font-medium rounded-lg hover:bg-green-100 transition-colors disabled:opacity-50"
+                    className="px-3 py-1.5 text-sm bg-white text-gray-600 border border-gray-300 font-medium rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
                   >
                     再分析
                   </button>
@@ -1854,7 +1855,7 @@ export default function StreamDetailPage() {
                   <button
                     onClick={runAINormalization}
                     disabled={aiNormalizeMutation.isPending}
-                    className="px-3 py-1.5 text-sm bg-purple-600 text-white font-medium rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50"
+                    className="px-3 py-1.5 text-sm bg-indigo-50 text-indigo-700 border border-indigo-200 font-medium rounded-lg hover:bg-indigo-100 transition-colors disabled:opacity-50"
                   >
                     {aiNormalizeMutation.isPending ? 'AI処理中...' : 'AI正規化'}
                   </button>
@@ -2073,7 +2074,7 @@ export default function StreamDetailPage() {
                                 handleSongChange(index, 'start', Math.floor(currentTime));
                               }
                             }}
-                            className="px-3 py-2 bg-blue-100 text-blue-600 rounded-lg hover:bg-blue-200 transition-colors font-mono text-sm whitespace-nowrap min-w-[5.5rem]"
+                            className="px-3 py-2 bg-indigo-100 text-indigo-700 rounded-lg hover:bg-indigo-200 transition-colors font-mono text-sm whitespace-nowrap min-w-[5.5rem]"
                             title="現在の再生時間を設定"
                           >
                             {currentPlayerTime !== null ? formatTimeInput(Math.floor(currentPlayerTime)) : '--:--'}
@@ -2130,7 +2131,7 @@ export default function StreamDetailPage() {
                             disabled={!song.trackDuration}
                             className={`px-3 py-2 rounded-lg font-mono text-sm font-medium transition-colors whitespace-nowrap min-w-[5.5rem] ${
                               song.trackDuration
-                                ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                                ? 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200'
                                 : 'bg-gray-100 text-gray-400 cursor-not-allowed'
                             }`}
                             title={song.trackDuration ? 'iTunes歌曲長度を適用' : '歌曲長度情報なし'}
@@ -2144,7 +2145,7 @@ export default function StreamDetailPage() {
                                 handleSongChange(index, 'end', Math.floor(currentTime));
                               }
                             }}
-                            className="px-3 py-2 bg-blue-100 text-blue-600 rounded-lg hover:bg-blue-200 transition-colors font-mono text-sm whitespace-nowrap min-w-[5.5rem]"
+                            className="px-3 py-2 bg-indigo-100 text-indigo-700 rounded-lg hover:bg-indigo-200 transition-colors font-mono text-sm whitespace-nowrap min-w-[5.5rem]"
                             title="現在の再生時間を設定"
                           >
                             {currentPlayerTime !== null ? formatTimeInput(Math.floor(currentPlayerTime)) : '--:--'}
