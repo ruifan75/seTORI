@@ -826,7 +826,7 @@ export default function StreamDetailPage() {
       const merged = mergeDuplicateSongs(updated);
       const mergedCount = updated.length - merged.length;
       setEditableSongs(merged);
-      const mergeMsg = mergedCount > 0 ? `（${mergedCount}曲の重複をマージ）` : '';
+      const mergeMsg = mergedCount > 0 ? `（${mergedCount}曲の重複を統合）` : '';
       if (data.warning) {
         showToast(data.warning + mergeMsg, 'error');
       } else {
@@ -930,7 +930,7 @@ export default function StreamDetailPage() {
       const merged = mergeDuplicateSongs(songs);
       const mergedCount = songs.length - merged.length;
       setEditableSongs(merged);
-      const mergeMsg = mergedCount > 0 ? `（${mergedCount}曲の重複をマージ）` : '';
+      const mergeMsg = mergedCount > 0 ? `（${mergedCount}曲の重複を統合）` : '';
       showToast(`Holodexから${merged.length}曲を読み込みました${mergeMsg}`, 'success');
     } catch (error) {
       showToast('Holodex分析に失敗しました', 'error');
@@ -1001,7 +1001,7 @@ export default function StreamDetailPage() {
       const merged = mergeDuplicateSongs(songs);
       const mergedCount = songs.length - merged.length;
       setEditableSongs(merged);
-      const mergeMsg = mergedCount > 0 ? `（${mergedCount}曲の重複をマージ）` : '';
+      const mergeMsg = mergedCount > 0 ? `（${mergedCount}曲の重複を統合）` : '';
       showToast(`コメントから${merged.length}曲を読み込みました${mergeMsg}`, 'success');
     } catch (error) {
       showToast('コメント分析に失敗しました', 'error');
@@ -2018,7 +2018,7 @@ export default function StreamDetailPage() {
                         {/* 合併元顯示 */}
                         {song.mergedFrom && song.mergedFrom.length > 0 && (
                           <div className="mt-1 text-sm">
-                            <span className="text-orange-600">マージ:</span>{' '}
+                            <span className="text-orange-600">統合:</span>{' '}
                             <span className="text-gray-500">{song.mergedFrom.join(', ')}</span>
                           </div>
                         )}

@@ -215,12 +215,12 @@ export default function SongDetailPage() {
   const mergeMutation = useMutation({
     mutationFn: (targetId: string) => songApi.merge(id!, targetId),
     onSuccess: (result) => {
-      showToast('楽曲をマージしました', 'success');
+      showToast('楽曲を統合しました', 'success');
       setIsEditing(false);
       navigate(`/songs/${result.target_id}`);
     },
     onError: (error: any) => {
-      showToast(error.response?.data?.message || 'マージに失敗しました', 'error');
+      showToast(error.response?.data?.message || '統合に失敗しました', 'error');
     },
   });
 
@@ -321,14 +321,14 @@ export default function SongDetailPage() {
     if (!id) return;
     const targetId = mergeTargetId.trim();
     if (!targetId) {
-      showToast('マージ先の楽曲を選択してください', 'error');
+      showToast('統合先の楽曲を選択してください', 'error');
       return;
     }
     if (targetId === id) {
-      showToast('同じ楽曲にはマージできません', 'error');
+      showToast('同じ楽曲には統合できません', 'error');
       return;
     }
-    if (!window.confirm('この楽曲をマージしますか？元の楽曲は削除されます。')) {
+    if (!window.confirm('この楽曲を統合しますか？元の楽曲は削除されます。')) {
       return;
     }
     mergeMutation.mutate(targetId);
@@ -750,13 +750,13 @@ export default function SongDetailPage() {
                           }}
                           onSelectSong={(song) => {
                             if (song.id === id) {
-                              showToast('同じ楽曲にはマージできません', 'error');
+                              showToast('同じ楽曲には統合できません', 'error');
                               return;
                             }
                             setMergeTargetId(song.id);
                             setMergeTargetQuery(`${song.name} / ${song.original_artist}`);
                           }}
-                          placeholder="マージ先を検索"
+                          placeholder="統合先を検索"
                           excludeSongId={id}
                         />
                       </div>
@@ -765,7 +765,7 @@ export default function SongDetailPage() {
                         disabled={mergeMutation.isPending}
                         className="px-3 py-2 text-sm bg-gray-800 text-white rounded-lg hover:bg-gray-900 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        {mergeMutation.isPending ? 'マージ中...' : 'マージ'}
+                        {mergeMutation.isPending ? '統合中...' : '統合'}
                       </button>
                     </div>
                     <button

@@ -97,7 +97,7 @@ func (s *ArtistService) GetByID(id uuid.UUID, page, limit int) (*dto.ArtistDetai
 }
 
 // ErrArtistNameTaken は改名先の名前が既存アーティストと衝突したとき返す。
-var ErrArtistNameTaken = fmt.Errorf("同名のアーティストが既に存在します。マージ機能を使ってください")
+var ErrArtistNameTaken = fmt.Errorf("同名のアーティストが既に存在します。統合機能を使ってください")
 
 // Update は名前・読み仮名を更新する。名前変更時は所属楽曲の表示テキストも連動更新する。
 func (s *ArtistService) Update(id uuid.UUID, name *string, reading *string) (*dto.ArtistResponse, error) {
@@ -146,7 +146,7 @@ func (s *ArtistService) Update(id uuid.UUID, name *string, reading *string) (*dt
 // Merge は source アーティストを target に統合する。
 func (s *ArtistService) Merge(sourceID, targetID uuid.UUID) (*dto.ArtistResponse, error) {
 	if sourceID == targetID {
-		return nil, fmt.Errorf("同じアーティストにはマージできません")
+		return nil, fmt.Errorf("同じアーティストには統合できません")
 	}
 	source, err := s.artistRepo.FindByID(sourceID)
 	if err != nil {
