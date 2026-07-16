@@ -152,6 +152,7 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("GET /api/artists", r.handleListArtists)
 	r.mux.HandleFunc("GET /api/artists/{id}", r.handleGetArtist)
 	r.mux.HandleFunc("PUT /api/artists/{id}", r.handleUpdateArtist)
+	r.mux.HandleFunc("POST /api/artists/{id}/merge", r.handleMergeArtist)
 	r.mux.HandleFunc("POST /api/ai/backfill-readings", r.handleBackfillReadings)
 
 	// API routes - Singers
@@ -409,7 +410,8 @@ func (r *Router) handleGetArtist(w http.ResponseWriter, req *http.Request) {
 	respondJSON(w, http.StatusOK, result)
 }
 
-// handleUpdateArtist は読み仮名を更新する（content:edit）。
+// handleUpdateArtist は名前・読み仮名を更新する（content:edit）。
+// 名前変更時は所属する全楽曲の original_artist テキストも連動更新される。
 func (r *Router) handleUpdateArtist(w http.ResponseWriter, req *http.Request) {
 	id, err := uuid.Parse(req.PathValue("id"))
 	if err != nil {
@@ -422,9 +424,43 @@ func (r *Router) handleUpdateArtist(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	result, err := r.artistService.UpdateReading(id, body.NameReading)
+	result, err := r.artistService.Update(id, body.Name, body.NameReading)
 	if err != nil {
+		if errors.Is(err, service.ErrArtistNameTaken) {
+			respondError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if result == nil {
+		respondError(w, http.StatusNotFound, "アーティストが見つかりません")
+		return
+	}
+	respondJSON(w, http.StatusOK, result)
+}
+
+// handleMergeArtist は source アーティストを target に統合する（content:edit）。
+func (r *Router) handleMergeArtist(w http.ResponseWriter, req *http.Request) {
+	sourceID, err := uuid.Parse(req.PathValue("id"))
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "無効なアーティストID")
+		return
+	}
+	var body dto.MergeArtistRequest
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		respondError(w, http.StatusBadRequest, "無効なリクエスト形式")
+		return
+	}
+	targetID, err := uuid.Parse(body.TargetArtistID)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "無効な対象アーティストID")
+		return
+	}
+
+	result, err := r.artistService.Merge(sourceID, targetID)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if result == nil {

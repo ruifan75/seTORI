@@ -415,7 +415,12 @@ type ArtistDetailResponse struct {
 }
 
 type UpdateArtistRequest struct {
-	NameReading string `json:"name_reading"`
+	Name        *string `json:"name,omitempty"`         // 変更時のみ。所属楽曲の表示テキストも連動更新
+	NameReading *string `json:"name_reading,omitempty"` // 変更時のみ
+}
+
+type MergeArtistRequest struct {
+	TargetArtistID string `json:"target_artist_id"`
 }
 
 // BackfillReadingsResponse 読み仮名 AI 補完の結果

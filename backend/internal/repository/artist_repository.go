@@ -97,6 +97,127 @@ func (r *ArtistRepository) UpdateReading(id uuid.UUID, reading string) error {
 	return nil
 }
 
+// FindByName は名前でアーティストを取得する。見つからなければ nil。
+func (r *ArtistRepository) FindByName(name string) (*models.Artist, error) {
+	var a models.Artist
+	err := r.db.QueryRow(`SELECT id, name, name_reading, created_at, updated_at, 0 FROM artists WHERE name = $1`, name).
+		Scan(&a.ID, &a.Name, &a.NameReading, &a.CreatedAt, &a.UpdatedAt, &a.SongCount)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find artist by name: %w", err)
+	}
+	return &a, nil
+}
+
+// Rename はアーティスト名を変更し、所属する全楽曲の original_artist 表示テキストも
+// 連動して更新する（アーティスト単位で表記を一括修正できる）。
+// 呼び出し前に新名称が他アーティストと重複しないことを確認すること。
+func (r *ArtistRepository) Rename(id uuid.UUID, newName string) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`UPDATE artists SET name = $2, updated_at = NOW() WHERE id = $1`, id, newName); err != nil {
+		return fmt.Errorf("rename artist: %w", err)
+	}
+	if _, err := tx.Exec(`
+		UPDATE songs SET original_artist = $2, updated_at = NOW()
+		WHERE id IN (SELECT song_id FROM song_artists WHERE artist_id = $1)`, id, newName); err != nil {
+		return fmt.Errorf("update songs artist text: %w", err)
+	}
+	return tx.Commit()
+}
+
+// MergeArtists は source を target に統合する。
+//  1. 両者に同名楽曲がある場合はその楽曲も統合（演唱記録を target 側へ移動、重複は除去）
+//  2. 残りの source 楽曲は original_artist テキストを target 名に書き換え
+//  3. マッピングを target に付け替え、source アーティストを削除
+func (r *ArtistRepository) MergeArtists(sourceID, targetID uuid.UUID) error {
+	target, err := r.FindByID(targetID)
+	if err != nil {
+		return err
+	}
+	if target == nil {
+		return fmt.Errorf("target artist not found")
+	}
+
+	tx, err := r.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin: %w", err)
+	}
+	defer tx.Rollback()
+
+	// 1. 同名楽曲の衝突ペアを検出（source 側の曲名が target 側にも存在する）
+	rows, err := tx.Query(`
+		SELECT ss.id, ts.id
+		FROM song_artists sa
+		JOIN songs ss ON ss.id = sa.song_id
+		JOIN songs ts ON ts.name = ss.name AND ts.original_artist = $2 AND ts.id <> ss.id
+		WHERE sa.artist_id = $1`, sourceID, target.Name)
+	if err != nil {
+		return fmt.Errorf("find colliding songs: %w", err)
+	}
+	type pair struct{ src, dst uuid.UUID }
+	var pairs []pair
+	for rows.Next() {
+		var p pair
+		if err := rows.Scan(&p.src, &p.dst); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan colliding songs: %w", err)
+		}
+		pairs = append(pairs, p)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	// 衝突した楽曲を統合：演唱記録を移動（同一配信・同一開始秒の重複は削除）→ source 曲を削除
+	for _, p := range pairs {
+		if _, err := tx.Exec(`
+			DELETE FROM performances p1 WHERE p1.song_id = $1 AND EXISTS (
+				SELECT 1 FROM performances p2
+				WHERE p2.song_id = $2 AND p2.stream_id = p1.stream_id AND p2.start_seconds = p1.start_seconds
+			)`, p.src, p.dst); err != nil {
+			return fmt.Errorf("dedupe performances: %w", err)
+		}
+		if _, err := tx.Exec(`UPDATE performances SET song_id = $2 WHERE song_id = $1`, p.src, p.dst); err != nil {
+			return fmt.Errorf("move performances: %w", err)
+		}
+		if _, err := tx.Exec(`DELETE FROM songs WHERE id = $1`, p.src); err != nil {
+			return fmt.Errorf("delete merged song: %w", err)
+		}
+	}
+
+	// 2. 残りの source 楽曲の表示テキストを target 名に統一
+	if _, err := tx.Exec(`
+		UPDATE songs SET original_artist = $2, original_artist_reading = $3, updated_at = NOW()
+		WHERE id IN (SELECT song_id FROM song_artists WHERE artist_id = $1)`,
+		sourceID, target.Name, target.NameReading); err != nil {
+		return fmt.Errorf("update songs artist text: %w", err)
+	}
+
+	// 3. マッピングを付け替え、source を削除
+	if _, err := tx.Exec(`
+		INSERT INTO song_artists (song_id, artist_id)
+		SELECT song_id, $2 FROM song_artists WHERE artist_id = $1
+		ON CONFLICT DO NOTHING`, sourceID, targetID); err != nil {
+		return fmt.Errorf("remap song artists: %w", err)
+	}
+	if _, err := tx.Exec(`DELETE FROM song_artists WHERE artist_id = $1`, sourceID); err != nil {
+		return fmt.Errorf("clear source mappings: %w", err)
+	}
+	if _, err := tx.Exec(`DELETE FROM artists WHERE id = $1`, sourceID); err != nil {
+		return fmt.Errorf("delete source artist: %w", err)
+	}
+
+	return tx.Commit()
+}
+
 // FindSongsByArtist はアーティストに紐づく楽曲を演唱回数付きで返す。
 func (r *ArtistRepository) FindSongsByArtist(artistID uuid.UUID, limit, offset int) ([]models.Song, map[uuid.UUID]int, int, error) {
 	var total int

@@ -96,8 +96,11 @@ func (s *ArtistService) GetByID(id uuid.UUID, page, limit int) (*dto.ArtistDetai
 	}, nil
 }
 
-// UpdateReading は読み仮名を手動更新する。
-func (s *ArtistService) UpdateReading(id uuid.UUID, reading string) (*dto.ArtistResponse, error) {
+// ErrArtistNameTaken は改名先の名前が既存アーティストと衝突したとき返す。
+var ErrArtistNameTaken = fmt.Errorf("同名のアーティストが既に存在します。マージ機能を使ってください")
+
+// Update は名前・読み仮名を更新する。名前変更時は所属楽曲の表示テキストも連動更新する。
+func (s *ArtistService) Update(id uuid.UUID, name *string, reading *string) (*dto.ArtistResponse, error) {
 	artist, err := s.artistRepo.FindByID(id)
 	if err != nil {
 		return nil, err
@@ -105,14 +108,62 @@ func (s *ArtistService) UpdateReading(id uuid.UUID, reading string) (*dto.Artist
 	if artist == nil {
 		return nil, nil
 	}
-	if err := s.artistRepo.UpdateReading(id, strings.TrimSpace(reading)); err != nil {
-		return nil, err
+
+	// 改名：他アーティストとの重複を拒否（統合したい場合はマージを使う）
+	if name != nil {
+		newName := strings.TrimSpace(*name)
+		if newName == "" {
+			return nil, fmt.Errorf("アーティスト名は必須です")
+		}
+		if newName != artist.Name {
+			existing, err := s.artistRepo.FindByName(newName)
+			if err != nil {
+				return nil, err
+			}
+			if existing != nil {
+				return nil, ErrArtistNameTaken
+			}
+			if err := s.artistRepo.Rename(id, newName); err != nil {
+				return nil, err
+			}
+		}
 	}
+
+	if reading != nil {
+		if err := s.artistRepo.UpdateReading(id, strings.TrimSpace(*reading)); err != nil {
+			return nil, err
+		}
+	}
+
 	updated, err := s.artistRepo.FindByID(id)
 	if err != nil || updated == nil {
 		return nil, err
 	}
 	resp := toArtistResponse(*updated)
+	return &resp, nil
+}
+
+// Merge は source アーティストを target に統合する。
+func (s *ArtistService) Merge(sourceID, targetID uuid.UUID) (*dto.ArtistResponse, error) {
+	if sourceID == targetID {
+		return nil, fmt.Errorf("同じアーティストにはマージできません")
+	}
+	source, err := s.artistRepo.FindByID(sourceID)
+	if err != nil {
+		return nil, err
+	}
+	if source == nil {
+		return nil, nil
+	}
+	if err := s.artistRepo.MergeArtists(sourceID, targetID); err != nil {
+		return nil, err
+	}
+	logger.Infof("artist merged: %q -> target %s", source.Name, targetID)
+	target, err := s.artistRepo.FindByID(targetID)
+	if err != nil || target == nil {
+		return nil, err
+	}
+	resp := toArtistResponse(*target)
 	return &resp, nil
 }
 

@@ -467,9 +467,15 @@ export const artistApi = {
     return data;
   },
 
-  // 読み仮名の手動修正
-  updateReading: async (id: string, nameReading: string): Promise<Artist> => {
-    const { data } = await api.put(`/api/artists/${id}`, { name_reading: nameReading });
+  // 名前・読み仮名の修正（名前変更時は所属楽曲の表示テキストも連動更新される）
+  update: async (id: string, input: { name?: string; name_reading?: string }): Promise<Artist> => {
+    const { data } = await api.put(`/api/artists/${id}`, input);
+    return data;
+  },
+
+  // source（このアーティスト）を target に統合
+  merge: async (sourceId: string, targetArtistId: string): Promise<Artist> => {
+    const { data } = await api.post(`/api/artists/${sourceId}/merge`, { target_artist_id: targetArtistId });
     return data;
   },
 
