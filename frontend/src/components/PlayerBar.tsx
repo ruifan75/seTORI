@@ -274,7 +274,7 @@ export default function PlayerBar() {
       <div
         className={
           expanded
-            ? 'fixed z-[60] top-16 left-2 right-2 h-[36vh] lg:top-20 lg:left-8 lg:right-auto lg:h-auto lg:aspect-video lg:w-[min(calc(100vw-38rem),calc((100vh-17rem)*1.7778))] bg-black rounded-lg overflow-hidden [&_iframe]:w-full [&_iframe]:h-full'
+            ? 'fixed z-[60] top-16 left-2 right-2 h-[36vh] lg:top-20 lg:left-8 lg:right-auto lg:h-auto lg:aspect-video lg:w-[min(calc((100vh-17rem)*1.7778),60vw)] bg-black rounded-lg overflow-hidden [&_iframe]:w-full [&_iframe]:h-full'
             : 'fixed z-[45] bottom-2 left-3 w-32 h-[72px] hidden sm:block bg-black rounded overflow-hidden [&_iframe]:w-full [&_iframe]:h-full'
         }
       >
@@ -319,8 +319,9 @@ export default function PlayerBar() {
 
           {/* Body */}
           <div className="flex-1 min-h-0 flex flex-col lg:flex-row">
-            {/* 左：動画（fixed の動画コンテナがこの領域に浮いている）＋情報・コントロール */}
-            <div className="shrink-0 lg:flex-1 lg:min-w-0 flex flex-col">
+            {/* 左：動画（fixed の動画コンテナがこの領域に浮いている）＋情報・コントロール。
+                幅は動画（16:9）の実寸に合わせ、余白はすべて右のキューに渡す */}
+            <div className="shrink-0 lg:w-[calc(min(calc((100vh-17rem)*1.7778),60vw)+4rem)] flex flex-col">
               <div className="h-[36vh] lg:flex-1 mt-2" /> {/* 動画スペース */}
               <div className="px-6 py-4 space-y-3 lg:h-36 shrink-0">
                 <div className="min-w-0">
@@ -380,8 +381,8 @@ export default function PlayerBar() {
               </div>
             </div>
 
-            {/* 右：キュー一覧 */}
-            <div className="flex-1 lg:flex-none lg:w-[32rem] min-h-0 border-t lg:border-t-0 lg:border-l border-white/10 flex flex-col">
+            {/* 右：キュー一覧（残り幅をすべて使う） */}
+            <div className="flex-1 min-w-0 min-h-0 border-t lg:border-t-0 lg:border-l border-white/10 flex flex-col">
               <div className="px-4 py-2.5 text-sm font-medium text-gray-300 border-b border-white/10 shrink-0">
                 再生キュー（{queue.length}曲）
               </div>
