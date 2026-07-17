@@ -175,6 +175,25 @@ func hashBytes(b []byte) string {
 	return hex.EncodeToString(h[:])
 }
 
+// RefreshCommentRaw はコメントを取得し直して comment_raw を上書き保存する。
+// 分析キャッシュは comment_raw のハッシュをキーにしているため、
+// 内容が変わっていれば次回の AnalyzeComments で自動的に再分析される。
+func (s *CommentService) RefreshCommentRaw(videoID string) error {
+	comments, err := s.holodexService.GetVideoComments(videoID)
+	if err != nil {
+		return fmt.Errorf("fetch comments: %w", err)
+	}
+	rawJSON, err := json.Marshal(comments)
+	if err != nil {
+		return fmt.Errorf("marshal comments: %w", err)
+	}
+	if err := s.streamRepo.SaveCommentRaw(videoID, util.SanitizeJSONB(rawJSON)); err != nil {
+		return fmt.Errorf("save comment raw: %w", err)
+	}
+	logger.Infof("[comment] refreshed %d raw comments for %s", len(comments), videoID)
+	return nil
+}
+
 // BackfillCommentSongs 補填所有有 comment_raw 但沒有 comment_songs 的 stream
 func (s *CommentService) BackfillCommentSongs() (int, error) {
 	streams, err := s.streamRepo.FindWithoutCommentSongs()

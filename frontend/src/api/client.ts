@@ -267,9 +267,10 @@ export const commentApi = {
 // ========== 一括プレ分析 API ==========
 
 export const batchAnalyzeApi = {
-  // 未処理配信の一括プレ分析を開始（背景ジョブ・singleton）
-  start: async (): Promise<{ message: string }> => {
-    const { data } = await api.post('/api/streams/batch-analyze');
+  // 一括プレ分析を開始（背景ジョブ・singleton）
+  // mode: unanalyzed（未分析のみ）/ unprocessed（未処理すべて）/ refresh（コメント再取得）
+  start: async (mode: string): Promise<{ message: string }> => {
+    const { data } = await api.post(`/api/streams/batch-analyze?mode=${encodeURIComponent(mode)}`);
     return data;
   },
 

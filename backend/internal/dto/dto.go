@@ -281,6 +281,7 @@ type AnalyzeCommentsResponse struct {
 // BatchAnalyzeStatus 未処理配信の一括分析ジョブの進捗
 type BatchAnalyzeStatus struct {
 	Running   bool     `json:"running"`
+	Mode      string   `json:"mode,omitempty"`
 	Total     int      `json:"total"`
 	Done      int      `json:"done"`
 	Failed    int      `json:"failed"`

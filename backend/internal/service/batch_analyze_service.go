@@ -7,6 +7,7 @@ import (
 
 	"github.com/ruifan75/setori/internal/dto"
 	"github.com/ruifan75/setori/internal/logger"
+	"github.com/ruifan75/setori/internal/models"
 	"github.com/ruifan75/setori/internal/repository"
 )
 
@@ -37,12 +38,25 @@ const (
 
 var ErrBatchAlreadyRunning = errors.New("一括分析は既に実行中です")
 
+// バッチの対象モード
+const (
+	BatchModeUnanalyzed  = "unanalyzed"  // 分析結果が一度も無い配信（is_processed 問わず）
+	BatchModeUnprocessed = "unprocessed" // 未処理（ユーザー未確認）の配信すべて
+	BatchModeRefresh     = "refresh"     // 未処理の配信のコメントを再取得してから分析
+)
+
 func NewBatchAnalyzeService(commentService *CommentService, streamRepo *repository.StreamRepository) *BatchAnalyzeService {
 	return &BatchAnalyzeService{commentService: commentService, streamRepo: streamRepo}
 }
 
 // Start はジョブを開始する（実行中なら ErrBatchAlreadyRunning）。
-func (s *BatchAnalyzeService) Start() error {
+func (s *BatchAnalyzeService) Start(mode string) error {
+	switch mode {
+	case BatchModeUnanalyzed, BatchModeUnprocessed, BatchModeRefresh:
+	default:
+		return errors.New("無効なモードです（unanalyzed / unprocessed / refresh）")
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.running {
@@ -50,9 +64,9 @@ func (s *BatchAnalyzeService) Start() error {
 	}
 	s.running = true
 	s.cancelled = false
-	s.status = dto.BatchAnalyzeStatus{Running: true}
+	s.status = dto.BatchAnalyzeStatus{Running: true, Mode: mode}
 
-	go s.run()
+	go s.run(mode)
 	return nil
 }
 
@@ -84,7 +98,7 @@ func (s *BatchAnalyzeService) update(fn func(*dto.BatchAnalyzeStatus)) {
 	fn(&s.status)
 }
 
-func (s *BatchAnalyzeService) run() {
+func (s *BatchAnalyzeService) run(mode string) {
 	defer func() {
 		s.mu.Lock()
 		s.running = false
@@ -101,7 +115,13 @@ func (s *BatchAnalyzeService) run() {
 		logger.Infof("[batch-analyze] finished: done=%d failed=%d", s.status.Done, s.status.Failed)
 	}()
 
-	streams, err := s.streamRepo.FindUnprocessedWithComments()
+	var streams []models.Stream
+	var err error
+	if mode == BatchModeUnanalyzed {
+		streams, err = s.streamRepo.FindUnanalyzedWithComments()
+	} else {
+		streams, err = s.streamRepo.FindUnprocessedWithComments()
+	}
 	if err != nil {
 		logger.Warnf("[batch-analyze] list streams failed: %v", err)
 		s.update(func(st *dto.BatchAnalyzeStatus) { st.Message = "対象の取得に失敗しました" })
@@ -109,13 +129,21 @@ func (s *BatchAnalyzeService) run() {
 	}
 
 	s.update(func(st *dto.BatchAnalyzeStatus) { st.Total = len(streams) })
-	logger.Infof("[batch-analyze] started: %d streams", len(streams))
+	logger.Infof("[batch-analyze] started: mode=%s %d streams", mode, len(streams))
 
 	for _, stream := range streams {
 		if s.isCancelled() {
 			return
 		}
 		s.update(func(st *dto.BatchAnalyzeStatus) { st.Current = stream.Title })
+
+		// refresh モード：先にコメントを再取得（内容が変わればハッシュが変わり、
+		// 後続の分析でキャッシュを外れて自動的に再分析される）
+		if mode == BatchModeRefresh {
+			if err := s.commentService.RefreshCommentRaw(stream.ID); err != nil {
+				logger.Warnf("[batch-analyze] refresh comments failed (%s): %v（既存の raw で分析を続行）", stream.ID, err)
+			}
+		}
 
 		if s.processOne(stream.ID) {
 			s.update(func(st *dto.BatchAnalyzeStatus) { st.Done++ })

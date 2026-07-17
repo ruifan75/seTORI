@@ -294,6 +294,7 @@ export interface AnalyzeCommentsResponse {
 // 未処理配信の一括プレ分析ジョブの進捗
 export interface BatchAnalyzeStatus {
   running: boolean;
+  mode?: string;
   total: number;
   done: number;
   failed: number;

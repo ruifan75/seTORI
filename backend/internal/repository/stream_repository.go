@@ -414,6 +414,31 @@ func (r *StreamRepository) FindByTagID(tagID string, limit, offset int) ([]model
 	return streams, total, rows.Err()
 }
 
+// FindUnanalyzedWithComments は comment_raw があるのに分析結果（comment_songs）が
+// 一度も生成されていない配信を返す（is_processed は問わない：本当に未分析のもの）。
+func (r *StreamRepository) FindUnanalyzedWithComments() ([]models.Stream, error) {
+	rows, err := r.db.Query(`
+		SELECT id, title FROM streams
+		WHERE is_hidden = FALSE
+		  AND comment_raw IS NOT NULL AND comment_raw != 'null'
+		  AND (comment_songs IS NULL OR comment_songs = 'null')
+		ORDER BY stream_date ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("query unanalyzed streams: %w", err)
+	}
+	defer rows.Close()
+
+	var streams []models.Stream
+	for rows.Next() {
+		var s models.Stream
+		if err := rows.Scan(&s.ID, &s.Title); err != nil {
+			return nil, fmt.Errorf("scan stream: %w", err)
+		}
+		streams = append(streams, s)
+	}
+	return streams, rows.Err()
+}
+
 // FindUnprocessedWithComments は未処理・非隠しで comment_raw を持つ配信（id/title のみ）を
 // 古い順に返す（一括分析の対象抽出）。
 func (r *StreamRepository) FindUnprocessedWithComments() ([]models.Stream, error) {

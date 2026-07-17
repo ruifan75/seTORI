@@ -412,7 +412,11 @@ func (r *Router) handleSearchStreams(w http.ResponseWriter, req *http.Request) {
 
 // handleStartBatchAnalyze 未処理配信の一括プレ分析を開始する（content:edit）。
 func (r *Router) handleStartBatchAnalyze(w http.ResponseWriter, req *http.Request) {
-	if err := r.batchAnalyzeService.Start(); err != nil {
+	mode := req.URL.Query().Get("mode")
+	if mode == "" {
+		mode = service.BatchModeUnprocessed
+	}
+	if err := r.batchAnalyzeService.Start(mode); err != nil {
 		respondError(w, http.StatusConflict, err.Error())
 		return
 	}
