@@ -316,7 +316,7 @@ export default function GlobalSearch({
   return (
     <div
       ref={rootRef}
-      className={`relative w-full min-w-0 ${
+      className={`relative w-full min-w-0 ${open ? 'z-50' : ''} ${
         expandable
           ? expanded
             ? 'lg:mx-auto lg:flex-[0_1_36rem] lg:-translate-x-14 lg:transition-[flex-basis,transform] lg:duration-300 lg:ease-out xl:flex-[0_1_42rem] motion-reduce:transition-none'
