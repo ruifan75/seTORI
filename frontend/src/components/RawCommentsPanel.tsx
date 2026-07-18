@@ -119,17 +119,14 @@ export default function RawCommentsPanel({ videoId, onSeek, onAddSong }: Props) 
 
   const comments = useMemo(() => data?.comments ?? [], [data?.comments]);
 
-  // コメント→行に分解してフィルタ。元コメントの区切りは保つ
+  // フィルタはコメント単位：タイムスタンプや検索語を含むコメントを「丸ごと」表示する
+  // （タイムスタンプ行だけに切り詰めない — 前後の行も文脈として重要）
   const filtered = useMemo(() => {
     const q = filter.trim().toLowerCase();
     return comments
-      .map((c) => {
-        let lines = c.split('\n');
-        if (tsOnly) lines = lines.filter((l) => HAS_TS_RE.test(l));
-        if (q) lines = lines.filter((l) => l.toLowerCase().includes(q));
-        return lines;
-      })
-      .filter((lines) => lines.length > 0);
+      .filter((c) => !tsOnly || HAS_TS_RE.test(c))
+      .filter((c) => !q || c.toLowerCase().includes(q))
+      .map((c) => c.split('\n'));
   }, [comments, filter, tsOnly]);
 
   return (
@@ -149,7 +146,7 @@ export default function RawCommentsPanel({ videoId, onSeek, onAddSong }: Props) 
             onChange={(e) => setTsOnly(e.target.checked)}
             className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
           />
-          タイムスタンプ行のみ
+          タイムスタンプ付きのみ
         </label>
       </div>
 

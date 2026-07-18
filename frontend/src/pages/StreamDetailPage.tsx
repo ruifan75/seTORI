@@ -1627,16 +1627,33 @@ export default function StreamDetailPage() {
                             className="flex items-baseline gap-2 px-2 py-1.5 rounded hover:bg-indigo-50 cursor-pointer group text-sm"
                             title="クリックで追加"
                           >
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                youtubePlayerSeekTo(song.start_seconds);
-                              }}
-                              className="shrink-0 px-1.5 rounded bg-blue-50 text-blue-700 font-mono text-xs hover:bg-blue-100 transition-colors"
-                              title="この時間にジャンプ"
-                            >
-                              {formatTime(song.start_seconds)}
-                            </button>
+                            <span className="shrink-0 flex items-baseline gap-0.5">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  youtubePlayerSeekTo(song.start_seconds);
+                                }}
+                                className="px-1.5 rounded bg-blue-50 text-blue-700 font-mono text-xs hover:bg-blue-100 transition-colors"
+                                title="開始時間にジャンプ"
+                              >
+                                {formatTime(song.start_seconds)}
+                              </button>
+                              {song.end_seconds > 0 && (
+                                <>
+                                  <span className="text-gray-300 text-xs">〜</span>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      youtubePlayerSeekTo(song.end_seconds);
+                                    }}
+                                    className="px-1.5 rounded bg-blue-50/60 text-blue-600 font-mono text-xs hover:bg-blue-100 transition-colors"
+                                    title="終了時間にジャンプ"
+                                  >
+                                    {formatTime(song.end_seconds)}
+                                  </button>
+                                </>
+                              )}
+                            </span>
                             <span className="min-w-0 flex-1 truncate">
                               <span className="text-gray-900 font-medium">{song.name}</span>
                               {song.original_artist && <span className="text-gray-500"> / {song.original_artist}</span>}
@@ -1682,16 +1699,33 @@ export default function StreamDetailPage() {
                             className="flex items-baseline gap-2 px-2 py-1.5 rounded hover:bg-indigo-50 cursor-pointer group text-sm"
                             title="クリックで追加"
                           >
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                youtubePlayerSeekTo(song.start);
-                              }}
-                              className="shrink-0 px-1.5 rounded bg-orange-50 text-orange-700 font-mono text-xs hover:bg-orange-100 transition-colors"
-                              title="この時間にジャンプ"
-                            >
-                              {formatTime(song.start)}
-                            </button>
+                            <span className="shrink-0 flex items-baseline gap-0.5">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  youtubePlayerSeekTo(song.start);
+                                }}
+                                className="px-1.5 rounded bg-orange-50 text-orange-700 font-mono text-xs hover:bg-orange-100 transition-colors"
+                                title="開始時間にジャンプ"
+                              >
+                                {formatTime(song.start)}
+                              </button>
+                              {song.end > 0 && (
+                                <>
+                                  <span className="text-gray-300 text-xs">〜</span>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      youtubePlayerSeekTo(song.end);
+                                    }}
+                                    className="px-1.5 rounded bg-orange-50/60 text-orange-600 font-mono text-xs hover:bg-orange-100 transition-colors"
+                                    title="終了時間にジャンプ"
+                                  >
+                                    {formatTime(song.end)}
+                                  </button>
+                                </>
+                              )}
+                            </span>
                             <span className="min-w-0 flex-1 truncate">
                               <span className="text-gray-900 font-medium">{song.name}</span>
                               {song.original_artist && <span className="text-gray-500"> / {song.original_artist}</span>}
