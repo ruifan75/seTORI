@@ -159,10 +159,14 @@ func ParseCommentsWithAI(aiClient ai.Chatter, comments []string) ([]ParsedSong, 
 		}
 
 		// AI 抽取的歌名/歌手：僅在「逐字出現在原始行」時才採用，杜絕幻覺竄改
-		if name := strings.TrimSpace(sel.Name); name != "" && isVerbatim(name, originalLine) {
+		if name := firstSlashField(sel.Name); name != "" && isVerbatim(name, originalLine) {
 			parsed.Name = name
 		}
-		if artist := strings.TrimSpace(sel.Artist); artist != "" && isVerbatim(artist, originalLine) {
+		if artist := firstSlashField(sel.Artist); artist != "" && isVerbatim(artist, originalLine) {
+			// AI 可能把縫合行尾端的合唱者資訊（with ○○ 等）當成歌手 → 視為未知
+			if collabMarkerRe.MatchString(artist) {
+				artist = ""
+			}
 			parsed.OriginalArtist = artist
 		}
 
@@ -179,6 +183,17 @@ func ParseCommentsWithAI(aiClient ai.Chatter, comments []string) ([]ParsedSong, 
 		logger.Debugf("AI parsed song %d: start=%d name=%q artist=%q from line=%s", i, p.Start, p.Name, p.OriginalArtist, p.OriginalComment)
 	}
 	return result, nil
+}
+
+// firstSlashField 把 AI 回傳的欄位裁到第一個斜線欄位為止，
+// 與 parseSongAndArtist 的「歌名/歌手/其餘欄位忽略」語意保持一致。
+// 縫合行的合唱者資訊掛在最後一個斜線欄位，AI 若整段照抄也會在這裡被裁掉。
+func firstSlashField(s string) string {
+	s = strings.ReplaceAll(strings.TrimSpace(s), "／", "/")
+	if i := strings.Index(s, "/"); i >= 0 {
+		s = s[:i]
+	}
+	return strings.TrimSpace(s)
 }
 
 // isVerbatim 判斷 candidate 是否「逐字」出現在 source 中（NFKC + 去空白 + lower 後比對子字串）。
@@ -205,7 +220,8 @@ func normalizeForMatch(s string) string {
 func extractTimestampLines(comments []string) []string {
 	var lines []string
 	for _, comment := range comments {
-		for _, line := range strings.Split(comment, "\n") {
+		// 先縫合兩行式條目，讓沒有時間戳的歌名行不會在這裡被過濾掉
+		for _, line := range stitchTwoLineEntries(strings.Split(comment, "\n")) {
 			trimmed := strings.TrimSpace(line)
 			if trimmed == "" {
 				continue

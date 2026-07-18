@@ -84,8 +84,8 @@ func ParseComments(comments []string) []ParsedSong {
 	var songs []ParsedSong
 
 	for _, comment := range comments {
-		// 按行分割
-		lines := strings.Split(comment, "\n")
+		// 按行分割，並先縫合「時間戳行 + 歌名行」的兩行式條目
+		lines := stitchTwoLineEntries(strings.Split(comment, "\n"))
 		for _, line := range lines {
 			song := ParseComment(line)
 			if song != nil {
