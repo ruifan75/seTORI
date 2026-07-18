@@ -271,6 +271,11 @@ export const commentApi = {
     return data;
   },
 
+  syncYouTube: async (videoId: string): Promise<{ video_id: string; comment_count: number }> => {
+    const { data } = await api.post(`/api/streams/${videoId}/comments/sync-youtube`);
+    return data;
+  },
+
   analyze: async (videoId: string, force = false): Promise<AnalyzeCommentsResponse> => {
     const { data } = await api.post(`/api/streams/${videoId}/comments/analyze${force ? '?force=true' : ''}`);
     return data;

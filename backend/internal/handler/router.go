@@ -212,6 +212,7 @@ func (r *Router) setupRoutes() {
 
 	// Comment analysis
 	r.mux.HandleFunc("GET /api/streams/{id}/comments", r.handleGetComments)
+	r.mux.HandleFunc("POST /api/streams/{id}/comments/sync-youtube", r.handleSyncYouTubeComments)
 	r.mux.HandleFunc("POST /api/streams/{id}/comments/analyze", r.handleAnalyzeComments)
 	r.mux.HandleFunc("POST /api/comments/backfill", r.handleBackfillCommentSongs)
 	r.mux.HandleFunc("POST /api/streams/{id}/analyze-chat-ends", r.handleAnalyzeChatEnds)
@@ -1538,6 +1539,25 @@ func (r *Router) handleGetComments(w http.ResponseWriter, req *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]interface{}{
 		"video_id": videoID,
 		"comments": comments,
+	})
+}
+
+func (r *Router) handleSyncYouTubeComments(w http.ResponseWriter, req *http.Request) {
+	videoID := req.PathValue("id")
+	if videoID == "" {
+		respondError(w, http.StatusBadRequest, "無効な動画ID")
+		return
+	}
+
+	count, err := r.commentService.SyncYouTubeCommentRaw(videoID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"video_id":      videoID,
+		"comment_count": count,
 	})
 }
 

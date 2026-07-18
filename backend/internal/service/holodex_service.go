@@ -653,11 +653,10 @@ func (s *HolodexService) GetVideoComments(videoID string) ([]string, error) {
 	var youtubeErr error
 	youtubeSucceeded := false
 	if s.youtubeClient != nil && s.youtubeClient.IsConfigured() {
-		comments, err := s.youtubeClient.ListVideoComments(videoID)
+		comments, err := s.GetYouTubeVideoComments(videoID)
 		if err == nil {
 			youtubeSucceeded = true
 			if len(comments) > 0 {
-				logger.Infof("[youtube] fetched %d comments for %s", len(comments), videoID)
 				return comments, nil
 			}
 			logger.Infof("[youtube] no comments returned for %s; trying Holodex fallback", videoID)
@@ -685,6 +684,20 @@ func (s *HolodexService) GetVideoComments(videoID string) ([]string, error) {
 	}
 	logger.Infof("[holodex] fetched %d comments for %s", len(comments), videoID)
 
+	return comments, nil
+}
+
+// GetYouTubeVideoComments は Holodex に fallback せず、YouTube Data API だけから
+// 公開トップレベルコメントを取得する。手動同期など、取得元を保証したい場合に使う。
+func (s *HolodexService) GetYouTubeVideoComments(videoID string) ([]string, error) {
+	if s.youtubeClient == nil || !s.youtubeClient.IsConfigured() {
+		return nil, fmt.Errorf("YouTube API key not configured")
+	}
+	comments, err := s.youtubeClient.ListVideoComments(videoID)
+	if err != nil {
+		return nil, fmt.Errorf("get comments from YouTube: %w", err)
+	}
+	logger.Infof("[youtube] fetched %d comments for %s", len(comments), videoID)
 	return comments, nil
 }
 

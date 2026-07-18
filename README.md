@@ -187,6 +187,7 @@ cd frontend && npm run build                          # dist/ に出力
 | POST | `/api/streams/{id}/estimate-end-times` | 終了時間の推定 |
 | POST/DELETE | `/api/streams/{id}/performances` | 歌唱記録の一括作成 / 全削除 |
 | GET | `/api/streams/{id}/comments` | 生コメントの取得 |
+| POST | `/api/streams/{id}/comments/sync-youtube` | YouTube Data API から生コメントを手動同期 |
 | POST | `/api/streams/{id}/comments/analyze` | コメントを楽曲に解析 |
 | POST | `/api/comments/backfill` | comment_songs を補完 |
 | **Singers** | | |

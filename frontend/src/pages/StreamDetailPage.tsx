@@ -842,6 +842,23 @@ export default function StreamDetailPage() {
     },
   });
 
+  // YouTube Data API から公開コメントを明示的に取り直す（Holodex fallback なし）
+  const syncYouTubeCommentsMutation = useMutation({
+    mutationFn: () => commentApi.syncYouTube(id!),
+    onSuccess: async (data) => {
+      // raw が変わると backend 側で旧 comment_songs cache は破棄される。
+      setCommentTimelineSongs([]);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['raw-comments', id] }),
+        queryClient.invalidateQueries({ queryKey: ['stream', id] }),
+      ]);
+      showToast(`YouTubeからコメント${data.comment_count}件を同期しました`, 'success');
+    },
+    onError: (err: Error) => {
+      showToast(`YouTubeコメント同期エラー: ${err.message}`, 'error');
+    },
+  });
+
   // 同步 seTORI 資料到 Holodex
   const syncToHolodexMutation = useMutation({
     mutationFn: () => holodexApi.syncSetoriToHolodex(id!),
@@ -1507,7 +1524,7 @@ export default function StreamDetailPage() {
                       <div className="flex flex-wrap gap-2">
                         <button
                           onClick={autoLoad}
-                          disabled={holodexAnalyzeLoading || commentAnalyzeLoading}
+                          disabled={holodexAnalyzeLoading || commentAnalyzeLoading || syncYouTubeCommentsMutation.isPending}
                           className="px-3 py-1.5 text-sm bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50"
                           title="Holodex → コメント の優先順で読み込み、正規化と chat 時間チェックまで実行"
                         >
@@ -1522,7 +1539,7 @@ export default function StreamDetailPage() {
                         </button>
                         <button
                           onClick={() => loadFromComments(false)}
-                          disabled={!stream?.has_comment_raw || commentAnalyzeLoading}
+                          disabled={!stream?.has_comment_raw || commentAnalyzeLoading || syncYouTubeCommentsMutation.isPending}
                           className="px-3 py-1.5 text-sm bg-indigo-50 text-indigo-700 border border-indigo-200 font-medium rounded-lg hover:bg-indigo-100 transition-colors disabled:opacity-50"
                         >
                           {commentAnalyzeLoading ? 'コメント分析中...' : 'コメント データ'}
@@ -1533,6 +1550,19 @@ export default function StreamDetailPage() {
                           className="px-3 py-1.5 text-sm bg-indigo-50 text-indigo-700 border border-indigo-200 font-medium rounded-lg hover:bg-indigo-100 transition-colors disabled:opacity-50"
                         >
                           {aiNormalizeMutation.isPending ? 'AI処理中...' : 'AI正規化'}
+                        </button>
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium text-gray-400 mb-1.5">コメント同期</p>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          onClick={() => syncYouTubeCommentsMutation.mutate()}
+                          disabled={syncYouTubeCommentsMutation.isPending || commentAnalyzeLoading}
+                          title="YouTube Data API から公開トップレベルコメントを取得し直します"
+                          className="px-3 py-1.5 text-sm bg-red-50 text-red-700 border border-red-200 font-medium rounded-lg hover:bg-red-100 transition-colors disabled:opacity-50"
+                        >
+                          {syncYouTubeCommentsMutation.isPending ? 'YouTubeから同期中...' : 'YouTubeからコメント同期'}
                         </button>
                       </div>
                     </div>
@@ -1617,7 +1647,7 @@ export default function StreamDetailPage() {
                     <div className="flex gap-2">
                       <button
                         onClick={() => loadFromComments(false)}
-                        disabled={!stream?.has_comment_raw || commentAnalyzeLoading}
+                        disabled={!stream?.has_comment_raw || commentAnalyzeLoading || syncYouTubeCommentsMutation.isPending}
                         className="flex-1 px-3 py-1.5 text-sm bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50"
                         title="分析済みの全曲を編集リストへ読み込む（正規化＋chat 時間チェック込み）"
                       >
@@ -1625,7 +1655,7 @@ export default function StreamDetailPage() {
                       </button>
                       <button
                         onClick={() => loadFromComments(true)}
-                        disabled={!stream?.has_comment_raw || commentAnalyzeLoading}
+                        disabled={!stream?.has_comment_raw || commentAnalyzeLoading || syncYouTubeCommentsMutation.isPending}
                         title="キャッシュを無視して AI で再分析・再正規化します"
                         className="px-3 py-1.5 text-sm bg-white text-gray-600 border border-gray-300 font-medium rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
                       >

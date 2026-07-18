@@ -597,10 +597,16 @@ func (r *StreamRepository) ApplyTagRulesToAll() (int64, error) {
 
 // ========== 分析快取（comment / holodex 正規化結果，以來源 hash 為鍵） ==========
 
-// SaveCommentRaw 只更新 comment_raw（同步時用，不動 comment_songs/其他大欄位）
+// SaveCommentRaw 更新 comment_raw；內容有變時一併清除由舊留言產生的分析快取。
 func (r *StreamRepository) SaveCommentRaw(id string, raw []byte) error {
 	raw = util.SanitizeJSONB(raw)
-	_, err := r.db.Exec(`UPDATE streams SET comment_raw = $2, updated_at = NOW() WHERE id = $1`, id, raw)
+	_, err := r.db.Exec(`
+		UPDATE streams
+		SET comment_songs = CASE WHEN comment_raw IS DISTINCT FROM $2 THEN NULL ELSE comment_songs END,
+		    comment_songs_hash = CASE WHEN comment_raw IS DISTINCT FROM $2 THEN NULL ELSE comment_songs_hash END,
+		    comment_raw = $2,
+		    updated_at = NOW()
+		WHERE id = $1`, id, raw)
 	if err != nil {
 		return fmt.Errorf("save comment raw: %w", err)
 	}

@@ -220,6 +220,32 @@ func (s *CommentService) RefreshCommentRaw(videoID string) error {
 	return nil
 }
 
+// SyncYouTubeCommentRaw は YouTube Data API から明示的にコメントを取り直す。
+// Holodex fallback は使わず、取得元を保証したうえで comment_raw を上書きする。
+func (s *CommentService) SyncYouTubeCommentRaw(videoID string) (int, error) {
+	stream, err := s.streamRepo.FindByID(videoID)
+	if err != nil {
+		return 0, fmt.Errorf("find stream: %w", err)
+	}
+	if stream == nil {
+		return 0, fmt.Errorf("stream not found: %s", videoID)
+	}
+
+	comments, err := s.holodexService.GetYouTubeVideoComments(videoID)
+	if err != nil {
+		return 0, fmt.Errorf("fetch comments from YouTube: %w", err)
+	}
+	rawJSON, err := json.Marshal(comments)
+	if err != nil {
+		return 0, fmt.Errorf("marshal YouTube comments: %w", err)
+	}
+	if err := s.streamRepo.SaveCommentRaw(videoID, util.SanitizeJSONB(rawJSON)); err != nil {
+		return 0, fmt.Errorf("save YouTube comments: %w", err)
+	}
+	logger.Infof("[comment] synced %d raw comments from YouTube for %s", len(comments), videoID)
+	return len(comments), nil
+}
+
 // BackfillCommentSongs 補填所有有 comment_raw 但沒有 comment_songs 的 stream
 func (s *CommentService) BackfillCommentSongs() (int, error) {
 	streams, err := s.streamRepo.FindWithoutCommentSongs()
