@@ -385,7 +385,7 @@ export default function GlobalSearch({
       </div>
 
       {showPanel && (
-        <div className="absolute left-0 top-full z-50 mt-1 max-h-[75vh] w-[34rem] max-w-[calc(100vw-2rem)] overflow-y-auto border border-gray-200 bg-white shadow-xl rounded-lg">
+        <div className="absolute left-0 top-full z-50 mt-1 max-h-[75vh] w-full overflow-y-auto border border-gray-200 bg-white shadow-xl rounded-lg">
           {focusedToken && (
             <div className="flex items-center gap-3 border-b border-gray-200 bg-gray-50 px-3 py-2">
               <span className="shrink-0 text-xs font-medium text-gray-400">選択中</span>
