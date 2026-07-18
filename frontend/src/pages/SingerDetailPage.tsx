@@ -7,6 +7,7 @@ import { usePlayerStore, type PlayerTrack } from '../store/player';
 import Loading from '../components/ui/Loading';
 import Pagination from '../components/ui/Pagination';
 import Tag from '../components/ui/Tag';
+import ArtistLinks from '../components/ArtistLinks';
 import { SortableTh, type SortDir, type SortState } from '../components/ui/Sort';
 
 type TabType = 'streams' | 'performances';
@@ -98,7 +99,8 @@ export default function SingerDetailPage() {
       streamId: perf.stream_id,
       songId: perf.song_id,
       songName: perf.song_name ?? '(不明)',
-      artist: '',
+      artist: perf.original_artist ?? '',
+      artists: perf.artists ?? [],
       singers: perf.singers?.map((s) => ({ id: s.id, name: s.name })) ?? [],
       streamTitle: perf.stream_title,
       streamDate: perf.stream_date,
@@ -534,14 +536,30 @@ export default function SingerDetailPage() {
                       <tr key={perf.id} className="hover:bg-gray-50">
                         <td className="px-4 py-4">
                           {perf.song_id ? (
-                            <Link
-                              to={`/songs/${perf.song_id}`}
-                              className="text-indigo-600 hover:text-indigo-900 font-medium"
-                            >
-                              {perf.song_name}
-                            </Link>
+                            <div>
+                              <Link
+                                to={`/songs/${perf.song_id}`}
+                                className="text-indigo-600 hover:text-indigo-900 font-medium"
+                              >
+                                {perf.song_name}
+                              </Link>
+                              <ArtistLinks
+                                artists={perf.artists}
+                                fallback={perf.original_artist}
+                                className="block text-xs text-gray-500"
+                                linkClassName="hover:text-indigo-600"
+                              />
+                            </div>
                           ) : (
-                            <span className="text-gray-900">{perf.song_name}</span>
+                            <div>
+                              <span className="text-gray-900">{perf.song_name}</span>
+                              <ArtistLinks
+                                artists={perf.artists}
+                                fallback={perf.original_artist}
+                                className="block text-xs text-gray-500"
+                                linkClassName="hover:text-indigo-600"
+                              />
+                            </div>
                           )}
                         </td>
                         <td className="px-4 py-4">

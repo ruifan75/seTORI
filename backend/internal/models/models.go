@@ -43,6 +43,12 @@ type Artist struct {
 	UpdatedAt   time.Time      `json:"updated_at"`
 }
 
+// ArtistReference は楽曲・演唱 API に埋め込む安定したアーティスト参照。
+type ArtistReference struct {
+	ID   uuid.UUID `json:"id"`
+	Name string    `json:"name"`
+}
+
 // SongITunes 歌曲的 iTunes ID
 type SongITunes struct {
 	ID             uuid.UUID      `json:"id"`

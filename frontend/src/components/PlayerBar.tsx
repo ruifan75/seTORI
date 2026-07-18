@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { usePlayerStore } from '../store/player';
+import ArtistLinks from './ArtistLinks';
 
 // 秒 → M:SS
 function fmt(sec: number): string {
@@ -339,15 +340,13 @@ export default function PlayerBar() {
                     ) : (
                       <span className="text-lg font-semibold truncate">{track.songName}</span>
                     )}
-                    {track.artist && (
-                      <Link
-                        to={`/artists?search=${encodeURIComponent(track.artist)}`}
-                        onClick={() => setExpanded(false)}
-                        className="text-sm text-gray-400 hover:text-indigo-300"
-                      >
-                        {track.artist}
-                      </Link>
-                    )}
+                    <ArtistLinks
+                      artists={track.artists}
+                      fallback={track.artist}
+                      className="text-sm text-gray-400"
+                      linkClassName="hover:text-indigo-300"
+                      onNavigate={() => setExpanded(false)}
+                    />
                   </div>
                   <div className="text-sm text-gray-400 truncate mt-0.5">
                     {track.singers.map((s, i) => (
@@ -537,15 +536,12 @@ export default function PlayerBar() {
                 ) : (
                   <span className="text-sm font-medium text-gray-900 truncate" title={track.songName}>{track.songName}</span>
                 )}
-                {track.artist && (
-                  <Link
-                    to={`/artists?search=${encodeURIComponent(track.artist)}`}
-                    title={`アーティスト: ${track.artist}`}
-                    className="text-xs text-gray-500 hover:text-indigo-600 truncate hidden md:inline"
-                  >
-                    {track.artist}
-                  </Link>
-                )}
+                <ArtistLinks
+                  artists={track.artists}
+                  fallback={track.artist}
+                  className="text-xs text-gray-500 truncate hidden md:inline"
+                  linkClassName="hover:text-indigo-600"
+                />
               </div>
               <div className="flex items-center gap-2 text-xs text-gray-400 min-w-0">
                 {track.singers.length > 0 && (

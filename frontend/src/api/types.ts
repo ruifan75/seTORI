@@ -16,12 +16,18 @@ export interface SongItunes {
   is_primary: boolean;
 }
 
+export interface ArtistReference {
+  id: string;
+  name: string;
+}
+
 export interface Song {
   id: string;
   name: string;
   name_reading?: string;
   original_artist: string;
   original_artist_reading?: string;
+  artists: ArtistReference[];
   arts?: string;
   performance_count: number;
   itunes_ids?: SongItunes[];
@@ -193,6 +199,7 @@ export interface Performance {
   song_id: string;
   song_name: string;
   original_artist: string;
+  artists: ArtistReference[];
   arts?: string;
   start_seconds: number;
   end_seconds: number;
@@ -221,6 +228,8 @@ export interface SongPerformance {
   thumbnail_url?: string;
   song_id?: string;
   song_name?: string;
+  original_artist?: string;
+  artists: ArtistReference[];
   start_seconds: number;
   end_seconds: number;
   tags: PerformanceTag[];

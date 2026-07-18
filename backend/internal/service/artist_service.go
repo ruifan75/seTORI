@@ -82,10 +82,19 @@ func (s *ArtistService) GetByID(id uuid.UUID, page, limit int, sort, dir string)
 	if err != nil {
 		return nil, err
 	}
+	songIDs := make([]uuid.UUID, len(songs))
+	for i, song := range songs {
+		songIDs[i] = song.ID
+	}
+	artistMap, err := s.artistRepo.FindReferencesBySongIDs(songIDs)
+	if err != nil {
+		return nil, err
+	}
 
 	songResponses := make([]dto.SongResponse, len(songs))
 	for i, song := range songs {
 		songResponses[i] = buildSongResponse(song, counts[song.ID], nil)
+		songResponses[i].Artists = toArtistReferences(artistMap[song.ID])
 	}
 
 	return &dto.ArtistDetailResponse{

@@ -370,6 +370,7 @@ func (s *StreamService) toPerformanceResponse(perf repository.PerformanceWithDet
 		SongID:         perf.SongID,
 		SongName:       perf.SongName,
 		OriginalArtist: perf.OriginalArtist,
+		Artists:        toArtistReferences(perf.Artists),
 		StartSeconds:   perf.StartSeconds,
 		EndSeconds:     perf.EndSeconds,
 		OrderIndex:     perf.OrderIndex,

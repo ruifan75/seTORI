@@ -29,12 +29,18 @@ type SongItunesResponse struct {
 	IsPrimary      bool    `json:"is_primary"`
 }
 
+type ArtistReference struct {
+	ID   uuid.UUID `json:"id"`
+	Name string    `json:"name"`
+}
+
 type SongResponse struct {
 	ID                    uuid.UUID            `json:"id"`
 	Name                  string               `json:"name"`
 	NameReading           *string              `json:"name_reading,omitempty"`
 	OriginalArtist        string               `json:"original_artist"`
 	OriginalArtistReading *string              `json:"original_artist_reading,omitempty"`
+	Artists               []ArtistReference    `json:"artists"`
 	Arts                  *string              `json:"arts,omitempty"`
 	PerformanceCount      int                  `json:"performance_count"`
 	ItunesIDs             []SongItunesResponse `json:"itunes_ids,omitempty"`
@@ -181,6 +187,7 @@ type PerformanceResponse struct {
 	SongID         uuid.UUID                `json:"song_id"`
 	SongName       string                   `json:"song_name"`
 	OriginalArtist string                   `json:"original_artist"`
+	Artists        []ArtistReference        `json:"artists"`
 	Arts           *string                  `json:"arts,omitempty"`
 	StartSeconds   int                      `json:"start_seconds"`
 	EndSeconds     int                      `json:"end_seconds"`
@@ -198,20 +205,22 @@ type PerformanceResponse struct {
 
 // 用於歌曲詳情頁的反向查詢
 type SongPerformanceResponse struct {
-	ID           uuid.UUID                `json:"id"`
-	StreamID     string                   `json:"stream_id"`
-	StreamTitle  string                   `json:"stream_title"`
-	StreamDate   string                   `json:"stream_date"`
-	ThumbnailURL *string                  `json:"thumbnail_url,omitempty"`
-	SongID       uuid.UUID                `json:"song_id,omitempty"`
-	SongName     string                   `json:"song_name,omitempty"`
-	StartSeconds int                      `json:"start_seconds"`
-	EndSeconds   int                      `json:"end_seconds"`
-	Tags         []PerformanceTagResponse `json:"tags"`
-	CustomTags   []string                 `json:"custom_tags"`
-	Singers      []SingerResponse         `json:"singers"`
-	YouTubeURL   string                   `json:"youtube_url"`
-	CreatedAt    time.Time                `json:"created_at"`
+	ID             uuid.UUID                `json:"id"`
+	StreamID       string                   `json:"stream_id"`
+	StreamTitle    string                   `json:"stream_title"`
+	StreamDate     string                   `json:"stream_date"`
+	ThumbnailURL   *string                  `json:"thumbnail_url,omitempty"`
+	SongID         uuid.UUID                `json:"song_id,omitempty"`
+	SongName       string                   `json:"song_name,omitempty"`
+	OriginalArtist string                   `json:"original_artist,omitempty"`
+	Artists        []ArtistReference        `json:"artists"`
+	StartSeconds   int                      `json:"start_seconds"`
+	EndSeconds     int                      `json:"end_seconds"`
+	Tags           []PerformanceTagResponse `json:"tags"`
+	CustomTags     []string                 `json:"custom_tags"`
+	Singers        []SingerResponse         `json:"singers"`
+	YouTubeURL     string                   `json:"youtube_url"`
+	CreatedAt      time.Time                `json:"created_at"`
 }
 
 type SongPerformanceListResponse struct {

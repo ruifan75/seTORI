@@ -7,6 +7,7 @@ export interface PlayerTrack {
   songId?: string;
   songName: string;
   artist: string;
+  artists: { id: string; name: string }[]; // 原曲アーティスト（UUID リンク用）
   artUrl?: string;
   singers: { id: string; name: string }[]; // 歌唱チャンネル（リンク用に id も保持）
   streamTitle?: string;

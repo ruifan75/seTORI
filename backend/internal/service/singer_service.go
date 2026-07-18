@@ -295,16 +295,18 @@ func (s *SingerService) toStreamResponse(stream models.Stream, tags []models.Str
 // toPerformanceResponse 轉換演出到 DTO
 func (s *SingerService) toPerformanceResponse(perf repository.PerformanceWithDetails) dto.SongPerformanceResponse {
 	resp := dto.SongPerformanceResponse{
-		ID:           perf.ID,
-		StreamID:     perf.StreamID,
-		StreamTitle:  perf.StreamTitle,
-		StreamDate:   perf.StreamDate,
-		StartSeconds: perf.StartSeconds,
-		EndSeconds:   perf.EndSeconds,
-		YouTubeURL:   fmt.Sprintf("https://www.youtube.com/watch?v=%s&t=%d", perf.StreamID, perf.StartSeconds),
-		CreatedAt:    perf.CreatedAt,
-		SongName:     perf.SongName,
-		SongID:       perf.SongID,
+		ID:             perf.ID,
+		StreamID:       perf.StreamID,
+		StreamTitle:    perf.StreamTitle,
+		StreamDate:     perf.StreamDate,
+		StartSeconds:   perf.StartSeconds,
+		EndSeconds:     perf.EndSeconds,
+		YouTubeURL:     fmt.Sprintf("https://www.youtube.com/watch?v=%s&t=%d", perf.StreamID, perf.StartSeconds),
+		CreatedAt:      perf.CreatedAt,
+		SongName:       perf.SongName,
+		SongID:         perf.SongID,
+		OriginalArtist: perf.OriginalArtist,
+		Artists:        toArtistReferences(perf.Artists),
 	}
 
 	if perf.ThumbnailURL.Valid {

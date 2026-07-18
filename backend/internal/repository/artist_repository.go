@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/ruifan75/setori/internal/models"
+	"github.com/lib/pq"
 )
 
 // ArtistRepository は artists / song_artists を扱う。
@@ -255,6 +256,47 @@ func (r *ArtistRepository) FindSongsByArtist(artistID uuid.UUID, limit, offset i
 		counts[s.ID] = perfCount
 	}
 	return songs, counts, total, rows.Err()
+}
+
+// FindReferencesBySongIDs は複数楽曲の artist key をまとめて取得する。
+func (r *ArtistRepository) FindReferencesBySongIDs(songIDs []uuid.UUID) (map[uuid.UUID][]models.ArtistReference, error) {
+	result := make(map[uuid.UUID][]models.ArtistReference, len(songIDs))
+	if len(songIDs) == 0 {
+		return result, nil
+	}
+
+	ids := make([]string, len(songIDs))
+	for i, id := range songIDs {
+		ids[i] = id.String()
+	}
+	rows, err := r.db.Query(`
+		SELECT sa.song_id, a.id, a.name
+		FROM song_artists sa
+		JOIN artists a ON a.id = sa.artist_id
+		WHERE sa.song_id = ANY($1::uuid[])
+		ORDER BY sa.song_id, a.name`, pq.Array(ids))
+	if err != nil {
+		return nil, fmt.Errorf("find artist references by song ids: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var songID uuid.UUID
+		var artist models.ArtistReference
+		if err := rows.Scan(&songID, &artist.ID, &artist.Name); err != nil {
+			return nil, fmt.Errorf("scan artist reference: %w", err)
+		}
+		result[songID] = append(result[songID], artist)
+	}
+	return result, rows.Err()
+}
+
+func (r *ArtistRepository) FindReferencesBySongID(songID uuid.UUID) ([]models.ArtistReference, error) {
+	bySong, err := r.FindReferencesBySongIDs([]uuid.UUID{songID})
+	if err != nil {
+		return nil, err
+	}
+	return bySong[songID], nil
 }
 
 // SyncSongArtist は楽曲の original_artist テキストと artists/song_artists を同期する。

@@ -17,6 +17,7 @@ interface EditableFieldProps {
   emptyText?: string;
   editHint?: string;
   required?: boolean;
+  display?: React.ReactNode;
 }
 
 function PencilIcon() {
@@ -44,6 +45,7 @@ export default function EditableField({
   emptyText = '未設定',
   editHint,
   required = false,
+  display,
 }: EditableFieldProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
@@ -126,7 +128,7 @@ export default function EditableField({
 
   return (
     <Wrapper className={`group flex w-fit max-w-full items-center gap-1.5 ${className}`}>
-      {value ? <span>{value}</span> : <span className="text-gray-300">{emptyText}</span>}
+      {value ? <span>{display ?? value}</span> : <span className="text-gray-300">{emptyText}</span>}
       <button
         type="button"
         onClick={start}

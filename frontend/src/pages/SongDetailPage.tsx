@@ -8,6 +8,7 @@ import Pagination from '../components/ui/Pagination';
 import Tag from '../components/ui/Tag';
 import EditableField from '../components/EditableField';
 import QueueAddButton from '../components/QueueAddButton';
+import ArtistLinks from '../components/ArtistLinks';
 import { useToast } from '../components/ui/Toast';
 import { useAuthStore, hasPermission, PERM } from '../store/auth';
 import { usePlayerStore, type PlayerTrack } from '../store/player';
@@ -540,6 +541,7 @@ export default function SongDetailPage() {
     songId: song.id,
     songName: song.name,
     artist: song.original_artist,
+    artists: song.artists ?? [],
     artUrl: song.arts,
     singers: perf.singers?.map((s) => ({ id: s.id, name: s.name })) ?? [],
     streamTitle: perf.stream_title,
@@ -875,6 +877,13 @@ export default function SongDetailPage() {
                       as="p"
                       label="原曲アーティスト"
                       value={song.original_artist}
+                      display={(
+                        <ArtistLinks
+                          artists={song.artists}
+                          fallback={song.original_artist}
+                          linkClassName="hover:text-indigo-600"
+                        />
+                      )}
                       canEdit={canEdit}
                       required
                       className="text-xl text-gray-600 pt-1"

@@ -20,14 +20,61 @@ func NewPerformanceRepository(db *sql.DB) *PerformanceRepository {
 // PerformanceWithDetails 包含演出及相關資訊的結構
 type PerformanceWithDetails struct {
 	models.Performance
-	StreamTitle    string                  `json:"stream_title"`
-	StreamDate     string                  `json:"stream_date"`
-	ThumbnailURL   sql.NullString          `json:"thumbnail_url"`
-	SongName       string                  `json:"song_name"`
-	OriginalArtist string                  `json:"original_artist"`
-	Arts           sql.NullString          `json:"arts"`
-	Tags           []models.PerformanceTag `json:"tags"`
-	Singers        []models.Singer         `json:"singers"`
+	StreamTitle    string                   `json:"stream_title"`
+	StreamDate     string                   `json:"stream_date"`
+	ThumbnailURL   sql.NullString           `json:"thumbnail_url"`
+	SongName       string                   `json:"song_name"`
+	OriginalArtist string                   `json:"original_artist"`
+	Artists        []models.ArtistReference `json:"artists"`
+	Arts           sql.NullString           `json:"arts"`
+	Tags           []models.PerformanceTag  `json:"tags"`
+	Singers        []models.Singer          `json:"singers"`
+}
+
+// attachArtistReferences は演唱一覧に song_artists の安定した UUID 参照を一括で付与する。
+func (r *PerformanceRepository) attachArtistReferences(performances []PerformanceWithDetails) error {
+	if len(performances) == 0 {
+		return nil
+	}
+
+	seen := make(map[uuid.UUID]struct{}, len(performances))
+	ids := make([]string, 0, len(performances))
+	for _, perf := range performances {
+		if _, ok := seen[perf.SongID]; ok {
+			continue
+		}
+		seen[perf.SongID] = struct{}{}
+		ids = append(ids, perf.SongID.String())
+	}
+
+	rows, err := r.db.Query(`
+		SELECT sa.song_id, a.id, a.name
+		FROM song_artists sa
+		JOIN artists a ON a.id = sa.artist_id
+		WHERE sa.song_id = ANY($1::uuid[])
+		ORDER BY sa.song_id, a.name`, pq.Array(ids))
+	if err != nil {
+		return fmt.Errorf("get performance artist references: %w", err)
+	}
+	defer rows.Close()
+
+	bySong := make(map[uuid.UUID][]models.ArtistReference, len(ids))
+	for rows.Next() {
+		var songID uuid.UUID
+		var artist models.ArtistReference
+		if err := rows.Scan(&songID, &artist.ID, &artist.Name); err != nil {
+			return fmt.Errorf("scan performance artist reference: %w", err)
+		}
+		bySong[songID] = append(bySong[songID], artist)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	for i := range performances {
+		performances[i].Artists = bySong[performances[i].SongID]
+	}
+	return nil
 }
 
 // FindByStreamID 根據 Stream ID 取得所有演出（用於歌回詳情頁）
@@ -73,6 +120,12 @@ func (r *PerformanceRepository) FindByStreamID(streamID string) ([]PerformanceWi
 		performances = append(performances, p)
 	}
 
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := r.attachArtistReferences(performances); err != nil {
+		return nil, err
+	}
 	return performances, nil
 }
 
@@ -93,9 +146,11 @@ func (r *PerformanceRepository) FindBySongID(songID uuid.UUID, limit, offset int
 	query := `
 		SELECT p.id, p.stream_id, p.song_id, p.start_seconds, p.end_seconds, p.order_index,
 		       p.holodex_song_id, p.custom_tags, p.created_at,
-		       st.title AS stream_title, st.stream_date, st.thumbnail_url
+		       st.title AS stream_title, st.stream_date, st.thumbnail_url,
+		       s.name AS song_name, s.original_artist, s.arts
 		FROM performances p
 		JOIN streams st ON p.stream_id = st.id
+		JOIN songs s ON p.song_id = s.id
 		WHERE p.song_id = $1 AND st.is_hidden = FALSE
 		ORDER BY st.stream_date DESC
 		LIMIT $2 OFFSET $3`
@@ -111,7 +166,8 @@ func (r *PerformanceRepository) FindBySongID(songID uuid.UUID, limit, offset int
 		var p PerformanceWithDetails
 		err := rows.Scan(&p.ID, &p.StreamID, &p.SongID, &p.StartSeconds, &p.EndSeconds,
 			&p.OrderIndex, &p.HolodexSongID, &p.CustomTags, &p.CreatedAt,
-			&p.StreamTitle, &p.StreamDate, &p.ThumbnailURL)
+			&p.StreamTitle, &p.StreamDate, &p.ThumbnailURL,
+			&p.SongName, &p.OriginalArtist, &p.Arts)
 		if err != nil {
 			return nil, 0, fmt.Errorf("scan performance: %w", err)
 		}
@@ -133,6 +189,12 @@ func (r *PerformanceRepository) FindBySongID(songID uuid.UUID, limit, offset int
 		performances = append(performances, p)
 	}
 
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	if err := r.attachArtistReferences(performances); err != nil {
+		return nil, 0, err
+	}
 	return performances, total, nil
 }
 
@@ -195,7 +257,13 @@ func (r *PerformanceRepository) FindByTagID(tagID string, limit, offset int) ([]
 		performances = append(performances, p)
 	}
 
-	return performances, total, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	if err := r.attachArtistReferences(performances); err != nil {
+		return nil, 0, err
+	}
+	return performances, total, nil
 }
 
 // Create 建立新演出
@@ -480,6 +548,12 @@ func (r *PerformanceRepository) FindBySingerID(singerID string, limit, offset in
 		performances = append(performances, p)
 	}
 
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	if err := r.attachArtistReferences(performances); err != nil {
+		return nil, 0, err
+	}
 	return performances, total, nil
 }
 
@@ -529,7 +603,13 @@ func (r *PerformanceRepository) queryPerformanceDetails(query string, args ...in
 		performances = append(performances, p)
 	}
 
-	return performances, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := r.attachArtistReferences(performances); err != nil {
+		return nil, err
+	}
+	return performances, nil
 }
 
 // FindRandom は曲単位で重複しないランダムな歌唱を返す。

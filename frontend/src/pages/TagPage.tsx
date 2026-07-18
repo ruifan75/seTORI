@@ -4,6 +4,7 @@ import { tagApi } from '../api/client';
 import Loading from '../components/ui/Loading';
 import Pagination from '../components/ui/Pagination';
 import Tag from '../components/ui/Tag';
+import ArtistLinks from '../components/ArtistLinks';
 import { usePlayerStore, type PlayerTrack } from '../store/player';
 
 // タグ検索結果ページ。/tags/stream/:id は配信一覧、/tags/performance/:id は演出一覧。
@@ -50,6 +51,7 @@ export default function TagPage() {
       songId: p.song_id,
       songName: p.song_name,
       artist: p.original_artist,
+      artists: p.artists ?? [],
       artUrl: p.arts,
       singers: p.singers.map((s) => ({ id: s.id, name: s.name })),
       streamTitle: p.stream_title,
@@ -173,7 +175,12 @@ export default function TagPage() {
                     >
                       {perf.song_name}
                     </Link>
-                    <span className="text-sm text-gray-500 truncate">{perf.original_artist}</span>
+                    <ArtistLinks
+                      artists={perf.artists}
+                      fallback={perf.original_artist}
+                      className="text-sm text-gray-500 truncate"
+                      linkClassName="hover:text-indigo-600"
+                    />
                     {perf.tags.map((tag) => (
                       <Tag key={tag.id} label={tag.display_name} color={tag.color} />
                     ))}

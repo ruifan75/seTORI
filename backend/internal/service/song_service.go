@@ -69,11 +69,16 @@ func (s *SongService) GetAll(page, limit int, search, sort, dir string) (*dto.So
 	if err != nil {
 		return nil, fmt.Errorf("get song itunes: %w", err)
 	}
+	artistMap, err := s.artistRepo.FindReferencesBySongIDs(songIDs)
+	if err != nil {
+		return nil, fmt.Errorf("get song artists: %w", err)
+	}
 
 	// 轉換為 DTO
 	songResponses := make([]dto.SongResponse, len(songs))
 	for i, song := range songs {
 		songResponses[i] = buildSongResponse(song, counts[song.ID], itunesMap[song.ID])
+		songResponses[i].Artists = toArtistReferences(artistMap[song.ID])
 	}
 
 	totalPages := (total + limit - 1) / limit
@@ -356,7 +361,20 @@ func (s *SongService) toSongResponse(song models.Song, count int) dto.SongRespon
 	if s.songItunesRepo != nil {
 		itunesRecords, _ = s.songItunesRepo.FindBySongID(song.ID)
 	}
-	return buildSongResponse(song, count, itunesRecords)
+	resp := buildSongResponse(song, count, itunesRecords)
+	if s.artistRepo != nil {
+		artists, _ := s.artistRepo.FindReferencesBySongID(song.ID)
+		resp.Artists = toArtistReferences(artists)
+	}
+	return resp
+}
+
+func toArtistReferences(artists []models.ArtistReference) []dto.ArtistReference {
+	refs := make([]dto.ArtistReference, len(artists))
+	for i, artist := range artists {
+		refs[i] = dto.ArtistReference{ID: artist.ID, Name: artist.Name}
+	}
+	return refs
 }
 
 // buildSongResponse 由已備妥的資料組裝 DTO（供批次列表與單筆查詢共用）
@@ -368,6 +386,7 @@ func buildSongResponse(song models.Song, count int, itunesRecords []models.SongI
 		PerformanceCount: count,
 		CreatedAt:        song.CreatedAt,
 		UpdatedAt:        song.UpdatedAt,
+		Artists:          []dto.ArtistReference{},
 	}
 
 	if song.NameReading.Valid {
@@ -402,14 +421,18 @@ func buildSongResponse(song models.Song, count int, itunesRecords []models.SongI
 // toSongPerformanceResponse 轉換演出到 DTO
 func (s *SongService) toSongPerformanceResponse(perf repository.PerformanceWithDetails) dto.SongPerformanceResponse {
 	resp := dto.SongPerformanceResponse{
-		ID:           perf.ID,
-		StreamID:     perf.StreamID,
-		StreamTitle:  perf.StreamTitle,
-		StreamDate:   perf.StreamDate,
-		StartSeconds: perf.StartSeconds,
-		EndSeconds:   perf.EndSeconds,
-		YouTubeURL:   fmt.Sprintf("https://www.youtube.com/watch?v=%s&t=%d", perf.StreamID, perf.StartSeconds),
-		CreatedAt:    perf.CreatedAt,
+		ID:             perf.ID,
+		StreamID:       perf.StreamID,
+		StreamTitle:    perf.StreamTitle,
+		StreamDate:     perf.StreamDate,
+		SongID:         perf.SongID,
+		SongName:       perf.SongName,
+		OriginalArtist: perf.OriginalArtist,
+		Artists:        toArtistReferences(perf.Artists),
+		StartSeconds:   perf.StartSeconds,
+		EndSeconds:     perf.EndSeconds,
+		YouTubeURL:     fmt.Sprintf("https://www.youtube.com/watch?v=%s&t=%d", perf.StreamID, perf.StartSeconds),
+		CreatedAt:      perf.CreatedAt,
 	}
 
 	if perf.ThumbnailURL.Valid {

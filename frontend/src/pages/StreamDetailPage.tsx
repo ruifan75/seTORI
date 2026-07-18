@@ -12,6 +12,7 @@ import YoutubePlayer, { youtubePlayerSeekTo, youtubePlayerGetCurrentTime } from 
 import TimestampTweaker from '../components/TimestampTweaker';
 import QueueAddButton from '../components/QueueAddButton';
 import RawCommentsPanel from '../components/RawCommentsPanel';
+import ArtistLinks from '../components/ArtistLinks';
 
 
 // 編集可能な配信情報
@@ -204,6 +205,7 @@ function SongSearchInput({ value, onChange, onSelectSong, placeholder, showToast
         name_reading: itunes.existing_song.name_reading,
         original_artist: itunes.existing_song.original_artist,
         original_artist_reading: itunes.existing_song.original_artist_reading,
+        artists: [],
         arts: itunes.existing_song.arts,
         performance_count: itunes.existing_song.performance_count,
         created_at: '',
@@ -225,6 +227,7 @@ function SongSearchInput({ value, onChange, onSelectSong, placeholder, showToast
         id: '', // 空 ID は新規楽曲であることを示す
         name: itunes.track_name,
         original_artist: itunes.artist_name,
+        artists: [],
         arts: itunes.artwork_url,
         performance_count: 0,
         created_at: '',
@@ -1467,6 +1470,7 @@ export default function StreamDetailPage() {
       songId: perf.song_id,
       songName: perf.song_name,
       artist: perf.original_artist,
+      artists: perf.artists ?? [],
       artUrl: perf.arts,
       singers: perf.singers?.map((s) => ({ id: s.id, name: s.name })) ?? [],
       streamTitle: stream.title,
@@ -2609,7 +2613,11 @@ export default function StreamDetailPage() {
                           </Link>
                         </td>
                         <td className="px-4 py-4 text-sm text-gray-500">
-                          {perf.original_artist}
+                          <ArtistLinks
+                            artists={perf.artists}
+                            fallback={perf.original_artist}
+                            linkClassName="hover:text-indigo-600"
+                          />
                         </td>
                         <td className="px-4 py-4">
                           <div className="flex flex-wrap gap-1">
@@ -2683,6 +2691,7 @@ export default function StreamDetailPage() {
                                 songId: perf.song_id,
                                 songName: perf.song_name,
                                 artist: perf.original_artist,
+                                artists: perf.artists ?? [],
                                 artUrl: perf.arts,
                                 singers: perf.singers?.map((s) => ({ id: s.id, name: s.name })) ?? [],
                                 streamTitle: stream.title,

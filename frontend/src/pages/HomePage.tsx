@@ -7,6 +7,7 @@ import Loading from '../components/ui/Loading';
 import Tag from '../components/ui/Tag';
 import { useToast } from '../components/ui/Toast';
 import QueueAddButton from '../components/QueueAddButton';
+import ArtistLinks from '../components/ArtistLinks';
 import { usePlayerStore, type PlayerTrack } from '../store/player';
 
 const RECOMMENDATION_PAGE_SIZE = 20;
@@ -29,6 +30,7 @@ function toTracks(perfs: Performance[]): PlayerTrack[] {
     songId: p.song_id,
     songName: p.song_name,
     artist: p.original_artist,
+    artists: p.artists ?? [],
     artUrl: p.arts,
     singers: p.singers.map((s) => ({ id: s.id, name: s.name })),
     streamTitle: p.stream_title,
@@ -527,7 +529,12 @@ export default function HomePage() {
                     >
                       {perf.song_name}
                     </Link>
-                    <p className="text-xs text-gray-500 truncate pr-14">{perf.original_artist}</p>
+                    <ArtistLinks
+                      artists={perf.artists}
+                      fallback={perf.original_artist}
+                      className="block text-xs text-gray-500 truncate pr-14"
+                      linkClassName="hover:text-indigo-600"
+                    />
                     <div className="mt-1 flex min-h-7 items-center justify-between gap-2">
                       {perf.stream_date ? (
                         <time dateTime={perf.stream_date} className="min-w-0 text-xs text-gray-400">
@@ -690,7 +697,11 @@ export default function HomePage() {
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-gray-500">
-                      {song.original_artist}
+                      <ArtistLinks
+                        artists={song.artists}
+                        fallback={song.original_artist}
+                        linkClassName="hover:text-indigo-600"
+                      />
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-gray-500">
                       {song.performance_count}回

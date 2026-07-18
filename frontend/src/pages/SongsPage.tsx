@@ -4,6 +4,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { songApi } from '../api/client';
 import Loading from '../components/ui/Loading';
 import Pagination from '../components/ui/Pagination';
+import ArtistLinks from '../components/ArtistLinks';
 import { SortableTh, type SortDir, type SortState } from '../components/ui/Sort';
 
 export default function SongsPage() {
@@ -137,12 +138,22 @@ export default function SongsPage() {
                               >
                                 {song.name}
                               </Link>
-                              <p className="text-xs text-gray-500 mt-0.5 truncate sm:hidden">{song.original_artist}</p>
+                              <ArtistLinks
+                                artists={song.artists}
+                                fallback={song.original_artist}
+                                className="block text-xs text-gray-500 mt-0.5 truncate sm:hidden"
+                                linkClassName="hover:text-indigo-600"
+                              />
                             </div>
                           </div>
                         </td>
                         <td className="hidden sm:table-cell px-6 py-4 text-gray-500 max-w-0">
-                          <span className="block truncate">{song.original_artist}</span>
+                          <ArtistLinks
+                            artists={song.artists}
+                            fallback={song.original_artist}
+                            className="block truncate"
+                            linkClassName="hover:text-indigo-600"
+                          />
                         </td>
                         <td className="px-4 sm:px-6 py-4 text-right">
                           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
