@@ -154,7 +154,7 @@ func (s *StreamService) GetByTag(tagID string, page, limit int) (*dto.StreamList
 	return s.composeStreamList(streams, total, page, limit)
 }
 
-// SearchStreams は配信元・参加者・ボーカル・タグを組み合わせて配信を検索する。
+// SearchStreams は非表示を含め、配信元・参加者・ボーカル・タグを組み合わせて配信を検索する。
 func (s *StreamService) SearchStreams(filters models.StreamSearchFilters, page, limit int) (*dto.StreamListResponse, error) {
 	if page < 1 {
 		page = 1
@@ -486,4 +486,33 @@ func (s *StreamService) Update(id string, req *dto.UpdateStreamRequest) (*dto.St
 
 	// 返回更新後的資料
 	return s.GetByID(id)
+}
+
+// ========== 首頁（ランダム再生） ==========
+
+// composePerformanceList は配信横断の歌唱一覧をレスポンスへ変換する（配信の文脈付き）。
+func (s *StreamService) composePerformanceList(perfs []repository.PerformanceWithDetails) *dto.PerformanceListResponse {
+	responses := make([]dto.PerformanceResponse, len(perfs))
+	for i, perf := range perfs {
+		resp := s.toPerformanceResponse(perf)
+		resp.StreamTitle = perf.StreamTitle
+		resp.StreamDate = perf.StreamDate
+		if perf.ThumbnailURL.Valid {
+			resp.ThumbnailURL = &perf.ThumbnailURL.String
+		}
+		responses[i] = resp
+	}
+	return &dto.PerformanceListResponse{Performances: responses}
+}
+
+// GetRandomPerformances は既出曲を除外した、曲単位で重複しないランダムな歌唱一覧を返す。
+func (s *StreamService) GetRandomPerformances(limit int, excludedSongIDs []string) (*dto.PerformanceListResponse, error) {
+	if limit < 1 || limit > 100 {
+		limit = 50
+	}
+	perfs, err := s.perfRepo.FindRandom(limit, excludedSongIDs)
+	if err != nil {
+		return nil, fmt.Errorf("get random performances: %w", err)
+	}
+	return s.composePerformanceList(perfs), nil
 }

@@ -303,6 +303,10 @@ type SongSuggestion struct {
 	ArtURL         *string  `json:"art_url,omitempty"`
 	ItunesID       *int64   `json:"itunes_id,omitempty"` // Holodex 提供的 iTunes ID
 
+	// Chat 拍手偵測結果（Holodex 明示 end との比較用。CommentSong と対称）
+	ChatEnd int `json:"chat_end,omitempty"` // chat 偵測出的結束秒數（如果有）
+	EndDiff int `json:"end_diff,omitempty"` // |end - chat_end|，只有兩邊都有值時才填
+
 	// ↓ 折り込んだ正規化結果（AnalyzeHolodexSongs 時に AI 正規化＋DB 照合し埋め込む。CommentSong と対称）
 	NormalizedName           string  `json:"normalized_name,omitempty"`
 	NormalizedNameReading    string  `json:"normalized_name_reading,omitempty"`
@@ -464,7 +468,7 @@ type ReadingsExport struct {
 type ImportReadingsResult struct {
 	ArtistsUpdated int      `json:"artists_updated"`
 	SongsUpdated   int      `json:"songs_updated"`
-	Skipped        int      `json:"skipped"`        // かな以外・不正な読みで採用しなかった件数
+	Skipped        int      `json:"skipped"` // かな以外・不正な読みで採用しなかった件数
 	Errors         []string `json:"errors,omitempty"`
 }
 
@@ -535,6 +539,11 @@ type GlobalSearchResponse struct {
 type TagPerformanceListResponse struct {
 	Performances []PerformanceResponse `json:"performances"`
 	Pagination   PaginationResponse    `json:"pagination"`
+}
+
+// PerformanceListResponse ページングなしの歌唱一覧（首頁のおすすめ・ランダム再生用）
+type PerformanceListResponse struct {
+	Performances []PerformanceResponse `json:"performances"`
 }
 
 // ========== 通用回應 ==========

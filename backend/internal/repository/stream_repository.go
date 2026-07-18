@@ -470,9 +470,10 @@ func (r *StreamRepository) FindUnprocessedWithComments() ([]models.Stream, error
 }
 
 // SearchStreams は配信元・参加者・ボーカル・タグを AND で組み合わせて検索する。
-// StreamTagIDs / PerformanceTagIDs の各配列内も AND 条件。非表示は除外する。
+// StreamTagIDs / PerformanceTagIDs の各配列内も AND 条件。
+// 検索は明示的な操作なので、非表示の配信も対象に含める。
 func (r *StreamRepository) SearchStreams(filters models.StreamSearchFilters, limit, offset int) ([]models.Stream, int, error) {
-	where := "WHERE s.is_hidden = FALSE"
+	where := "WHERE TRUE"
 	args := []any{}
 	i := 1
 	if filters.Query != "" {

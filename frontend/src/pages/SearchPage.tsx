@@ -329,9 +329,9 @@ export default function SearchPage() {
         <Loading />
       ) : (
         <>
-          <div className="text-sm text-gray-500">歌枠 {streamResults?.pagination.total ?? 0}件</div>
+          <div className="text-sm text-gray-500">検索結果 {streamResults?.pagination.total ?? 0}件</div>
           {streamResults && streamResults.streams.length === 0 && (
-            <div className="py-12 text-center text-gray-500">条件に一致する歌枠がありません</div>
+            <div className="py-12 text-center text-gray-500">条件に一致する動画がありません</div>
           )}
           {streamResults && streamResults.streams.length > 0 && (
             <div className="grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3">

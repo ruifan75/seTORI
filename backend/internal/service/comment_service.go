@@ -53,7 +53,7 @@ func (s *CommentService) AnalyzeComments(videoID string, force bool) (*dto.Analy
 		return nil, fmt.Errorf("stream not found: %s", videoID)
 	}
 
-	rawHash := hashBytes(stream.CommentRaw)
+	rawHash := hashStoredComments(stream.CommentRaw)
 
 	// 快取命中：comment_songs 是用「現在這份 comment_raw」算出來的 → 直接回傳，不打 AI
 	if !force && rawHash != "" && len(stream.CommentSongs) > 0 {
@@ -67,12 +67,14 @@ func (s *CommentService) AnalyzeComments(videoID string, force bool) (*dto.Analy
 		}
 	}
 
-	// 1. 取得原始留言（DB 優先，否則 Holodex 抓取）
+	// 1. 取得原始留言（DB 優先，否則 YouTube/Holodex 抓取）
 	logger.Infof("starting comment analysis for %s (force=%v, raw len=%d)", videoID, force, len(stream.CommentRaw))
 	comments, err := s.getComments(videoID, stream)
 	if err != nil {
 		return nil, err
 	}
+	// 遠端から取り直した場合も、分析結果は実際に使ったコメント内容の hash に結び付ける。
+	rawHash = hashComments(comments)
 
 	// 2. AI hybrid 抽取（AI 判斷歌曲行 + 逐字驗證；失敗/未設定時自動退回純正則）
 	parsedSongs := s.parseComments(comments)
@@ -175,6 +177,30 @@ func hashBytes(b []byte) string {
 	return hex.EncodeToString(h[:])
 }
 
+// hashStoredComments は保存済み JSON を正規化して hash 化する。
+// null / [] / 壊れた JSON はキャッシュ可能なコメントとして扱わない。
+func hashStoredComments(raw []byte) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var comments []string
+	if err := json.Unmarshal(raw, &comments); err != nil {
+		return ""
+	}
+	return hashComments(comments)
+}
+
+func hashComments(comments []string) string {
+	if len(comments) == 0 {
+		return ""
+	}
+	raw, err := json.Marshal(comments)
+	if err != nil {
+		return ""
+	}
+	return hashBytes(raw)
+}
+
 // RefreshCommentRaw はコメントを取得し直して comment_raw を上書き保存する。
 // 分析キャッシュは comment_raw のハッシュをキーにしているため、
 // 内容が変わっていれば次回の AnalyzeComments で自動的に再分析される。
@@ -266,7 +292,7 @@ func (s *CommentService) parseComments(comments []string) []comment.ParsedSong {
 	return comment.ParseComments(comments)
 }
 
-// getComments 從 DB 讀取原始留言，若無則從 Holodex 抓取
+// getComments 從 DB 讀取非空的原始留言，若無則從 YouTube/Holodex 抓取並保存。
 func (s *CommentService) getComments(videoID string, stream *models.Stream) ([]string, error) {
 	if stream != nil && len(stream.CommentRaw) > 0 {
 		var comments []string
@@ -277,8 +303,40 @@ func (s *CommentService) getComments(videoID string, stream *models.Stream) ([]s
 
 	comments, err := s.holodexService.GetVideoComments(videoID)
 	if err != nil {
-		return nil, fmt.Errorf("get comments from holodex: %w", err)
+		return nil, fmt.Errorf("get comments: %w", err)
+	}
+	if raw, marshalErr := json.Marshal(comments); marshalErr == nil {
+		if saveErr := s.streamRepo.SaveCommentRaw(videoID, util.SanitizeJSONB(raw)); saveErr != nil {
+			logger.Warnf("save comment raw error (video: %s): %v", videoID, saveErr)
+		}
 	}
 
+	return comments, nil
+}
+
+// GetRawComments は保存済みの生コメント（comment_raw）を返す（編集ページの生コメント表示用）。
+// 未保存または空配列のときは YouTube/Holodex から取得し、次回のために保存する。
+func (s *CommentService) GetRawComments(videoID string) ([]string, error) {
+	stream, err := s.streamRepo.FindByID(videoID)
+	if err != nil {
+		return nil, fmt.Errorf("find stream: %w", err)
+	}
+	if stream != nil && len(stream.CommentRaw) > 0 {
+		var comments []string
+		if err := json.Unmarshal(stream.CommentRaw, &comments); err == nil && len(comments) > 0 {
+			return comments, nil
+		}
+		// 壊れたキャッシュと空配列は無視して取り直す
+	}
+
+	comments, err := s.holodexService.GetVideoComments(videoID)
+	if err != nil {
+		return nil, err
+	}
+	if raw, err := json.Marshal(comments); err == nil {
+		if saveErr := s.streamRepo.SaveCommentRaw(videoID, util.SanitizeJSONB(raw)); saveErr != nil {
+			logger.Warnf("save comment raw error (video: %s): %v", videoID, saveErr)
+		}
+	}
 	return comments, nil
 }

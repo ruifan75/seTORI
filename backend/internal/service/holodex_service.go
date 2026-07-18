@@ -19,6 +19,7 @@ import (
 	"github.com/ruifan75/setori/pkg/ai"
 	"github.com/ruifan75/setori/pkg/holodex"
 	"github.com/ruifan75/setori/pkg/itunes"
+	"github.com/ruifan75/setori/pkg/util"
 	"github.com/ruifan75/setori/pkg/youtube"
 )
 
@@ -646,10 +647,35 @@ func (s *HolodexService) LoadHolodexSongs(videoID string) (*dto.LoadHolodexSongs
 	}, nil
 }
 
-// GetVideoComments 取得影片的評論（用於 Comment 分析）
+// GetVideoComments 取得影片的公開留言（用於 Comment 分析）。
+// YouTube 是權威來源；未設定、請求失敗或沒有留言時，再嘗試 Holodex。
 func (s *HolodexService) GetVideoComments(videoID string) ([]string, error) {
+	var youtubeErr error
+	youtubeSucceeded := false
+	if s.youtubeClient != nil && s.youtubeClient.IsConfigured() {
+		comments, err := s.youtubeClient.ListVideoComments(videoID)
+		if err == nil {
+			youtubeSucceeded = true
+			if len(comments) > 0 {
+				logger.Infof("[youtube] fetched %d comments for %s", len(comments), videoID)
+				return comments, nil
+			}
+			logger.Infof("[youtube] no comments returned for %s; trying Holodex fallback", videoID)
+		} else {
+			youtubeErr = err
+			logger.Warnf("[youtube] comment fetch failed for %s: %v; trying Holodex fallback", videoID, err)
+		}
+	}
+
 	video, err := s.client.GetVideo(videoID)
 	if err != nil {
+		// YouTube が正常に空結果を返したなら、Holodex の障害を全体の失敗にはしない。
+		if youtubeSucceeded {
+			return []string{}, nil
+		}
+		if youtubeErr != nil {
+			return nil, fmt.Errorf("get comments from YouTube: %v; get video from Holodex: %w", youtubeErr, err)
+		}
 		return nil, fmt.Errorf("get video: %w", err)
 	}
 
@@ -657,11 +683,13 @@ func (s *HolodexService) GetVideoComments(videoID string) ([]string, error) {
 	for i, c := range video.Comments {
 		comments[i] = c.Message
 	}
+	logger.Infof("[holodex] fetched %d comments for %s", len(comments), videoID)
 
 	return comments, nil
 }
 
-// loadAndSaveComments 同步時只抓取並儲存「原始留言」，準備給之後的分析使用。
+// loadAndSaveComments 同步時只抓取並儲存「原始留言」（YouTube 優先、Holodex fallback），
+// 準備給之後的分析使用。
 // AI 抽取／正規化／拍手 end 偵測都不在同步時跑（避免大量同步時打爆 AI/yt-dlp），
 // 改在編輯頁手動觸發分析時才執行並快取（見 CommentService.AnalyzeComments）。
 func (s *HolodexService) loadAndSaveComments(videoID string) {
@@ -677,7 +705,7 @@ func (s *HolodexService) loadAndSaveComments(videoID string) {
 		return
 	}
 
-	if err := s.streamRepo.SaveCommentRaw(videoID, commentRawJSON); err != nil {
+	if err := s.streamRepo.SaveCommentRaw(videoID, util.SanitizeJSONB(commentRawJSON)); err != nil {
 		logger.Warnf("save comment raw error (video: %s): %v", videoID, err)
 	} else {
 		logger.Infof("[holodex] saved %d raw comments for %s", len(comments), videoID)
@@ -711,12 +739,13 @@ func (s *HolodexService) AnalyzeHolodexSongs(videoID string, force bool) ([]dto.
 		holodexHash = stream.HolodexHash.String
 	}
 
-	// キャッシュ命中：holodex_data が変わっていない → そのまま返す（AI なし）
+	// キャッシュ命中：holodex_data が変わっていない → chat 比較だけ付け直して返す（AI なし）
 	if !force && holodexHash != "" {
 		cached, cachedHash, _ := s.streamRepo.GetHolodexSongsCache(videoID)
 		if cachedHash.Valid && cachedHash.String == holodexHash && len(cached) > 0 {
 			var songs []dto.SongSuggestion
 			if err := json.Unmarshal(cached, &songs); err == nil && len(songs) > 0 {
+				s.attachChatComparison(stream, songs)
 				return songs, nil
 			}
 		}
@@ -755,25 +784,28 @@ func (s *HolodexService) AnalyzeHolodexSongs(videoID string, force bool) ([]dto.
 	// 2. 正規化（AI 正規化＋DB 照合）を折り込む
 	s.normalizeHolodexInto(songs)
 
-	// 3. 拍手 end：Holodex に明示 end が無い曲だけ補完（explicit end を上書きしない）
+	// 3. 拍手 end：明示 end が無い曲は補完。明示 end がある曲も chat 値を検出し、
+	//    ChatEnd/EndDiff として付与する（Holodex 側の誤りをユーザーが確認できるように）。
 	if s.chatEndService != nil {
 		var duration int
 		if stream.DurationSeconds.Valid {
 			duration = int(stream.DurationSeconds.Int32)
 		}
-		starts := make([]int, 0, len(songs))
+		starts := make([]int, len(songs))
 		for i := range songs {
-			if !hasExplicitEnd[i] {
-				starts = append(starts, songs[i].StartSeconds)
-			}
+			starts[i] = songs[i].StartSeconds
 		}
 		if endByStart := s.chatEndService.DetectEnds(videoID, duration, starts); len(endByStart) > 0 {
 			for i := range songs {
-				if hasExplicitEnd[i] {
+				chatEnd, ok := endByStart[songs[i].StartSeconds]
+				if !ok {
 					continue
 				}
-				if end, ok := endByStart[songs[i].StartSeconds]; ok {
-					songs[i].EndSeconds = end
+				songs[i].ChatEnd = chatEnd
+				if hasExplicitEnd[i] {
+					songs[i].EndDiff = absInt(songs[i].EndSeconds - chatEnd)
+				} else {
+					songs[i].EndSeconds = chatEnd
 				}
 			}
 		}
@@ -1064,4 +1096,36 @@ func (s *HolodexService) SyncSetoriToHolodex(streamID string) (*dto.SyncHolodexR
 		SyncedCount: syncedCount,
 		Message:     message,
 	}, nil
+}
+
+// attachChatComparison はキャッシュ済みの Holodex 曲に chat 拍手 end の比較値を付け直す。
+// live chat はローカルキャッシュ済みなので安価。end 自体は変更しない（比較表示用）。
+func (s *HolodexService) attachChatComparison(stream *models.Stream, songs []dto.SongSuggestion) {
+	if s.chatEndService == nil || len(songs) == 0 {
+		return
+	}
+	var duration int
+	if stream.DurationSeconds.Valid {
+		duration = int(stream.DurationSeconds.Int32)
+	}
+	starts := make([]int, len(songs))
+	for i := range songs {
+		starts[i] = songs[i].StartSeconds
+	}
+	endByStart := s.chatEndService.DetectEnds(stream.ID, duration, starts)
+	for i := range songs {
+		if chatEnd, ok := endByStart[songs[i].StartSeconds]; ok {
+			songs[i].ChatEnd = chatEnd
+			if songs[i].EndSeconds > 0 {
+				songs[i].EndDiff = absInt(songs[i].EndSeconds - chatEnd)
+			}
+		}
+	}
+}
+
+func absInt(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
 }

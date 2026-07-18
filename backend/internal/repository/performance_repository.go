@@ -482,3 +482,79 @@ func (r *PerformanceRepository) FindBySingerID(singerID string, limit, offset in
 
 	return performances, total, nil
 }
+
+// ========== 首頁：ランダム再生 ==========
+
+// perfDetailSelect は配信・楽曲情報付きで歌唱を引く共通 SELECT（FindByTagID と同形）。
+const perfDetailSelect = `
+	SELECT p.id, p.stream_id, p.song_id, p.start_seconds, p.end_seconds, p.order_index,
+	       p.holodex_song_id, p.custom_tags, p.created_at,
+	       st.title AS stream_title, st.stream_date, st.thumbnail_url,
+	       s.name AS song_name, s.original_artist, s.arts
+	FROM performances p
+	JOIN streams st ON p.stream_id = st.id
+	JOIN songs s ON p.song_id = s.id`
+
+// queryPerformanceDetails は perfDetailSelect 形のクエリを実行し、タグ・歌手も付けて返す。
+func (r *PerformanceRepository) queryPerformanceDetails(query string, args ...interface{}) ([]PerformanceWithDetails, error) {
+	rows, err := r.db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query performance details: %w", err)
+	}
+	defer rows.Close()
+
+	performances := make([]PerformanceWithDetails, 0)
+	for rows.Next() {
+		var p PerformanceWithDetails
+		err := rows.Scan(&p.ID, &p.StreamID, &p.SongID, &p.StartSeconds, &p.EndSeconds,
+			&p.OrderIndex, &p.HolodexSongID, &p.CustomTags, &p.CreatedAt,
+			&p.StreamTitle, &p.StreamDate, &p.ThumbnailURL,
+			&p.SongName, &p.OriginalArtist, &p.Arts)
+		if err != nil {
+			return nil, fmt.Errorf("scan performance: %w", err)
+		}
+
+		tags, err := r.GetTags(p.ID)
+		if err != nil {
+			return nil, err
+		}
+		p.Tags = tags
+
+		singers, err := r.GetSingers(p.ID)
+		if err != nil {
+			return nil, err
+		}
+		p.Singers = singers
+
+		performances = append(performances, p)
+	}
+
+	return performances, rows.Err()
+}
+
+// FindRandom は曲単位で重複しないランダムな歌唱を返す。
+// 非表示に加え、再生できない可能性が高い メン限・アーカイブなし の配信も除外する。
+func (r *PerformanceRepository) FindRandom(limit int, excludedSongIDs []string) ([]PerformanceWithDetails, error) {
+	if excludedSongIDs == nil {
+		excludedSongIDs = []string{}
+	}
+	query := `
+		WITH random_per_song AS (
+			SELECT DISTINCT ON (p.song_id) p.id
+			FROM performances p
+			JOIN streams st ON p.stream_id = st.id
+			WHERE st.is_hidden = FALSE
+			  AND NOT (p.song_id = ANY($2::uuid[]))
+			  AND NOT EXISTS (
+				SELECT 1 FROM stream_stream_tags sst
+				WHERE sst.stream_id = st.id AND sst.tag_id IN ('members_only', 'unarchived')
+			  )
+			ORDER BY p.song_id, random()
+		)
+	` + perfDetailSelect + `
+		JOIN random_per_song rps ON rps.id = p.id
+		ORDER BY random()
+		LIMIT $1`
+
+	return r.queryPerformanceDetails(query, limit, pq.Array(excludedSongIDs))
+}

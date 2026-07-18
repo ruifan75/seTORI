@@ -3,6 +3,7 @@ package youtube
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -59,6 +60,23 @@ type ChannelListResponse struct {
 type ChannelLookup struct {
 	ID     string
 	Handle string
+}
+
+// CommentThreadListResponse は commentThreads.list の必要なフィールドだけを表す。
+type CommentThreadListResponse struct {
+	NextPageToken string          `json:"nextPageToken"`
+	Items         []CommentThread `json:"items"`
+}
+
+type CommentThread struct {
+	Snippet struct {
+		TopLevelComment struct {
+			Snippet struct {
+				TextDisplay  string `json:"textDisplay"`
+				TextOriginal string `json:"textOriginal"`
+			} `json:"snippet"`
+		} `json:"topLevelComment"`
+	} `json:"snippet"`
 }
 
 // ParseChannelLookup Channel ID、@handle、YouTube URL を検索条件に変換する
@@ -278,6 +296,76 @@ func (c *Client) GetChannelPhoto(channelID string) (string, error) {
 	}
 
 	return "", fmt.Errorf("no thumbnail found for channel: %s", channelID)
+}
+
+// ListVideoComments は公開されているトップレベルコメントを全ページ取得する。
+// セットリストは通常トップレベルコメントに投稿されるため、返信は取得しない。
+func (c *Client) ListVideoComments(videoID string) ([]string, error) {
+	if !c.IsConfigured() {
+		return nil, fmt.Errorf("YouTube API key not configured")
+	}
+	videoID = strings.TrimSpace(videoID)
+	if videoID == "" {
+		return nil, fmt.Errorf("video ID is required")
+	}
+
+	comments := make([]string, 0)
+	pageToken := ""
+	seenPageTokens := map[string]bool{"": true}
+
+	for {
+		params := url.Values{}
+		params.Set("key", c.apiKey)
+		params.Set("part", "snippet")
+		params.Set("videoId", videoID)
+		params.Set("maxResults", "100")
+		params.Set("textFormat", "plainText")
+		params.Set("order", "relevance")
+		if pageToken != "" {
+			params.Set("pageToken", pageToken)
+		}
+
+		reqURL := fmt.Sprintf("%s/commentThreads?%s", baseURL, params.Encode())
+		resp, err := c.httpClient.Get(reqURL)
+		if err != nil {
+			return nil, fmt.Errorf("request YouTube comments: %w", err)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+			resp.Body.Close()
+			return nil, fmt.Errorf("YouTube comments API returned status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		}
+
+		var result CommentThreadListResponse
+		decodeErr := json.NewDecoder(resp.Body).Decode(&result)
+		resp.Body.Close()
+		if decodeErr != nil {
+			return nil, fmt.Errorf("decode YouTube comments: %w", decodeErr)
+		}
+
+		for _, item := range result.Items {
+			snippet := item.Snippet.TopLevelComment.Snippet
+			message := snippet.TextOriginal
+			if message == "" {
+				message = snippet.TextDisplay
+			}
+			if message != "" {
+				comments = append(comments, message)
+			}
+		}
+
+		if result.NextPageToken == "" {
+			break
+		}
+		if seenPageTokens[result.NextPageToken] {
+			return nil, fmt.Errorf("YouTube comments API repeated page token %q", result.NextPageToken)
+		}
+		seenPageTokens[result.NextPageToken] = true
+		pageToken = result.NextPageToken
+	}
+
+	return comments, nil
 }
 
 // IsConfigured API Key が設定されているかを確認

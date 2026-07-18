@@ -29,7 +29,9 @@ export default function YoutubePlayer({ videoId, onReady }: YoutubePlayerProps) 
           containerRef.current.innerHTML = '';
         }
 
+        const origin = window.location.origin;
         playerInstance = new (window as any).YT.Player(containerRef.current, {
+          origin,
           width: '100%',
           height: '390',
           videoId: videoId,
@@ -37,6 +39,7 @@ export default function YoutubePlayer({ videoId, onReady }: YoutubePlayerProps) 
             autoplay: 0,
             controls: 1,
             modestbranding: 1,
+            origin,
           },
           events: {
             onReady: (event: any) => {

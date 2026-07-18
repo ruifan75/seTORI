@@ -220,3 +220,20 @@ func (s *ChatEndService) fetchLiveChat(videoID string) (string, error) {
 	}
 	return "", fmt.Errorf("no live chat available for %s", videoID)
 }
+
+// EstimateEnds は任意の開始秒数リストに対する拍手 end 推定を返す（編集ページの単曲追加用）。
+// live chat はローカルキャッシュされるため、2回目以降は安価。
+func (s *ChatEndService) EstimateEnds(videoID string, starts []int) (map[int]int, error) {
+	stream, err := s.streamRepo.FindByID(videoID)
+	if err != nil {
+		return nil, fmt.Errorf("find stream: %w", err)
+	}
+	if stream == nil {
+		return nil, fmt.Errorf("stream not found: %s", videoID)
+	}
+	var duration int
+	if stream.DurationSeconds.Valid {
+		duration = int(stream.DurationSeconds.Int32)
+	}
+	return s.DetectEnds(videoID, duration, starts), nil
+}

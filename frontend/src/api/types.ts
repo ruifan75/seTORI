@@ -315,6 +315,10 @@ export interface SongSuggestion {
   art_url?: string;
   itunes_id?: number; // Holodex 提供的 iTunes ID
 
+  // Chat 拍手偵測結果（Holodex 明示 end との比較用。CommentSong と対称）
+  chat_end?: number;
+  end_diff?: number; // |end - chat_end|，只有兩邊都有值時才會有
+
   // analyzeSongs 時に折り込んだ正規化結果（あれば）
   normalized_name?: string;
   normalized_name_reading?: string;
@@ -513,6 +517,11 @@ export interface GlobalSearchResponse {
 export interface TagPerformanceListResponse {
   performances: Performance[];
   pagination: PaginationResponse;
+}
+
+// 首頁のランダム再生用（ページングなし）
+export interface PerformanceListResponse {
+  performances: Performance[];
 }
 
 // タイトル自動タグ付けルール（キーワードを含めば stream tag を付与）

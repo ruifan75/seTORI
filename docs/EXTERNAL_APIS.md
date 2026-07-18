@@ -2,16 +2,16 @@
 
 > デプロイモデル：**案 A — シングルテナント、運用者の key をすべて使用**。
 > 危険/課金が発生する操作は `API_AUTH_TOKEN` 認証の後ろにロックしてください（最終セクション参照）。
-> 本ドキュメントは 2026-06-28 時点のコードに基づきます。
+> 本ドキュメントは 2026-07-18 時点のコードに基づきます。
 
 ## 概要
 
 | API | 環境変数 | 方向 | 主な用途 | 課金 / 制限 | 運用時の注意（案 A） |
 |-----|----------|:---:|----------|------------|----------------------|
-| Holodex（読） | `HOLODEX_API_KEY` | 読 | チャンネル/動画/セットリスト/コメントの取得 | 無料、~80 req/2min | 🟡 共有可（rate limit 依存） |
+| Holodex（読） | `HOLODEX_API_KEY` | 読 | チャンネル/動画/セットリスト、コメント fallback | 無料、~80 req/2min | 🟡 共有可（rate limit 依存） |
 | Holodex Editor | `HOLODEX_EDITOR_TOKEN` | **書** | seTORI セットリストを Holodex にアップロード | あなたの Holodex アカウントに紐づく | 🔴 **管理者限定必須** |
 | Groq | `GROQ_API_KEY` | LLM | 曲名正規化、コメントのハイブリッド解析 | トークン課金 / 制限あり | 🔴 **管理者またはクォータ管理** |
-| YouTube Data | `YOUTUBE_API_KEY` | 読 | チャンネル高解像度アバター取得 | 10,000 units/日/プロジェクト | 🟡 共有可 |
+| YouTube Data | `YOUTUBE_API_KEY` | 読 | 公開コメント、チャンネル高解像度アバター取得 | 10,000 units/日/プロジェクト | 🟡 共有可 |
 | iTunes | （key 不要） | 読 | 楽曲メタデータ、再生時間、カバー | ~20 req/min（Apple） | 🟢 key 不要で安心 |
 
 ---
@@ -21,7 +21,7 @@
 - **コード位置**：`pkg/holodex/client.go`（認証ヘッダ `X-APIKEY`）、クライアント側 rate limiter は 75 req/2min に設定。
 - **実際に呼び出すエンドポイント**：
   - `GET /channels/{id}` — チャンネル情報（名前、英語名、アバター、所属）
-  - `GET /videos/{id}` — 動画詳細；`?c=1` 時はコメントを含む。パラメータなし時は `songs` + `channel` + `mentions` を含む
+  - `GET /videos/{id}` — 動画詳細；`?c=1` は YouTube コメントが未設定・取得失敗・空の場合の fallback。パラメータなし時は `songs` + `channel` + `mentions` を含む
   - `GET /videos?channel_id=&type=stream&status=past&include=songs,mentions` — ページング（50/ページ）でチャンネルの過去歌枠を取得
 - **呼び出しトリガー**：
   - `POST /api/sync/holodex`（チャンネル全体同期）
@@ -50,10 +50,12 @@
 
 ## 4. YouTube Data API（読、任意） — `YOUTUBE_API_KEY`
 
-- **コード位置**：`pkg/youtube/client.go` — `GET /youtube/v3/channels?part=snippet&id=` または `forHandle=` でチャンネル情報を取得（アバターは high → medium → default 優先）。
-- **用途**：`HolodexService.getChannelPhotoURL` がチャンネル/歌手同期時に **優先的に** YouTube 高解像度アバターを使用。取得できないか key 未設定時は Holodex の `photo`、さらに Holodex 静的画像にフォールバック。`POST /api/singers` では Holodex に存在しないチャンネルを追加するための fallback として、Channel ID または `@handle` から YouTube の channel snippet を取得してローカル DB に保存する。この fallback には `YOUTUBE_API_KEY` が必要。fallback 登録されたチャンネルのみ、所属などのメタデータを手動編集できる。
-- **呼び出しトリガー**（間接、チャンネル同期時）：`POST /api/sync/holodex`、`POST /api/sync/holodex/video/{id}`、`POST /api/singers`。
-- **制限**：デフォルトでプロジェクトあたり 10,000 units/日（`channels.list` は約 1 unit/回）。
+- **コード位置**：`pkg/youtube/client.go`。
+  - `GET /youtube/v3/commentThreads?part=snippet&videoId=...` — 公開トップレベルコメントを `maxResults=100`、`textFormat=plainText` で全ページ取得。
+  - `GET /youtube/v3/channels?part=snippet&id=` または `forHandle=` — チャンネル情報を取得（アバターは high → medium → default 優先）。
+- **用途**：一般動画コメントは YouTube を優先し、未設定・取得失敗・空の場合に Holodex へ fallback する。空の `comment_raw` は有効な永続キャッシュと見なさず、次回アクセス時に再取得する。チャンネル/歌手同期では YouTube 高解像度アバターを優先し、Holodex 未登録チャンネルの追加にも利用する。
+- **呼び出しトリガー**：`POST /api/sync/holodex`、`POST /api/sync/holodex/video/{id}`、`GET /api/streams/{id}/comments`、`POST /api/streams/{id}/comments/analyze`、`POST /api/singers`。
+- **制限**：デフォルトでプロジェクトあたり 10,000 units/日。`commentThreads.list` と `channels.list` は 1 request あたり 1 unit（コメントは 100 件ごとに 1 request）。取得するのはトップレベルコメントのみで、live chat replay は従来どおり yt-dlp を使用する。
 
 ## 5. iTunes Search / Lookup API（key 不要）
 

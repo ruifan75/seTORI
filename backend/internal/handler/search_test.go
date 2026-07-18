@@ -24,6 +24,23 @@ func TestParseCSVQueryParamEmpty(t *testing.T) {
 	}
 }
 
+func TestParseUUIDCSVQueryParam(t *testing.T) {
+	req := httptest.NewRequest(
+		"GET",
+		"/api/performances/random?exclude_song_ids=550e8400-e29b-41d4-a716-446655440000%2Cinvalid%2C550E8400-E29B-41D4-A716-446655440000%2C6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+		nil,
+	)
+
+	got := parseUUIDCSVQueryParam(req, "exclude_song_ids")
+	want := []string{
+		"550e8400-e29b-41d4-a716-446655440000",
+		"6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("parseUUIDCSVQueryParam() = %#v, want %#v", got, want)
+	}
+}
+
 func TestParseIDQueryParamsCombinesNewAndLegacyValues(t *testing.T) {
 	req := httptest.NewRequest("GET", "/api/streams/search?participant_ids=a%2Cb&participant_id=b&singer_id=c", nil)
 

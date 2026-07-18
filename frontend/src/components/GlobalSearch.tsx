@@ -16,7 +16,17 @@ interface ActiveSearchToken {
   remove: () => void;
 }
 
-export default function GlobalSearch({ autoFocus = false }: { autoFocus?: boolean }) {
+interface GlobalSearchProps {
+  autoFocus?: boolean;
+  expandable?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
+}
+
+export default function GlobalSearch({
+  autoFocus = false,
+  expandable = false,
+  onExpandedChange,
+}: GlobalSearchProps) {
   const navigate = useNavigate();
   const { showToast } = useToast();
   const canSync = hasPermission(useAuthStore((state) => state.user), PERM.SYNC_RUN);
@@ -24,6 +34,7 @@ export default function GlobalSearch({ autoFocus = false }: { autoFocus?: boolea
   const [query, setQuery] = useState('');
   const [debounced, setDebounced] = useState('');
   const [open, setOpen] = useState(false);
+  const [expanded, setExpanded] = useState(autoFocus);
   const [titleQuery, setTitleQuery] = useState('');
   const [owner, setOwner] = useState<Singer | null>(null);
   const [participants, setParticipants] = useState<Singer[]>([]);
@@ -39,6 +50,10 @@ export default function GlobalSearch({ autoFocus = false }: { autoFocus?: boolea
     const timer = setTimeout(() => setDebounced(query.trim()), 250);
     return () => clearTimeout(timer);
   }, [query]);
+
+  useEffect(() => {
+    if (expandable) onExpandedChange?.(expanded);
+  }, [expandable, expanded, onExpandedChange]);
 
   const { data, isFetching } = useQuery({
     queryKey: ['global-search', debounced],
@@ -71,7 +86,10 @@ export default function GlobalSearch({ autoFocus = false }: { autoFocus?: boolea
 
   useEffect(() => {
     const onMouseDown = (event: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(event.target as Node)) setOpen(false);
+      if (rootRef.current && !rootRef.current.contains(event.target as Node)) {
+        setOpen(false);
+        setExpanded(false);
+      }
     };
     document.addEventListener('mousedown', onMouseDown);
     return () => document.removeEventListener('mousedown', onMouseDown);
@@ -91,8 +109,15 @@ export default function GlobalSearch({ autoFocus = false }: { autoFocus?: boolea
 
   const go = (path: string) => {
     setOpen(false);
+    setExpanded(false);
     reset();
     navigate(path);
+  };
+
+  const expandAndFocus = () => {
+    setExpanded(true);
+    setOpen(true);
+    window.setTimeout(() => inputRef.current?.focus(), 0);
   };
 
   const buildSearchPath = (fallbackTitle = '') => {
@@ -247,6 +272,7 @@ export default function GlobalSearch({ autoFocus = false }: { autoFocus?: boolea
 
     if (event.key === 'Escape') {
       setOpen(false);
+      setExpanded(false);
       event.currentTarget.blur();
       return;
     }
@@ -279,8 +305,25 @@ export default function GlobalSearch({ autoFocus = false }: { autoFocus?: boolea
     data.songs.length > 0 || data.streams.length > 0 || data.artists.length > 0
   );
 
+  const handleSearchButtonClick = () => {
+    if (expandable && !expanded) {
+      expandAndFocus();
+      return;
+    }
+    executeSearch();
+  };
+
   return (
-    <div ref={rootRef} className="relative w-full md:w-52 lg:w-72 xl:w-96">
+    <div
+      ref={rootRef}
+      className={`relative w-full min-w-0 ${
+        expandable
+          ? expanded
+            ? 'lg:mx-auto lg:flex-[0_1_36rem] lg:-translate-x-14 lg:transition-[flex-basis,transform] lg:duration-300 lg:ease-out xl:flex-[0_1_42rem] motion-reduce:transition-none'
+            : 'lg:ml-auto lg:flex-[0_0_10rem] lg:transition-[flex-basis,transform] lg:duration-300 lg:ease-out motion-reduce:transition-none'
+          : 'lg:w-72 xl:w-96'
+      }`}
+    >
       <div className="flex h-9 items-center border border-gray-300 bg-gray-50 rounded-lg focus-within:border-transparent focus-within:bg-white focus-within:ring-2 focus-within:ring-indigo-500">
         <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto px-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {activeTokens.map((token, index) => (
@@ -298,6 +341,7 @@ export default function GlobalSearch({ autoFocus = false }: { autoFocus?: boolea
               onFocus={(event) => {
                 setFocusedTokenKey(token.key);
                 setOpen(true);
+                setExpanded(true);
                 event.currentTarget.scrollIntoView({ block: 'nearest', inline: 'center' });
               }}
               onKeyDown={(event) => handleTokenKeyDown(event, index)}
@@ -320,14 +364,23 @@ export default function GlobalSearch({ autoFocus = false }: { autoFocus?: boolea
             onFocus={() => {
               setFocusedTokenKey(null);
               setOpen(true);
+              setExpanded(true);
             }}
             onKeyDown={handleKeyDown}
-            placeholder={hasFilters ? '条件を追加' : '検索 / URL・動画ID'}
+            placeholder={expandable && !expanded ? '検索' : hasFilters ? '条件を追加' : '検索 / URL・動画ID'}
             className="h-full min-w-24 flex-1 border-0 bg-transparent px-1 text-sm outline-none placeholder:text-gray-400 focus:ring-0"
           />
         </div>
-        <button type="button" onClick={executeSearch} className="h-full shrink-0 border-l border-gray-200 px-2.5 text-xs font-medium text-indigo-700 hover:bg-indigo-50 rounded-r-lg">
-          検索
+        <button
+          type="button"
+          onClick={handleSearchButtonClick}
+          aria-label="検索"
+          title="検索"
+          className="flex h-full w-9 shrink-0 items-center justify-center border-l border-gray-200 text-indigo-700 transition-colors hover:bg-indigo-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500 rounded-r-lg"
+        >
+          <svg aria-hidden="true" className="h-[18px] w-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="m21 21-4.35-4.35m2.35-5.4A7.75 7.75 0 1 1 3.5 11.25a7.75 7.75 0 0 1 15.5 0Z" />
+          </svg>
         </button>
       </div>
 

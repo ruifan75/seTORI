@@ -10,19 +10,11 @@ import { useAuthStore, hasPermission, PERM } from '../store/auth';
 import { usePlayerStore } from '../store/player';
 import YoutubePlayer, { youtubePlayerSeekTo, youtubePlayerGetCurrentTime } from '../components/YoutubePlayer';
 import TimestampTweaker from '../components/TimestampTweaker';
+import QueueAddButton from '../components/QueueAddButton';
+import RawCommentsPanel from '../components/RawCommentsPanel';
 
 
 // 編集可能な配信情報
-interface EditableStreamInfo {
-  title: string;
-  streamDate: string;
-  tagIds: string[];
-  participantIds: string[];
-  isProcessed: boolean;
-  isHidden: boolean;
-}
-
-
 interface EditableSong {
   id: string;
   name: string;
@@ -608,19 +600,6 @@ function formatDuration(seconds: number | null): string {
   return `+${m}:${s.toString().padStart(2, '0')}`;
 }
 
-function formatStreamDate(dateStr: string): string {
-  // ISO 形式の日付をローカルタイムゾーンの形式に変換
-  const date = new Date(dateStr);
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  const hours = String(date.getHours()).padStart(2, '0');
-  const minutes = String(date.getMinutes()).padStart(2, '0');
-  const seconds = String(date.getSeconds()).padStart(2, '0');
-  
-  return `${year}/${month}/${day} ${hours}:${minutes}:${seconds}`;
-}
-
 export default function StreamDetailPage() {
   const { id } = useParams<{ id: string }>();
   const queryClient = useQueryClient();
@@ -628,6 +607,11 @@ export default function StreamDetailPage() {
   const canEdit = hasPermission(useAuthStore((s) => s.user), PERM.CONTENT_EDIT);
 
   const [isEditing, setIsEditing] = useState(false);
+  // 編集モード左上のタブ（操作 / Holodex / コメント / 生コメント）
+  const [editTab, setEditTab] = useState<'actions' | 'holodex' | 'comment' | 'raw'>('actions');
+  // 閲覧モードのクイック編集 UI（タグ選択・参加者追加）の開閉
+  const [tagPickerOpen, setTagPickerOpen] = useState(false);
+  const [participantAddOpen, setParticipantAddOpen] = useState(false);
   const [editableSongs, setEditableSongs] = useState<EditableSong[]>([]);
   // 単曲編集フロー：現在フォーカス中の曲。選択曲だけ詳細カードを展開し、他は圧縮行にする
   const [selectedSongIndex, setSelectedSongIndex] = useState<number | null>(null);
@@ -679,7 +663,6 @@ export default function StreamDetailPage() {
   const [commentTimelineSongs, setCommentTimelineSongs] = useState<CommentSong[]>([]);
   const [channelOwner, setChannelOwner] = useState<Singer | null>(null);
   const [participants, setParticipants] = useState<Singer[]>([]);
-  const [editableStreamInfo, setEditableStreamInfo] = useState<EditableStreamInfo | null>(null);
   const [currentPlayerTime, setCurrentPlayerTime] = useState<number | null>(null);
   const [highlightedSongId, setHighlightedSongId] = useState<string | null>(null);
 
@@ -877,6 +860,102 @@ export default function StreamDetailPage() {
   const [holodexAnalyzeLoading, setHolodexAnalyzeLoading] = useState(false);
 
   // force=true で快取を無視し AI 再分析（再正規化）。通常はキャッシュ済み結果を秒読みする。
+  // 編集リストへ入れるときの既定ボーカル（参加者 → チャンネル主）
+  const getDefaultSingerIds = () =>
+    stream?.participants?.map((p) => p.id) || (channelOwner ? [channelOwner.id] : []);
+
+  // Holodex 分析結果（SongSuggestion）→ EditableSong 変換（一括読み込み・単曲追加で共用）。
+  // end === chat_end のものは chat 由来、そうでない end は Holodex 明示値として扱う。
+  const suggestionToEditableSong = async (
+    song: SongSuggestion,
+    editableId: string,
+    defaultSingerIds: string[],
+  ): Promise<EditableSong> => {
+    const hasMatch = !!song.matched_song_id;
+    const finalName = hasMatch && song.matched_song_name
+      ? song.matched_song_name : (song.normalized_name || song.name);
+    const finalNameReading = hasMatch && song.matched_song_name_reading != null
+      ? song.matched_song_name_reading : (song.normalized_name_reading || '');
+    const finalArtist = hasMatch && song.matched_song_artist
+      ? song.matched_song_artist : (song.normalized_artist || song.original_artist);
+    const finalArtistReading = hasMatch && song.matched_song_artist_reading != null
+      ? song.matched_song_artist_reading : (song.normalized_artist_reading || '');
+    const artUrl = (hasMatch ? song.matched_song_art_url : undefined) || song.art_url || null;
+    const itunesId = song.matched_song_itunes_id || song.itunes_id || null;
+    const trackDuration = itunesId ? await fetchTrackDurationByItunesId(itunesId) : null;
+    const explicitEnd = song.end_seconds > 0 && song.end_seconds !== song.chat_end;
+    return {
+      id: editableId,
+      name: finalName,
+      nameReading: finalNameReading,
+      artist: finalArtist,
+      artistReading: finalArtistReading,
+      start: song.start_seconds,
+      end: song.end_seconds,
+      tags: song.tags || [],
+      singerIds: song.singer_ids.length > 0 ? song.singer_ids : defaultSingerIds,
+      matchedSongId: song.matched_song_id || null,
+      artUrl,
+      itunesId,
+      trackDuration,
+      originalName: finalName,
+      originalArtist: finalArtist,
+      aiNormalizedName: finalName !== song.name ? song.name : undefined,
+      aiNormalizedArtist: finalArtist !== song.original_artist ? song.original_artist : undefined,
+      isEndTimeEstimated: false,
+      chatEnd: song.chat_end,
+      endDiff: song.end_diff,
+      originalCommentEnd: explicitEnd ? song.end_seconds : undefined,
+      endSource: song.end_seconds > 0 ? (explicitEnd ? 'holodex' : 'chat') : undefined,
+      customTags: [],
+    };
+  };
+
+  // コメント分析結果（CommentSong）→ EditableSong 変換（一括読み込み・単曲追加で共用）
+  const commentSongToEditableSong = async (
+    song: CommentSong,
+    editableId: string,
+    defaultSingerIds: string[],
+  ): Promise<EditableSong> => {
+    const hasMatch = !!song.matched_song_id;
+    const finalName = hasMatch && song.matched_song_name
+      ? song.matched_song_name : (song.normalized_name || song.name);
+    const finalNameReading = hasMatch && song.matched_song_name_reading != null
+      ? song.matched_song_name_reading : (song.normalized_name_reading || '');
+    const finalArtist = hasMatch && song.matched_song_artist
+      ? song.matched_song_artist : (song.normalized_artist || song.original_artist);
+    const finalArtistReading = hasMatch && song.matched_song_artist_reading != null
+      ? song.matched_song_artist_reading : (song.normalized_artist_reading || '');
+    const artUrl = (hasMatch ? song.matched_song_art_url : undefined) || null;
+    const itunesId = song.matched_song_itunes_id || null;
+    const trackDuration = itunesId ? await fetchTrackDurationByItunesId(itunesId) : null;
+    return {
+      id: editableId,
+      name: finalName,
+      nameReading: finalNameReading,
+      artist: finalArtist,
+      artistReading: finalArtistReading,
+      start: song.start,
+      end: song.end,
+      tags: song.tags || [],
+      singerIds: defaultSingerIds,
+      matchedSongId: song.matched_song_id || null,
+      artUrl,
+      itunesId,
+      trackDuration,
+      originalName: finalName,
+      originalArtist: finalArtist,
+      aiNormalizedName: finalName !== song.name ? song.name : undefined,
+      aiNormalizedArtist: finalArtist !== song.original_artist ? song.original_artist : undefined,
+      isEndTimeEstimated: song.is_end_time_estimated,
+      chatEnd: song.chat_end,
+      endDiff: song.end_diff,
+      originalCommentEnd: song.end, // 載入時的 end 視為 comment 原始值
+      endSource: song.end > 0 && !song.is_end_time_estimated ? 'comment' : undefined,
+      customTags: [],
+    };
+  };
+
   const loadFromHolodex = async (force = false) => {
     if (!id) return;
     if (!stream?.holodex_timeline_songs || stream.holodex_timeline_songs.length === 0) {
@@ -890,47 +969,9 @@ export default function StreamDetailPage() {
       const sortedSongs = [...analyzed].sort((a, b) => a.start_seconds - b.start_seconds);
       setHolodexTimelineSongs(sortedSongs);
 
-      const defaultSingerIds = stream.participants?.map((p) => p.id) || (channelOwner ? [channelOwner.id] : []);
-
       const songs: EditableSong[] = [];
       for (let index = 0; index < sortedSongs.length; index++) {
-        const song = sortedSongs[index];
-        const hasMatch = !!song.matched_song_id;
-        const finalName = hasMatch && song.matched_song_name
-          ? song.matched_song_name : (song.normalized_name || song.name);
-        const finalNameReading = hasMatch && song.matched_song_name_reading != null
-          ? song.matched_song_name_reading : (song.normalized_name_reading || '');
-        const finalArtist = hasMatch && song.matched_song_artist
-          ? song.matched_song_artist : (song.normalized_artist || song.original_artist);
-        const finalArtistReading = hasMatch && song.matched_song_artist_reading != null
-          ? song.matched_song_artist_reading : (song.normalized_artist_reading || '');
-        const artUrl = (hasMatch ? song.matched_song_art_url : undefined) || song.art_url || null;
-        const itunesId = song.matched_song_itunes_id || song.itunes_id || null;
-        const trackDuration = itunesId ? await fetchTrackDurationByItunesId(itunesId) : null;
-        const nameChanged = finalName !== song.name;
-        const artistChanged = finalArtist !== song.original_artist;
-
-        songs.push({
-          id: `holodex-${index}`,
-          name: finalName,
-          nameReading: finalNameReading,
-          artist: finalArtist,
-          artistReading: finalArtistReading,
-          start: song.start_seconds,
-          end: song.end_seconds,
-          tags: song.tags || [],
-          singerIds: song.singer_ids.length > 0 ? song.singer_ids : defaultSingerIds,
-          matchedSongId: song.matched_song_id || null,
-          artUrl,
-          itunesId,
-          trackDuration,
-          originalName: finalName,
-          originalArtist: finalArtist,
-          aiNormalizedName: nameChanged ? song.name : undefined,
-          aiNormalizedArtist: artistChanged ? song.original_artist : undefined,
-          isEndTimeEstimated: false,
-          customTags: [],
-        });
+        songs.push(await suggestionToEditableSong(sortedSongs[index], `holodex-${index}`, getDefaultSingerIds()));
       }
 
       const merged = mergeDuplicateSongs(songs);
@@ -956,52 +997,9 @@ export default function StreamDetailPage() {
       const result = await commentApi.analyze(id, force);
       const sortedSongs = [...result.songs].sort((a, b) => a.start - b.start);
 
-      const defaultSingerIds = stream?.participants?.map((p) => p.id) || (channelOwner ? [channelOwner.id] : []);
-
-      // 分析時に正規化＋DB 照合が折り込まれているので、その結果をそのまま反映する
       const songs: EditableSong[] = [];
       for (let index = 0; index < sortedSongs.length; index++) {
-        const song = sortedSongs[index];
-        const hasMatch = !!song.matched_song_id;
-        const finalName = hasMatch && song.matched_song_name
-          ? song.matched_song_name : (song.normalized_name || song.name);
-        const finalNameReading = hasMatch && song.matched_song_name_reading != null
-          ? song.matched_song_name_reading : (song.normalized_name_reading || '');
-        const finalArtist = hasMatch && song.matched_song_artist
-          ? song.matched_song_artist : (song.normalized_artist || song.original_artist);
-        const finalArtistReading = hasMatch && song.matched_song_artist_reading != null
-          ? song.matched_song_artist_reading : (song.normalized_artist_reading || '');
-        const artUrl = (hasMatch ? song.matched_song_art_url : undefined) || null;
-        const itunesId = song.matched_song_itunes_id || null;
-        const trackDuration = itunesId ? await fetchTrackDurationByItunesId(itunesId) : null;
-        const nameChanged = finalName !== song.name;
-        const artistChanged = finalArtist !== song.original_artist;
-
-        songs.push({
-          id: `comment-${index}`,
-          name: finalName,
-          nameReading: finalNameReading,
-          artist: finalArtist,
-          artistReading: finalArtistReading,
-          start: song.start,
-          end: song.end,
-          tags: song.tags || [],
-          singerIds: defaultSingerIds,
-          matchedSongId: song.matched_song_id || null,
-          artUrl,
-          itunesId,
-          trackDuration,
-          originalName: finalName,
-          originalArtist: finalArtist,
-          aiNormalizedName: nameChanged ? song.name : undefined,
-          aiNormalizedArtist: artistChanged ? song.original_artist : undefined,
-          isEndTimeEstimated: song.is_end_time_estimated,
-          chatEnd: song.chat_end,
-          endDiff: song.end_diff,
-          originalCommentEnd: song.end, // 載入時的 end 視為 comment 原始值
-          endSource: song.end > 0 && !song.is_end_time_estimated ? 'comment' : undefined,
-          customTags: [],
-        });
+        songs.push(await commentSongToEditableSong(sortedSongs[index], `comment-${index}`, getDefaultSingerIds()));
       }
 
       const merged = mergeDuplicateSongs(songs);
@@ -1017,25 +1015,82 @@ export default function StreamDetailPage() {
     }
   };
 
+  // 提案リストから1曲だけ編集リストへ追加（開始秒順に挿入し、ハイライトしてスクロール）
+  const addSingleSong = (newSong: EditableSong) => {
+    setEditableSongs((prev) => [...prev, newSong].sort((a, b) => a.start - b.start));
+    showToast(`「${newSong.name}」を追加しました`, 'success');
+    setTimeout(() => {
+      setHighlightedSongId(newSong.id);
+      document.getElementById(`song-${newSong.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setTimeout(() => setHighlightedSongId(null), 3000);
+    }, 100);
+  };
+
+  // Holodex タブ：1曲追加
+  const addSuggestionSong = async (song: SongSuggestion) => {
+    addSingleSong(await suggestionToEditableSong(song, `holodex-add-${Date.now()}`, getDefaultSingerIds()));
+  };
+
+  // コメントタブ：1曲追加
+  const addCommentSongToList = async (song: CommentSong) => {
+    addSingleSong(await commentSongToEditableSong(song, `comment-add-${Date.now()}`, getDefaultSingerIds()));
+  };
+
+  // 生コメントタブ：タイムスタンプ行から1曲追加。chat 拍手で終了時間を推定してから挿入する
+  const addFromRawComment = async ({ start, name, artist }: { start: number; name: string; artist: string }) => {
+    let end = 0;
+    let chatEnd: number | undefined;
+    try {
+      const { ends } = await commentApi.estimateChatEnds(id!, [start]);
+      if (ends[String(start)]) {
+        end = ends[String(start)];
+        chatEnd = end;
+      }
+    } catch {
+      /* 推定失敗時は end 未設定のまま（手動で設定） */
+    }
+    addSingleSong({
+      id: `raw-add-${Date.now()}`,
+      name: name || '(曲名未入力)',
+      nameReading: '',
+      artist,
+      artistReading: '',
+      start,
+      end,
+      tags: [],
+      singerIds: getDefaultSingerIds(),
+      matchedSongId: null,
+      artUrl: null,
+      itunesId: null,
+      trackDuration: null,
+      originalName: name,
+      originalArtist: artist,
+      isEndTimeEstimated: false,
+      chatEnd,
+      endSource: chatEnd !== undefined ? 'chat' : undefined,
+      customTags: [],
+    });
+  };
+
+  // 自動読み込み：Holodex → コメント の優先順。どちらも正規化＋chat 比較込み
+  const autoLoad = async () => {
+    if (holodexTimelineSongs.length > 0) {
+      await loadFromHolodex(false);
+    } else if (stream?.has_comment_raw) {
+      await loadFromComments(false);
+    } else {
+      showToast('読み込めるデータがありません（Holodex から同期するか、コメントを取得してください）', 'info');
+    }
+  };
+
   const toggleEditing = () => {
     if (isEditing) {
       // 關閉編輯模式
       setIsEditing(false);
       setEditableSongs([]);
-      setEditableStreamInfo(null);
     } else {
-      // 開啟編輯模式，自動載入現有セトリ和直播資訊
+      // 開啟編輯模式，自動載入現有セトリ
       if (stream) {
-        // 初始化直播資訊
-        setEditableStreamInfo({
-          title: stream.title,
-          streamDate: stream.stream_date,
-          tagIds: stream.tags.map((t) => t.id),
-          participantIds: stream.participants?.map((p) => p.id) || [],
-          isProcessed: stream.is_processed,
-          isHidden: stream.is_hidden,
-        });
-
         // 設定參與者列表（包括表演中的所有歌唱者）
         const allSingers = new Map<string, Singer>();
         
@@ -1253,40 +1308,6 @@ export default function StreamDetailPage() {
     ]);
   };
 
-  // Timeline から歌曲を追加（編集モード用）
-  const addSongFromTimeline = (item: { start: number; end: number; label: string; artist: string }, source: string) => {
-    const defaultSingerIds = channelOwner ? [channelOwner.id] : [];
-    const newId = `${source}-add-${Date.now()}`;
-    const newSong: EditableSong = {
-      id: newId,
-      name: item.label,
-      nameReading: '',
-      artist: item.artist,
-      artistReading: '',
-      start: item.start,
-      end: item.end,
-      tags: [],
-      singerIds: defaultSingerIds,
-      matchedSongId: null,
-      artUrl: null,
-      itunesId: null,
-      trackDuration: null,
-      originalName: item.label,
-      originalArtist: item.artist,
-      customTags: [],
-    };
-    setEditableSongs(prev => {
-      const updated = [...prev, newSong].sort((a, b) => a.start - b.start);
-      return updated;
-    });
-    showToast(`「${item.label}」を追加しました`, 'success');
-    setTimeout(() => {
-      setHighlightedSongId(newId);
-      document.getElementById(`song-${newId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      setTimeout(() => setHighlightedSongId(null), 3000);
-    }, 100);
-  };
-
   // seTORI timeline クリック → 対応する曲を選択して詳細カードを展開＋スクロール（編集モード用）
   const scrollToEditableSong = (start: number) => {
     if (editableSongs.length === 0) return;
@@ -1305,17 +1326,8 @@ export default function StreamDetailPage() {
   };
 
   const handleConfirm = async () => {
-    // 先更新 Stream 資訊（如果有變更）
-    if (editableStreamInfo) {
-      await updateStreamMutation.mutateAsync({
-        title: editableStreamInfo.title,
-        stream_date: editableStreamInfo.streamDate,
-        tag_ids: editableStreamInfo.tagIds,
-        participant_ids: editableStreamInfo.participantIds,
-        is_processed: editableStreamInfo.isProcessed,
-        is_hidden: editableStreamInfo.isHidden,
-      });
-    }
+    // 配信情報（タグ・参加者・非表示など）は閲覧モードのクイック編集で即時保存されるため、
+    // ここではセットリストのみ保存する。
 
     // 如果沒有歌曲，刪除所有 performance
     if (editableSongs.length === 0) {
@@ -1360,61 +1372,6 @@ export default function StreamDetailPage() {
       custom_tags: song.customTags.length > 0 ? song.customTags : undefined,
     }));
     createPerformancesMutation.mutate(performances);
-  };
-
-  // 自動保存 Stream 資訊（用於標籤、參與者、狀態等）
-  const autoSaveStreamInfo = async (info: Partial<EditableStreamInfo>) => {
-    try {
-      const updateData = {
-        tag_ids: info.tagIds,
-        participant_ids: info.participantIds,
-        is_processed: info.isProcessed,
-        is_hidden: info.isHidden,
-      };
-      await updateStreamMutation.mutateAsync(updateData as UpdateStreamRequest);
-      showToast('更新しました', 'success');
-    } catch (err) {
-      showToast(`更新エラー: ${err instanceof Error ? err.message : '未知のエラー'}`, 'error');
-    }
-  };
-
-  // 切換直播標籤並自動保存
-  const toggleStreamTag = (tagId: string) => {
-    if (!editableStreamInfo) return;
-    const newTagIds = editableStreamInfo.tagIds.includes(tagId)
-      ? editableStreamInfo.tagIds.filter((id) => id !== tagId)
-      : [...editableStreamInfo.tagIds, tagId];
-    const updatedInfo = { ...editableStreamInfo, tagIds: newTagIds };
-    setEditableStreamInfo(updatedInfo);
-    // 自動保存
-    autoSaveStreamInfo({ tagIds: newTagIds });
-  };
-
-  // 自動保存參與者變更
-  const updateParticipantsAndSave = (newParticipantIds: string[]) => {
-    if (!editableStreamInfo) return;
-    const updatedInfo = { ...editableStreamInfo, participantIds: newParticipantIds };
-    setEditableStreamInfo(updatedInfo);
-    // 自動保存
-    autoSaveStreamInfo({ participantIds: newParticipantIds });
-  };
-
-  // 自動保存處理完成狀態
-  const updateIsProcessedAndSave = (isProcessed: boolean) => {
-    if (!editableStreamInfo) return;
-    const updatedInfo = { ...editableStreamInfo, isProcessed };
-    setEditableStreamInfo(updatedInfo);
-    // 自動保存
-    autoSaveStreamInfo({ isProcessed });
-  };
-
-  // 自動保存隱藏狀態
-  const updateIsHiddenAndSave = (isHidden: boolean) => {
-    if (!editableStreamInfo) return;
-    const updatedInfo = { ...editableStreamInfo, isHidden };
-    setEditableStreamInfo(updatedInfo);
-    // 自動保存
-    autoSaveStreamInfo({ isHidden });
   };
 
   // YouTube 播放器實例（必須在任何條件判斷之前）
@@ -1485,6 +1442,32 @@ export default function StreamDetailPage() {
     return 'left-1/2 -translate-x-1/2';
   };
 
+  // セットリスト→再生キュー用トラック（連続再生・キュー追加で共用）
+  const performanceTracks = () =>
+    stream.performances.map((perf) => ({
+      performanceId: perf.id,
+      streamId: perf.stream_id,
+      songId: perf.song_id,
+      songName: perf.song_name,
+      artist: perf.original_artist,
+      artUrl: perf.arts,
+      singers: perf.singers?.map((s) => ({ id: s.id, name: s.name })) ?? [],
+      streamTitle: stream.title,
+      streamDate: stream.stream_date,
+      start: perf.start_seconds,
+      end: perf.end_seconds,
+    }));
+
+  // 閲覧モードのクイック編集：タグ/参加者/非表示を編集モードを開かずに保存
+  const quickSaveStream = async (patch: UpdateStreamRequest) => {
+    try {
+      await updateStreamMutation.mutateAsync(patch);
+      showToast('更新しました', 'success');
+    } catch {
+      /* onError 側でトースト表示済み */
+    }
+  };
+
   return (
     <>
       <div className="flex flex-col min-[1300px]:flex-row gap-6 w-full h-full min-h-0 overflow-hidden">
@@ -1492,119 +1475,213 @@ export default function StreamDetailPage() {
       <div className="w-full min-[1300px]:basis-2/5 min-[1300px]:shrink-0 min-[1300px]:self-stretch flex flex-row min-[1300px]:grid min-[1300px]:grid-rows-[2fr_3fr] gap-4 min-h-0 min-[1300px]:overflow-hidden shrink-0 max-h-[40vh] min-[1300px]:max-h-none">
         {/* Stream Header - 40% */}
         <div className="flex-1 min-w-0 bg-white rounded-lg shadow-sm border overflow-y-auto min-h-0">
-          <div className="p-6">
-            {isEditing && editableStreamInfo ? (
-              <>
-                {/* Title - Read Only */}
-                <h1 className="text-2xl font-bold text-gray-900">{stream.title}</h1>
-                {/* Date - Read Only */}
-                <p className="text-gray-500 mt-2">{formatStreamDate(stream.stream_date)}</p>
+          {isEditing ? (
+            /* 編集モード：情報カードの代わりにデータ読み込みタブ */
+            <div className="flex flex-col min-h-0">
+              <div className="flex border-b shrink-0 sticky top-0 bg-white z-10">
+                {([
+                  { key: 'actions', label: '操作' },
+                  { key: 'holodex', label: 'Holodex' },
+                  { key: 'comment', label: 'コメント' },
+                  { key: 'raw', label: '生コメント' },
+                ] as const).map((t) => (
+                  <button
+                    key={t.key}
+                    onClick={() => setEditTab(t.key)}
+                    className={`px-3.5 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                      editTab === t.key
+                        ? 'border-indigo-600 text-indigo-600'
+                        : 'border-transparent text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
 
-                {/* Editable Tags */}
-                <div className="mt-4">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">タグ</label>
-                  <div className="flex flex-wrap gap-2">
-                    {STREAM_TAGS.map((tag) => (
-                      <button
-                        key={tag.id}
-                        onClick={() => toggleStreamTag(tag.id)}
-                        className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${
-                          editableStreamInfo.tagIds.includes(tag.id)
-                            ? 'text-white'
-                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                        }`}
-                        style={editableStreamInfo.tagIds.includes(tag.id) ? { backgroundColor: tag.color } : {}}
-                      >
-                        {tag.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Editable Participants */}
-                <div className="mt-4">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">参加者</label>
-                  {/* Selected Participants */}
-                  <div className="flex flex-wrap gap-2 mb-3">
-                    {participants
-                      .filter((singer) => editableStreamInfo.participantIds.includes(singer.id))
-                      .map((singer) => (
-                        <div
-                          key={singer.id}
-                          className="flex items-center gap-2 px-3 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm font-medium"
+              <div className="p-4">
+                {editTab === 'actions' && (
+                  <div className="space-y-4">
+                    <div>
+                      <p className="text-xs font-medium text-gray-400 mb-1.5">読み込み</p>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          onClick={autoLoad}
+                          disabled={holodexAnalyzeLoading || commentAnalyzeLoading}
+                          className="px-3 py-1.5 text-sm bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50"
+                          title="Holodex → コメント の優先順で読み込み、正規化と chat 時間チェックまで実行"
                         >
-                          {singer.photo_url && (
-                            <img
-                              src={singer.photo_url}
-                              alt={singer.name}
-                              className="w-5 h-5 rounded-full"
-                              onError={(e) => {
-                                e.currentTarget.onerror = null;
-                                e.currentTarget.src = `https://holodex.net/statics/channelImg/${singer.id}/50.png`;
-                              }}
-                            />
-                          )}
-                          {singer.name}
-                          <button
-                            onClick={() => {
-                              const newIds = editableStreamInfo.participantIds.filter((id) => id !== singer.id);
-                              updateParticipantsAndSave(newIds);
-                            }}
-                            className="ml-1 text-indigo-600 hover:text-indigo-800"
-                            title="削除"
-                          >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                            </svg>
-                          </button>
-                        </div>
-                      ))}
+                          {holodexAnalyzeLoading || commentAnalyzeLoading ? '読み込み中...' : '自動読み込み'}
+                        </button>
+                        <button
+                          onClick={() => loadFromHolodex(false)}
+                          disabled={holodexTimelineSongs.length === 0 || holodexAnalyzeLoading}
+                          className="px-3 py-1.5 text-sm bg-indigo-50 text-indigo-700 border border-indigo-200 font-medium rounded-lg hover:bg-indigo-100 transition-colors disabled:opacity-50"
+                        >
+                          {holodexAnalyzeLoading ? 'Holodex分析中...' : 'Holodex データ'}
+                        </button>
+                        <button
+                          onClick={() => loadFromComments(false)}
+                          disabled={!stream?.has_comment_raw || commentAnalyzeLoading}
+                          className="px-3 py-1.5 text-sm bg-indigo-50 text-indigo-700 border border-indigo-200 font-medium rounded-lg hover:bg-indigo-100 transition-colors disabled:opacity-50"
+                        >
+                          {commentAnalyzeLoading ? 'コメント分析中...' : 'コメント データ'}
+                        </button>
+                        <button
+                          onClick={runAINormalization}
+                          disabled={editableSongs.length === 0 || aiNormalizeMutation.isPending}
+                          className="px-3 py-1.5 text-sm bg-indigo-50 text-indigo-700 border border-indigo-200 font-medium rounded-lg hover:bg-indigo-100 transition-colors disabled:opacity-50"
+                        >
+                          {aiNormalizeMutation.isPending ? 'AI処理中...' : 'AI正規化'}
+                        </button>
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium text-gray-400 mb-1.5">Holodex 同期</p>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          onClick={() => syncVideoMutation.mutate()}
+                          disabled={syncVideoMutation.isPending}
+                          className="px-3 py-1.5 text-sm bg-indigo-50 text-indigo-700 border border-indigo-200 font-medium rounded-lg hover:bg-indigo-100 transition-colors disabled:opacity-50"
+                        >
+                          {syncVideoMutation.isPending ? '同期中...' : 'Holodex から同期'}
+                        </button>
+                        <button
+                          onClick={() => syncToHolodexMutation.mutate()}
+                          disabled={syncToHolodexMutation.isPending}
+                          title="seTORI のセットリストを Holodex に書き込みます（外部サービスへの反映）"
+                          className="px-3 py-1.5 text-sm bg-amber-50 text-amber-700 border border-amber-300 font-medium rounded-lg hover:bg-amber-100 transition-colors disabled:opacity-50"
+                        >
+                          {syncToHolodexMutation.isPending ? 'Holodex へ同期中...' : 'seTORI から Holodex へ同期'}
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                  {/* Singer Search Input */}
-                  <SingerSearchInput
-                    excludeIds={editableStreamInfo.participantIds}
-                    onSelectSinger={(singer) => {
-                      // 添加到 participants 列表（如果不存在）
-                      if (!participants.find((p) => p.id === singer.id)) {
-                        setParticipants((prev) => [...prev, singer]);
-                      }
-                      // 添加到選擇的 ID 列表並自動保存
-                      updateParticipantsAndSave([...editableStreamInfo.participantIds, singer.id]);
-                    }}
-                    placeholder="チャンネル名を入力して参加者を追加..."
-                  />
-                </div>
+                )}
 
-                {/* Status Checkboxes */}
-                <div className="mt-4 flex flex-wrap gap-4">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={editableStreamInfo.isProcessed}
-                      onChange={(e) =>
-                        updateIsProcessedAndSave(e.target.checked)
-                      }
-                      className="w-4 h-4 text-green-600 border-gray-300 rounded focus:ring-green-500"
-                    />
-                    <span className="text-sm font-medium text-gray-700">処理完了</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={editableStreamInfo.isHidden}
-                      onChange={(e) =>
-                        updateIsHiddenAndSave(e.target.checked)
-                      }
-                      className="w-4 h-4 text-red-600 border-gray-300 rounded focus:ring-red-500"
-                    />
-                    <span className="text-sm font-medium text-gray-700">非表示</span>
-                  </label>
-                </div>
-              </>
-            ) : (
+                {editTab === 'holodex' && (
+                  <div className="space-y-2">
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => loadFromHolodex(false)}
+                        disabled={holodexTimelineSongs.length === 0 || holodexAnalyzeLoading}
+                        className="flex-1 px-3 py-1.5 text-sm bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50"
+                        title="全曲を編集リストへ読み込む（正規化＋chat 時間チェック込み）"
+                      >
+                        {holodexAnalyzeLoading ? '分析中...' : '全部読み込む'}
+                      </button>
+                      <button
+                        onClick={() => loadFromHolodex(true)}
+                        disabled={holodexTimelineSongs.length === 0 || holodexAnalyzeLoading}
+                        title="キャッシュを無視して AI で再分析・再正規化します"
+                        className="px-3 py-1.5 text-sm bg-white text-gray-600 border border-gray-300 font-medium rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
+                      >
+                        再分析
+                      </button>
+                    </div>
+                    {holodexTimelineSongs.length === 0 ? (
+                      <p className="text-sm text-gray-400 py-2">Holodex データがありません</p>
+                    ) : (
+                      <div className="space-y-0.5">
+                        {holodexTimelineSongs.map((song, i) => (
+                          <div
+                            key={i}
+                            onClick={() => addSuggestionSong(song)}
+                            className="flex items-baseline gap-2 px-2 py-1.5 rounded hover:bg-indigo-50 cursor-pointer group text-sm"
+                            title="クリックで追加"
+                          >
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                youtubePlayerSeekTo(song.start_seconds);
+                              }}
+                              className="shrink-0 px-1.5 rounded bg-blue-50 text-blue-700 font-mono text-xs hover:bg-blue-100 transition-colors"
+                              title="この時間にジャンプ"
+                            >
+                              {formatTime(song.start_seconds)}
+                            </button>
+                            <span className="min-w-0 flex-1 truncate">
+                              <span className="text-gray-900 font-medium">{song.name}</span>
+                              {song.original_artist && <span className="text-gray-500"> / {song.original_artist}</span>}
+                            </span>
+                            <span className="shrink-0 text-gray-300 group-hover:text-indigo-600 transition-colors">＋</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {editTab === 'comment' && (
+                  <div className="space-y-2">
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => loadFromComments(false)}
+                        disabled={!stream?.has_comment_raw || commentAnalyzeLoading}
+                        className="flex-1 px-3 py-1.5 text-sm bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50"
+                        title="分析済みの全曲を編集リストへ読み込む（正規化＋chat 時間チェック込み）"
+                      >
+                        {commentAnalyzeLoading ? '分析中...' : '全部読み込む'}
+                      </button>
+                      <button
+                        onClick={() => loadFromComments(true)}
+                        disabled={!stream?.has_comment_raw || commentAnalyzeLoading}
+                        title="キャッシュを無視して AI で再分析・再正規化します"
+                        className="px-3 py-1.5 text-sm bg-white text-gray-600 border border-gray-300 font-medium rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
+                      >
+                        再分析
+                      </button>
+                    </div>
+                    {commentTimelineSongs.length === 0 ? (
+                      <p className="text-sm text-gray-400 py-2">
+                        分析済みの曲がありません（「全部読み込む」で分析を実行）
+                      </p>
+                    ) : (
+                      <div className="space-y-0.5">
+                        {commentTimelineSongs.map((song, i) => (
+                          <div
+                            key={i}
+                            onClick={() => addCommentSongToList(song)}
+                            className="flex items-baseline gap-2 px-2 py-1.5 rounded hover:bg-indigo-50 cursor-pointer group text-sm"
+                            title="クリックで追加"
+                          >
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                youtubePlayerSeekTo(song.start);
+                              }}
+                              className="shrink-0 px-1.5 rounded bg-orange-50 text-orange-700 font-mono text-xs hover:bg-orange-100 transition-colors"
+                              title="この時間にジャンプ"
+                            >
+                              {formatTime(song.start)}
+                            </button>
+                            <span className="min-w-0 flex-1 truncate">
+                              <span className="text-gray-900 font-medium">{song.name}</span>
+                              {song.original_artist && <span className="text-gray-500"> / {song.original_artist}</span>}
+                            </span>
+                            <span className="shrink-0 text-gray-300 group-hover:text-indigo-600 transition-colors">＋</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {editTab === 'raw' && (
+                  <RawCommentsPanel
+                    videoId={stream.id}
+                    onSeek={(secs) => youtubePlayerSeekTo(secs)}
+                    onAddSong={addFromRawComment}
+                  />
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="p-6">
               <>
                 <h1 className="text-2xl font-bold text-gray-900">{stream.title}</h1>
-                <p className="text-gray-500 mt-2">
+                {/* 日時 + YouTube リンク */}
+                <p className="text-gray-500 mt-2 flex items-center gap-2">
                   {new Date(stream.stream_date).toLocaleString('ja-JP', {
                     year: 'numeric',
                     month: '2-digit',
@@ -1614,74 +1691,145 @@ export default function StreamDetailPage() {
                     second: '2-digit',
                     hour12: false
                   })}
+                  <a
+                    href={youtubeUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center justify-center w-7 h-7 rounded-full text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                    title="YouTubeで見る"
+                  >
+                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
+                    </svg>
+                  </a>
                 </p>
 
-                {/* Tags */}
-                {stream.tags.length > 0 && (
-                  <div className="flex flex-wrap gap-2 mt-4">
-                    {stream.tags.map((tag) => (
-                      <Tag key={tag.id} label={tag.display_name} color={tag.color} size="md" />
-                    ))}
+                {/* Tags + 編集アイコン */}
+                <div className="flex flex-wrap items-center gap-2 mt-4">
+                  {stream.tags.map((tag) => (
+                    <Tag key={tag.id} label={tag.display_name} color={tag.color} size="md" />
+                  ))}
+                  {canEdit && (
+                    <button
+                      onClick={() => setTagPickerOpen(!tagPickerOpen)}
+                      className={`inline-flex items-center justify-center w-7 h-7 rounded-full transition-colors ${
+                        tagPickerOpen ? 'text-indigo-600 bg-indigo-50' : 'text-gray-400 hover:text-indigo-600 hover:bg-indigo-50'
+                      }`}
+                      title="タグを編集"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+                {canEdit && tagPickerOpen && (
+                  <div className="flex flex-wrap gap-2 mt-2 p-3 bg-gray-50 rounded-lg border">
+                    {STREAM_TAGS.map((tag) => {
+                      const ids = stream.tags.map((t) => t.id);
+                      const active = ids.includes(tag.id);
+                      return (
+                        <button
+                          key={tag.id}
+                          onClick={() =>
+                            quickSaveStream({
+                              tag_ids: active ? ids.filter((i) => i !== tag.id) : [...ids, tag.id],
+                            })
+                          }
+                          className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${
+                            active ? 'text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                          }`}
+                          style={active ? { backgroundColor: tag.color } : {}}
+                        >
+                          {tag.label}
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
 
-                {/* Participants */}
-                {stream.participants && stream.participants.length > 0 && (
-                  <div className="flex flex-wrap gap-2 mt-4">
-                    {stream.participants.map((singer) => (
-                      <div
-                        key={singer.id}
-                        className="flex items-center gap-2 px-3 py-1 bg-gray-100 rounded-full text-sm"
-                      >
-                        {singer.photo_url && (
-                          <img
-                            src={singer.photo_url}
-                            alt={singer.name}
-                            className="w-5 h-5 rounded-full"
-                            onError={(e) => {
-                              e.currentTarget.onerror = null;
-                              e.currentTarget.src = `https://holodex.net/statics/channelImg/${singer.id}/50.png`;
-                            }}
-                          />
-                        )}
-                        <span className="text-gray-700">{singer.name}</span>
-                      </div>
-                    ))}
+                {/* Participants + 編集アイコン */}
+                <div className="flex flex-wrap items-center gap-2 mt-4">
+                  {stream.participants?.map((singer) => (
+                    <div
+                      key={singer.id}
+                      className="flex items-center gap-2 px-3 py-1 bg-gray-100 rounded-full text-sm"
+                    >
+                      {singer.photo_url && (
+                        <img
+                          src={singer.photo_url}
+                          alt={singer.name}
+                          className="w-5 h-5 rounded-full"
+                          onError={(e) => {
+                            e.currentTarget.onerror = null;
+                            e.currentTarget.src = `https://holodex.net/statics/channelImg/${singer.id}/50.png`;
+                          }}
+                        />
+                      )}
+                      <span className="text-gray-700">{singer.name}</span>
+                      {canEdit && participantAddOpen && (
+                        <button
+                          onClick={() =>
+                            quickSaveStream({
+                              participant_ids: (stream.participants ?? [])
+                                .map((p) => p.id)
+                                .filter((pid) => pid !== singer.id),
+                            })
+                          }
+                          className="text-gray-400 hover:text-red-600 transition-colors"
+                          title="参加者から外す"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  {canEdit && (
+                    <button
+                      onClick={() => setParticipantAddOpen(!participantAddOpen)}
+                      className={`inline-flex items-center justify-center w-7 h-7 rounded-full transition-colors ${
+                        participantAddOpen ? 'text-indigo-600 bg-indigo-50' : 'text-gray-400 hover:text-indigo-600 hover:bg-indigo-50'
+                      }`}
+                      title="参加者を編集"
+                      aria-label="参加者を編集"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+                {canEdit && participantAddOpen && (
+                  <div className="mt-2">
+                    <SingerSearchInput
+                      excludeIds={stream.participants?.map((p) => p.id) ?? []}
+                      onSelectSinger={(singer) =>
+                        quickSaveStream({
+                          participant_ids: [...(stream.participants?.map((p) => p.id) ?? []), singer.id],
+                        })
+                      }
+                      placeholder="チャンネル名を入力して参加者を追加..."
+                    />
                   </div>
+                )}
+
+                {/* 非表示 */}
+                {canEdit && (
+                  <label className="mt-4 flex items-center gap-2 cursor-pointer w-fit">
+                    <input
+                      type="checkbox"
+                      checked={stream.is_hidden}
+                      onChange={(e) => quickSaveStream({ is_hidden: e.target.checked })}
+                      className="w-4 h-4 text-red-600 border-gray-300 rounded focus:ring-red-500"
+                    />
+                    <span className="text-sm font-medium text-gray-700">非表示</span>
+                  </label>
                 )}
               </>
-            )}
-
-            {/* Actions */}
-            <div className="mt-6 flex gap-3">
-              <a
-                href={youtubeUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 px-4 py-2 bg-red-600 text-white font-medium rounded-lg hover:bg-red-700 transition-colors"
-              >
-                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
-                </svg>
-                YouTubeで見る
-              </a>
-              {canEdit && (
-              <button
-                onClick={toggleEditing}
-                className={`inline-flex items-center gap-2 px-4 py-2 font-medium rounded-lg transition-colors ${
-                  isEditing
-                    ? 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                    : 'bg-indigo-600 text-white hover:bg-indigo-700'
-                }`}
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                </svg>
-                {isEditing ? '編集を閉じる' : '編集'}
-              </button>
-              )}
             </div>
-          </div>
+          )}
         </div>
 
         {/* Player + Timeline - 60% */}
@@ -1726,71 +1874,6 @@ export default function StreamDetailPage() {
                   </button>
                 ))}
               </div>
-              <div className="relative h-3 bg-gray-100 rounded-none">
-                {holodexTimeline.map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => {
-                      youtubePlayerSeekTo(item.start);
-                      if (isEditing) addSongFromTimeline(item, 'holodex');
-                    }}
-                    className="absolute top-0 h-full rounded bg-blue-500/70 hover:bg-blue-600 transition-colors group"
-                    style={{
-                      left: `${getTimelineLeft(item.start)}%`,
-                      width: `${getTimelineWidth(item.start, item.end)}%`,
-                    }}
-                  >
-                    <div className={`absolute bottom-full ${getTooltipAlignClass(item.start)} mb-2 hidden group-hover:block z-50 pointer-events-none`}>
-                      <div className="bg-gray-900 text-white text-xs rounded-lg p-2 shadow-lg whitespace-nowrap">
-                        <div className="font-semibold">{item.label}</div>
-                        {item.artist && <div className="text-gray-300">{item.artist}</div>}
-                        <div className="text-gray-400 mt-1">
-                          {formatTime(item.start)} - {formatTime(item.end)}
-                        </div>
-                        <div className="text-blue-400 text-[10px] mt-1">Holodex</div>
-                        {isEditing && <div className="text-gray-500 text-[10px]">クリックで追加</div>}
-                      </div>
-                    </div>
-                  </button>
-                ))}
-              </div>
-              <div className="relative h-3 bg-gray-100 rounded-none">
-                {commentTimeline.map((item) => {
-                  const isPoint = item.end <= item.start;
-                  return (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => {
-                        youtubePlayerSeekTo(item.start);
-                        if (isEditing) addSongFromTimeline(item, 'comment');
-                      }}
-                      className={
-                        isPoint
-                          ? 'absolute top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-orange-500 group'
-                          : 'absolute top-0 h-full rounded bg-orange-500/70 hover:bg-orange-600 transition-colors group'
-                      }
-                      style={{
-                        left: `${getTimelineLeft(item.start)}%`,
-                        width: isPoint ? undefined : `${getTimelineWidth(item.start, item.end)}%`,
-                      }}
-                    >
-                      <div className={`absolute bottom-full ${getTooltipAlignClass(item.start)} mb-2 hidden group-hover:block z-50 pointer-events-none`}>
-                        <div className="bg-gray-900 text-white text-xs rounded-lg p-2 shadow-lg whitespace-nowrap">
-                          <div className="font-semibold">{item.label}</div>
-                          {item.artist && <div className="text-gray-300">{item.artist}</div>}
-                          <div className="text-gray-400 mt-1">
-                            {formatTime(item.start)}{!isPoint && ` - ${formatTime(item.end)}`}
-                          </div>
-                          <div className="text-orange-400 text-[10px] mt-1">Comment</div>
-                          {isEditing && <div className="text-gray-500 text-[10px]">クリックで追加</div>}
-                        </div>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
             </div>
           </div>
         </div>
@@ -1804,99 +1887,47 @@ export default function StreamDetailPage() {
             <h2 className="text-2xl font-bold text-gray-900">
               セットリスト ({isEditing ? editableSongs.length : stream.performances.length}曲)
             </h2>
-            {!isEditing && stream.performances.length > 0 && (
-              <button
-                onClick={() => {
-                  usePlayerStore.getState().playTracks(
-                    stream.performances.map((perf) => ({
-                      performanceId: perf.id,
-                      streamId: perf.stream_id,
-                      songId: perf.song_id,
-                      songName: perf.song_name,
-                      artist: perf.original_artist,
-                      artUrl: perf.arts,
-                      singers: perf.singers?.map((s) => ({ id: s.id, name: s.name })) ?? [],
-                      streamTitle: stream.title,
-                      streamDate: stream.stream_date,
-                      start: perf.start_seconds,
-                      end: perf.end_seconds,
-                    })),
-                    0
-                  );
-                }}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm bg-indigo-600 text-white font-medium rounded-full hover:bg-indigo-700 transition-colors"
-                title="セットリストをグローバルプレイヤーで連続再生"
-              >
-                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                連続再生
-              </button>
-            )}
-          </div>
-
-          {/* Edit Mode Actions */}
-          {isEditing && (
-            <div className="flex justify-between items-center gap-2">
-              <div className="flex flex-wrap gap-2">
-                <button
-                  onClick={() => syncVideoMutation.mutate()}
-                  disabled={syncVideoMutation.isPending}
-                  className="px-3 py-1.5 text-sm bg-indigo-50 text-indigo-700 border border-indigo-200 font-medium rounded-lg hover:bg-indigo-100 transition-colors disabled:opacity-50"
-                >
-                  {syncVideoMutation.isPending ? '同期中...' : 'Holodex から同期'}
-                </button>
-                <button
-                  onClick={() => syncToHolodexMutation.mutate()}
-                  disabled={syncToHolodexMutation.isPending}
-                  title="seTORI のセットリストを Holodex に書き込みます（外部サービスへの反映）"
-                  className="px-3 py-1.5 text-sm bg-amber-50 text-amber-700 border border-amber-300 font-medium rounded-lg hover:bg-amber-100 transition-colors disabled:opacity-50"
-                >
-                  {syncToHolodexMutation.isPending ? 'Holodex へ同期中...' : 'seTORI から Holodex へ同期'}
-                </button>
-                <button
-                  onClick={() => loadFromHolodex(false)}
-                  disabled={!stream?.holodex_timeline_songs || stream.holodex_timeline_songs.length === 0 || holodexAnalyzeLoading}
-                  className="px-3 py-1.5 text-sm bg-indigo-50 text-indigo-700 border border-indigo-200 font-medium rounded-lg hover:bg-indigo-100 transition-colors disabled:opacity-50"
-                >
-                  {holodexAnalyzeLoading ? 'Holodex分析中...' : 'Holodex データを読み込む'}
-                </button>
-                {stream?.holodex_timeline_songs && stream.holodex_timeline_songs.length > 0 && (
+            {!isEditing && (
+              <div className="flex items-center gap-1.5">
+                {canEdit && (
                   <button
-                    onClick={() => loadFromHolodex(true)}
-                    disabled={holodexAnalyzeLoading}
-                    title="キャッシュを無視して AI で再分析・再正規化します"
-                    className="px-3 py-1.5 text-sm bg-white text-gray-600 border border-gray-300 font-medium rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
+                    onClick={toggleEditing}
+                    className="inline-flex items-center justify-center w-8 h-8 rounded-full text-gray-500 border border-gray-300 hover:bg-gray-100 transition-colors"
+                    title="セットリストを編集"
                   >
-                    再分析
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                    </svg>
                   </button>
                 )}
-                <button
-                  onClick={() => loadFromComments(false)}
-                  disabled={!stream?.has_comment_raw || commentAnalyzeLoading}
-                  className="px-3 py-1.5 text-sm bg-indigo-50 text-indigo-700 border border-indigo-200 font-medium rounded-lg hover:bg-indigo-100 transition-colors disabled:opacity-50"
-                >
-                  {commentAnalyzeLoading ? 'コメント分析中...' : 'コメント データを読み込む'}
-                </button>
-                {stream?.has_comment_raw && (
-                  <button
-                    onClick={() => loadFromComments(true)}
-                    disabled={commentAnalyzeLoading}
-                    title="キャッシュを無視して AI で再分析・再正規化します"
-                    className="px-3 py-1.5 text-sm bg-white text-gray-600 border border-gray-300 font-medium rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
-                  >
-                    再分析
-                  </button>
-                )}
-                {editableSongs.length > 0 && (
-                  <button
-                    onClick={runAINormalization}
-                    disabled={aiNormalizeMutation.isPending}
-                    className="px-3 py-1.5 text-sm bg-indigo-50 text-indigo-700 border border-indigo-200 font-medium rounded-lg hover:bg-indigo-100 transition-colors disabled:opacity-50"
-                  >
-                    {aiNormalizeMutation.isPending ? 'AI処理中...' : 'AI正規化'}
-                  </button>
+                {stream.performances.length > 0 && (
+                  <>
+                    <button
+                      onClick={() => usePlayerStore.getState().playTracks(performanceTracks(), 0)}
+                      className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
+                      title="セットリストを連続再生"
+                    >
+                      <svg className="w-4 h-4 ml-0.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+                    </button>
+                    <button
+                      onClick={() => {
+                        usePlayerStore.getState().enqueue(performanceTracks());
+                        showToast('セットリストをキューに追加しました', 'success');
+                      }}
+                      className="inline-flex items-center justify-center w-8 h-8 rounded-full text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+                      title="セットリストをキューに追加"
+                    >
+                      <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M14 10H3v2h11v-2zm0-4H3v2h11V6zm4 8v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zM3 16h7v-2H3v2z" />
+                      </svg>
+                    </button>
+                  </>
                 )}
               </div>
-              <div className="flex gap-2 shrink-0">
+            )}
+            {isEditing && (
+              /* 編集コントロールはタイトルと同じ行の右側に寄せる。処理完了は保存の直前に置く（即時保存） */
+              <div className="ml-auto flex items-center gap-2 shrink-0">
                 <button
                   onClick={toggleEditing}
                   className="px-3 py-1.5 text-sm bg-gray-200 text-gray-700 font-medium rounded-lg hover:bg-gray-300 transition-colors"
@@ -1915,6 +1946,15 @@ export default function StreamDetailPage() {
                     ✓ {confirmedCount}/{editableSongs.length}
                   </span>
                 )}
+                <label className="flex items-center gap-1.5 cursor-pointer text-sm font-medium text-gray-700 whitespace-nowrap">
+                  <input
+                    type="checkbox"
+                    checked={stream.is_processed}
+                    onChange={(e) => quickSaveStream({ is_processed: e.target.checked })}
+                    className="w-4 h-4 text-green-600 border-gray-300 rounded focus:ring-green-500"
+                  />
+                  処理完了
+                </label>
                 <button
                   onClick={handleConfirm}
                   disabled={createPerformancesMutation.isPending || updateStreamMutation.isPending}
@@ -1923,8 +1963,8 @@ export default function StreamDetailPage() {
                   {createPerformancesMutation.isPending || updateStreamMutation.isPending ? '処理中...' : '変更を保存'}
                 </button>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
         <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
@@ -2247,7 +2287,7 @@ export default function StreamDetailPage() {
                                 <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
                               </svg>
                               <span>
-                                Chat 與 comment 差 {song.endDiff} 秒
+                                Chat との差 {song.endDiff} 秒
                                 {song.chatEnd !== undefined && `（Chat: ${formatTimeInput(song.chatEnd)}）`}
                               </span>
                             </div>
@@ -2255,7 +2295,7 @@ export default function StreamDetailPage() {
                               onClick={() => applyEndSource(index, 'chat')}
                               className="px-2 py-0.5 bg-amber-200 hover:bg-amber-300 text-amber-800 rounded text-xs font-medium"
                             >
-                              套用 Chat 值
+                              Chat の値を適用
                             </button>
                           </div>
                         )}
@@ -2266,7 +2306,7 @@ export default function StreamDetailPage() {
                             onClick={() => applyEndSource(index, 'comment')}
                             className="mt-1 text-xs text-blue-600 hover:text-blue-800 underline"
                           >
-                            還原為 Comment 原始值 ({song.originalCommentEnd ? formatTimeInput(song.originalCommentEnd) : ''})
+                            元の値に戻す ({song.originalCommentEnd ? formatTimeInput(song.originalCommentEnd) : ''})
                           </button>
                         )}
                       </div>
@@ -2485,7 +2525,6 @@ export default function StreamDetailPage() {
                       ボーカル
                     </th>
                     <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-20">
-                      再生
                     </th>
                   </tr>
                 </thead>
@@ -2597,15 +2636,43 @@ export default function StreamDetailPage() {
                           )}
                         </td>
                         <td className="px-4 py-4 text-right">
-                          <button
-                            onClick={() => youtubePlayerSeekTo(perf.start_seconds)}
-                            className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-red-100 text-red-600 hover:bg-red-200 transition-colors"
-                            title={`${perf.song_name} を再生`}
-                          >
-                            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                              <path d="M8 5v14l11-7z" />
-                            </svg>
-                          </button>
+                          <div className="inline-flex items-center gap-1.5">
+                            <button
+                              onClick={() => youtubePlayerSeekTo(perf.start_seconds)}
+                              className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
+                              title={`${perf.song_name} を再生`}
+                            >
+                              <svg className="w-4 h-4 ml-0.5" fill="currentColor" viewBox="0 0 24 24">
+                                <path d="M8 5v14l11-7z" />
+                              </svg>
+                            </button>
+                            <QueueAddButton
+                              track={{
+                                performanceId: perf.id,
+                                streamId: perf.stream_id,
+                                songId: perf.song_id,
+                                songName: perf.song_name,
+                                artist: perf.original_artist,
+                                artUrl: perf.arts,
+                                singers: perf.singers?.map((s) => ({ id: s.id, name: s.name })) ?? [],
+                                streamTitle: stream.title,
+                                streamDate: stream.stream_date,
+                                start: perf.start_seconds,
+                                end: perf.end_seconds,
+                              }}
+                            />
+                            <a
+                              href={perf.youtube_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center justify-center w-8 h-8 rounded-full text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                              title="YouTubeで開く"
+                            >
+                              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                                <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
+                              </svg>
+                            </a>
+                          </div>
                         </td>
                       </tr>
                     );

@@ -150,7 +150,7 @@ cd frontend && npm run build                          # dist/ に出力
 | `HOLODEX_API_KEY` | ✓ | Holodex API キー（配信/セットリスト同期用） |
 | `HOLODEX_EDITOR_TOKEN` | — | セットリストを Holodex にアップロードする際の編集者トークン |
 | `GROQ_API_KEY` | — | AI 正規化/コメントフィルタ。未設定時は純粋な正規表現にフォールバック |
-| `YOUTUBE_API_KEY` | — | チャンネルの高解像度アバター取得、および Holodex 未登録チャンネル追加時の YouTube fallback 用。未設定時は Holodex 登録済みチャンネルのみ追加可能 |
+| `YOUTUBE_API_KEY` | — | 公開動画コメント（YouTube 優先・Holodex fallback）、チャンネルの高解像度アバター取得、および Holodex 未登録チャンネル追加用 |
 | `JWT_SECRET` | — | 予約フィールド（未使用） |
 | `API_AUTH_TOKEN` | — | 設定時は書き込み操作（POST/PUT/DELETE）に `Authorization: Bearer <token>` が必要。空欄時は公開（[セキュリティ](#セキュリティ注意事項)参照） |
 | `ENVIRONMENT` | — | `development` / `production` |
@@ -223,7 +223,7 @@ cd frontend && npm run build                          # dist/ に出力
 ## コメント解析フロー
 
 ```
-生コメント (comment_raw)
+YouTube 公開コメント（Holodex fallback）→ 生コメント (comment_raw)
    │  regex でタイムスタンプ + 区切り文字を解析   pkg/comment/parser.go
    ▼
 ParsedSong[]  (comment_songs、未重複排除)

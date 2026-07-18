@@ -23,6 +23,8 @@ interface PlayerState {
 
   // tracks をキューにセットして startIndex から再生開始
   playTracks: (tracks: PlayerTrack[], startIndex?: number) => void;
+  // tracks をキュー末尾に追加（空のときはそのまま再生開始）
+  enqueue: (tracks: PlayerTrack[]) => void;
   next: () => void;
   prev: () => void;
   jumpTo: (index: number) => void;
@@ -41,6 +43,16 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   playTracks: (tracks, startIndex = 0) => {
     if (tracks.length === 0) return;
     set({ queue: tracks, index: Math.min(startIndex, tracks.length - 1), playing: true });
+  },
+
+  enqueue: (tracks) => {
+    if (tracks.length === 0) return;
+    const { queue } = get();
+    if (queue.length === 0) {
+      set({ queue: tracks, index: 0, playing: true });
+    } else {
+      set({ queue: [...queue, ...tracks] });
+    }
   },
 
   next: () => {

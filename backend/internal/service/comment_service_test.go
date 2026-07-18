@@ -27,3 +27,22 @@ func TestParseCommentsAIZeroSongsNoRegexFallback(t *testing.T) {
 		t.Fatalf("regex baseline: got %d songs, want 1", len(regexGot))
 	}
 }
+
+func TestHashStoredCommentsDoesNotCacheEmptyValues(t *testing.T) {
+	for _, raw := range [][]byte{nil, []byte("null"), []byte("[]"), []byte("not-json")} {
+		if got := hashStoredComments(raw); got != "" {
+			t.Errorf("hashStoredComments(%q) = %q, want empty", raw, got)
+		}
+	}
+}
+
+func TestHashStoredCommentsNormalizesJSONFormatting(t *testing.T) {
+	compact := hashStoredComments([]byte(`["12:23 言って。","19:34 ソラニン"]`))
+	formatted := hashStoredComments([]byte(`["12:23 言って。", "19:34 ソラニン"]`))
+	if compact == "" {
+		t.Fatal("hashStoredComments() returned empty for non-empty comments")
+	}
+	if compact != formatted {
+		t.Fatalf("hash differs by JSON formatting: %q != %q", compact, formatted)
+	}
+}

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore, hasPermission, PERM } from '../store/auth';
@@ -43,11 +43,11 @@ export default function Layout() {
   });
   const pendingCount = pendingSuggestions ?? 0;
 
-  // モバイルメニュー。ページ遷移で自動的に閉じる。
-  const [menuOpen, setMenuOpen] = useState(false);
-  useEffect(() => {
-    setMenuOpen(false);
-  }, [location.pathname]);
+  // 開いた場所の location.key を保持することで、ページ遷移時は自動的に閉じる。
+  const [menuLocationKey, setMenuLocationKey] = useState<string | null>(null);
+  const [expandedSearchLocationKey, setExpandedSearchLocationKey] = useState<string | null>(null);
+  const menuOpen = menuLocationKey === location.key;
+  const desktopSearchExpanded = expandedSearchLocationKey === location.key;
 
   const handleLogout = async () => {
     await logout();
@@ -59,9 +59,9 @@ export default function Layout() {
       {/* Header */}
       <header className="bg-white shadow-sm border-b shrink-0">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
+          <div className="flex items-center h-16">
             {/* Logo */}
-            <Link to="/" className="flex items-center gap-2">
+            <Link to="/" className="flex shrink-0 items-center gap-2">
               <span className="text-2xl font-bold text-indigo-600 inline-flex items-center">
                 seT
                 <span className="mx-0 inline-flex h-6 w-6 align-middle translate-y-[1px]">
@@ -76,84 +76,99 @@ export default function Layout() {
             </Link>
 
             {/* Desktop navigation */}
-            <nav className="hidden md:flex items-center gap-6 min-w-0">
-              <GlobalSearch />
-              {navItems.map((item) => (
-                <Link
-                  key={item.path}
-                  to={item.path}
-                  className={`text-sm font-medium transition-colors ${
-                    location.pathname === item.path
-                      ? 'text-indigo-600'
-                      : 'text-gray-600 hover:text-gray-900'
-                  }`}
-                >
-                  {item.label}
-                </Link>
-              ))}
+            <nav className="ml-6 hidden min-w-0 flex-1 items-center lg:flex">
+              <GlobalSearch
+                key={`desktop-search-${location.key}`}
+                expandable
+                onExpandedChange={(expanded) => setExpandedSearchLocationKey(expanded ? location.key : null)}
+              />
 
-              {/* Admin dropdown（アクセス可能な項目がある場合のみ表示） */}
-              {visibleAdminItems.length > 0 && (
-                <div className="relative group">
-                  <button className="text-sm font-medium text-gray-600 hover:text-gray-900 inline-flex items-center gap-1">
-                    管理
-                    {pendingCount > 0 && (
-                      <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold bg-red-500 text-white">
-                        {pendingCount > 99 ? '99+' : pendingCount}
-                      </span>
-                    )}
-                  </button>
-                  <div className="absolute right-0 mt-2 w-40 bg-white rounded-md shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
-                    <div className="py-1">
-                      {visibleAdminItems.map((item) => (
-                        <Link
-                          key={item.path}
-                          to={item.path}
-                          className="flex items-center justify-between px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                        >
-                          <span>{item.label}</span>
-                          {item.path === '/admin/suggestions' && pendingCount > 0 && (
-                            <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold bg-red-500 text-white">
-                              {pendingCount > 99 ? '99+' : pendingCount}
-                            </span>
-                          )}
-                        </Link>
-                      ))}
+              <div
+                aria-hidden={desktopSearchExpanded}
+                inert={desktopSearchExpanded ? true : undefined}
+                className={`flex shrink-0 items-center gap-3 whitespace-nowrap transition-[max-width,margin,opacity] duration-300 ease-out motion-reduce:transition-none xl:gap-6 ${
+                  desktopSearchExpanded
+                    ? 'pointer-events-none ml-0 max-w-0 overflow-hidden opacity-0'
+                    : 'ml-3 max-w-[64rem] opacity-100'
+                }`}
+              >
+                {navItems.map((item) => (
+                  <Link
+                    key={item.path}
+                    to={item.path}
+                    className={`text-sm font-medium transition-colors ${
+                      location.pathname === item.path
+                        ? 'text-indigo-600'
+                        : 'text-gray-600 hover:text-gray-900'
+                    }`}
+                  >
+                    {item.label}
+                  </Link>
+                ))}
+
+                {/* Admin dropdown（アクセス可能な項目がある場合のみ表示） */}
+                {visibleAdminItems.length > 0 && (
+                  <div className="relative group">
+                    <button className="text-sm font-medium text-gray-600 hover:text-gray-900 inline-flex items-center gap-1">
+                      管理
+                      {pendingCount > 0 && (
+                        <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold bg-red-500 text-white">
+                          {pendingCount > 99 ? '99+' : pendingCount}
+                        </span>
+                      )}
+                    </button>
+                    <div className="absolute right-0 mt-2 w-40 bg-white rounded-md shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
+                      <div className="py-1">
+                        {visibleAdminItems.map((item) => (
+                          <Link
+                            key={item.path}
+                            to={item.path}
+                            className="flex items-center justify-between px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                          >
+                            <span>{item.label}</span>
+                            {item.path === '/admin/suggestions' && pendingCount > 0 && (
+                              <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold bg-red-500 text-white">
+                                {pendingCount > 99 ? '99+' : pendingCount}
+                              </span>
+                            )}
+                          </Link>
+                        ))}
+                      </div>
                     </div>
                   </div>
-                </div>
-              )}
+                )}
 
-              {/* 認証エリア */}
-              <div className="flex items-center gap-3 pl-3 border-l border-gray-200">
-                {status === 'authenticated' && user ? (
-                  <>
-                    <span className="text-sm text-gray-600" title={`ロール: ${user.role}`}>
-                      {user.display_name || user.username}
-                      <span className="ml-1 text-xs text-gray-400">({user.role})</span>
-                    </span>
-                    <button
-                      onClick={handleLogout}
-                      className="text-sm font-medium text-gray-500 hover:text-gray-800"
+                {/* 認証エリア */}
+                <div className="flex items-center gap-3 pl-3 border-l border-gray-200">
+                  {status === 'authenticated' && user ? (
+                    <>
+                      <span className="text-sm text-gray-600" title={`ロール: ${user.role}`}>
+                        {user.display_name || user.username}
+                        <span className="ml-1 text-xs text-gray-400">({user.role})</span>
+                      </span>
+                      <button
+                        onClick={handleLogout}
+                        className="text-sm font-medium text-gray-500 hover:text-gray-800"
+                      >
+                        ログアウト
+                      </button>
+                    </>
+                  ) : status === 'anonymous' ? (
+                    <Link
+                      to="/login"
+                      className="text-sm font-medium px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
                     >
-                      ログアウト
-                    </button>
-                  </>
-                ) : status === 'anonymous' ? (
-                  <Link
-                    to="/login"
-                    className="text-sm font-medium px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
-                  >
-                    ログイン
-                  </Link>
-                ) : null}
+                      ログイン
+                    </Link>
+                  ) : null}
+                </div>
               </div>
             </nav>
 
             {/* Mobile hamburger */}
             <button
-              onClick={() => setMenuOpen((v) => !v)}
-              className="md:hidden p-2 -mr-2 text-gray-600 hover:text-gray-900"
+              onClick={() => setMenuLocationKey((key) => key === location.key ? null : location.key)}
+              className="ml-auto lg:hidden p-2 -mr-2 text-gray-600 hover:text-gray-900"
               aria-label="メニュー"
               aria-expanded={menuOpen}
             >
@@ -172,7 +187,7 @@ export default function Layout() {
 
         {/* Mobile menu panel */}
         {menuOpen && (
-          <nav className="md:hidden border-t bg-white">
+          <nav className="lg:hidden border-t bg-white">
             <div className="px-4 py-3 space-y-1">
               <div className="pb-2">
                 <GlobalSearch />

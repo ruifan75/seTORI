@@ -7,6 +7,7 @@ import Loading from '../components/ui/Loading';
 import Pagination from '../components/ui/Pagination';
 import Tag from '../components/ui/Tag';
 import EditableField from '../components/EditableField';
+import QueueAddButton from '../components/QueueAddButton';
 import { useToast } from '../components/ui/Toast';
 import { useAuthStore, hasPermission, PERM } from '../store/auth';
 import { usePlayerStore, type PlayerTrack } from '../store/player';
@@ -532,22 +533,24 @@ export default function SongDetailPage() {
     }
   };
 
+  // 歌唱記録1件を再生キューのトラックへ変換する
+  const toTrack = (perf: (typeof performances)[number]): PlayerTrack => ({
+    performanceId: perf.id,
+    streamId: perf.stream_id,
+    songId: song.id,
+    songName: song.name,
+    artist: song.original_artist,
+    artUrl: song.arts,
+    singers: perf.singers?.map((s) => ({ id: s.id, name: s.name })) ?? [],
+    streamTitle: perf.stream_title,
+    streamDate: perf.stream_date,
+    start: perf.start_seconds,
+    end: perf.end_seconds,
+  });
+
   // この曲の歌唱記録をグローバルプレイヤーのキューに載せて startIndex から再生
   const playAll = (startIndex: number) => {
-    const tracks: PlayerTrack[] = performances.map((perf) => ({
-      performanceId: perf.id,
-      streamId: perf.stream_id,
-      songId: song.id,
-      songName: song.name,
-      artist: song.original_artist,
-      artUrl: song.arts,
-      singers: perf.singers?.map((s) => ({ id: s.id, name: s.name })) ?? [],
-      streamTitle: perf.stream_title,
-      streamDate: perf.stream_date,
-      start: perf.start_seconds,
-      end: perf.end_seconds,
-    }));
-    usePlayerStore.getState().playTracks(tracks, startIndex);
+    usePlayerStore.getState().playTracks(performances.map(toTrack), startIndex);
   };
 
   return (
@@ -1023,22 +1026,25 @@ export default function SongDetailPage() {
                             })()}
                           </p>
                         </div>
-                        <div className="flex-shrink-0 ml-4 flex items-center gap-2">
+                        <div className="flex-shrink-0 ml-4 flex items-center gap-1.5">
                           <button
                             onClick={() => playAll(perfIndex)}
-                            className="px-3 py-1.5 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors"
+                            className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
                             title="この歌唱から連続再生"
                           >
-                            ▶ 再生
+                            <svg className="w-4 h-4 ml-0.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
                           </button>
+                          <QueueAddButton track={toTrack(perf)} />
                           <a
                             href={perf.youtube_url}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="text-xs text-gray-400 hover:text-red-600"
+                            className="inline-flex items-center justify-center w-8 h-8 rounded-full text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
                             title="YouTubeで開く"
                           >
-                            YouTube
+                            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                              <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
+                            </svg>
                           </a>
                         </div>
                       </div>

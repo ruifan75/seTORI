@@ -78,13 +78,15 @@ export default function PlayerBar() {
         setTimeout(init, 100);
         return;
       }
+      const origin = window.location.origin;
       playerRef.current = new YT.Player(containerRef.current, {
+        origin,
         width: '100%',
         height: '100%',
         videoId: track.streamId,
         // controls: 1 → 拡大表示時に YouTube ネイティブの操作
         // （全画面・画質・音量など）がそのまま使える
-        playerVars: { autoplay: 1, controls: 1, modestbranding: 1, start: Math.floor(track.start) },
+        playerVars: { autoplay: 1, controls: 1, modestbranding: 1, start: Math.floor(track.start), origin },
         events: {
           onReady: () => {
             readyRef.current = true;

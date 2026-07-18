@@ -35,6 +35,7 @@ import type {
   TagKeywordRule,
   GlobalSearchResponse,
   TagPerformanceListResponse,
+  PerformanceListResponse,
   Artist,
   ArtistListResponse,
   ArtistDetailResponse,
@@ -274,6 +275,12 @@ export const commentApi = {
     const { data } = await api.post(`/api/streams/${videoId}/comments/analyze${force ? '?force=true' : ''}`);
     return data;
   },
+
+  // 指定した開始秒数の拍手 end 推定（生コメントからの単曲追加用）。キーは start 秒の文字列
+  estimateChatEnds: async (videoId: string, starts: number[]): Promise<{ ends: Record<string, number> }> => {
+    const { data } = await api.post(`/api/streams/${videoId}/chat-end-estimate`, { starts });
+    return data;
+  },
 };
 
 // ========== 一括プレ分析 API ==========
@@ -408,6 +415,18 @@ export const tagApi = {
   getPerformancesByTag: async (tagId: string, page = 1, limit = 20): Promise<TagPerformanceListResponse> => {
     const params = new URLSearchParams({ page: String(page), limit: String(limit) });
     const { data } = await api.get(`/api/performance-tags/${encodeURIComponent(tagId)}/performances?${params}`);
+    return data;
+  },
+};
+
+// ========== 首頁（おすすめ） API ==========
+
+export const homeApi = {
+  // 曲単位で重複しないランダムな歌唱。追加読み込み時は既出の曲 ID を除外する。
+  randomPerformances: async (limit = 50, excludeSongIds: string[] = []): Promise<PerformanceListResponse> => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (excludeSongIds.length > 0) params.set('exclude_song_ids', excludeSongIds.join(','));
+    const { data } = await api.get(`/api/performances/random?${params}`);
     return data;
   },
 };
@@ -607,7 +626,7 @@ export const searchApi = {
     return data;
   },
 
-  // 複合条件の配信検索。指定した条件はすべて AND で評価される。
+  // 複合条件の動画検索。非表示を含み、指定した条件はすべて AND で評価される。
   searchStreams: async (opts: {
     q?: string;
     ownerId?: string;

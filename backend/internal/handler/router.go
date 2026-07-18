@@ -215,6 +215,7 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("POST /api/streams/{id}/comments/analyze", r.handleAnalyzeComments)
 	r.mux.HandleFunc("POST /api/comments/backfill", r.handleBackfillCommentSongs)
 	r.mux.HandleFunc("POST /api/streams/{id}/analyze-chat-ends", r.handleAnalyzeChatEnds)
+	r.mux.HandleFunc("POST /api/streams/{id}/chat-end-estimate", r.handleEstimateChatEnds)
 	r.mux.HandleFunc("POST /api/chat-ends/backfill", r.handleBackfillChatEnds)
 
 	// Filter keywords management
@@ -225,6 +226,9 @@ func (r *Router) setupRoutes() {
 	// タグ検索（タグが付いた配信・演出の一覧）
 	r.mux.HandleFunc("GET /api/stream-tags/{id}/streams", r.handleGetStreamsByTag)
 	r.mux.HandleFunc("GET /api/performance-tags/{id}/performances", r.handleGetPerformancesByTag)
+
+	// 首頁：おすすめ
+	r.mux.HandleFunc("GET /api/performances/random", r.handleRandomPerformances)
 
 	// Tag management
 	r.mux.HandleFunc("GET /api/stream-tags", r.handleListStreamTags)
@@ -404,7 +408,7 @@ func toSearchTagItems(tags []repository.TagWithCount) []dto.SearchTagItem {
 	return items
 }
 
-// handleSearchStreams は配信元・参加者・ボーカル・タグを組み合わせて配信を検索する。
+// handleSearchStreams は非表示を含め、配信元・参加者・ボーカル・タグを組み合わせて配信を検索する。
 func (r *Router) handleSearchStreams(w http.ResponseWriter, req *http.Request) {
 	filters := models.StreamSearchFilters{
 		Query:             strings.TrimSpace(req.URL.Query().Get("q")),
@@ -443,6 +447,24 @@ func parseCSVQueryParam(req *http.Request, key string) []string {
 		}
 		seen[value] = struct{}{}
 		values = append(values, value)
+	}
+	return values
+}
+
+func parseUUIDCSVQueryParam(req *http.Request, key string) []string {
+	seen := make(map[string]struct{})
+	values := make([]string, 0)
+	for _, rawID := range parseCSVQueryParam(req, key) {
+		id, err := uuid.Parse(rawID)
+		if err != nil {
+			continue
+		}
+		normalized := id.String()
+		if _, exists := seen[normalized]; exists {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		values = append(values, normalized)
 	}
 	return values
 }
@@ -811,6 +833,20 @@ func (r *Router) handleGetPerformancesByTag(w http.ResponseWriter, req *http.Req
 	limit, _ := strconv.Atoi(req.URL.Query().Get("limit"))
 
 	result, err := r.streamService.GetPerformancesByTag(tagID, page, limit)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, result)
+}
+
+// ========== Home Handlers（ランダム再生） ==========
+
+// handleRandomPerformances 曲単位で重複しないランダムな歌唱一覧（公開）
+func (r *Router) handleRandomPerformances(w http.ResponseWriter, req *http.Request) {
+	limit, _ := strconv.Atoi(req.URL.Query().Get("limit"))
+	excludedSongIDs := parseUUIDCSVQueryParam(req, "exclude_song_ids")
+	result, err := r.streamService.GetRandomPerformances(limit, excludedSongIDs)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1493,7 +1529,7 @@ func (r *Router) handleGetComments(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	comments, err := r.holodexService.GetVideoComments(videoID)
+	comments, err := r.commentService.GetRawComments(videoID)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1544,6 +1580,29 @@ func (r *Router) handleAnalyzeHolodexSongs(w http.ResponseWriter, req *http.Requ
 
 	logger.Infof("/holodex-songs/analyze completed for %s: %d songs (AI used or cached)", videoID, len(songs))
 	respondJSON(w, http.StatusOK, map[string]any{"songs": songs})
+}
+
+// handleEstimateChatEnds 指定した開始秒数それぞれの拍手 end を推定して返す
+// （編集ページで生コメント等から曲を1件追加するときの終了時間推定用）。
+func (r *Router) handleEstimateChatEnds(w http.ResponseWriter, req *http.Request) {
+	videoID := req.PathValue("id")
+	if videoID == "" {
+		respondError(w, http.StatusBadRequest, "無効な動画ID")
+		return
+	}
+	var body struct {
+		Starts []int `json:"starts"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil || len(body.Starts) == 0 {
+		respondError(w, http.StatusBadRequest, "無効なリクエスト")
+		return
+	}
+	ends, err := r.chatEndService.EstimateEnds(videoID, body.Starts)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]interface{}{"ends": ends})
 }
 
 // handleAnalyzeChatEnds 手動觸發：用 live chat 拍手偵測該歌回各首歌的 end（背景執行）
