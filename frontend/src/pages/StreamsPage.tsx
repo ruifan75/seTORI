@@ -4,18 +4,39 @@ import { streamApi } from '../api/client';
 import Loading from '../components/ui/Loading';
 import Pagination from '../components/ui/Pagination';
 import Tag from '../components/ui/Tag';
+import { SortControl, type SortDir, type SortState } from '../components/ui/Sort';
 
 export default function StreamsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const page = parseInt(searchParams.get('page') || '1');
+  const sort = searchParams.get('sort') || 'date';
+  const dir: SortDir = searchParams.get('dir')
+    ? (searchParams.get('dir') === 'asc' ? 'asc' : 'desc')
+    : (sort === 'title' ? 'asc' : 'desc');
 
   const { data, isLoading } = useQuery({
-    queryKey: ['streams', page],
-    queryFn: () => streamApi.list(page, 20),
+    queryKey: ['streams', page, sort, dir],
+    queryFn: () => streamApi.list(page, 20, sort, dir),
   });
 
+  const buildParams = (next: { page?: number; sort?: string; dir?: SortDir }) => {
+    const params: Record<string, string> = {};
+    const p = next.page ?? page;
+    const so = next.sort ?? sort;
+    const d = next.dir ?? dir;
+    if (p > 1) params.page = String(p);
+    if (so !== 'date') params.sort = so;
+    const naturalDir = so === 'title' ? 'asc' : 'desc';
+    if (d !== naturalDir) params.dir = d;
+    return params;
+  };
+
   const handlePageChange = (newPage: number) => {
-    setSearchParams({ page: String(newPage) });
+    setSearchParams(buildParams({ page: newPage }));
+  };
+
+  const handleSort = (next: SortState) => {
+    setSearchParams(buildParams({ sort: next.sort, dir: next.dir, page: 1 }));
   };
 
   return (
@@ -32,8 +53,19 @@ export default function StreamsPage() {
             </div>
           ) : (
             <>
-              <div className="text-sm text-gray-500">
-                {data?.pagination.total}件の歌枠
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-sm text-gray-500">
+                  {data?.pagination.total}件の歌枠
+                </div>
+                <SortControl
+                  options={[
+                    { value: 'date', label: '配信日', firstDir: 'desc' },
+                    { value: 'title', label: 'タイトル', firstDir: 'asc' },
+                  ]}
+                  sort={sort}
+                  dir={dir}
+                  onSort={handleSort}
+                />
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

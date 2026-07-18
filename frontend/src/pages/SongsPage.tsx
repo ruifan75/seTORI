@@ -4,25 +4,46 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { songApi } from '../api/client';
 import Loading from '../components/ui/Loading';
 import Pagination from '../components/ui/Pagination';
+import { SortableTh, type SortDir, type SortState } from '../components/ui/Sort';
 
 export default function SongsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const page = parseInt(searchParams.get('page') || '1');
   const search = searchParams.get('search') || '';
+  const sort = searchParams.get('sort') || 'name';
+  const dir: SortDir = searchParams.get('dir') === 'desc' ? 'desc' : 'asc';
   const [searchInput, setSearchInput] = useState(search);
 
   const { data, isLoading } = useQuery({
-    queryKey: ['songs', page, search],
-    queryFn: () => songApi.list(page, 20, search || undefined),
+    queryKey: ['songs', page, search, sort, dir],
+    queryFn: () => songApi.list(page, 20, search || undefined, sort, dir),
   });
+
+  // 検索・ソート・ページを URL クエリにまとめる（既定値は省略）
+  const buildParams = (next: { search?: string; sort?: string; dir?: SortDir; page?: number }) => {
+    const params: Record<string, string> = {};
+    const s = next.search ?? search;
+    const so = next.sort ?? sort;
+    const d = next.dir ?? dir;
+    const p = next.page ?? 1;
+    if (s) params.search = s;
+    if (so !== 'name') params.sort = so;
+    if (d !== 'asc') params.dir = d;
+    if (p > 1) params.page = String(p);
+    return params;
+  };
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    setSearchParams({ search: searchInput, page: '1' });
+    setSearchParams(buildParams({ search: searchInput, page: 1 }));
+  };
+
+  const handleSort = (next: SortState) => {
+    setSearchParams(buildParams({ sort: next.sort, dir: next.dir, page: 1 }));
   };
 
   const handlePageChange = (newPage: number) => {
-    setSearchParams({ search, page: String(newPage) });
+    setSearchParams(buildParams({ page: newPage }));
   };
 
   return (
@@ -66,16 +87,33 @@ export default function SongsPage() {
                 <table className="w-full table-fixed divide-y divide-gray-200">
                   <thead className="bg-gray-50">
                     <tr>
-                      <th className="px-4 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-[72%] sm:w-[45%]">
-                        楽曲名
-                      </th>
+                      <SortableTh
+                        label="楽曲名"
+                        sortKey="name"
+                        sort={sort}
+                        dir={dir}
+                        onSort={handleSort}
+                        className="w-[72%] sm:w-[45%]"
+                      />
                       {/* モバイルではアーティスト列を隠し、曲名の下に表示する */}
-                      <th className="hidden sm:table-cell px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider sm:w-[40%]">
-                        アーティスト
-                      </th>
-                      <th className="px-4 sm:px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-[28%] sm:w-[15%]">
-                        歌唱回数
-                      </th>
+                      <SortableTh
+                        label="アーティスト"
+                        sortKey="artist"
+                        sort={sort}
+                        dir={dir}
+                        onSort={handleSort}
+                        className="hidden sm:table-cell sm:w-[40%]"
+                      />
+                      <SortableTh
+                        label="歌唱回数"
+                        sortKey="performances"
+                        sort={sort}
+                        dir={dir}
+                        onSort={handleSort}
+                        align="right"
+                        firstDir="desc"
+                        className="w-[28%] sm:w-[15%]"
+                      />
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
@@ -99,9 +137,6 @@ export default function SongsPage() {
                               >
                                 {song.name}
                               </Link>
-                              {song.name_reading && (
-                                <p className="text-xs text-gray-400 mt-0.5 truncate hidden sm:block">{song.name_reading}</p>
-                              )}
                               <p className="text-xs text-gray-500 mt-0.5 truncate sm:hidden">{song.original_artist}</p>
                             </div>
                           </div>

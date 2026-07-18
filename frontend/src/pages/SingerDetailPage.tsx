@@ -7,6 +7,7 @@ import { usePlayerStore, type PlayerTrack } from '../store/player';
 import Loading from '../components/ui/Loading';
 import Pagination from '../components/ui/Pagination';
 import Tag from '../components/ui/Tag';
+import { SortableTh, type SortDir, type SortState } from '../components/ui/Sort';
 
 type TabType = 'streams' | 'performances';
 type ProcessedFilter = 'all' | 'true' | 'false';
@@ -24,6 +25,11 @@ export default function SingerDetailPage() {
   const activeTab: TabType = searchParams.get('tab') === 'performances' ? 'performances' : 'streams';
   const streamPage = Math.max(1, parseInt(searchParams.get('page') || '1') || 1);
   const perfPage = Math.max(1, parseInt(searchParams.get('ppage') || '1') || 1);
+  // 歌唱曲一覧テーブルの並び替え（既定は配信日の新しい順）
+  const perfSort = searchParams.get('psort') || 'date';
+  const perfDir: SortDir = searchParams.get('pdir')
+    ? (searchParams.get('pdir') === 'asc' ? 'asc' : 'desc')
+    : (perfSort === 'date' ? 'desc' : 'asc');
 
   // 複数キーを一括更新（null は削除＝デフォルト値）。replace で履歴を汚さない。
   const updateParams = (updates: Record<string, string | null>) => {
@@ -38,6 +44,15 @@ export default function SingerDetailPage() {
   const setActiveTab = (t: TabType) => updateParams({ tab: t === 'streams' ? null : t });
   const setStreamPage = (p: number) => updateParams({ page: p <= 1 ? null : String(p) });
   const setPerfPage = (p: number) => updateParams({ ppage: p <= 1 ? null : String(p) });
+  // 並び替え変更時は 1 ページ目に戻す。既定値（date / 自然方向）は URL から省く。
+  const handlePerfSort = (next: SortState) => {
+    const naturalDir = next.sort === 'date' ? 'desc' : 'asc';
+    updateParams({
+      psort: next.sort === 'date' ? null : next.sort,
+      pdir: next.dir === naturalDir ? null : next.dir,
+      ppage: null,
+    });
+  };
   const [syncMode, setSyncMode] = useState<'new' | 'all'>('new');
   const [showEditModal, setShowEditModal] = useState(false);
   const [editForm, setEditForm] = useState({
@@ -71,8 +86,8 @@ export default function SingerDetailPage() {
 
   // Performances
   const { data: performances, isLoading: perfsLoading } = useQuery({
-    queryKey: ['singerPerformances', id, perfPage],
-    queryFn: () => singerApi.getPerformances(id!, perfPage, 20),
+    queryKey: ['singerPerformances', id, perfPage, perfSort, perfDir],
+    queryFn: () => singerApi.getPerformances(id!, perfPage, 20, perfSort, perfDir),
     enabled: !!id && activeTab === 'performances',
   });
 
@@ -503,15 +518,9 @@ export default function SingerDetailPage() {
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">
                     <tr>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        楽曲
-                      </th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        歌枠
-                      </th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        日付
-                      </th>
+                      <SortableTh label="楽曲" sortKey="song" sort={perfSort} dir={perfDir} onSort={handlePerfSort} />
+                      <SortableTh label="歌枠" sortKey="stream" sort={perfSort} dir={perfDir} onSort={handlePerfSort} />
+                      <SortableTh label="日付" sortKey="date" sort={perfSort} dir={perfDir} onSort={handlePerfSort} firstDir="desc" />
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         時間
                       </th>

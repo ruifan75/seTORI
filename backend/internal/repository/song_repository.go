@@ -18,8 +18,24 @@ func NewSongRepository(db *sql.DB) *SongRepository {
 	return &SongRepository{db: db}
 }
 
-// FindAll 取得所有歌曲（支援分頁和搜尋）
-func (r *SongRepository) FindAll(limit, offset int, search string) ([]models.Song, int, error) {
+// songListOrder は楽曲一覧の ORDER BY 句を組み立てる。
+// sort: "name"(既定) / "artist" / "performances"、dir: asc|desc。
+func songListOrder(sort, dir string) string {
+	switch sort {
+	case "artist":
+		return nameSortOrderDir("original_artist", "original_artist_reading", dir)
+	case "performances":
+		return fmt.Sprintf(
+			`(SELECT COUNT(*) FROM performances p JOIN streams st ON st.id = p.stream_id `+
+				`WHERE p.song_id = songs.id AND st.is_hidden = FALSE) %s, `, dirOr(dir, "desc")) +
+			nameSortOrder("name", "name_reading")
+	default:
+		return nameSortOrderDir("name", "name_reading", dir)
+	}
+}
+
+// FindAll 取得所有歌曲（支援分頁、搜尋、排序）
+func (r *SongRepository) FindAll(limit, offset int, search, sort, dir string) ([]models.Song, int, error) {
 	var total int
 	var rows *sql.Rows
 	var err error
@@ -39,7 +55,7 @@ func (r *SongRepository) FindAll(limit, offset int, search string) ([]models.Son
 			SELECT id, name, name_reading, original_artist, original_artist_reading, arts, created_at, updated_at
 			FROM songs
 			WHERE name ILIKE $1 OR original_artist ILIKE $1 OR name_reading ILIKE $1
-			ORDER BY name ASC
+			ORDER BY ` + songListOrder(sort, dir) + `
 			LIMIT $2 OFFSET $3`
 		rows, err = r.db.Query(query, searchPattern, limit, offset)
 	} else {
@@ -51,7 +67,7 @@ func (r *SongRepository) FindAll(limit, offset int, search string) ([]models.Son
 		query := `
 			SELECT id, name, name_reading, original_artist, original_artist_reading, arts, created_at, updated_at
 			FROM songs
-			ORDER BY name ASC
+			ORDER BY ` + songListOrder(sort, dir) + `
 			LIMIT $1 OFFSET $2`
 		rows, err = r.db.Query(query, limit, offset)
 	}
@@ -340,6 +356,25 @@ func (r *SongRepository) ListMissingNameReadings(limit int) ([]models.Song, erro
 				break
 			}
 		}
+	}
+	return out, rows.Err()
+}
+
+// ListAllReadings は全楽曲の id/name/name_reading を返す（読みデータのエクスポート用）。
+func (r *SongRepository) ListAllReadings() ([]models.Song, error) {
+	rows, err := r.db.Query(`SELECT id, name, name_reading FROM songs ORDER BY name`)
+	if err != nil {
+		return nil, fmt.Errorf("list song readings: %w", err)
+	}
+	defer rows.Close()
+
+	var out []models.Song
+	for rows.Next() {
+		var s models.Song
+		if err := rows.Scan(&s.ID, &s.Name, &s.NameReading); err != nil {
+			return nil, fmt.Errorf("scan song reading: %w", err)
+		}
+		out = append(out, s)
 	}
 	return out, rows.Err()
 }

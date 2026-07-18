@@ -71,6 +71,17 @@ type Stream struct {
 	UpdatedAt       time.Time      `json:"updated_at"`
 }
 
+// StreamSearchFilters 配信検索で組み合わせられる条件。
+// StreamTagIDs / PerformanceTagIDs は、それぞれ指定した全タグを持つ配信に絞り込む。
+type StreamSearchFilters struct {
+	Query             string
+	OwnerID           string
+	ParticipantIDs    []string
+	VocalistIDs       []string
+	StreamTagIDs      []string
+	PerformanceTagIDs []string
+}
+
 // Performance 演出紀錄
 type Performance struct {
 	ID            uuid.UUID      `json:"id"`
@@ -154,6 +165,20 @@ type User struct {
 	LastLogin    *time.Time `json:"last_login"` // 未ログインなら null
 	CreatedAt    time.Time  `json:"created_at"`
 	UpdatedAt    time.Time  `json:"updated_at"`
+}
+
+// EditSuggestion 閲覧モードからの修正提案。管理者が承認/却下する。
+type EditSuggestion struct {
+	ID          uuid.UUID  `json:"id"`
+	TargetType  string     `json:"target_type"` // song / artist
+	TargetID    uuid.UUID  `json:"target_id"`
+	TargetLabel string     `json:"target_label"`
+	BeforeData  []byte     `json:"-"` // JSONB（生バイト、ハンドラで json.RawMessage として出力）
+	AfterData   []byte     `json:"-"`
+	Note        string     `json:"note"`
+	Status      string     `json:"status"` // pending / approved / rejected
+	CreatedAt   time.Time  `json:"created_at"`
+	ReviewedAt  *time.Time `json:"reviewed_at"`
 }
 
 // Session Bearer トークンのセッション。DB には token の SHA-256 ハッシュのみ保存する。

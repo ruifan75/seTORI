@@ -445,6 +445,58 @@ type BackfillReadingsResponse struct {
 	Warning        string `json:"warning,omitempty"`
 }
 
+// ========== 読みのエクスポート / インポート ==========
+
+// ReadingItem はエクスポート/インポート1件（アーティスト or 楽曲の読み）。
+type ReadingItem struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Reading string `json:"reading"`
+}
+
+// ReadingsExport は読みデータの一括エクスポート形式。外部 AI で reading を埋めて再取り込みできる。
+type ReadingsExport struct {
+	Artists []ReadingItem `json:"artists"`
+	Songs   []ReadingItem `json:"songs"`
+}
+
+// ImportReadingsResult は読み取り込みの結果。
+type ImportReadingsResult struct {
+	ArtistsUpdated int      `json:"artists_updated"`
+	SongsUpdated   int      `json:"songs_updated"`
+	Skipped        int      `json:"skipped"`        // かな以外・不正な読みで採用しなかった件数
+	Errors         []string `json:"errors,omitempty"`
+}
+
+// ========== 修正提案（閲覧モードからの提案 → 管理者レビュー） ==========
+
+// CreateSuggestionRequest 修正提案の投稿（匿名可）。
+type CreateSuggestionRequest struct {
+	TargetType string            `json:"target_type"` // song / artist
+	TargetID   string            `json:"target_id"`
+	Fields     map[string]string `json:"fields"` // 提案する編集値（キーは対象の編集可能フィールド）
+	Note       string            `json:"note"`   // 提案者コメント（任意）
+}
+
+// SuggestionResponse 提案1件（before/after を差分表示できるよう両方返す）。
+type SuggestionResponse struct {
+	ID          uuid.UUID         `json:"id"`
+	TargetType  string            `json:"target_type"`
+	TargetID    uuid.UUID         `json:"target_id"`
+	TargetLabel string            `json:"target_label"`
+	Before      map[string]string `json:"before"`
+	After       map[string]string `json:"after"`
+	Note        string            `json:"note"`
+	Status      string            `json:"status"`
+	CreatedAt   time.Time         `json:"created_at"`
+	ReviewedAt  *time.Time        `json:"reviewed_at"`
+}
+
+type SuggestionListResponse struct {
+	Suggestions []SuggestionResponse `json:"suggestions"`
+	Pagination  PaginationResponse   `json:"pagination"`
+}
+
 // ========== グローバル検索 ==========
 
 // SearchStreamItem 検索結果の配信（軽量版）

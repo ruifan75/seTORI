@@ -2,9 +2,11 @@ package handler
 
 import (
 	"database/sql"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -44,6 +46,8 @@ type Router struct {
 	artistService        *service.ArtistService
 	batchAnalyzeService  *service.BatchAnalyzeService
 	authService          *service.AuthService
+	readingService       *service.ReadingService
+	suggestionService    *service.SuggestionService
 }
 
 // NewRouter 新しいルーターを作成
@@ -81,6 +85,9 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	itunesClient := itunes.NewClient()
 	endTimeEstimateService := service.NewEndTimeEstimateService(itunesClient)
 	authService := service.NewAuthService(authRepo)
+	readingService := service.NewReadingService(artistRepo, songRepo)
+	suggestionRepo := repository.NewSuggestionRepository(db)
+	suggestionService := service.NewSuggestionService(suggestionRepo, songService, artistService)
 
 	r := &Router{
 		db:                   db,
@@ -101,6 +108,8 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 		artistService:        artistService,
 		batchAnalyzeService:  batchAnalyzeService,
 		authService:          authService,
+		readingService:       readingService,
+		suggestionService:    suggestionService,
 	}
 
 	r.setupRoutes()
@@ -165,6 +174,16 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("PUT /api/artists/{id}", r.handleUpdateArtist)
 	r.mux.HandleFunc("POST /api/artists/{id}/merge", r.handleMergeArtist)
 	r.mux.HandleFunc("POST /api/ai/backfill-readings", r.handleBackfillReadings)
+	// 読みデータのエクスポート/インポート（外部 AI で読みを作成する運用向け）
+	r.mux.HandleFunc("GET /api/readings/export", r.handleExportReadings)
+	r.mux.HandleFunc("POST /api/readings/import", r.handleImportReadings)
+
+	// 修正提案：投稿は閲覧モードでも可、一覧/承認/却下は content:edit
+	r.mux.HandleFunc("POST /api/suggestions", r.handleCreateSuggestion)
+	r.mux.HandleFunc("GET /api/suggestions", r.handleListSuggestions)
+	r.mux.HandleFunc("GET /api/suggestions/count", r.handleCountSuggestions)
+	r.mux.HandleFunc("POST /api/suggestions/{id}/approve", r.handleApproveSuggestion)
+	r.mux.HandleFunc("POST /api/suggestions/{id}/reject", r.handleRejectSuggestion)
 
 	// API routes - Singers
 	r.mux.HandleFunc("GET /api/singers", r.handleListSingers)
@@ -337,7 +356,7 @@ func (r *Router) handleGlobalSearch(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// テキスト検索：楽曲・歌枠・チャンネルを横断。個別の失敗は空リストで続行する。
-	if songs, err := r.songService.GetAll(1, limit, query); err != nil {
+	if songs, err := r.songService.GetAll(1, limit, query, "", ""); err != nil {
 		logger.Warnf("global search songs failed: %v", err)
 	} else if songs != nil {
 		resp.Songs = songs.Songs
@@ -355,8 +374,8 @@ func (r *Router) handleGlobalSearch(w http.ResponseWriter, req *http.Request) {
 		resp.Singers = singers
 	}
 
-	// 原曲アーティスト（名前・読みの部分一致）
-	if artists, err := r.artistService.GetAll(1, limit, query); err != nil {
+	// 原曲アーティスト（名前・読みの部分一致、曲数の多い順＝関連度の代用）
+	if artists, err := r.artistService.GetAll(1, limit, query, "songs", ""); err != nil {
 		logger.Warnf("global search artists failed: %v", err)
 	} else {
 		resp.Artists = artists.Artists
@@ -385,27 +404,66 @@ func toSearchTagItems(tags []repository.TagWithCount) []dto.SearchTagItem {
 	return items
 }
 
-// handleSearchStreams は複合条件（q × singer_id × tags AND）で配信を検索する。
+// handleSearchStreams は配信元・参加者・ボーカル・タグを組み合わせて配信を検索する。
 func (r *Router) handleSearchStreams(w http.ResponseWriter, req *http.Request) {
-	q := strings.TrimSpace(req.URL.Query().Get("q"))
-	singerID := strings.TrimSpace(req.URL.Query().Get("singer_id"))
-	var tagIDs []string
-	if raw := strings.TrimSpace(req.URL.Query().Get("tags")); raw != "" {
-		for _, t := range strings.Split(raw, ",") {
-			if t = strings.TrimSpace(t); t != "" {
-				tagIDs = append(tagIDs, t)
-			}
-		}
+	filters := models.StreamSearchFilters{
+		Query:             strings.TrimSpace(req.URL.Query().Get("q")),
+		OwnerID:           strings.TrimSpace(req.URL.Query().Get("owner_id")),
+		ParticipantIDs:    parseIDQueryParams(req, "participant_ids", "participant_id", "singer_id"),
+		VocalistIDs:       parseIDQueryParams(req, "vocalist_ids", "vocalist_id"),
+		StreamTagIDs:      parseCSVQueryParam(req, "tags"),
+		PerformanceTagIDs: parseCSVQueryParam(req, "performance_tags"),
 	}
 	page, _ := strconv.Atoi(req.URL.Query().Get("page"))
 	limit, _ := strconv.Atoi(req.URL.Query().Get("limit"))
 
-	result, err := r.streamService.SearchStreams(q, singerID, tagIDs, page, limit)
+	result, err := r.streamService.SearchStreams(filters, page, limit)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	respondJSON(w, http.StatusOK, result)
+}
+
+func parseCSVQueryParam(req *http.Request, key string) []string {
+	raw := strings.TrimSpace(req.URL.Query().Get(key))
+	if raw == "" {
+		return nil
+	}
+
+	seen := make(map[string]struct{})
+	values := make([]string, 0)
+	for _, value := range strings.Split(raw, ",") {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		values = append(values, value)
+	}
+	return values
+}
+
+// parseIDQueryParams は複数形パラメータと旧単値パラメータを重複なしで結合する。
+func parseIDQueryParams(req *http.Request, multiKey string, legacyKeys ...string) []string {
+	values := parseCSVQueryParam(req, multiKey)
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		seen[value] = struct{}{}
+	}
+	for _, key := range legacyKeys {
+		for _, value := range parseCSVQueryParam(req, key) {
+			if _, exists := seen[value]; exists {
+				continue
+			}
+			seen[value] = struct{}{}
+			values = append(values, value)
+		}
+	}
+	return values
 }
 
 // ========== Batch Analyze Handlers ==========
@@ -439,8 +497,10 @@ func (r *Router) handleListArtists(w http.ResponseWriter, req *http.Request) {
 	page, _ := strconv.Atoi(req.URL.Query().Get("page"))
 	limit, _ := strconv.Atoi(req.URL.Query().Get("limit"))
 	search := req.URL.Query().Get("search")
+	sort := req.URL.Query().Get("sort")
+	dir := req.URL.Query().Get("dir")
 
-	result, err := r.artistService.GetAll(page, limit, search)
+	result, err := r.artistService.GetAll(page, limit, search, sort, dir)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -456,8 +516,10 @@ func (r *Router) handleGetArtist(w http.ResponseWriter, req *http.Request) {
 	}
 	page, _ := strconv.Atoi(req.URL.Query().Get("page"))
 	limit, _ := strconv.Atoi(req.URL.Query().Get("limit"))
+	sort := req.URL.Query().Get("sort")
+	dir := req.URL.Query().Get("dir")
 
-	result, err := r.artistService.GetByID(id, page, limit)
+	result, err := r.artistService.GetByID(id, page, limit, sort, dir)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -539,6 +601,185 @@ func (r *Router) handleBackfillReadings(w http.ResponseWriter, req *http.Request
 	respondJSON(w, http.StatusOK, result)
 }
 
+// handleExportReadings はアーティスト・楽曲の読みを一括出力する。
+// ?filter=needs_fix で未整備のみ、?format=csv で CSV（type,id,name,reading）出力。
+func (r *Router) handleExportReadings(w http.ResponseWriter, req *http.Request) {
+	onlyNeedsFix := req.URL.Query().Get("filter") == "needs_fix"
+	data, err := r.readingService.Export(onlyNeedsFix)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	if req.URL.Query().Get("format") == "csv" {
+		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+		w.Header().Set("Content-Disposition", `attachment; filename="readings.csv"`)
+		cw := csv.NewWriter(w)
+		_ = cw.Write([]string{"type", "id", "name", "reading"})
+		for _, a := range data.Artists {
+			_ = cw.Write([]string{"artist", a.ID, a.Name, a.Reading})
+		}
+		for _, s := range data.Songs {
+			_ = cw.Write([]string{"song", s.ID, s.Name, s.Reading})
+		}
+		cw.Flush()
+		return
+	}
+
+	respondJSON(w, http.StatusOK, data)
+}
+
+// handleImportReadings は読みデータを取り込む（content:edit）。JSON または CSV を受け付ける。
+func (r *Router) handleImportReadings(w http.ResponseWriter, req *http.Request) {
+	var data dto.ReadingsExport
+
+	if strings.HasPrefix(req.Header.Get("Content-Type"), "text/csv") {
+		parsed, err := parseReadingsCSV(req.Body)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, "CSV の解析に失敗しました: "+err.Error())
+			return
+		}
+		data = *parsed
+	} else if err := json.NewDecoder(req.Body).Decode(&data); err != nil {
+		respondError(w, http.StatusBadRequest, "無効なリクエスト形式")
+		return
+	}
+
+	result, err := r.readingService.Import(&data)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, result)
+}
+
+// parseReadingsCSV は type,id,name,reading の CSV を ReadingsExport に変換する。
+// ヘッダー行（type で始まる）は読み飛ばす。列数が不足する行は無視する。
+func parseReadingsCSV(rd io.Reader) (*dto.ReadingsExport, error) {
+	cr := csv.NewReader(rd)
+	cr.FieldsPerRecord = -1 // 列数のばらつきを許容
+	out := &dto.ReadingsExport{}
+	for {
+		rec, err := cr.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		if len(rec) < 4 {
+			continue
+		}
+		typ := strings.TrimSpace(rec[0])
+		item := dto.ReadingItem{ID: strings.TrimSpace(rec[1]), Name: rec[2], Reading: rec[3]}
+		switch typ {
+		case "artist":
+			out.Artists = append(out.Artists, item)
+		case "song":
+			out.Songs = append(out.Songs, item)
+		}
+	}
+	return out, nil
+}
+
+// ========== Suggestion Handlers（修正提案） ==========
+
+// handleCreateSuggestion は修正提案を投稿する（閲覧モードでも可・匿名可）。
+func (r *Router) handleCreateSuggestion(w http.ResponseWriter, req *http.Request) {
+	var body dto.CreateSuggestionRequest
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		respondError(w, http.StatusBadRequest, "無効なリクエスト形式")
+		return
+	}
+	if len(body.Fields) == 0 {
+		respondError(w, http.StatusBadRequest, "提案する変更がありません")
+		return
+	}
+
+	sug, err := r.suggestionService.Create(&body)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrInvalidTarget), errors.Is(err, service.ErrNoChange):
+			respondError(w, http.StatusBadRequest, err.Error())
+		case errors.Is(err, service.ErrTargetNotFound):
+			respondError(w, http.StatusNotFound, err.Error())
+		default:
+			respondError(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+	respondJSON(w, http.StatusCreated, map[string]any{
+		"message": "修正提案を送信しました。管理者の確認をお待ちください",
+		"id":      sug.ID,
+	})
+}
+
+// handleListSuggestions は提案一覧を返す（content:edit）。?status=pending|approved|rejected で絞る。
+func (r *Router) handleListSuggestions(w http.ResponseWriter, req *http.Request) {
+	status := req.URL.Query().Get("status")
+	page, _ := strconv.Atoi(req.URL.Query().Get("page"))
+	limit, _ := strconv.Atoi(req.URL.Query().Get("limit"))
+
+	result, err := r.suggestionService.List(status, page, limit)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, result)
+}
+
+// handleCountSuggestions は未処理の提案数を返す（バッジ表示用、content:edit）。
+func (r *Router) handleCountSuggestions(w http.ResponseWriter, req *http.Request) {
+	n, err := r.suggestionService.CountPending()
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]int{"pending": n})
+}
+
+// handleApproveSuggestion は提案を承認して対象へ反映する（content:edit）。
+func (r *Router) handleApproveSuggestion(w http.ResponseWriter, req *http.Request) {
+	id, err := uuid.Parse(req.PathValue("id"))
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "無効な提案ID")
+		return
+	}
+	if err := r.suggestionService.Approve(id); err != nil {
+		switch {
+		case errors.Is(err, service.ErrSuggestionNotFound):
+			respondError(w, http.StatusNotFound, err.Error())
+		case errors.Is(err, service.ErrAlreadyReviewed):
+			respondError(w, http.StatusConflict, err.Error())
+		default:
+			respondError(w, http.StatusBadRequest, err.Error())
+		}
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"message": "提案を承認して反映しました"})
+}
+
+// handleRejectSuggestion は提案を却下する（content:edit）。
+func (r *Router) handleRejectSuggestion(w http.ResponseWriter, req *http.Request) {
+	id, err := uuid.Parse(req.PathValue("id"))
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "無効な提案ID")
+		return
+	}
+	if err := r.suggestionService.Reject(id); err != nil {
+		switch {
+		case errors.Is(err, service.ErrSuggestionNotFound):
+			respondError(w, http.StatusNotFound, err.Error())
+		case errors.Is(err, service.ErrAlreadyReviewed):
+			respondError(w, http.StatusConflict, err.Error())
+		default:
+			respondError(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"message": "提案を却下しました"})
+}
+
 // ========== Tag Search Handlers ==========
 
 // handleGetStreamsByTag 指定タグが付いた配信一覧（タグ検索ページ）
@@ -583,6 +824,8 @@ func (r *Router) handleListSongs(w http.ResponseWriter, req *http.Request) {
 	page, _ := strconv.Atoi(req.URL.Query().Get("page"))
 	limit, _ := strconv.Atoi(req.URL.Query().Get("limit"))
 	search := req.URL.Query().Get("search")
+	sort := req.URL.Query().Get("sort")
+	dir := req.URL.Query().Get("dir")
 
 	if page < 1 {
 		page = 1
@@ -591,7 +834,7 @@ func (r *Router) handleListSongs(w http.ResponseWriter, req *http.Request) {
 		limit = 20
 	}
 
-	result, err := r.songService.GetAll(page, limit, search)
+	result, err := r.songService.GetAll(page, limit, search, sort, dir)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -806,6 +1049,8 @@ func (r *Router) handleMergeSong(w http.ResponseWriter, req *http.Request) {
 func (r *Router) handleListStreams(w http.ResponseWriter, req *http.Request) {
 	page, _ := strconv.Atoi(req.URL.Query().Get("page"))
 	limit, _ := strconv.Atoi(req.URL.Query().Get("limit"))
+	sort := req.URL.Query().Get("sort")
+	dir := req.URL.Query().Get("dir")
 
 	if page < 1 {
 		page = 1
@@ -814,7 +1059,7 @@ func (r *Router) handleListStreams(w http.ResponseWriter, req *http.Request) {
 		limit = 20
 	}
 
-	result, err := r.streamService.GetAll(page, limit)
+	result, err := r.streamService.GetAll(page, limit, sort, dir)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -881,6 +1126,8 @@ func (r *Router) handleUpdateStream(w http.ResponseWriter, req *http.Request) {
 func (r *Router) handleListSingers(w http.ResponseWriter, req *http.Request) {
 	page, _ := strconv.Atoi(req.URL.Query().Get("page"))
 	limit, _ := strconv.Atoi(req.URL.Query().Get("limit"))
+	sort := req.URL.Query().Get("sort")
+	dir := req.URL.Query().Get("dir")
 
 	if page < 1 {
 		page = 1
@@ -889,7 +1136,7 @@ func (r *Router) handleListSingers(w http.ResponseWriter, req *http.Request) {
 		limit = 20
 	}
 
-	result, err := r.singerService.GetAll(page, limit)
+	result, err := r.singerService.GetAll(page, limit, sort, dir)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -998,6 +1245,8 @@ func (r *Router) handleGetSingerPerformances(w http.ResponseWriter, req *http.Re
 
 	page, _ := strconv.Atoi(req.URL.Query().Get("page"))
 	limit, _ := strconv.Atoi(req.URL.Query().Get("limit"))
+	sort := req.URL.Query().Get("sort")
+	dir := req.URL.Query().Get("dir")
 
 	if page < 1 {
 		page = 1
@@ -1006,7 +1255,7 @@ func (r *Router) handleGetSingerPerformances(w http.ResponseWriter, req *http.Re
 		limit = 20
 	}
 
-	result, err := r.singerService.GetPerformances(id, page, limit)
+	result, err := r.singerService.GetPerformances(id, page, limit, sort, dir)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1941,6 +2190,15 @@ func requiredPermission(method, path string) (perm string, needsAuth bool) {
 		return "", false
 	case "/api/auth/logout", "/api/auth/me":
 		return "", true
+	}
+
+	// 修正提案：投稿（POST /api/suggestions）は閲覧モードでも可（公開）。
+	// 一覧・件数・承認・却下は content:edit（管理者レビュー）。
+	if path == "/api/suggestions" && method == http.MethodPost {
+		return "", false
+	}
+	if strings.HasPrefix(path, "/api/suggestions") {
+		return auth.PermContentEdit, true
 	}
 
 	// 管理系リソースはメソッドを問わず専用権限が必要

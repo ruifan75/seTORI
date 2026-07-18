@@ -30,7 +30,8 @@ func ContainsHan(s string) bool {
 }
 
 // ListWithCounts はアーティスト一覧（曲数付き）を返す。search は名前/読みの部分一致。
-func (r *ArtistRepository) ListWithCounts(limit, offset int, search string) ([]models.Artist, int, error) {
+// sort は "songs"（曲数順）か "name"（数字→英字→読み順、既定）。dir は asc|desc。
+func (r *ArtistRepository) ListWithCounts(limit, offset int, search, sort, dir string) ([]models.Artist, int, error) {
 	where := ""
 	args := []any{}
 	if search != "" {
@@ -43,6 +44,10 @@ func (r *ArtistRepository) ListWithCounts(limit, offset int, search string) ([]m
 		return nil, 0, fmt.Errorf("count artists: %w", err)
 	}
 
+	order := nameSortOrderDir("a.name", "a.name_reading", dir)
+	if sort == "songs" {
+		order = "song_count " + normDir(dir) + ", a.name ASC"
+	}
 	query := fmt.Sprintf(`
 		SELECT a.id, a.name, a.name_reading, a.created_at, a.updated_at,
 		       COUNT(sa.song_id) AS song_count
@@ -50,8 +55,8 @@ func (r *ArtistRepository) ListWithCounts(limit, offset int, search string) ([]m
 		LEFT JOIN song_artists sa ON sa.artist_id = a.id
 		%s
 		GROUP BY a.id
-		ORDER BY song_count DESC, a.name ASC
-		LIMIT $%d OFFSET $%d`, where, len(args)+1, len(args)+2)
+		ORDER BY %s
+		LIMIT $%d OFFSET $%d`, where, order, len(args)+1, len(args)+2)
 	args = append(args, limit, offset)
 
 	rows, err := r.db.Query(query, args...)
@@ -86,15 +91,6 @@ func (r *ArtistRepository) FindByID(id uuid.UUID) (*models.Artist, error) {
 		return nil, fmt.Errorf("find artist: %w", err)
 	}
 	return &a, nil
-}
-
-// UpdateReading は読み仮名を更新する。
-func (r *ArtistRepository) UpdateReading(id uuid.UUID, reading string) error {
-	_, err := r.db.Exec(`UPDATE artists SET name_reading = NULLIF($2, ''), updated_at = NOW() WHERE id = $1`, id, reading)
-	if err != nil {
-		return fmt.Errorf("update artist reading: %w", err)
-	}
-	return nil
 }
 
 // FindByName は名前でアーティストを取得する。見つからなければ nil。
@@ -219,10 +215,16 @@ func (r *ArtistRepository) MergeArtists(sourceID, targetID uuid.UUID) error {
 }
 
 // FindSongsByArtist はアーティストに紐づく楽曲を演唱回数付きで返す。
-func (r *ArtistRepository) FindSongsByArtist(artistID uuid.UUID, limit, offset int) ([]models.Song, map[uuid.UUID]int, int, error) {
+func (r *ArtistRepository) FindSongsByArtist(artistID uuid.UUID, limit, offset int, sort, dir string) ([]models.Song, map[uuid.UUID]int, int, error) {
 	var total int
 	if err := r.db.QueryRow(`SELECT COUNT(*) FROM song_artists WHERE artist_id = $1`, artistID).Scan(&total); err != nil {
 		return nil, nil, 0, fmt.Errorf("count artist songs: %w", err)
+	}
+
+	// 既定は歌唱回数の多い順。"name" 指定で曲名の五十音順。
+	order := "perf_count " + dirOr(dir, "desc") + ", s.name ASC"
+	if sort == "name" {
+		order = nameSortOrderDir("s.name", "s.name_reading", dir)
 	}
 
 	rows, err := r.db.Query(`
@@ -233,7 +235,7 @@ func (r *ArtistRepository) FindSongsByArtist(artistID uuid.UUID, limit, offset i
 		FROM songs s
 		JOIN song_artists sa ON sa.song_id = s.id
 		WHERE sa.artist_id = $1
-		ORDER BY perf_count DESC, s.name ASC
+		ORDER BY `+order+`
 		LIMIT $2 OFFSET $3`, artistID, limit, offset)
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("query artist songs: %w", err)
@@ -280,6 +282,45 @@ func (r *ArtistRepository) SyncSongArtist(songID uuid.UUID, artistText string) e
 	}
 	if _, err := tx.Exec(`INSERT INTO song_artists (song_id, artist_id) VALUES ($1, $2)`, songID, artistID); err != nil {
 		return fmt.Errorf("insert song artist: %w", err)
+	}
+	return tx.Commit()
+}
+
+// ListAllReadings は全アーティストの id/name/name_reading を返す（読みデータのエクスポート用）。
+func (r *ArtistRepository) ListAllReadings() ([]models.Artist, error) {
+	rows, err := r.db.Query(`SELECT id, name, name_reading FROM artists ORDER BY name`)
+	if err != nil {
+		return nil, fmt.Errorf("list artist readings: %w", err)
+	}
+	defer rows.Close()
+
+	var out []models.Artist
+	for rows.Next() {
+		var a models.Artist
+		if err := rows.Scan(&a.ID, &a.Name, &a.NameReading); err != nil {
+			return nil, fmt.Errorf("scan artist reading: %w", err)
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// UpdateReadingPropagate は読み仮名を更新し、所属楽曲の original_artist_reading にも反映する
+// （読みデータの取り込み用。アーティストの読みが正で、楽曲側の表示テキストを追従させる）。
+func (r *ArtistRepository) UpdateReadingPropagate(id uuid.UUID, reading string) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`UPDATE artists SET name_reading = NULLIF($2, ''), updated_at = NOW() WHERE id = $1`, id, reading); err != nil {
+		return fmt.Errorf("update artist reading: %w", err)
+	}
+	if _, err := tx.Exec(`
+		UPDATE songs SET original_artist_reading = NULLIF($2, ''), updated_at = NOW()
+		WHERE id IN (SELECT song_id FROM song_artists WHERE artist_id = $1)`, id, reading); err != nil {
+		return fmt.Errorf("propagate artist reading: %w", err)
 	}
 	return tx.Commit()
 }

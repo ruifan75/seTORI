@@ -1,27 +1,43 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useQuery, useMutation } from '@tanstack/react-query';
-import { searchApi, holodexApi } from '../api/client';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { holodexApi, searchApi } from '../api/client';
+import type { CSSProperties } from 'react';
+import type { SearchTagItem, Singer } from '../api/types';
 import { useAuthStore, hasPermission, PERM } from '../store/auth';
 import { useToast } from './ui/Toast';
 
-// GlobalSearch 統一検索ボックス。
-// 楽曲・歌枠・チャンネルを横断検索し、YouTube URL / video ID を貼れば該当歌枠へ直行できる。
-// 未登録の video ID は sync:run 権限があれば Holodex から同期して開ける。
+interface ActiveSearchToken {
+  key: string;
+  label: string;
+  title: string;
+  className: string;
+  style?: CSSProperties;
+  remove: () => void;
+}
+
 export default function GlobalSearch({ autoFocus = false }: { autoFocus?: boolean }) {
   const navigate = useNavigate();
   const { showToast } = useToast();
-  const canSync = hasPermission(useAuthStore((s) => s.user), PERM.SYNC_RUN);
+  const canSync = hasPermission(useAuthStore((state) => state.user), PERM.SYNC_RUN);
 
   const [query, setQuery] = useState('');
   const [debounced, setDebounced] = useState('');
   const [open, setOpen] = useState(false);
+  const [titleQuery, setTitleQuery] = useState('');
+  const [owner, setOwner] = useState<Singer | null>(null);
+  const [participants, setParticipants] = useState<Singer[]>([]);
+  const [vocalists, setVocalists] = useState<Singer[]>([]);
+  const [streamTags, setStreamTags] = useState<SearchTagItem[]>([]);
+  const [performanceTags, setPerformanceTags] = useState<SearchTagItem[]>([]);
+  const [focusedTokenKey, setFocusedTokenKey] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const tokenRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
-  // 250ms デバウンス
   useEffect(() => {
-    const t = setTimeout(() => setDebounced(query.trim()), 250);
-    return () => clearTimeout(t);
+    const timer = setTimeout(() => setDebounced(query.trim()), 250);
+    return () => clearTimeout(timer);
   }, [query]);
 
   const { data, isFetching } = useQuery({
@@ -31,262 +47,414 @@ export default function GlobalSearch({ autoFocus = false }: { autoFocus?: boolea
     staleTime: 1000 * 30,
   });
 
-  // 外側クリックで閉じる
+  const hasFilters = !!(
+    titleQuery || owner || participants.length || vocalists.length || streamTags.length || performanceTags.length
+  );
+  const { data: filteredResults, isFetching: filtersFetching } = useQuery({
+    queryKey: [
+      'global-filter-preview', titleQuery, owner?.id,
+      participants.map((singer) => singer.id).join(','), vocalists.map((singer) => singer.id).join(','),
+      streamTags.map((tag) => tag.id).join(','), performanceTags.map((tag) => tag.id).join(','),
+    ],
+    queryFn: () => searchApi.searchStreams({
+      q: titleQuery,
+      ownerId: owner?.id,
+      participantIds: participants.map((singer) => singer.id),
+      vocalistIds: vocalists.map((singer) => singer.id),
+      streamTags: streamTags.map((tag) => tag.id),
+      performanceTags: performanceTags.map((tag) => tag.id),
+      page: 1,
+      limit: 4,
+    }),
+    enabled: hasFilters,
+  });
+
   useEffect(() => {
-    const onMouseDown = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
+    const onMouseDown = (event: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(event.target as Node)) setOpen(false);
     };
     document.addEventListener('mousedown', onMouseDown);
     return () => document.removeEventListener('mousedown', onMouseDown);
   }, []);
 
-  const close = () => {
-    setOpen(false);
+  const reset = () => {
     setQuery('');
+    setDebounced('');
+    setTitleQuery('');
+    setOwner(null);
+    setParticipants([]);
+    setVocalists([]);
+    setStreamTags([]);
+    setPerformanceTags([]);
+    setFocusedTokenKey(null);
   };
 
   const go = (path: string) => {
-    close();
+    setOpen(false);
+    reset();
     navigate(path);
   };
 
-  // 未登録動画の同期→遷移
+  const buildSearchPath = (fallbackTitle = '') => {
+    const params = new URLSearchParams();
+    const effectiveTitle = titleQuery || fallbackTitle.trim();
+    if (effectiveTitle) params.set('q', effectiveTitle);
+    if (owner) params.set('channel', owner.id);
+    if (participants.length) params.set('participants', participants.map((singer) => singer.id).join(','));
+    if (vocalists.length) params.set('vocalists', vocalists.map((singer) => singer.id).join(','));
+    if (streamTags.length) params.set('tags', streamTags.map((tag) => tag.id).join(','));
+    if (performanceTags.length) params.set('performance_tags', performanceTags.map((tag) => tag.id).join(','));
+    return `/search?${params.toString()}`;
+  };
+
+  const focusForNextToken = () => {
+    setQuery('');
+    setDebounced('');
+    setFocusedTokenKey(null);
+    setOpen(true);
+    window.setTimeout(() => inputRef.current?.focus(), 0);
+  };
+
+  const addSingerToken = (singer: Singer, role: 'owner' | 'participant' | 'vocalist') => {
+    if (role === 'owner') setOwner(singer);
+    if (role === 'participant') {
+      setParticipants((current) => current.some((item) => item.id === singer.id) ? current : [...current, singer]);
+    }
+    if (role === 'vocalist') {
+      setVocalists((current) => current.some((item) => item.id === singer.id) ? current : [...current, singer]);
+    }
+    focusForNextToken();
+  };
+
+  const addTagToken = (tag: SearchTagItem, kind: 'stream' | 'performance') => {
+    if (kind === 'stream') {
+      setStreamTags((current) => current.some((item) => item.id === tag.id) ? current : [...current, tag]);
+    } else {
+      setPerformanceTags((current) => current.some((item) => item.id === tag.id) ? current : [...current, tag]);
+    }
+    focusForNextToken();
+  };
+
+  const addTitleToken = (value: string) => {
+    const normalized = value.trim();
+    if (!normalized) return;
+    setTitleQuery(normalized);
+    focusForNextToken();
+  };
+
   const syncMutation = useMutation({
     mutationFn: (videoId: string) => holodexApi.syncVideo(videoId),
-    onSuccess: (_res, videoId) => {
+    onSuccess: (_response, videoId) => {
       showToast('動画を同期しました', 'success');
       go(`/streams/${videoId}`);
     },
-    onError: (err: Error) => showToast(`同期エラー: ${err.message}`, 'error'),
+    onError: (error: Error) => showToast(`同期エラー: ${error.message}`, 'error'),
   });
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Escape') {
-      setOpen(false);
-      (e.target as HTMLInputElement).blur();
+  const executeSearch = () => {
+    const rawQuery = query.trim();
+    if (!hasFilters && data?.video_id && data.video_registered) {
+      go(`/streams/${data.video_id}`);
       return;
     }
-    if (e.key === 'Enter') {
-      // 動画ID（登録済み）はそのまま直行、それ以外は詳細検索ページへ
-      if (data?.video_id && data.video_registered) {
-        go(`/streams/${data.video_id}`);
-      } else if (debounced || query.trim()) {
-        go(`/search?q=${encodeURIComponent((debounced || query).trim())}`);
-      }
+    if (!hasFilters && !rawQuery) return;
+    go(buildSearchPath(rawQuery));
+  };
+
+  const activeTokens: ActiveSearchToken[] = [];
+  if (titleQuery) {
+    activeTokens.push({
+      key: 'title',
+      label: `タイトル: ${titleQuery}`,
+      title: `タイトルに「${titleQuery}」を含む`,
+      className: 'border-gray-300 bg-white text-gray-700',
+      remove: () => setTitleQuery(''),
+    });
+  }
+  if (owner) {
+    activeTokens.push({
+      key: `owner-${owner.id}`,
+      label: `配信元: ${owner.name}`,
+      title: `配信元チャンネル: ${owner.name}`,
+      className: 'border-indigo-200 bg-indigo-50 text-indigo-800',
+      remove: () => setOwner(null),
+    });
+  }
+  participants.forEach((singer) => activeTokens.push({
+    key: `participant-${singer.id}`,
+    label: `参加: ${singer.name}`,
+    title: `参加チャンネル: ${singer.name}`,
+    className: 'border-sky-200 bg-sky-50 text-sky-800',
+    remove: () => setParticipants((items) => items.filter((item) => item.id !== singer.id)),
+  }));
+  vocalists.forEach((singer) => activeTokens.push({
+    key: `vocalist-${singer.id}`,
+    label: `ボーカル: ${singer.name}`,
+    title: `ボーカル: ${singer.name}`,
+    className: 'border-emerald-200 bg-emerald-50 text-emerald-800',
+    remove: () => setVocalists((items) => items.filter((item) => item.id !== singer.id)),
+  }));
+  streamTags.forEach((tag) => activeTokens.push({
+    key: `stream-${tag.id}`,
+    label: tag.display_name,
+    title: `配信タグ: ${tag.display_name}`,
+    className: 'border',
+    style: { color: tag.color, borderColor: `${tag.color}66`, backgroundColor: `${tag.color}12` },
+    remove: () => setStreamTags((items) => items.filter((item) => item.id !== tag.id)),
+  }));
+  performanceTags.forEach((tag) => activeTokens.push({
+    key: `performance-${tag.id}`,
+    label: `楽曲: ${tag.display_name}`,
+    title: `楽曲タグ: ${tag.display_name}`,
+    className: 'border-fuchsia-200 bg-fuchsia-50 text-fuchsia-800',
+    remove: () => setPerformanceTags((items) => items.filter((item) => item.id !== tag.id)),
+  }));
+
+  const focusedToken = activeTokens.find((token) => token.key === focusedTokenKey);
+
+  const handleTokenKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      tokenRefs.current[Math.max(0, index - 1)]?.focus();
+      return;
+    }
+    if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      if (index + 1 < activeTokens.length) tokenRefs.current[index + 1]?.focus();
+      else inputRef.current?.focus();
+      return;
+    }
+    if (event.key === 'Delete' || event.key === 'Backspace') {
+      event.preventDefault();
+      activeTokens[index].remove();
+      setFocusedTokenKey(null);
+      window.setTimeout(() => {
+        if (index > 0) tokenRefs.current[index - 1]?.focus();
+        else inputRef.current?.focus();
+      }, 0);
+      return;
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      setFocusedTokenKey(null);
+      inputRef.current?.focus();
     }
   };
 
-  const showPanel = open && debounced.length >= 1;
-  const hasTextResults =
-    data &&
-    (data.songs.length > 0 ||
-      data.streams.length > 0 ||
-      data.singers.length > 0 ||
-      data.stream_tags.length > 0 ||
-      data.performance_tags.length > 0);
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    // IME の候補確定 Enter は検索として扱わない。Safari は keyCode=229 で通知する。
+    if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+
+    if (event.key === 'Escape') {
+      setOpen(false);
+      event.currentTarget.blur();
+      return;
+    }
+    if (event.key === 'ArrowLeft' && query === '' && activeTokens.length > 0) {
+      event.preventDefault();
+      tokenRefs.current[activeTokens.length - 1]?.focus();
+      return;
+    }
+    if (event.key === 'Backspace' && query === '') {
+      if (activeTokens.length > 0) {
+        event.preventDefault();
+        tokenRefs.current[activeTokens.length - 1]?.focus();
+      }
+      return;
+    }
+    if (event.key !== 'Enter') return;
+
+    event.preventDefault();
+    if (data?.video_id && !hasFilters) {
+      if (data.video_registered) go(`/streams/${data.video_id}`);
+      return;
+    }
+    if (query.trim()) addTitleToken(query);
+    else if (hasFilters) executeSearch();
+  };
+
+  const showPanel = open && (debounced.length >= 1 || hasFilters);
+  const hasCandidates = !!data && (
+    data.singers.length > 0 || data.stream_tags.length > 0 || data.performance_tags.length > 0 ||
+    data.songs.length > 0 || data.streams.length > 0 || data.artists.length > 0
+  );
 
   return (
-    <div ref={rootRef} className="relative w-full md:w-44 lg:w-64 xl:w-80">
-      <div className="relative">
-        <svg
-          className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none"
-          fill="none" stroke="currentColor" viewBox="0 0 24 24"
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z" />
-        </svg>
-        <input
-          type="text"
-          value={query}
-          autoFocus={autoFocus}
-          onChange={(e) => {
-            setQuery(e.target.value);
-            setOpen(true);
-          }}
-          onFocus={() => setOpen(true)}
-          onKeyDown={handleKeyDown}
-          placeholder="検索 / URL・動画IDを貼り付け"
-          className="w-full pl-9 pr-3 py-1.5 text-sm border border-gray-300 rounded-lg bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-        />
+    <div ref={rootRef} className="relative w-full md:w-52 lg:w-72 xl:w-96">
+      <div className="flex h-9 items-center border border-gray-300 bg-gray-50 rounded-lg focus-within:border-transparent focus-within:bg-white focus-within:ring-2 focus-within:ring-indigo-500">
+        <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto px-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {activeTokens.map((token, index) => (
+            <button
+              key={token.key}
+              ref={(element) => {
+                tokenRefs.current[index] = element;
+              }}
+              type="button"
+              onClick={() => {
+                token.remove();
+                setFocusedTokenKey(null);
+                window.setTimeout(() => inputRef.current?.focus(), 0);
+              }}
+              onFocus={(event) => {
+                setFocusedTokenKey(token.key);
+                setOpen(true);
+                event.currentTarget.scrollIntoView({ block: 'nearest', inline: 'center' });
+              }}
+              onKeyDown={(event) => handleTokenKeyDown(event, index)}
+              className={`max-w-36 shrink-0 truncate border px-2 py-0.5 text-xs rounded-full outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1 ${token.className}`}
+              style={token.style}
+              title={`${token.title}（クリックで解除）`}
+            >
+              {token.label} ×
+            </button>
+          ))}
+          <input
+            ref={inputRef}
+            type="text"
+            value={query}
+            autoFocus={autoFocus}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setOpen(true);
+            }}
+            onFocus={() => {
+              setFocusedTokenKey(null);
+              setOpen(true);
+            }}
+            onKeyDown={handleKeyDown}
+            placeholder={hasFilters ? '条件を追加' : '検索 / URL・動画ID'}
+            className="h-full min-w-24 flex-1 border-0 bg-transparent px-1 text-sm outline-none placeholder:text-gray-400 focus:ring-0"
+          />
+        </div>
+        <button type="button" onClick={executeSearch} className="h-full shrink-0 border-l border-gray-200 px-2.5 text-xs font-medium text-indigo-700 hover:bg-indigo-50 rounded-r-lg">
+          検索
+        </button>
       </div>
 
       {showPanel && (
-        <div className="absolute left-0 right-0 top-full mt-1 z-50 bg-white border border-gray-200 rounded-lg shadow-lg max-h-[70vh] overflow-y-auto">
-          {/* YouTube URL / video ID マッチ */}
-          {data?.video_id && (
-            <div className="p-3 border-b">
+        <div className="absolute left-0 top-full z-50 mt-1 max-h-[75vh] w-[34rem] max-w-[calc(100vw-2rem)] overflow-y-auto border border-gray-200 bg-white shadow-xl rounded-lg">
+          {focusedToken && (
+            <div className="flex items-center gap-3 border-b border-gray-200 bg-gray-50 px-3 py-2">
+              <span className="shrink-0 text-xs font-medium text-gray-400">選択中</span>
+              <span className="min-w-0 break-words text-sm text-gray-800">{focusedToken.title}</span>
+            </div>
+          )}
+          {data?.video_id && !hasFilters && (
+            <div className="border-b p-2">
               {data.video_registered ? (
-                <button
-                  onClick={() => go(`/streams/${data.video_id}`)}
-                  className="w-full text-left px-3 py-2 rounded-lg bg-indigo-50 hover:bg-indigo-100 transition-colors"
-                >
-                  <span className="text-sm font-medium text-indigo-700">歌枠を開く</span>
-                  <span className="block text-xs text-gray-500 font-mono mt-0.5">{data.video_id}</span>
+                <button type="button" onClick={() => go(`/streams/${data.video_id}`)} className="w-full px-3 py-2 text-left rounded hover:bg-indigo-50">
+                  <span className="block text-sm font-medium text-indigo-700">歌枠を開く</span>
+                  <span className="font-mono text-xs text-gray-500">{data.video_id}</span>
                 </button>
               ) : canSync ? (
-                <button
-                  onClick={() => syncMutation.mutate(data.video_id!)}
-                  disabled={syncMutation.isPending}
-                  className="w-full text-left px-3 py-2 rounded-lg bg-indigo-50 hover:bg-indigo-100 transition-colors disabled:opacity-60"
-                >
-                  <span className="text-sm font-medium text-indigo-700">
-                    {syncMutation.isPending ? '同期中...' : '未登録の動画 — Holodexから同期して開く'}
-                  </span>
-                  <span className="block text-xs text-gray-500 font-mono mt-0.5">{data.video_id}</span>
+                <button type="button" onClick={() => syncMutation.mutate(data.video_id!)} disabled={syncMutation.isPending} className="w-full px-3 py-2 text-left rounded hover:bg-indigo-50 disabled:opacity-60">
+                  <span className="block text-sm font-medium text-indigo-700">{syncMutation.isPending ? '同期中...' : 'Holodexから同期して開く'}</span>
+                  <span className="font-mono text-xs text-gray-500">{data.video_id}</span>
                 </button>
               ) : (
-                <div className="px-3 py-2 text-sm text-gray-500">
-                  未登録の動画IDです（<span className="font-mono text-xs">{data.video_id}</span>）
-                </div>
+                <div className="px-3 py-2 text-sm text-gray-500">未登録の動画IDです</div>
               )}
             </div>
           )}
 
-          {/* テキスト検索結果 */}
-          {data && !data.video_id && (
-            <>
-              {(data.stream_tags.length > 0 || data.performance_tags.length > 0) && (
-                <div className="py-1">
-                  <div className="px-3 pt-2 pb-1 text-xs font-medium text-gray-400">タグ</div>
-                  <div className="px-3 pb-2 flex flex-wrap gap-1.5">
-                    {data.stream_tags.map((tag) => (
-                      <button
-                        key={`s-${tag.id}`}
-                        onClick={() => go(`/tags/stream/${encodeURIComponent(tag.id)}`)}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 text-sm border rounded-full hover:opacity-75 transition-opacity"
-                        style={{
-                          backgroundColor: (tag.color || '#6366F1') + '20',
-                          color: tag.color || '#6366F1',
-                          borderColor: (tag.color || '#6366F1') + '40',
-                        }}
-                        title="配信タグ"
-                      >
-                        {tag.display_name}
-                        <span className="text-xs opacity-70">配信 {tag.count}</span>
-                      </button>
-                    ))}
-                    {data.performance_tags.map((tag) => (
-                      <button
-                        key={`p-${tag.id}`}
-                        onClick={() => go(`/tags/performance/${encodeURIComponent(tag.id)}`)}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 text-sm border rounded-full hover:opacity-75 transition-opacity"
-                        style={{
-                          backgroundColor: (tag.color || '#9932CC') + '20',
-                          color: tag.color || '#9932CC',
-                          borderColor: (tag.color || '#9932CC') + '40',
-                        }}
-                        title="演出タグ"
-                      >
-                        {tag.display_name}
-                        <span className="text-xs opacity-70">演出 {tag.count}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {data.songs.length > 0 && (
-                <div className="py-1">
-                  <div className="px-3 pt-2 pb-1 text-xs font-medium text-gray-400">楽曲</div>
-                  {data.songs.map((song) => (
-                    <button
-                      key={song.id}
-                      onClick={() => go(`/songs/${song.id}`)}
-                      className="w-full text-left px-3 py-2 hover:bg-gray-50 transition-colors"
-                    >
-                      <span className="text-sm text-gray-900 block truncate">{song.name}</span>
-                      <span className="text-xs text-gray-500 block truncate">
-                        {song.original_artist}
-                        {song.performance_count > 0 && ` · ${song.performance_count}回`}
-                      </span>
+          {debounced && !data?.video_id && (
+            <div className="border-b py-1">
+              <div className="px-3 pb-1 pt-2 text-xs font-medium text-gray-400">条件として追加</div>
+              {data?.singers.map((singer) => (
+                <div key={singer.id}>
+                  {owner?.id !== singer.id && (
+                    <button type="button" onClick={() => addSingerToken(singer, 'owner')} className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-indigo-50">
+                      {singer.photo_url && <img src={singer.photo_url} alt="" className="h-7 w-7 shrink-0 rounded-full object-cover" />}
+                      <span className="w-16 shrink-0 text-xs font-medium text-indigo-600">配信元</span>
+                      <span className="truncate text-sm text-gray-900">{singer.name}</span>
                     </button>
-                  ))}
-                </div>
-              )}
-
-              {data.streams.length > 0 && (
-                <div className="py-1 border-t first:border-t-0">
-                  <div className="px-3 pt-2 pb-1 text-xs font-medium text-gray-400">歌枠</div>
-                  {data.streams.map((stream) => (
-                    <button
-                      key={stream.id}
-                      onClick={() => go(`/streams/${stream.id}`)}
-                      className="w-full text-left px-3 py-2 hover:bg-gray-50 transition-colors flex items-center gap-2"
-                    >
-                      {stream.thumbnail_url && (
-                        <img src={stream.thumbnail_url} alt="" className="w-12 h-7 object-cover rounded shrink-0" />
-                      )}
-                      <span className="min-w-0">
-                        <span className="text-sm text-gray-900 block truncate">{stream.title}</span>
-                        <span className="text-xs text-gray-500">
-                          {new Date(stream.stream_date).toLocaleDateString('ja-JP')}
-                          {stream.is_hidden && ' · 非表示'}
-                        </span>
-                      </span>
+                  )}
+                  {!participants.some((item) => item.id === singer.id) && (
+                    <button type="button" onClick={() => addSingerToken(singer, 'participant')} className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-sky-50">
+                      <span className="h-7 w-7 shrink-0" />
+                      <span className="w-16 shrink-0 text-xs font-medium text-sky-600">参加</span>
+                      <span className="truncate text-sm text-gray-900">{singer.name}</span>
                     </button>
-                  ))}
-                </div>
-              )}
-
-              {data.artists.length > 0 && (
-                <div className="py-1 border-t first:border-t-0">
-                  <div className="px-3 pt-2 pb-1 text-xs font-medium text-gray-400">アーティスト</div>
-                  {data.artists.map((artist) => (
-                    <button
-                      key={artist.id}
-                      onClick={() => go(`/artists/${artist.id}`)}
-                      className="w-full text-left px-3 py-2 hover:bg-gray-50 transition-colors"
-                    >
-                      <span className="text-sm text-gray-900 block truncate">
-                        {artist.name}
-                        <span className="text-xs text-gray-400 ml-2">{artist.song_count}曲</span>
-                      </span>
-                      {artist.name_reading && (
-                        <span className="text-xs text-gray-500 block truncate">{artist.name_reading}</span>
-                      )}
+                  )}
+                  {!vocalists.some((item) => item.id === singer.id) && (
+                    <button type="button" onClick={() => addSingerToken(singer, 'vocalist')} className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-emerald-50">
+                      <span className="h-7 w-7 shrink-0" />
+                      <span className="w-16 shrink-0 text-xs font-medium text-emerald-600">ボーカル</span>
+                      <span className="truncate text-sm text-gray-900">{singer.name}</span>
                     </button>
-                  ))}
+                  )}
                 </div>
-              )}
-
-              {data.singers.length > 0 && (
-                <div className="py-1 border-t first:border-t-0">
-                  <div className="px-3 pt-2 pb-1 text-xs font-medium text-gray-400">チャンネル</div>
-                  {data.singers.map((singer) => (
-                    <button
-                      key={singer.id}
-                      onClick={() => go(`/singers/${singer.id}`)}
-                      className="w-full text-left px-3 py-2 hover:bg-gray-50 transition-colors flex items-center gap-2"
-                    >
-                      {singer.photo_url && (
-                        <img src={singer.photo_url} alt="" className="w-7 h-7 rounded-full object-cover shrink-0" />
-                      )}
-                      <span className="text-sm text-gray-900 truncate">{singer.name}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              {!hasTextResults && !isFetching && (
-                <div className="px-3 py-4 text-sm text-gray-400 text-center">結果がありません</div>
-              )}
-            </>
+              ))}
+              {data?.stream_tags.map((tag) => (
+                <button key={`stream-tag-${tag.id}`} type="button" onClick={() => addTagToken(tag, 'stream')} className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-amber-50">
+                  <span className="h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: tag.color }} />
+                  <span className="w-16 shrink-0 text-xs font-medium text-amber-700">配信タグ</span>
+                  <span className="truncate text-sm text-gray-900">{tag.display_name}</span>
+                </button>
+              ))}
+              {data?.performance_tags.map((tag) => (
+                <button key={`performance-tag-${tag.id}`} type="button" onClick={() => addTagToken(tag, 'performance')} className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-fuchsia-50">
+                  <span className="h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: tag.color }} />
+                  <span className="w-16 shrink-0 text-xs font-medium text-fuchsia-700">楽曲タグ</span>
+                  <span className="truncate text-sm text-gray-900">{tag.display_name}</span>
+                </button>
+              ))}
+              <button type="button" onClick={() => addTitleToken(debounced)} className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-gray-50">
+                <span className="h-3 w-3 shrink-0 border border-gray-400" />
+                <span className="w-16 shrink-0 text-xs font-medium text-gray-600">タイトル</span>
+                <span className="truncate text-sm text-gray-900">「{debounced}」を含む</span>
+              </button>
+            </div>
           )}
 
-          {isFetching && !data && (
-            <div className="px-3 py-4 text-sm text-gray-400 text-center">検索中...</div>
+          {data && !data.video_id && !hasFilters && (
+            <div className="border-b py-1">
+              <div className="px-3 pb-1 pt-2 text-xs font-medium text-gray-400">直接開く</div>
+              {data.songs.map((song) => (
+                <button key={song.id} type="button" onClick={() => go(`/songs/${song.id}`)} className="w-full px-3 py-2 text-left hover:bg-gray-50">
+                  <span className="block truncate text-sm text-gray-900">{song.name}</span>
+                  <span className="block truncate text-xs text-gray-500">{song.original_artist}</span>
+                </button>
+              ))}
+              {data.streams.map((stream) => (
+                <button key={stream.id} type="button" onClick={() => go(`/streams/${stream.id}`)} className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-gray-50">
+                  {stream.thumbnail_url && <img src={stream.thumbnail_url} alt="" className="h-7 w-12 shrink-0 object-cover rounded" />}
+                  <span className="truncate text-sm text-gray-900">{stream.title}</span>
+                </button>
+              ))}
+              {data.artists.map((artist) => (
+                <button key={artist.id} type="button" onClick={() => go(`/artists/${artist.id}`)} className="w-full px-3 py-2 text-left text-sm text-gray-900 hover:bg-gray-50">
+                  {artist.name}<span className="ml-2 text-xs text-gray-400">{artist.song_count}曲</span>
+                </button>
+              ))}
+            </div>
           )}
 
-          {/* 詳細検索ページへ（Enter でも同じ） */}
-          {data && !data.video_id && (
-            <button
-              onClick={() => go(`/search?q=${encodeURIComponent(debounced)}`)}
-              className="w-full px-3 py-2.5 text-sm font-medium text-indigo-600 hover:bg-indigo-50 border-t transition-colors text-center"
-            >
-              「{debounced}」のすべての結果を見る →
-            </button>
+          {hasFilters && (
+            <div className="border-b py-1">
+              <div className="flex items-center justify-between px-3 pb-1 pt-2">
+                <span className="text-xs font-medium text-gray-400">現在の条件</span>
+                <span className="text-xs text-gray-500">{filtersFetching ? '検索中...' : `${filteredResults?.pagination.total ?? 0}件`}</span>
+              </div>
+              {filteredResults?.streams.map((stream) => (
+                <button key={stream.id} type="button" onClick={() => go(`/streams/${stream.id}`)} className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-gray-50">
+                  {stream.thumbnail_url && <img src={stream.thumbnail_url} alt="" className="h-7 w-12 shrink-0 object-cover rounded" />}
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm text-gray-900">{stream.title}</span>
+                    <span className="text-xs text-gray-500">{stream.channel_owner?.name || new Date(stream.stream_date).toLocaleDateString('ja-JP')}</span>
+                  </span>
+                </button>
+              ))}
+              <button type="button" onClick={executeSearch} className="w-full px-3 py-2.5 text-center text-sm font-medium text-indigo-700 hover:bg-indigo-50">
+                この条件で検索
+              </button>
+            </div>
           )}
+
+          {debounced && !hasCandidates && !isFetching && (
+            <div className="px-3 py-4 text-center text-sm text-gray-400">タイトル条件として追加できます</div>
+          )}
+          {isFetching && !data && <div className="px-3 py-4 text-center text-sm text-gray-400">検索中...</div>}
         </div>
       )}
     </div>

@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { artistApi } from '../api/client';
+import { artistApi, suggestionApi } from '../api/client';
 import type { Artist } from '../api/types';
 import Loading from '../components/ui/Loading';
 import Pagination from '../components/ui/Pagination';
+import EditableField from '../components/EditableField';
+import { SortableTh, type SortDir, type SortState } from '../components/ui/Sort';
 import { useToast } from '../components/ui/Toast';
 import { useAuthStore, hasPermission, PERM } from '../store/auth';
 
@@ -14,21 +16,39 @@ export default function ArtistDetailPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const page = parseInt(searchParams.get('page') || '1');
+  const sort = searchParams.get('sort') || 'performances';
+  const dir: SortDir = searchParams.get('dir')
+    ? (searchParams.get('dir') === 'asc' ? 'asc' : 'desc')
+    : (sort === 'name' ? 'asc' : 'desc');
   const { showToast } = useToast();
   const queryClient = useQueryClient();
   const canEdit = hasPermission(useAuthStore((s) => s.user), PERM.CONTENT_EDIT);
 
-  const [isEditing, setIsEditing] = useState(false);
-  const [editName, setEditName] = useState('');
-  const [editReading, setEditReading] = useState('');
   const [mergeOpen, setMergeOpen] = useState(false);
   const [mergeQuery, setMergeQuery] = useState('');
 
   const { data, isLoading } = useQuery({
-    queryKey: ['artist', id, page],
-    queryFn: () => artistApi.get(id!, page, 20),
+    queryKey: ['artist', id, page, sort, dir],
+    queryFn: () => artistApi.get(id!, page, 20, sort, dir),
     enabled: !!id,
   });
+
+  // page / sort / dir を URL クエリにまとめる（既定は省略）
+  const buildParams = (next: { page?: number; sort?: string; dir?: SortDir }) => {
+    const params: Record<string, string> = {};
+    const p = next.page ?? page;
+    const so = next.sort ?? sort;
+    const d = next.dir ?? dir;
+    if (p > 1) params.page = String(p);
+    if (so !== 'performances') params.sort = so;
+    const naturalDir = so === 'name' ? 'asc' : 'desc';
+    if (d !== naturalDir) params.dir = d;
+    return params;
+  };
+
+  const handleSort = (nextState: SortState) => {
+    setSearchParams(buildParams({ sort: nextState.sort, dir: nextState.dir, page: 1 }));
+  };
 
   // 統合先の候補検索
   const { data: mergeCandidates } = useQuery({
@@ -47,11 +67,26 @@ export default function ArtistDetailPage() {
     mutationFn: (input: { name?: string; name_reading?: string }) => artistApi.update(id!, input),
     onSuccess: () => {
       showToast('アーティスト情報を更新しました', 'success');
-      setIsEditing(false);
       invalidate();
     },
     onError: (err: Error) => showToast(`更新エラー: ${err.message}`, 'error'),
   });
+
+  // 閲覧ユーザーからの1フィールド修正提案
+  const suggestField = async (field: 'name' | 'name_reading', val: string, note: string) => {
+    try {
+      const r = await suggestionApi.create({
+        target_type: 'artist',
+        target_id: id!,
+        fields: { [field]: val },
+        note,
+      });
+      showToast(r.message, 'success');
+    } catch (err) {
+      showToast(`送信失敗: ${(err as Error).message}`, 'error');
+      throw err;
+    }
+  };
 
   const mergeMutation = useMutation({
     mutationFn: (targetId: string) => artistApi.merge(id!, targetId),
@@ -85,94 +120,51 @@ export default function ArtistDetailPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
+      {/* Header：名前・読みはホバーで鉛筆が出る。編集権限があれば即時保存、無ければ修正提案。 */}
       <div className="bg-white rounded-lg shadow-sm border p-6">
-        {isEditing ? (
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              updateMutation.mutate({ name: editName.trim(), name_reading: editReading.trim() });
-            }}
-            className="space-y-3 max-w-lg"
-          >
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">アーティスト名</label>
-              <input
-                type="text"
-                value={editName}
-                onChange={(e) => setEditName(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-              />
-              <p className="text-xs text-gray-400 mt-1">
-                変更すると所属する全楽曲（{artist.song_count}曲）のアーティスト表記も更新されます
-              </p>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">読み（平仮名）</label>
-              <input
-                type="text"
-                value={editReading}
-                onChange={(e) => setEditReading(e.target.value)}
-                placeholder="よみがな"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-              />
-            </div>
-            <div className="flex gap-2">
-              <button
-                type="submit"
-                disabled={updateMutation.isPending || !editName.trim()}
-                className="px-4 py-2 text-sm bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50"
-              >
-                {updateMutation.isPending ? '保存中...' : '保存'}
-              </button>
-              <button
-                type="button"
-                onClick={() => setIsEditing(false)}
-                className="px-4 py-2 text-sm bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
-              >
-                キャンセル
-              </button>
-            </div>
-          </form>
-        ) : (
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="min-w-0">
-              <h1 className="text-3xl font-bold text-gray-900 break-words">{artist.name}</h1>
-              <p className="text-gray-500 mt-1">
-                {artist.name_reading || <span className="text-gray-300">読み未設定</span>}
-              </p>
-            </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-indigo-100 text-indigo-800">
-                {artist.song_count}曲
-              </span>
-              {canEdit && (
-                <>
-                  <button
-                    onClick={() => {
-                      setEditName(artist.name);
-                      setEditReading(artist.name_reading || '');
-                      setIsEditing(true);
-                    }}
-                    className="px-3 py-1.5 text-sm bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
-                  >
-                    編集
-                  </button>
-                  <button
-                    onClick={() => setMergeOpen((v) => !v)}
-                    className="px-3 py-1.5 text-sm bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
-                    title="このアーティストを別のアーティストに統合します"
-                  >
-                    統合
-                  </button>
-                </>
-              )}
-            </div>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 space-y-1">
+            <EditableField
+              as="h1"
+              label="アーティスト名"
+              value={artist.name}
+              canEdit={canEdit}
+              required
+              className="text-3xl font-bold text-gray-900 break-words"
+              editHint={`変更すると所属する全楽曲（${artist.song_count}曲）のアーティスト表記も更新されます`}
+              onSave={(val) => updateMutation.mutateAsync({ name: val })}
+              onSuggest={(val, note) => suggestField('name', val, note)}
+            />
+            <EditableField
+              as="p"
+              label="読み（平仮名）"
+              value={artist.name_reading || ''}
+              canEdit={canEdit}
+              className="text-gray-500"
+              placeholder="よみがな"
+              emptyText="読み未設定"
+              onSave={(val) => updateMutation.mutateAsync({ name_reading: val })}
+              onSuggest={(val, note) => suggestField('name_reading', val, note)}
+            />
           </div>
-        )}
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-indigo-100 text-indigo-800">
+              {artist.song_count}曲
+            </span>
+            {canEdit && (
+              <button
+                onClick={() => setMergeOpen((v) => !v)}
+                className="px-3 py-1.5 text-sm bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+                title="このアーティストを別のアーティストに統合します"
+              >
+                統合
+              </button>
+            )}
+          </div>
+        </div>
 
         {/* Merge panel */}
-        {mergeOpen && !isEditing && (
+        {mergeOpen && (
           <div className="mt-4 pt-4 border-t">
             <p className="text-sm text-gray-600 mb-2">
               統合先のアーティストを検索してください。「{artist.name}」の全楽曲が統合先の表記に変わり、このアーティストは削除されます。
@@ -224,12 +216,24 @@ export default function ArtistDetailPage() {
               <table className="w-full table-fixed divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-4 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-[75%]">
-                      楽曲名
-                    </th>
-                    <th className="px-4 sm:px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-[25%]">
-                      歌唱回数
-                    </th>
+                    <SortableTh
+                      label="楽曲名"
+                      sortKey="name"
+                      sort={sort}
+                      dir={dir}
+                      onSort={handleSort}
+                      className="w-[75%]"
+                    />
+                    <SortableTh
+                      label="歌唱回数"
+                      sortKey="performances"
+                      sort={sort}
+                      dir={dir}
+                      onSort={handleSort}
+                      align="right"
+                      firstDir="desc"
+                      className="w-[25%]"
+                    />
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
@@ -253,9 +257,6 @@ export default function ArtistDetailPage() {
                             >
                               {song.name}
                             </Link>
-                            {song.name_reading && (
-                              <p className="text-xs text-gray-400 mt-0.5 truncate">{song.name_reading}</p>
-                            )}
                           </div>
                         </div>
                       </td>
@@ -275,13 +276,14 @@ export default function ArtistDetailPage() {
                 <Pagination
                   page={page}
                   totalPages={pagination.total_pages}
-                  onPageChange={(p) => setSearchParams(p <= 1 ? {} : { page: String(p) }, { replace: true })}
+                  onPageChange={(p) => setSearchParams(buildParams({ page: p }), { replace: true })}
                 />
               </div>
             )}
           </>
         )}
       </div>
+
     </div>
   );
 }

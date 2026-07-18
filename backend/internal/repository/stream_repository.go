@@ -19,7 +19,7 @@ func NewStreamRepository(db *sql.DB) *StreamRepository {
 }
 
 // FindAll 取得所有歌回（支援分頁，預設不顯示隱藏的）
-func (r *StreamRepository) FindAll(limit, offset int, includeHidden bool) ([]models.Stream, int, error) {
+func (r *StreamRepository) FindAll(limit, offset int, includeHidden bool, sort, dir string) ([]models.Stream, int, error) {
 	var total int
 	var countQuery string
 	if includeHidden {
@@ -32,19 +32,25 @@ func (r *StreamRepository) FindAll(limit, offset int, includeHidden bool) ([]mod
 		return nil, 0, fmt.Errorf("count streams: %w", err)
 	}
 
+	// 既定は配信日の新しい順。"title" 指定でタイトルの五十音順。
+	order := "stream_date " + dirOr(dir, "desc")
+	if sort == "title" {
+		order = nameSortOrderDir("title", "''", dir)
+	}
+
 	var query string
 	if includeHidden {
 		query = `
 			SELECT id, title, stream_date, duration_seconds, thumbnail_url, holodex_data, holodex_hash, comment_raw, comment_songs, is_processed, is_hidden, created_at, updated_at
 			FROM streams
-			ORDER BY stream_date DESC
+			ORDER BY ` + order + `
 			LIMIT $1 OFFSET $2`
 	} else {
 		query = `
 			SELECT id, title, stream_date, duration_seconds, thumbnail_url, holodex_data, holodex_hash, comment_raw, comment_songs, is_processed, is_hidden, created_at, updated_at
 			FROM streams
 			WHERE is_hidden = FALSE
-			ORDER BY stream_date DESC
+			ORDER BY ` + order + `
 			LIMIT $1 OFFSET $2`
 	}
 
@@ -463,26 +469,40 @@ func (r *StreamRepository) FindUnprocessedWithComments() ([]models.Stream, error
 	return streams, rows.Err()
 }
 
-// SearchStreams は複合条件（タイトル部分一致 × 参加チャンネル × タグの AND）で配信を検索する。
-// Holodex の検索（org/topic/channel の組み合わせ）に相当。非表示は除外。
-func (r *StreamRepository) SearchStreams(q, singerID string, tagIDs []string, limit, offset int) ([]models.Stream, int, error) {
+// SearchStreams は配信元・参加者・ボーカル・タグを AND で組み合わせて検索する。
+// StreamTagIDs / PerformanceTagIDs の各配列内も AND 条件。非表示は除外する。
+func (r *StreamRepository) SearchStreams(filters models.StreamSearchFilters, limit, offset int) ([]models.Stream, int, error) {
 	where := "WHERE s.is_hidden = FALSE"
 	args := []any{}
 	i := 1
-	if q != "" {
+	if filters.Query != "" {
 		where += fmt.Sprintf(" AND s.title ILIKE '%%' || $%d || '%%'", i)
-		args = append(args, q)
+		args = append(args, filters.Query)
 		i++
 	}
-	if singerID != "" {
-		where += fmt.Sprintf(" AND EXISTS (SELECT 1 FROM stream_singers ss WHERE ss.stream_id = s.id AND ss.singer_id = $%d)", i)
-		args = append(args, singerID)
+	if filters.OwnerID != "" {
+		where += fmt.Sprintf(" AND EXISTS (SELECT 1 FROM stream_singers ss WHERE ss.stream_id = s.id AND ss.singer_id = $%d AND ss.is_owner = TRUE)", i)
+		args = append(args, filters.OwnerID)
 		i++
 	}
-	if len(tagIDs) > 0 {
-		// 指定タグを「すべて」持つ配信（AND 条件）
-		where += fmt.Sprintf(" AND (SELECT COUNT(*) FROM stream_stream_tags sst WHERE sst.stream_id = s.id AND sst.tag_id = ANY($%d)) = %d", i, len(tagIDs))
-		args = append(args, pq.Array(tagIDs))
+	if len(filters.ParticipantIDs) > 0 {
+		where += fmt.Sprintf(" AND (SELECT COUNT(DISTINCT ss.singer_id) FROM stream_singers ss WHERE ss.stream_id = s.id AND ss.singer_id = ANY($%d)) = %d", i, len(filters.ParticipantIDs))
+		args = append(args, pq.Array(filters.ParticipantIDs))
+		i++
+	}
+	if len(filters.VocalistIDs) > 0 {
+		where += fmt.Sprintf(" AND (SELECT COUNT(DISTINCT ps.singer_id) FROM performances p JOIN performance_singers ps ON ps.performance_id = p.id WHERE p.stream_id = s.id AND ps.singer_id = ANY($%d)) = %d", i, len(filters.VocalistIDs))
+		args = append(args, pq.Array(filters.VocalistIDs))
+		i++
+	}
+	if len(filters.StreamTagIDs) > 0 {
+		where += fmt.Sprintf(" AND (SELECT COUNT(DISTINCT sst.tag_id) FROM stream_stream_tags sst WHERE sst.stream_id = s.id AND sst.tag_id = ANY($%d)) = %d", i, len(filters.StreamTagIDs))
+		args = append(args, pq.Array(filters.StreamTagIDs))
+		i++
+	}
+	if len(filters.PerformanceTagIDs) > 0 {
+		where += fmt.Sprintf(" AND (SELECT COUNT(DISTINCT ppt.tag_id) FROM performances p JOIN performance_performance_tags ppt ON ppt.performance_id = p.id WHERE p.stream_id = s.id AND ppt.tag_id = ANY($%d)) = %d", i, len(filters.PerformanceTagIDs))
+		args = append(args, pq.Array(filters.PerformanceTagIDs))
 		i++
 	}
 

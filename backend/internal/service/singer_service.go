@@ -36,10 +36,10 @@ func NewSingerService(
 }
 
 // GetAll 取得所有演唱者
-func (s *SingerService) GetAll(page, limit int) (*dto.SingerListResponse, error) {
+func (s *SingerService) GetAll(page, limit int, sort, dir string) (*dto.SingerListResponse, error) {
 	offset := (page - 1) * limit
 
-	singers, total, err := s.singerRepo.FindAll(limit, offset)
+	singers, total, err := s.singerRepo.FindAll(limit, offset, sort, dir)
 	if err != nil {
 		return nil, fmt.Errorf("get singers: %w", err)
 	}
@@ -176,7 +176,7 @@ func (s *SingerService) GetStreams(singerID string, page, limit int, processedFi
 }
 
 // GetPerformances 取得演唱者的所有演出記錄
-func (s *SingerService) GetPerformances(singerID string, page, limit int) (*dto.SingerPerformanceListResponse, error) {
+func (s *SingerService) GetPerformances(singerID string, page, limit int, sort, dir string) (*dto.SingerPerformanceListResponse, error) {
 	offset := (page - 1) * limit
 
 	// 先取得演唱者資訊
@@ -188,7 +188,7 @@ func (s *SingerService) GetPerformances(singerID string, page, limit int) (*dto.
 		return nil, nil
 	}
 
-	performances, total, err := s.perfRepo.FindBySingerID(singerID, limit, offset)
+	performances, total, err := s.perfRepo.FindBySingerID(singerID, limit, offset, sort, dir)
 	if err != nil {
 		return nil, fmt.Errorf("get performances: %w", err)
 	}

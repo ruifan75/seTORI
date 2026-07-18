@@ -16,17 +16,23 @@ func NewSingerRepository(db *sql.DB) *SingerRepository {
 }
 
 // FindAll 取得所有演唱者
-func (r *SingerRepository) FindAll(limit, offset int) ([]models.Singer, int, error) {
+func (r *SingerRepository) FindAll(limit, offset int, sort, dir string) ([]models.Singer, int, error) {
 	var total int
 	err := r.db.QueryRow("SELECT COUNT(*) FROM singers").Scan(&total)
 	if err != nil {
 		return nil, 0, fmt.Errorf("count singers: %w", err)
 	}
 
+	// 既定は名前の五十音順。"organization" 指定で事務所順（名前を第2キー）。
+	order := nameSortOrderDir("name", "''", dir)
+	if sort == "organization" {
+		order = "organization " + normDir(dir) + ", name ASC"
+	}
+
 	query := `
 		SELECT id, name, english_name, photo_url, organization, metadata_source, created_at, updated_at
 		FROM singers
-		ORDER BY name ASC
+		ORDER BY ` + order + `
 		LIMIT $1 OFFSET $2`
 
 	rows, err := r.db.Query(query, limit, offset)

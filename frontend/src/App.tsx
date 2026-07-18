@@ -21,6 +21,7 @@ import SyncPage from './pages/admin/SyncPage';
 import SettingsPage from './pages/admin/SettingsPage';
 import LogsPage from './pages/admin/LogsPage';
 import UsersPage from './pages/admin/UsersPage';
+import SuggestionsPage from './pages/admin/SuggestionsPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -63,6 +64,10 @@ function App() {
               <Route
                 path="admin/settings"
                 element={<RequirePermission permission={PERM.CONTENT_EDIT}><SettingsPage /></RequirePermission>}
+              />
+              <Route
+                path="admin/suggestions"
+                element={<RequirePermission permission={PERM.CONTENT_EDIT}><SuggestionsPage /></RequirePermission>}
               />
               <Route
                 path="admin/logs"

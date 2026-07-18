@@ -4,22 +4,26 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { artistApi } from '../api/client';
 import Loading from '../components/ui/Loading';
 import Pagination from '../components/ui/Pagination';
+import ReadingsIO from '../components/ReadingsIO';
+import { SortableTh, type SortDir, type SortState } from '../components/ui/Sort';
 import { useToast } from '../components/ui/Toast';
 import { useAuthStore, hasPermission, PERM } from '../store/auth';
 
-// 原曲アーティスト一覧。曲数順、名前・読みで検索できる。
+// 原曲アーティスト一覧。表頭クリックで名前順／楽曲数順を昇降切替、名前・読みで検索できる。
 export default function ArtistsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const page = parseInt(searchParams.get('page') || '1');
   const search = searchParams.get('search') || '';
+  const sort = searchParams.get('sort') || 'name';
+  const dir: SortDir = searchParams.get('dir') === 'desc' ? 'desc' : 'asc';
   const [searchInput, setSearchInput] = useState(search);
   const { showToast } = useToast();
   const queryClient = useQueryClient();
   const canEdit = hasPermission(useAuthStore((s) => s.user), PERM.CONTENT_EDIT);
 
   const { data, isLoading } = useQuery({
-    queryKey: ['artists', page, search],
-    queryFn: () => artistApi.list(page, 50, search || undefined),
+    queryKey: ['artists', page, search, sort, dir],
+    queryFn: () => artistApi.list(page, 50, search || undefined, sort, dir),
   });
 
   // AI 読み仮名補完（1回で最大30件ずつ、複数回押して続きを処理）
@@ -34,16 +38,31 @@ export default function ArtistsPage() {
     onError: (err: Error) => showToast(`補完エラー: ${err.message}`, 'error'),
   });
 
+  // 検索・ソート・ページを URL クエリにまとめる（既定値は URL から省略する）
+  const buildParams = (next: { search?: string; sort?: string; dir?: SortDir; page?: number }) => {
+    const params: Record<string, string> = {};
+    const s = next.search ?? search;
+    const so = next.sort ?? sort;
+    const d = next.dir ?? dir;
+    const p = next.page ?? 1;
+    if (s) params.search = s;
+    if (so !== 'name') params.sort = so;
+    if (d !== 'asc') params.dir = d;
+    if (p > 1) params.page = String(p);
+    return params;
+  };
+
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    setSearchParams(searchInput ? { search: searchInput } : {});
+    setSearchParams(buildParams({ search: searchInput, page: 1 }));
+  };
+
+  const handleSort = (next: SortState) => {
+    setSearchParams(buildParams({ sort: next.sort, dir: next.dir, page: 1 }));
   };
 
   const handlePageChange = (newPage: number) => {
-    const params: Record<string, string> = {};
-    if (search) params.search = search;
-    if (newPage > 1) params.page = String(newPage);
-    setSearchParams(params);
+    setSearchParams(buildParams({ page: newPage }));
   };
 
   return (
@@ -51,16 +70,19 @@ export default function ArtistsPage() {
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
         <h1 className="text-3xl font-bold text-gray-900">アーティスト一覧</h1>
 
-        <div className="flex gap-2 items-center">
+        <div className="flex gap-2 items-center flex-wrap justify-end">
           {canEdit && (
-            <button
-              onClick={() => backfillMutation.mutate()}
-              disabled={backfillMutation.isPending}
-              title="読みが未整備のアーティスト・曲名の読み仮名を AI で補完します（1回で最大30件ずつ）"
-              className="px-3 py-2 text-sm bg-indigo-50 text-indigo-700 border border-indigo-200 font-medium rounded-lg hover:bg-indigo-100 transition-colors disabled:opacity-50 shrink-0"
-            >
-              {backfillMutation.isPending ? 'AI補完中...' : '読みをAIで補完'}
-            </button>
+            <>
+              <button
+                onClick={() => backfillMutation.mutate()}
+                disabled={backfillMutation.isPending}
+                title="読みが未整備のアーティスト・曲名の読み仮名を AI で補完します（1回で最大30件ずつ）"
+                className="px-3 py-2 text-sm bg-indigo-50 text-indigo-700 border border-indigo-200 font-medium rounded-lg hover:bg-indigo-100 transition-colors disabled:opacity-50 shrink-0"
+              >
+                {backfillMutation.isPending ? 'AI補完中...' : '読みをAIで補完'}
+              </button>
+              <ReadingsIO />
+            </>
           )}
           <form onSubmit={handleSearch} className="flex gap-2">
             <input
@@ -94,12 +116,24 @@ export default function ArtistsPage() {
             <table className="w-full table-fixed divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-4 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-[75%]">
-                    アーティスト
-                  </th>
-                  <th className="px-4 sm:px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-[25%]">
-                    楽曲数
-                  </th>
+                  <SortableTh
+                    label="アーティスト"
+                    sortKey="name"
+                    sort={sort}
+                    dir={dir}
+                    onSort={handleSort}
+                    className="w-[75%]"
+                  />
+                  <SortableTh
+                    label="楽曲数"
+                    sortKey="songs"
+                    sort={sort}
+                    dir={dir}
+                    onSort={handleSort}
+                    align="right"
+                    firstDir="desc"
+                    className="w-[25%]"
+                  />
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
@@ -112,9 +146,6 @@ export default function ArtistsPage() {
                       >
                         {artist.name}
                       </Link>
-                      {artist.name_reading && (
-                        <p className="text-xs text-gray-400 mt-0.5 truncate">{artist.name_reading}</p>
-                      )}
                     </td>
                     <td className="px-4 sm:px-6 py-4 text-right">
                       <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">

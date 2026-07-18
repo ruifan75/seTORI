@@ -3,6 +3,7 @@ package service
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/ruifan75/setori/internal/dto"
@@ -41,7 +42,7 @@ func (s *SongService) syncArtistMapping(song *models.Song) {
 }
 
 // GetAll 取得歌曲列表
-func (s *SongService) GetAll(page, limit int, search string) (*dto.SongListResponse, error) {
+func (s *SongService) GetAll(page, limit int, search, sort, dir string) (*dto.SongListResponse, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -50,7 +51,7 @@ func (s *SongService) GetAll(page, limit int, search string) (*dto.SongListRespo
 	}
 	offset := (page - 1) * limit
 
-	songs, total, err := s.songRepo.FindAll(limit, offset, search)
+	songs, total, err := s.songRepo.FindAll(limit, offset, search, sort, dir)
 	if err != nil {
 		return nil, fmt.Errorf("get songs: %w", err)
 	}
@@ -266,6 +267,67 @@ func (s *SongService) Update(id uuid.UUID, req *dto.UpdateSongRequest) (*dto.Son
 // Delete 刪除歌曲
 func (s *SongService) Delete(id uuid.UUID) error {
 	return s.songRepo.Delete(id)
+}
+
+// nullStr は sql.NullString を文字列に変換する（NULL は ""）。
+func nullStr(ns sql.NullString) string {
+	if ns.Valid {
+		return ns.String
+	}
+	return ""
+}
+
+// GetEditableFields は修正提案の対象となる編集可能フィールドと表示ラベルを返す。
+// 見つからなければ (nil, "", nil)。TargetEditor インターフェースを満たす。
+func (s *SongService) GetEditableFields(id uuid.UUID) (map[string]string, string, error) {
+	song, err := s.songRepo.FindByID(id)
+	if err != nil {
+		return nil, "", err
+	}
+	if song == nil {
+		return nil, "", nil
+	}
+	fields := map[string]string{
+		"name":                    song.Name,
+		"name_reading":            nullStr(song.NameReading),
+		"original_artist":         song.OriginalArtist,
+		"original_artist_reading": nullStr(song.OriginalArtistReading),
+	}
+	return fields, song.Name + " / " + song.OriginalArtist, nil
+}
+
+// ApplyEditableFields は提案された編集値を楽曲へ反映する（iTunes/arts は変更しない）。
+func (s *SongService) ApplyEditableFields(id uuid.UUID, fields map[string]string) error {
+	song, err := s.songRepo.FindByID(id)
+	if err != nil {
+		return err
+	}
+	if song == nil {
+		return fmt.Errorf("曲が見つかりません")
+	}
+	if v, ok := fields["name"]; ok {
+		if strings.TrimSpace(v) == "" {
+			return fmt.Errorf("曲名は必須です")
+		}
+		song.Name = strings.TrimSpace(v)
+	}
+	if v, ok := fields["original_artist"]; ok {
+		if strings.TrimSpace(v) == "" {
+			return fmt.Errorf("原曲アーティストは必須です")
+		}
+		song.OriginalArtist = strings.TrimSpace(v)
+	}
+	if v, ok := fields["name_reading"]; ok {
+		song.NameReading = sql.NullString{String: strings.TrimSpace(v), Valid: strings.TrimSpace(v) != ""}
+	}
+	if v, ok := fields["original_artist_reading"]; ok {
+		song.OriginalArtistReading = sql.NullString{String: strings.TrimSpace(v), Valid: strings.TrimSpace(v) != ""}
+	}
+	if err := s.songRepo.Update(song); err != nil {
+		return fmt.Errorf("update song: %w", err)
+	}
+	s.syncArtistMapping(song)
+	return nil
 }
 
 // MergeSongs 將來源歌曲合併至目標歌曲

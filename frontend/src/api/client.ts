@@ -39,6 +39,10 @@ import type {
   ArtistListResponse,
   ArtistDetailResponse,
   BackfillReadingsResponse,
+  ReadingsExport,
+  ImportReadingsResult,
+  CreateSuggestionRequest,
+  SuggestionListResponse,
   AIProvider,
   AIProviderInput,
   AIModelInfo,
@@ -109,9 +113,11 @@ api.interceptors.response.use(
 // ========== 歌曲 API ==========
 
 export const songApi = {
-  list: async (page = 1, limit = 20, search?: string): Promise<SongListResponse> => {
+  list: async (page = 1, limit = 20, search?: string, sort?: string, dir?: string): Promise<SongListResponse> => {
     const params = new URLSearchParams({ page: String(page), limit: String(limit) });
     if (search) params.set('search', search);
+    if (sort) params.set('sort', sort);
+    if (dir) params.set('dir', dir);
     const { data } = await api.get(`/api/songs?${params}`);
     return data;
   },
@@ -151,8 +157,10 @@ export const songApi = {
 // ========== 歌回 API ==========
 
 export const streamApi = {
-  list: async (page = 1, limit = 20): Promise<StreamListResponse> => {
+  list: async (page = 1, limit = 20, sort?: string, dir?: string): Promise<StreamListResponse> => {
     const params = new URLSearchParams({ page: String(page), limit: String(limit) });
+    if (sort) params.set('sort', sort);
+    if (dir) params.set('dir', dir);
     const { data } = await api.get(`/api/streams?${params}`);
     return data;
   },
@@ -176,8 +184,10 @@ export const streamApi = {
 // ========== 演唱者 API ==========
 
 export const singerApi = {
-  list: async (page = 1, limit = 20): Promise<SingerListResponse> => {
+  list: async (page = 1, limit = 20, sort?: string, dir?: string): Promise<SingerListResponse> => {
     const params = new URLSearchParams({ page: String(page), limit: String(limit) });
+    if (sort) params.set('sort', sort);
+    if (dir) params.set('dir', dir);
     const { data } = await api.get(`/api/singers?${params}`);
     return data;
   },
@@ -207,8 +217,10 @@ export const singerApi = {
     return data;
   },
 
-  getPerformances: async (id: string, page = 1, limit = 20): Promise<SingerPerformanceListResponse> => {
+  getPerformances: async (id: string, page = 1, limit = 20, sort?: string, dir?: string): Promise<SingerPerformanceListResponse> => {
     const params = new URLSearchParams({ page: String(page), limit: String(limit) });
+    if (sort) params.set('sort', sort);
+    if (dir) params.set('dir', dir);
     const { data } = await api.get(`/api/singers/${id}/performances?${params}`);
     return data;
   },
@@ -476,15 +488,25 @@ export const logsApi = {
 // ========== アーティスト API ==========
 
 export const artistApi = {
-  list: async (page = 1, limit = 50, search?: string): Promise<ArtistListResponse> => {
+  list: async (
+    page = 1,
+    limit = 50,
+    search?: string,
+    sort?: string,
+    dir?: string
+  ): Promise<ArtistListResponse> => {
     const params = new URLSearchParams({ page: String(page), limit: String(limit) });
     if (search) params.set('search', search);
+    if (sort) params.set('sort', sort);
+    if (dir) params.set('dir', dir);
     const { data } = await api.get(`/api/artists?${params}`);
     return data;
   },
 
-  get: async (id: string, page = 1, limit = 20): Promise<ArtistDetailResponse> => {
+  get: async (id: string, page = 1, limit = 20, sort?: string, dir?: string): Promise<ArtistDetailResponse> => {
     const params = new URLSearchParams({ page: String(page), limit: String(limit) });
+    if (sort) params.set('sort', sort);
+    if (dir) params.set('dir', dir);
     const { data } = await api.get(`/api/artists/${id}?${params}`);
     return data;
   },
@@ -508,6 +530,74 @@ export const artistApi = {
   },
 };
 
+// ========== 読みのエクスポート / インポート API ==========
+
+export const readingApi = {
+  // 読みデータを Blob で取得（filter=needs_fix で未整備のみ、format=csv で CSV）
+  exportBlob: async (
+    filter: 'all' | 'needs_fix',
+    format: 'json' | 'csv'
+  ): Promise<Blob> => {
+    const params = new URLSearchParams();
+    if (filter === 'needs_fix') params.set('filter', 'needs_fix');
+    if (format === 'csv') params.set('format', 'csv');
+    const { data } = await api.get(`/api/readings/export?${params}`, { responseType: 'blob' });
+    return data as Blob;
+  },
+
+  // JSON で読みデータを取り込む
+  importJSON: async (payload: ReadingsExport): Promise<ImportReadingsResult> => {
+    const { data } = await api.post('/api/readings/import', payload);
+    return data;
+  },
+
+  // CSV 文字列で読みデータを取り込む
+  importCSV: async (csv: string): Promise<ImportReadingsResult> => {
+    const { data } = await api.post('/api/readings/import', csv, {
+      headers: { 'Content-Type': 'text/csv' },
+    });
+    return data;
+  },
+};
+
+// ========== 修正提案 API ==========
+
+export const suggestionApi = {
+  // 修正提案を投稿（閲覧モードでも可・匿名可）
+  create: async (req: CreateSuggestionRequest): Promise<{ message: string; id: string }> => {
+    const { data } = await api.post('/api/suggestions', req);
+    return data;
+  },
+
+  // 提案一覧（要 content:edit）。status で絞り込み
+  list: async (
+    status: 'pending' | 'approved' | 'rejected' | '' = 'pending',
+    page = 1,
+    limit = 20
+  ): Promise<SuggestionListResponse> => {
+    const params = new URLSearchParams({ page: String(page), limit: String(limit) });
+    if (status) params.set('status', status);
+    const { data } = await api.get(`/api/suggestions?${params}`);
+    return data;
+  },
+
+  // 未処理提案数（バッジ用）
+  count: async (): Promise<number> => {
+    const { data } = await api.get('/api/suggestions/count');
+    return data.pending ?? 0;
+  },
+
+  approve: async (id: string): Promise<{ message: string }> => {
+    const { data } = await api.post(`/api/suggestions/${id}/approve`);
+    return data;
+  },
+
+  reject: async (id: string): Promise<{ message: string }> => {
+    const { data } = await api.post(`/api/suggestions/${id}/reject`);
+    return data;
+  },
+};
+
 // ========== グローバル検索 API ==========
 
 export const searchApi = {
@@ -517,11 +607,19 @@ export const searchApi = {
     return data;
   },
 
-  // 複合条件の配信検索（キーワード × チャンネル × タグ AND）
+  // 複合条件の配信検索。指定した条件はすべて AND で評価される。
   searchStreams: async (opts: {
     q?: string;
+    ownerId?: string;
+    participantIds?: string[];
+    vocalistIds?: string[];
+    // 旧クライアント互換の単値指定。
+    participantId?: string;
+    vocalistId?: string;
+    streamTags?: string[];
+    performanceTags?: string[];
+    // 旧クライアント互換: singerId は participantId として送信する。
     singerId?: string;
-    tags?: string[];
     page?: number;
     limit?: number;
   }): Promise<StreamListResponse> => {
@@ -530,8 +628,21 @@ export const searchApi = {
       limit: String(opts.limit ?? 20),
     });
     if (opts.q) params.set('q', opts.q);
-    if (opts.singerId) params.set('singer_id', opts.singerId);
-    if (opts.tags && opts.tags.length > 0) params.set('tags', opts.tags.join(','));
+    if (opts.ownerId) params.set('owner_id', opts.ownerId);
+    if (opts.participantIds && opts.participantIds.length > 0) {
+      params.set('participant_ids', opts.participantIds.join(','));
+    } else if (opts.participantId || opts.singerId) {
+      params.set('participant_id', opts.participantId || opts.singerId!);
+    }
+    if (opts.vocalistIds && opts.vocalistIds.length > 0) {
+      params.set('vocalist_ids', opts.vocalistIds.join(','));
+    } else if (opts.vocalistId) {
+      params.set('vocalist_id', opts.vocalistId);
+    }
+    if (opts.streamTags && opts.streamTags.length > 0) params.set('tags', opts.streamTags.join(','));
+    if (opts.performanceTags && opts.performanceTags.length > 0) {
+      params.set('performance_tags', opts.performanceTags.join(','));
+    }
     const { data } = await api.get(`/api/streams/search?${params}`);
     return data;
   },

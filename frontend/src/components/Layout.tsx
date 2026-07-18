@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore, hasPermission, PERM } from '../store/auth';
+import { suggestionApi } from '../api/client';
 import GlobalSearch from './GlobalSearch';
 import PlayerBar from './PlayerBar';
 
@@ -13,6 +15,7 @@ const navItems = [
 ];
 
 const adminItems = [
+  { path: '/admin/suggestions', label: '修正提案', permission: PERM.CONTENT_EDIT },
   { path: '/admin/sync', label: '同期', permission: PERM.SYNC_RUN },
   { path: '/admin/settings', label: '設定', permission: PERM.CONTENT_EDIT },
   { path: '/admin/logs', label: 'ログ', permission: PERM.LOGS_VIEW },
@@ -29,6 +32,16 @@ export default function Layout() {
   const logout = useAuthStore((s) => s.logout);
 
   const visibleAdminItems = adminItems.filter((item) => hasPermission(user, item.permission));
+  const canReviewSuggestions = hasPermission(user, PERM.CONTENT_EDIT);
+
+  // 未処理の修正提案数（バッジ表示用）。権限があるときだけ取得し、定期更新する。
+  const { data: pendingSuggestions } = useQuery({
+    queryKey: ['suggestions', 'count'],
+    queryFn: () => suggestionApi.count(),
+    enabled: canReviewSuggestions,
+    refetchInterval: 60000,
+  });
+  const pendingCount = pendingSuggestions ?? 0;
 
   // モバイルメニュー。ページ遷移で自動的に閉じる。
   const [menuOpen, setMenuOpen] = useState(false);
@@ -82,8 +95,13 @@ export default function Layout() {
               {/* Admin dropdown（アクセス可能な項目がある場合のみ表示） */}
               {visibleAdminItems.length > 0 && (
                 <div className="relative group">
-                  <button className="text-sm font-medium text-gray-600 hover:text-gray-900">
+                  <button className="text-sm font-medium text-gray-600 hover:text-gray-900 inline-flex items-center gap-1">
                     管理
+                    {pendingCount > 0 && (
+                      <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold bg-red-500 text-white">
+                        {pendingCount > 99 ? '99+' : pendingCount}
+                      </span>
+                    )}
                   </button>
                   <div className="absolute right-0 mt-2 w-40 bg-white rounded-md shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
                     <div className="py-1">
@@ -91,9 +109,14 @@ export default function Layout() {
                         <Link
                           key={item.path}
                           to={item.path}
-                          className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                          className="flex items-center justify-between px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
                         >
-                          {item.label}
+                          <span>{item.label}</span>
+                          {item.path === '/admin/suggestions' && pendingCount > 0 && (
+                            <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold bg-red-500 text-white">
+                              {pendingCount > 99 ? '99+' : pendingCount}
+                            </span>
+                          )}
                         </Link>
                       ))}
                     </div>
@@ -175,13 +198,18 @@ export default function Layout() {
                     <Link
                       key={item.path}
                       to={item.path}
-                      className={`block px-3 py-2 rounded-lg text-base font-medium ${
+                      className={`flex items-center justify-between px-3 py-2 rounded-lg text-base font-medium ${
                         location.pathname === item.path
                           ? 'bg-indigo-50 text-indigo-600'
                           : 'text-gray-700 hover:bg-gray-50'
                       }`}
                     >
-                      {item.label}
+                      <span>{item.label}</span>
+                      {item.path === '/admin/suggestions' && pendingCount > 0 && (
+                        <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold bg-red-500 text-white">
+                          {pendingCount > 99 ? '99+' : pendingCount}
+                        </span>
+                      )}
                     </Link>
                   ))}
                 </>

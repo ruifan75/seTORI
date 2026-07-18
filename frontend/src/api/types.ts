@@ -432,6 +432,54 @@ export interface BackfillReadingsResponse {
   warning?: string;
 }
 
+// 読みのエクスポート / インポート
+export interface ReadingItem {
+  id: string;
+  name: string;
+  reading: string;
+}
+
+export interface ReadingsExport {
+  artists: ReadingItem[];
+  songs: ReadingItem[];
+}
+
+export interface ImportReadingsResult {
+  artists_updated: number;
+  songs_updated: number;
+  skipped: number;
+  errors?: string[];
+}
+
+// 修正提案（閲覧モードからの提案 → 管理者レビュー）
+export type SuggestionTargetType = 'song' | 'artist';
+export type SuggestionStatus = 'pending' | 'approved' | 'rejected';
+
+export interface CreateSuggestionRequest {
+  target_type: SuggestionTargetType;
+  target_id: string;
+  fields: Record<string, string>;
+  note?: string;
+}
+
+export interface Suggestion {
+  id: string;
+  target_type: SuggestionTargetType;
+  target_id: string;
+  target_label: string;
+  before: Record<string, string>;
+  after: Record<string, string>;
+  note: string;
+  status: SuggestionStatus;
+  created_at: string;
+  reviewed_at?: string | null;
+}
+
+export interface SuggestionListResponse {
+  suggestions: Suggestion[];
+  pagination: PaginationResponse;
+}
+
 // ========== グローバル検索 ==========
 
 export interface SearchStreamItem {

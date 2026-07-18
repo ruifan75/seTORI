@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, useSearchParams, Link, useNavigate } from 'react-router-dom';
-import { songApi, itunesApi } from '../api/client';
+import { songApi, itunesApi, suggestionApi } from '../api/client';
 import type { UpdateSongRequest, ITunesSearchResult, Song, ITunesQueryResult } from '../api/types';
 import Loading from '../components/ui/Loading';
 import Pagination from '../components/ui/Pagination';
 import Tag from '../components/ui/Tag';
+import EditableField from '../components/EditableField';
 import { useToast } from '../components/ui/Toast';
 import { useAuthStore, hasPermission, PERM } from '../store/auth';
 import { usePlayerStore, type PlayerTrack } from '../store/player';
@@ -503,6 +504,34 @@ export default function SongDetailPage() {
 
   const { song, performances, pagination } = data;
 
+  // 1フィールドだけを即時保存（現在値をベースに1項目だけ差し替えて PUT）
+  const saveSongField = (patch: Partial<UpdateSongRequest>) =>
+    updateMutation.mutateAsync({
+      name: song.name,
+      name_reading: song.name_reading || '',
+      original_artist: song.original_artist,
+      original_artist_reading: song.original_artist_reading || '',
+      arts: song.arts || '',
+      itunes_ids: (song.itunes_ids || []).map((i) => ({ itunes_id: i.itunes_id, is_primary: i.is_primary })),
+      ...patch,
+    });
+
+  // 閲覧ユーザーからの1フィールド修正提案
+  const suggestSongField = async (field: string, val: string, note: string) => {
+    try {
+      const r = await suggestionApi.create({
+        target_type: 'song',
+        target_id: song.id,
+        fields: { [field]: val },
+        note,
+      });
+      showToast(r.message, 'success');
+    } catch (err) {
+      showToast(`送信失敗: ${(err as Error).message}`, 'error');
+      throw err;
+    }
+  };
+
   // この曲の歌唱記録をグローバルプレイヤーのキューに載せて startIndex から再生
   const playAll = (startIndex: number) => {
     const tracks: PlayerTrack[] = performances.map((perf) => ({
@@ -815,23 +844,59 @@ export default function SongDetailPage() {
               </div>
             ) : (
               <>
-                <div className="flex items-start justify-between">
-                  <div>
-                    <h1 className="text-3xl font-bold text-gray-900">{song.name}</h1>
-                    {song.name_reading && (
-                      <p className="text-gray-500 mt-1">{song.name_reading}</p>
-                    )}
-                    <p className="text-xl text-gray-600 mt-2">{song.original_artist}</p>
-                    {song.original_artist_reading && (
-                      <p className="text-gray-500 text-sm mt-1">{song.original_artist_reading}</p>
-                    )}
+                {/* 曲名・読み・アーティストはホバーで鉛筆が出る。権限があれば即時保存、無ければ修正提案。 */}
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 space-y-1">
+                    <EditableField
+                      as="h1"
+                      label="曲名"
+                      value={song.name}
+                      canEdit={canEdit}
+                      required
+                      className="text-3xl font-bold text-gray-900 break-words"
+                      onSave={(v) => saveSongField({ name: v })}
+                      onSuggest={(v, n) => suggestSongField('name', v, n)}
+                    />
+                    <EditableField
+                      as="p"
+                      label="曲名の読み（平仮名）"
+                      value={song.name_reading || ''}
+                      canEdit={canEdit}
+                      className="text-gray-500"
+                      placeholder="よみがな"
+                      emptyText="読み未設定"
+                      onSave={(v) => saveSongField({ name_reading: v })}
+                      onSuggest={(v, n) => suggestSongField('name_reading', v, n)}
+                    />
+                    <EditableField
+                      as="p"
+                      label="原曲アーティスト"
+                      value={song.original_artist}
+                      canEdit={canEdit}
+                      required
+                      className="text-xl text-gray-600 pt-1"
+                      onSave={(v) => saveSongField({ original_artist: v })}
+                      onSuggest={(v, n) => suggestSongField('original_artist', v, n)}
+                    />
+                    <EditableField
+                      as="p"
+                      label="アーティストの読み（平仮名）"
+                      value={song.original_artist_reading || ''}
+                      canEdit={canEdit}
+                      className="text-gray-500 text-sm"
+                      placeholder="よみがな"
+                      emptyText="読み未設定"
+                      onSave={(v) => saveSongField({ original_artist_reading: v })}
+                      onSuggest={(v, n) => suggestSongField('original_artist_reading', v, n)}
+                    />
                   </div>
                   {canEdit && (
                     <button
                       onClick={toggleEditing}
-                      className="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+                      className="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 shrink-0 whitespace-nowrap"
+                      title="アートワーク・iTunes・統合・削除などの詳細を編集"
                     >
-                      編集
+                      詳細編集
                     </button>
                   )}
                 </div>
@@ -1022,6 +1087,7 @@ export default function SongDetailPage() {
           </>
         )}
       </div>
+
     </div>
   );
 }

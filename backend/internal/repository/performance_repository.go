@@ -411,7 +411,7 @@ func (r *PerformanceRepository) DeleteByStreamID(streamID string) error {
 
 // FindBySingerID 根據演唱者 ID 取得所有演出（支援分頁）
 // 只顯示非隱藏的 Stream 中的演出
-func (r *PerformanceRepository) FindBySingerID(singerID string, limit, offset int) ([]PerformanceWithDetails, int, error) {
+func (r *PerformanceRepository) FindBySingerID(singerID string, limit, offset int, sort, dir string) ([]PerformanceWithDetails, int, error) {
 	var total int
 	err := r.db.QueryRow(`
 		SELECT COUNT(DISTINCT p.id)
@@ -424,6 +424,15 @@ func (r *PerformanceRepository) FindBySingerID(singerID string, limit, offset in
 		return nil, 0, fmt.Errorf("count performances: %w", err)
 	}
 
+	// 既定は配信日の新しい順。"song"=曲名順、"stream"=歌枠タイトル順。
+	order := "st.stream_date " + dirOr(dir, "desc") + ", p.start_seconds ASC"
+	switch sort {
+	case "song":
+		order = nameSortOrderDir("s.name", "s.name_reading", dir)
+	case "stream":
+		order = nameSortOrderDir("st.title", "''", dir)
+	}
+
 	query := `
 		SELECT p.id, p.stream_id, p.song_id, p.start_seconds, p.end_seconds, p.order_index,
 		       p.holodex_song_id, p.custom_tags, p.created_at,
@@ -434,7 +443,7 @@ func (r *PerformanceRepository) FindBySingerID(singerID string, limit, offset in
 		JOIN streams st ON p.stream_id = st.id
 		JOIN songs s ON p.song_id = s.id
 		WHERE ps.singer_id = $1 AND st.is_hidden = FALSE
-		ORDER BY st.stream_date DESC, p.start_seconds ASC
+		ORDER BY ` + order + `
 		LIMIT $2 OFFSET $3`
 
 	rows, err := r.db.Query(query, singerID, limit, offset)

@@ -60,7 +60,7 @@ func (s *StreamService) Exists(id string) (bool, error) {
 }
 
 // GetAll 取得歌回列表（預設不顯示隱藏的）
-func (s *StreamService) GetAll(page, limit int) (*dto.StreamListResponse, error) {
+func (s *StreamService) GetAll(page, limit int, sort, dir string) (*dto.StreamListResponse, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -70,7 +70,7 @@ func (s *StreamService) GetAll(page, limit int) (*dto.StreamListResponse, error)
 	offset := (page - 1) * limit
 
 	// 預設不顯示隱藏的歌回
-	streams, total, err := s.streamRepo.FindAll(limit, offset, false)
+	streams, total, err := s.streamRepo.FindAll(limit, offset, false, sort, dir)
 	if err != nil {
 		return nil, fmt.Errorf("get streams: %w", err)
 	}
@@ -154,15 +154,15 @@ func (s *StreamService) GetByTag(tagID string, page, limit int) (*dto.StreamList
 	return s.composeStreamList(streams, total, page, limit)
 }
 
-// SearchStreams は複合条件（キーワード × 参加チャンネル × タグ AND）で配信を検索する。
-func (s *StreamService) SearchStreams(q, singerID string, tagIDs []string, page, limit int) (*dto.StreamListResponse, error) {
+// SearchStreams は配信元・参加者・ボーカル・タグを組み合わせて配信を検索する。
+func (s *StreamService) SearchStreams(filters models.StreamSearchFilters, page, limit int) (*dto.StreamListResponse, error) {
 	if page < 1 {
 		page = 1
 	}
 	if limit < 1 || limit > 100 {
 		limit = 20
 	}
-	streams, total, err := s.streamRepo.SearchStreams(q, singerID, tagIDs, limit, (page-1)*limit)
+	streams, total, err := s.streamRepo.SearchStreams(filters, limit, (page-1)*limit)
 	if err != nil {
 		return nil, fmt.Errorf("search streams: %w", err)
 	}

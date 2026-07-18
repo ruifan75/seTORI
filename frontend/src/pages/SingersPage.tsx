@@ -4,20 +4,38 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { singerApi } from '../api/client';
 import Loading from '../components/ui/Loading';
 import Pagination from '../components/ui/Pagination';
+import { SortControl, type SortDir, type SortState } from '../components/ui/Sort';
 import { useAuthStore, hasPermission, PERM } from '../store/auth';
 
 export default function SingersPage() {
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const page = parseInt(searchParams.get('page') || '1');
+  const sort = searchParams.get('sort') || 'name';
+  const dir: SortDir = searchParams.get('dir') === 'desc' ? 'desc' : 'asc';
   const canEdit = hasPermission(useAuthStore((s) => s.user), PERM.CONTENT_EDIT);
   const [showAddModal, setShowAddModal] = useState(false);
   const [channelInput, setChannelInput] = useState('');
 
   const { data, isLoading } = useQuery({
-    queryKey: ['singers', page],
-    queryFn: () => singerApi.list(page, 20),
+    queryKey: ['singers', page, sort, dir],
+    queryFn: () => singerApi.list(page, 20, sort, dir),
   });
+
+  const buildParams = (next: { page?: number; sort?: string; dir?: SortDir }) => {
+    const params: Record<string, string> = {};
+    const p = next.page ?? page;
+    const so = next.sort ?? sort;
+    const d = next.dir ?? dir;
+    if (p > 1) params.page = String(p);
+    if (so !== 'name') params.sort = so;
+    if (d !== 'asc') params.dir = d;
+    return params;
+  };
+
+  const handleSort = (next: SortState) => {
+    setSearchParams(buildParams({ sort: next.sort, dir: next.dir, page: 1 }));
+  };
 
   const syncMutation = useMutation({
     mutationFn: (channelId: string) => singerApi.create(channelId),
@@ -29,7 +47,7 @@ export default function SingersPage() {
   });
 
   const handlePageChange = (newPage: number) => {
-    setSearchParams({ page: String(newPage) });
+    setSearchParams(buildParams({ page: newPage }));
   };
 
   const handleAddSinger = (e: React.FormEvent) => {
@@ -81,8 +99,19 @@ export default function SingersPage() {
             </div>
           ) : (
             <>
-              <div className="text-sm text-gray-500">
-                {data?.pagination.total}件のチャンネル
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-sm text-gray-500">
+                  {data?.pagination.total}件のチャンネル
+                </div>
+                <SortControl
+                  options={[
+                    { value: 'name', label: '名前', firstDir: 'asc' },
+                    { value: 'organization', label: '事務所', firstDir: 'asc' },
+                  ]}
+                  sort={sort}
+                  dir={dir}
+                  onSort={handleSort}
+                />
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

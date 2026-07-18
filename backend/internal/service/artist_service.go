@@ -37,14 +37,15 @@ func toArtistResponse(a models.Artist) dto.ArtistResponse {
 }
 
 // GetAll はアーティスト一覧（曲数付き・検索対応）を返す。
-func (s *ArtistService) GetAll(page, limit int, search string) (*dto.ArtistListResponse, error) {
+// sort は "name"（数字→英字→読み順、既定）か "songs"（曲数順）。
+func (s *ArtistService) GetAll(page, limit int, search, sort, dir string) (*dto.ArtistListResponse, error) {
 	if page < 1 {
 		page = 1
 	}
 	if limit < 1 || limit > 100 {
 		limit = 50
 	}
-	artists, total, err := s.artistRepo.ListWithCounts(limit, (page-1)*limit, search)
+	artists, total, err := s.artistRepo.ListWithCounts(limit, (page-1)*limit, search, sort, dir)
 	if err != nil {
 		return nil, fmt.Errorf("list artists: %w", err)
 	}
@@ -62,7 +63,7 @@ func (s *ArtistService) GetAll(page, limit int, search string) (*dto.ArtistListR
 }
 
 // GetByID はアーティスト詳細＋所属楽曲を返す。見つからなければ nil。
-func (s *ArtistService) GetByID(id uuid.UUID, page, limit int) (*dto.ArtistDetailResponse, error) {
+func (s *ArtistService) GetByID(id uuid.UUID, page, limit int, sort, dir string) (*dto.ArtistDetailResponse, error) {
 	artist, err := s.artistRepo.FindByID(id)
 	if err != nil {
 		return nil, err
@@ -77,7 +78,7 @@ func (s *ArtistService) GetByID(id uuid.UUID, page, limit int) (*dto.ArtistDetai
 	if limit < 1 || limit > 100 {
 		limit = 20
 	}
-	songs, counts, total, err := s.artistRepo.FindSongsByArtist(id, limit, (page-1)*limit)
+	songs, counts, total, err := s.artistRepo.FindSongsByArtist(id, limit, (page-1)*limit, sort, dir)
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +131,9 @@ func (s *ArtistService) Update(id uuid.UUID, name *string, reading *string) (*dt
 	}
 
 	if reading != nil {
-		if err := s.artistRepo.UpdateReading(id, strings.TrimSpace(*reading)); err != nil {
+		// 読みはアーティスト単位で一元管理する方針（migration 021）。
+		// 所属楽曲の original_artist_reading にも伝播させ、表示のドリフトを防ぐ。
+		if err := s.artistRepo.UpdateReadingPropagate(id, strings.TrimSpace(*reading)); err != nil {
 			return nil, err
 		}
 	}
@@ -165,6 +168,45 @@ func (s *ArtistService) Merge(sourceID, targetID uuid.UUID) (*dto.ArtistResponse
 	}
 	resp := toArtistResponse(*target)
 	return &resp, nil
+}
+
+// GetEditableFields は修正提案の対象となる編集可能フィールドと表示ラベルを返す。
+// 見つからなければ (nil, "", nil)。TargetEditor インターフェースを満たす。
+func (s *ArtistService) GetEditableFields(id uuid.UUID) (map[string]string, string, error) {
+	a, err := s.artistRepo.FindByID(id)
+	if err != nil {
+		return nil, "", err
+	}
+	if a == nil {
+		return nil, "", nil
+	}
+	reading := ""
+	if a.NameReading.Valid {
+		reading = a.NameReading.String
+	}
+	return map[string]string{"name": a.Name, "name_reading": reading}, a.Name, nil
+}
+
+// ApplyEditableFields は提案された編集値をアーティストへ反映する。
+// 名前変更時は所属楽曲の表示テキストも連動更新される（Update 経由）。
+func (s *ArtistService) ApplyEditableFields(id uuid.UUID, fields map[string]string) error {
+	var name, reading *string
+	if v, ok := fields["name"]; ok {
+		vv := v
+		name = &vv
+	}
+	if v, ok := fields["name_reading"]; ok {
+		vv := v
+		reading = &vv
+	}
+	result, err := s.Update(id, name, reading)
+	if err != nil {
+		return err
+	}
+	if result == nil {
+		return fmt.Errorf("アーティストが見つかりません")
+	}
+	return nil
 }
 
 // ========== 読み仮名の AI 補完 ==========
@@ -246,7 +288,7 @@ func (s *ArtistService) BackfillReadings() (*dto.BackfillReadingsResponse, error
 		} else {
 			for i, a := range artists {
 				if reading, ok := readings[i]; ok {
-					if err := s.artistRepo.UpdateReading(a.ID, reading); err == nil {
+					if err := s.artistRepo.UpdateReadingPropagate(a.ID, reading); err == nil {
 						resp.ArtistsUpdated++
 					}
 				}
