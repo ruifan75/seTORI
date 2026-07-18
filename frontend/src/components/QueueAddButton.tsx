@@ -1,4 +1,4 @@
-import { useToast } from './ui/Toast';
+import { useToast } from './ui/ToastContext';
 import { usePlayerStore, type PlayerTrack } from '../store/player';
 
 // 歌唱を再生キューの末尾に追加するアイコンボタン（playlist-add）。

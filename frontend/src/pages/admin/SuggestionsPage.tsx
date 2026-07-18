@@ -5,7 +5,7 @@ import { suggestionApi } from '../../api/client';
 import type { Suggestion, SuggestionStatus } from '../../api/types';
 import Loading from '../../components/ui/Loading';
 import Pagination from '../../components/ui/Pagination';
-import { useToast } from '../../components/ui/Toast';
+import { useToast } from '../../components/ui/ToastContext';
 
 const STATUS_TABS: { value: SuggestionStatus; label: string }[] = [
   { value: 'pending', label: '未処理' },

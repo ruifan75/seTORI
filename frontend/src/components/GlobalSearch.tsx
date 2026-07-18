@@ -5,7 +5,7 @@ import { holodexApi, searchApi } from '../api/client';
 import type { CSSProperties } from 'react';
 import type { SearchTagItem, Singer } from '../api/types';
 import { useAuthStore, hasPermission, PERM } from '../store/auth';
-import { useToast } from './ui/Toast';
+import { useToast } from './ui/ToastContext';
 
 interface ActiveSearchToken {
   key: string;

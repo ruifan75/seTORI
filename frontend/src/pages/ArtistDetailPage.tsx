@@ -7,7 +7,7 @@ import Loading from '../components/ui/Loading';
 import Pagination from '../components/ui/Pagination';
 import EditableField from '../components/EditableField';
 import { SortableTh, type SortDir, type SortState } from '../components/ui/Sort';
-import { useToast } from '../components/ui/Toast';
+import { useToast } from '../components/ui/ToastContext';
 import { useAuthStore, hasPermission, PERM } from '../store/auth';
 
 // アーティスト詳細：名前・読みの修正、別アーティストへの統合、所属楽曲一覧。

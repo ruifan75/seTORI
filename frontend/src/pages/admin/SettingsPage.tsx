@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { filterKeywordApi, tagApi, tagRuleApi, aiProviderApi } from '../../api/client';
-import { useToast } from '../../components/ui/Toast';
+import { useToast } from '../../components/ui/ToastContext';
 import { useAuthStore, hasPermission, PERM } from '../../store/auth';
 import type { FilterKeyword, StreamTag, PerformanceTag, TagKeywordRule, AIProvider, AIProviderInput, AIModelInfo } from '../../api/types';
 
@@ -299,10 +299,6 @@ function ProviderRow({ p, idx, total, onUpdate, onDelete, onMove }: {
   const [model, setModel] = useState(p.model);
   const [timeoutSec, setTimeoutSec] = useState(p.timeout_seconds || 60);
 
-  // 外部で model が更新されたら input に反映
-  useEffect(() => { setModel(p.model); }, [p.model]);
-  useEffect(() => { setTimeoutSec(p.timeout_seconds || 60); }, [p.timeout_seconds]);
-
   const saveModel = (value?: string) => {
     const m = (value ?? model).trim();
     if (m && m !== p.model) onUpdate(p.id, { model: m });
@@ -474,7 +470,7 @@ function AIProviderSection() {
           )}
           {providers.map((p: AIProvider, idx: number) => (
             <ProviderRow
-              key={p.id}
+              key={`${p.id}:${p.model}:${p.timeout_seconds}`}
               p={p}
               idx={idx}
               total={providers.length}

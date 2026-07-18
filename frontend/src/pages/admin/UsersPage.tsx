@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { userApi, roleApi } from '../../api/client';
-import { useToast } from '../../components/ui/Toast';
+import { useToast } from '../../components/ui/ToastContext';
 import { useAuthStore } from '../../store/auth';
 import type { AuthUser, Role, PermissionInfo, CreateUserRequest } from '../../api/types';
 

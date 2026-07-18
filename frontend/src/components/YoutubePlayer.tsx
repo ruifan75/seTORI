@@ -1,11 +1,11 @@
 import { useEffect, useRef } from 'react';
+import { setYoutubePlayerInstance } from './youtubePlayerControl';
+import type { YouTubePlayerEvent, YouTubePlayerInstance } from '../types/youtube';
 
 interface YoutubePlayerProps {
   videoId: string;
-  onReady?: (player: any) => void;
+  onReady?: (player: YouTubePlayerInstance) => void;
 }
-
-let playerInstance: any = null;
 
 export default function YoutubePlayer({ videoId, onReady }: YoutubePlayerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -18,7 +18,9 @@ export default function YoutubePlayer({ videoId, onReady }: YoutubePlayerProps) 
 
     // YouTube API がロード済みであることを確認
     const initPlayer = () => {
-      if (!(window as any).YT) {
+      const YT = window.YT;
+      const container = containerRef.current;
+      if (!YT?.Player || !container) {
         setTimeout(initPlayer, 100);
         return;
       }
@@ -30,7 +32,7 @@ export default function YoutubePlayer({ videoId, onReady }: YoutubePlayerProps) 
         }
 
         const origin = window.location.origin;
-        playerInstance = new (window as any).YT.Player(containerRef.current, {
+        const player = new YT.Player(container, {
           origin,
           width: '100%',
           height: '390',
@@ -42,11 +44,13 @@ export default function YoutubePlayer({ videoId, onReady }: YoutubePlayerProps) 
             origin,
           },
           events: {
-            onReady: (event: any) => {
+            onReady: (event: YouTubePlayerEvent) => {
+              setYoutubePlayerInstance(event.target);
               onReady?.(event.target);
             },
           },
         });
+        setYoutubePlayerInstance(player);
 
         isInitializedRef.current = true;
       } catch (error) {
@@ -55,7 +59,7 @@ export default function YoutubePlayer({ videoId, onReady }: YoutubePlayerProps) 
     };
 
     // YouTube API がロード済みかを確認
-    if ((window as any).YT && (window as any).YT.Player) {
+    if (window.YT?.Player) {
       initPlayer();
     } else {
       // YouTube IFrame API をロード
@@ -78,21 +82,3 @@ export default function YoutubePlayer({ videoId, onReady }: YoutubePlayerProps) 
 
   return <div ref={containerRef} style={{ width: '100%', height: '100%' }} />;
 }
-
-// プレイヤーインスタンスを公開、他のコンポーネントで使用するため
-export const youtubePlayerSeekTo = (seconds: number) => {
-  if (playerInstance && playerInstance.seekTo) {
-    playerInstance.seekTo(seconds, true);
-    if (playerInstance.playVideo) {
-      playerInstance.playVideo();
-    }
-  }
-};
-
-// 現在の再生時間を取得（秒）
-export const youtubePlayerGetCurrentTime = (): number | null => {
-  if (playerInstance && playerInstance.getCurrentTime) {
-    return playerInstance.getCurrentTime();
-  }
-  return null;
-};

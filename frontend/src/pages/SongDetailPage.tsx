@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { isAxiosError } from 'axios';
 import { useParams, useSearchParams, Link, useNavigate } from 'react-router-dom';
 import { songApi, itunesApi, suggestionApi } from '../api/client';
 import type { UpdateSongRequest, ITunesSearchResult, Song, ITunesQueryResult } from '../api/types';
@@ -9,7 +10,7 @@ import Tag from '../components/ui/Tag';
 import EditableField from '../components/EditableField';
 import QueueAddButton from '../components/QueueAddButton';
 import ArtistLinks from '../components/ArtistLinks';
-import { useToast } from '../components/ui/Toast';
+import { useToast } from '../components/ui/ToastContext';
 import { useAuthStore, hasPermission, PERM } from '../store/auth';
 import { usePlayerStore, type PlayerTrack } from '../store/player';
 
@@ -22,6 +23,13 @@ function formatTime(seconds: number): string {
     return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   }
   return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+function apiErrorMessage(error: unknown, fallback: string): string {
+  if (isAxiosError<{ message?: string; error?: string }>(error)) {
+    return error.response?.data?.message || error.response?.data?.error || fallback;
+  }
+  return error instanceof Error && error.message ? error.message : fallback;
 }
 
 // 楽曲検索入力コンポーネントの Props
@@ -63,7 +71,7 @@ function SongSearchInput({ value, onChange, onSelectSong, placeholder, excludeSo
     }, 300);
 
     return () => clearTimeout(timer);
-  }, [searchQuery]);
+  }, [searchQuery, excludeSongId]);
 
   // 外部クリックでドロップダウンを閉じる
   useEffect(() => {
@@ -175,8 +183,8 @@ export default function SongDetailPage() {
       setIsEditing(false);
       queryClient.invalidateQueries({ queryKey: ['song', id, 'performances', page] });
     },
-    onError: (error: any) => {
-      showToast(error.response?.data?.message || '更新に失敗しました', 'error');
+    onError: (error: unknown) => {
+      showToast(apiErrorMessage(error, '更新に失敗しました'), 'error');
     },
   });
 
@@ -211,8 +219,8 @@ export default function SongDetailPage() {
       showToast('楽曲を削除しました', 'success');
       navigate('/songs');
     },
-    onError: (error: any) => {
-      showToast(error.response?.data?.message || '削除に失敗しました', 'error');
+    onError: (error: unknown) => {
+      showToast(apiErrorMessage(error, '削除に失敗しました'), 'error');
     },
   });
 
@@ -223,8 +231,8 @@ export default function SongDetailPage() {
       setIsEditing(false);
       navigate(`/songs/${result.target_id}`);
     },
-    onError: (error: any) => {
-      showToast(error.response?.data?.message || '統合に失敗しました', 'error');
+    onError: (error: unknown) => {
+      showToast(apiErrorMessage(error, '統合に失敗しました'), 'error');
     },
   });
 
@@ -306,7 +314,7 @@ export default function SongDetailPage() {
       const existingIds = new Set((editedSong.itunes_ids || []).map((item) => item.itunes_id));
       setItunesSearchResults(results.results.filter((item) => !existingIds.has(item.itunes_id)));
       setShowItunesSearch(true);
-    } catch (error) {
+    } catch {
       showToast('iTunes検索に失敗しました', 'error');
     } finally {
       setIsSearching(false);
@@ -353,7 +361,7 @@ export default function SongDetailPage() {
         [itunesId]: url,
       }));
       window.open(url, '_blank', 'noopener,noreferrer');
-    } catch (error) {
+    } catch {
       window.open(`https://music.apple.com/song/${itunesId}`, '_blank', 'noopener,noreferrer');
     }
   };
@@ -414,7 +422,7 @@ export default function SongDetailPage() {
 
       setDirectItunesId('');
       showToast('iTunesを追加しました', 'success');
-    } catch (error) {
+    } catch {
       showToast('iTunes IDが見つかりません', 'error');
     } finally {
       setIsSearching(false);
@@ -481,7 +489,7 @@ export default function SongDetailPage() {
         arts: result.artwork_url,
       });
       showToast('アートワークを同期しました', 'success');
-    } catch (error) {
+    } catch {
       showToast('アートワークの取得に失敗しました', 'error');
     } finally {
       setIsSearching(false);

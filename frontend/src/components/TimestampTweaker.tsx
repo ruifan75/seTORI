@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { youtubePlayerSeekTo } from './YoutubePlayer';
+import { youtubePlayerSeekTo } from './youtubePlayerControl';
 
 // 秒数を M:SS / H:MM:SS 形式に
 function fmt(sec: number): string {

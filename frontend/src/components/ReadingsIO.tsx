@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { readingApi } from '../api/client';
 import type { ImportReadingsResult } from '../api/types';
-import { useToast } from './ui/Toast';
+import { useToast } from './ui/ToastContext';
 
 // 読みデータのエクスポート/インポート UI。
 // 外部の（ネット情報を参照できる）AI で読みを作成してもらう運用を支える。

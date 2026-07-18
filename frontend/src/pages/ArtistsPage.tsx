@@ -6,7 +6,7 @@ import Loading from '../components/ui/Loading';
 import Pagination from '../components/ui/Pagination';
 import ReadingsIO from '../components/ReadingsIO';
 import { SortableTh, type SortDir, type SortState } from '../components/ui/Sort';
-import { useToast } from '../components/ui/Toast';
+import { useToast } from '../components/ui/ToastContext';
 import { useAuthStore, hasPermission, PERM } from '../store/auth';
 
 // 原曲アーティスト一覧。表頭クリックで名前順／楽曲数順を昇降切替、名前・読みで検索できる。

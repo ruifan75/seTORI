@@ -1,7 +1,7 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { logsApi } from '../../api/client';
-import { useToast } from '../../components/ui/Toast';
+import { useToast } from '../../components/ui/ToastContext';
 
 const LEVELS = ['DEBUG', 'INFO', 'WARN', 'ERROR'] as const;
 
@@ -38,7 +38,7 @@ export default function LogsPage() {
     }
   };
 
-  const filteredLogs = data?.logs || [];
+  const filteredLogs = useMemo(() => data?.logs || [], [data?.logs]);
 
   // Auto scroll to bottom on initial load, and on updates only when user is near bottom
   useEffect(() => {

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { usePlayerStore } from '../store/player';
 import ArtistLinks from './ArtistLinks';
+import type { YouTubePlayerInstance, YouTubePlayerStateChangeEvent } from '../types/youtube';
 
 // 秒 → M:SS
 function fmt(sec: number): string {
@@ -21,7 +22,7 @@ export default function PlayerBar() {
   const track = queue[index];
 
   const containerRef = useRef<HTMLDivElement>(null);
-  const playerRef = useRef<any>(null);
+  const playerRef = useRef<YouTubePlayerInstance | null>(null);
   const readyRef = useRef(false);
   const currentVideoRef = useRef<string>('');
   const [progress, setProgress] = useState(0); // 区間内の経過秒
@@ -71,16 +72,17 @@ export default function PlayerBar() {
 
   // YT IFrame API のロード（既存の YoutubePlayer と同じ script を共有）
   useEffect(() => {
-    if (!track || playerRef.current || !containerRef.current) return;
+    const container = containerRef.current;
+    if (!track || playerRef.current || !container) return;
 
     const init = () => {
-      const YT = (window as any).YT;
+      const YT = window.YT;
       if (!YT || !YT.Player) {
         setTimeout(init, 100);
         return;
       }
       const origin = window.location.origin;
-      playerRef.current = new YT.Player(containerRef.current, {
+      playerRef.current = new YT.Player(container, {
         origin,
         width: '100%',
         height: '100%',
@@ -94,9 +96,9 @@ export default function PlayerBar() {
             currentVideoRef.current = track.streamId;
             applyVolume(volume, muted);
           },
-          onStateChange: (e: any) => {
+          onStateChange: (e: YouTubePlayerStateChangeEvent) => {
             // 動画自体が終わった（end 未設定 or 区間が動画末尾）→ 次へ
-            if (e.data === (window as any).YT?.PlayerState?.ENDED) {
+            if (e.data === window.YT?.PlayerState?.ENDED) {
               usePlayerStore.getState().next();
             }
           },
@@ -108,7 +110,7 @@ export default function PlayerBar() {
       });
     };
 
-    if (!(window as any).YT && !document.getElementById('youtube-api')) {
+    if (!window.YT && !document.getElementById('youtube-api')) {
       const script = document.createElement('script');
       script.id = 'youtube-api';
       script.src = 'https://www.youtube.com/iframe_api';

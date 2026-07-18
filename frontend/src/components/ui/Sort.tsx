@@ -9,7 +9,7 @@ export interface SortState {
 }
 
 // 同じ列を再クリックしたら方向を反転、別の列なら firstDir（既定 asc）で開始。
-export function nextSort(current: SortState, key: string, firstDir: SortDir = 'asc'): SortState {
+function nextSort(current: SortState, key: string, firstDir: SortDir = 'asc'): SortState {
   if (current.sort === key) {
     return { sort: key, dir: current.dir === 'asc' ? 'desc' : 'asc' };
   }

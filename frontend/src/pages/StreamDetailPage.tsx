@@ -5,10 +5,12 @@ import { streamApi, performanceApi, aiApi, songApi, singerApi, itunesApi, holode
 import type { Singer, CreatePerformanceItem, AINormalizationItem, Song, UpdateStreamRequest, ITunesSearchResult, CommentSong, SongSuggestion } from '../api/types';
 import Loading from '../components/ui/Loading';
 import Tag from '../components/ui/Tag';
-import { useToast } from '../components/ui/Toast';
+import { useToast } from '../components/ui/ToastContext';
 import { useAuthStore, hasPermission, PERM } from '../store/auth';
 import { usePlayerStore } from '../store/player';
-import YoutubePlayer, { youtubePlayerSeekTo, youtubePlayerGetCurrentTime } from '../components/YoutubePlayer';
+import YoutubePlayer from '../components/YoutubePlayer';
+import { youtubePlayerSeekTo, youtubePlayerGetCurrentTime } from '../components/youtubePlayerControl';
+import type { YouTubePlayerInstance } from '../types/youtube';
 import TimestampTweaker from '../components/TimestampTweaker';
 import QueueAddButton from '../components/QueueAddButton';
 import RawCommentsPanel from '../components/RawCommentsPanel';
@@ -1226,7 +1228,7 @@ export default function StreamDetailPage() {
           endDiff: undefined,
         };
       } else if (newEnd !== undefined) {
-        updated[index] = { ...s, end: newEnd, endSource: source as any };
+        updated[index] = { ...s, end: newEnd, endSource: source };
       }
       return updated;
     });
@@ -1357,8 +1359,9 @@ export default function StreamDetailPage() {
         setIsEditing(false);
         setEditableSongs([]);
         queryClient.invalidateQueries({ queryKey: ['stream', id] });
-      } catch (err: any) {
-        showToast(`削除エラー: ${err.message}`, 'error');
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        showToast(`削除エラー: ${message}`, 'error');
       }
       return;
     }
@@ -1395,7 +1398,7 @@ export default function StreamDetailPage() {
   };
 
   // YouTube 播放器實例（必須在任何條件判斷之前）
-  const playerInstanceRef = useRef<any>(null);
+  const playerInstanceRef = useRef<YouTubePlayerInstance | null>(null);
 
   if (isLoading) {
     return <Loading />;

@@ -5,7 +5,7 @@ import { homeApi, songApi, tagApi } from '../api/client';
 import type { Performance, Singer, Stream } from '../api/types';
 import Loading from '../components/ui/Loading';
 import Tag from '../components/ui/Tag';
-import { useToast } from '../components/ui/Toast';
+import { useToast } from '../components/ui/ToastContext';
 import QueueAddButton from '../components/QueueAddButton';
 import ArtistLinks from '../components/ArtistLinks';
 import { usePlayerStore, type PlayerTrack } from '../store/player';

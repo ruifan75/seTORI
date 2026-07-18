@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { holodexApi, batchAnalyzeApi } from '../../api/client';
-import { useToast } from '../../components/ui/Toast';
+import { useToast } from '../../components/ui/ToastContext';
 
 // 一括分析のモード定義（バックエンドの BatchMode* と対応）
 const BATCH_MODES = [
