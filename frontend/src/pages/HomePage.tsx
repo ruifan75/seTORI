@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { homeApi, songApi, tagApi } from '../api/client';
 import type { Performance, Singer, Stream } from '../api/types';
@@ -282,6 +282,7 @@ function StreamCardRow({ streams }: { streams: Stream[] }) {
 
 export default function HomePage() {
   const { showToast } = useToast();
+  const queryClient = useQueryClient();
   const recommendationRowRef = useRef<HTMLDivElement>(null);
   const pendingRecommendationReveal = useRef<{ previousCount: number; previousScrollWidth: number } | null>(null);
   const recommendationLoadInFlight = useRef(false);
@@ -445,6 +446,13 @@ export default function HomePage() {
     showToast(`現在のおすすめ${reco.length}曲をキューに追加しました`, 'success');
   };
 
+  // おすすめを最初から選び直す（蓄積した全ページを破棄して 1 ページ目を取り直す）
+  const reshuffleRecommendations = () => {
+    pendingRecommendationReveal.current = null;
+    recommendationRowRef.current?.scrollTo({ left: 0 });
+    queryClient.resetQueries({ queryKey: ['random-performances', 'home', 'infinite'] });
+  };
+
   return (
     <div className="space-y-8">
       {/* おすすめ（ランダムピックアップ） */}
@@ -474,6 +482,15 @@ export default function HomePage() {
               >
                 <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
                   <path d="M14 10H3v2h11v-2zm0-4H3v2h11V6zm4 8v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zM3 16h7v-2H3v2z" />
+                </svg>
+              </button>
+              <button
+                onClick={reshuffleRecommendations}
+                className="inline-flex items-center justify-center w-8 h-8 text-gray-500 border rounded-full hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+                title="おすすめを選び直す"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v6h6M20 20v-6h-6M5.5 9a8 8 0 0 1 13.4-2.6L20 7.5M18.5 15a8 8 0 0 1-13.4 2.6L4 16.5" />
                 </svg>
               </button>
             </>
