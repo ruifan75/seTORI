@@ -297,7 +297,7 @@ export default function PlayerBar() {
 
       {expanded ? (
         /* ===== 拡大表示（Musicdex 風：左＝動画、右＝キュー） ===== */
-        <div className="fixed inset-0 z-50 bg-gray-950 text-white flex flex-col">
+        <div className="fixed inset-0 z-50 bg-gray-950 text-white flex flex-col pb-[env(safe-area-inset-bottom)]">
           {/* Header */}
           <div className="h-14 shrink-0 flex items-center justify-between px-4 border-b border-white/10">
             <button
@@ -441,7 +441,7 @@ export default function PlayerBar() {
         </div>
       ) : (
         /* ===== 底部バー ===== */
-        <div className="relative shrink-0 bg-white border-t shadow-[0_-2px_8px_rgba(0,0,0,0.06)] z-40">
+        <div className="relative shrink-0 bg-white border-t shadow-[0_-2px_8px_rgba(0,0,0,0.06)] z-40 pb-[env(safe-area-inset-bottom)]">
           {/* キューパネル（クイック表示） */}
           {queueOpen && (
             <div className="absolute bottom-full right-2 mb-1 w-[26rem] max-w-[calc(100vw-1rem)] max-h-80 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-xl">
@@ -516,7 +516,15 @@ export default function PlayerBar() {
             </div>
           )}
 
-          <div className="flex items-center gap-3 px-3 py-2">
+          {/* モバイルはコントロール以外のタップで全画面表示（Musicdex 風） */}
+          <div
+            className="flex items-center gap-3 px-3 py-2 cursor-pointer sm:cursor-default"
+            onClick={(e) => {
+              if (window.matchMedia('(min-width: 640px)').matches) return;
+              if ((e.target as HTMLElement).closest('button, a')) return;
+              setExpanded(true);
+            }}
+          >
             {/* 動画のスペース（実映像は fixed のコンテナが浮いている） */}
             <div className="w-32 h-[72px] shrink-0 hidden sm:block" />
             {/* モバイルではアートワーク */}
@@ -532,7 +540,8 @@ export default function PlayerBar() {
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 min-w-0">
                 {track.songId ? (
-                  <Link to={`/songs/${track.songId}`} title={track.songName} className="text-sm font-medium text-gray-900 hover:text-indigo-600 truncate">
+                  // モバイルではリンク無効（タップ＝全画面表示に統一）
+                  <Link to={`/songs/${track.songId}`} title={track.songName} className="text-sm font-medium text-gray-900 hover:text-indigo-600 truncate pointer-events-none sm:pointer-events-auto">
                     {track.songName}
                   </Link>
                 ) : (
@@ -546,8 +555,10 @@ export default function PlayerBar() {
                 />
               </div>
               <div className="flex items-center gap-2 text-xs text-gray-400 min-w-0">
+                {/* モバイルはキュー位置を小さく表示（ボタンではなく情報として） */}
+                <span className="sm:hidden font-mono shrink-0">{index + 1}/{queue.length}</span>
                 {track.singers.length > 0 && (
-                  <span className="truncate shrink-0">
+                  <span className="truncate shrink-0 pointer-events-none sm:pointer-events-auto">
                     {track.singers.map((s, i) => (
                       <span key={s.id}>
                         {i > 0 && '、'}
@@ -576,8 +587,13 @@ export default function PlayerBar() {
 
             <div className="hidden md:flex">{volumeControl(false)}</div>
 
-            {/* 拡大・キュー・閉じる */}
-            <div className="flex items-center gap-1 shrink-0">
+            {/* モバイル：展開できることを示すシェブロン（バー全体がタップ対象） */}
+            <svg className="sm:hidden w-4 h-4 text-gray-300 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+            </svg>
+
+            {/* 拡大・キュー・閉じる（sm 以上のみ。モバイルは拡大＝バータップ、キュー/閉じるは全画面側で操作） */}
+            <div className="hidden sm:flex items-center gap-1 shrink-0">
               <button
                 onClick={() => setExpanded(true)}
                 className="p-2 text-gray-500 hover:text-gray-900"

@@ -985,7 +985,8 @@ export default function SongDetailPage() {
                   key={perf.id}
                   className="bg-white rounded-lg shadow-sm border overflow-hidden hover:shadow-md transition-shadow"
                 >
-                  <div className="flex">
+                  {/* モバイルはサムネイルを上に全幅表示、sm 以上で左右並び */}
+                  <div className="flex flex-col sm:flex-row">
                     {/* Thumbnail：クリックでサイト内プレイヤー再生 */}
                     <button
                       onClick={() => playAll(perfIndex)}
@@ -996,10 +997,10 @@ export default function SongDetailPage() {
                         <img
                           src={perf.thumbnail_url}
                           alt={perf.stream_title}
-                          className="w-48 h-28 object-cover"
+                          className="w-full aspect-video sm:w-48 sm:h-28 sm:aspect-auto object-cover"
                         />
                       ) : (
-                        <div className="w-48 h-28 bg-gray-200 flex items-center justify-center">
+                        <div className="w-full aspect-video sm:w-48 sm:h-28 sm:aspect-auto bg-gray-200 flex items-center justify-center">
                           <span className="text-gray-400">No Image</span>
                         </div>
                       )}
@@ -1018,9 +1019,9 @@ export default function SongDetailPage() {
                     </button>
 
                     {/* Content */}
-                    <div className="flex-1 p-4">
+                    <div className="flex-1 min-w-0 p-4">
                       <div className="flex items-start justify-between">
-                        <div>
+                        <div className="min-w-0">
                           <Link
                             to={`/streams/${perf.stream_id}`}
                             className="font-medium text-gray-900 hover:text-indigo-600 line-clamp-1"

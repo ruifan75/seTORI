@@ -504,9 +504,9 @@ export default function BackupPage() {
 
       {/* ローカルバックアップ */}
       <div className="bg-white rounded-lg shadow-sm border p-6">
-        <div className="flex items-start justify-between gap-4 mb-2">
-          <h2 className="text-xl font-bold text-gray-900">ローカルバックアップ</h2>
-          <div className="flex gap-2 shrink-0">
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 mb-2">
+          <h2 className="text-xl font-bold text-gray-900 whitespace-nowrap">ローカルバックアップ</h2>
+          <div className="flex flex-wrap gap-2">
             <button
               onClick={() => fileInputRef.current?.click()}
               className="px-3 py-1.5 text-sm text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50"

@@ -14,6 +14,14 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  min-height: 100dvh;
+}
+
+/* iOS Safari の 100vh は下部ツールバー収納時の高さのため、ツールバー表示中は
+   画面最下部（プレイヤーバー）が隠れる。dvh 対応ブラウザでは動的高さを使う。 */
+.h-screen-dynamic {
+  height: 100vh;
+  height: 100dvh;
 }
 
 /* Toast Animation */

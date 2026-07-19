@@ -1496,7 +1496,8 @@ export default function StreamDetailPage() {
     <>
       <div className="flex flex-col min-[1300px]:flex-row gap-6 w-full h-full min-h-0 overflow-hidden">
       {/* Left Column - Stream Info + YouTube Player */}
-      <div className="w-full min-[1300px]:basis-2/5 min-[1300px]:shrink-0 min-[1300px]:self-stretch flex flex-row min-[1300px]:grid min-[1300px]:grid-rows-[2fr_3fr] gap-4 min-h-0 min-[1300px]:overflow-hidden shrink-0 max-h-[40vh] min-[1300px]:max-h-none">
+      {/* モバイル（<sm）は情報カードとプレイヤーを縦積みにし高さ制限も外す。sm〜1300px は左右並び+40vh 制限 */}
+      <div className="w-full min-[1300px]:basis-2/5 min-[1300px]:shrink-0 min-[1300px]:self-stretch flex flex-col sm:flex-row min-[1300px]:grid min-[1300px]:grid-rows-[2fr_3fr] gap-4 min-h-0 min-[1300px]:overflow-hidden shrink-0 max-h-none sm:max-h-[40vh] min-[1300px]:max-h-none">
         {/* Stream Header - 40% */}
         <div className="flex-1 min-w-0 bg-white rounded-lg shadow-sm border overflow-y-auto min-h-0">
           {isEditing ? (
@@ -1905,7 +1906,7 @@ export default function StreamDetailPage() {
 
         {/* Player + Timeline - 60% */}
         <div className="flex-1 min-w-0 bg-white rounded-lg shadow-sm border flex flex-col min-h-0">
-          <div className="bg-black flex-1 min-h-[280px] flex items-center overflow-hidden">
+          <div className="bg-black flex-1 min-h-[200px] sm:min-h-[280px] flex items-center overflow-hidden">
             <YoutubePlayer
               videoId={stream.id}
               onReady={(player) => {
