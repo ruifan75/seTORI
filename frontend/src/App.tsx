@@ -22,6 +22,7 @@ import SettingsPage from './pages/admin/SettingsPage';
 import LogsPage from './pages/admin/LogsPage';
 import UsersPage from './pages/admin/UsersPage';
 import SuggestionsPage from './pages/admin/SuggestionsPage';
+import BackupPage from './pages/admin/BackupPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -76,6 +77,10 @@ function App() {
               <Route
                 path="admin/users"
                 element={<RequirePermission permission={PERM.USERS_MANAGE}><UsersPage /></RequirePermission>}
+              />
+              <Route
+                path="admin/backups"
+                element={<RequirePermission permission={PERM.BACKUP_MANAGE}><BackupPage /></RequirePermission>}
               />
             </Route>
           </Routes>

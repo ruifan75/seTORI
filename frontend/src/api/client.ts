@@ -54,6 +54,12 @@ import type {
   PermissionInfo,
   CreateUserRequest,
   UpdateUserRequest,
+  BackupStatusResponse,
+  BackupSettings,
+  BackupResult,
+  DriveDeviceAuth,
+  DriveStatus,
+  DriveFile,
 } from './types';
 
 const DEFAULT_API_BASE_URL =
@@ -741,6 +747,85 @@ export const roleApi = {
 
   listPermissions: async (): Promise<PermissionInfo[]> => {
     const { data } = await api.get('/api/permissions');
+    return data;
+  },
+};
+
+// ========== DB バックアップ API（要 backup:manage） ==========
+
+export const backupApi = {
+  status: async (): Promise<BackupStatusResponse> => {
+    const { data } = await api.get('/api/backups');
+    return data;
+  },
+
+  create: async (): Promise<BackupResult> => {
+    const { data } = await api.post('/api/backups');
+    return data;
+  },
+
+  updateSettings: async (settings: {
+    auto_enabled: boolean;
+    interval_hours: number;
+    retention_local: number;
+    retention_drive: number;
+    drive_upload: boolean;
+  }): Promise<BackupSettings> => {
+    const { data } = await api.put('/api/backups/settings', settings);
+    return data;
+  },
+
+  downloadBlob: async (name: string): Promise<Blob> => {
+    const { data } = await api.get(`/api/backups/${encodeURIComponent(name)}/download`, {
+      responseType: 'blob',
+    });
+    return data as Blob;
+  },
+
+  delete: async (name: string): Promise<void> => {
+    await api.delete(`/api/backups/${encodeURIComponent(name)}`);
+  },
+
+  restore: async (name: string): Promise<{ message: string }> => {
+    const { data } = await api.post(`/api/backups/${encodeURIComponent(name)}/restore`);
+    return data;
+  },
+
+  restoreUpload: async (file: File): Promise<{ message: string }> => {
+    const form = new FormData();
+    form.append('file', file);
+    const { data } = await api.post('/api/backups/restore-upload', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return data;
+  },
+
+  // Google Drive 連携（デバイスフロー）
+  gdriveAuthStart: async (): Promise<DriveDeviceAuth> => {
+    const { data } = await api.post('/api/backups/gdrive/auth/start');
+    return data;
+  },
+
+  gdriveAuthPoll: async (deviceCode: string): Promise<{ connected: boolean; gdrive: DriveStatus }> => {
+    const { data } = await api.post('/api/backups/gdrive/auth/poll', { device_code: deviceCode });
+    return data;
+  },
+
+  gdriveDisconnect: async (): Promise<void> => {
+    await api.delete('/api/backups/gdrive');
+  },
+
+  gdriveFiles: async (): Promise<DriveFile[]> => {
+    const { data } = await api.get('/api/backups/gdrive/files');
+    return data.files ?? [];
+  },
+
+  gdriveDeleteFile: async (id: string): Promise<void> => {
+    await api.delete(`/api/backups/gdrive/files/${encodeURIComponent(id)}`);
+  },
+
+  gdriveRestoreFile: async (id: string): Promise<{ message: string }> => {
+    const { data } = await api.post(`/api/backups/gdrive/files/${encodeURIComponent(id)}/restore`);
     return data;
   },
 };

@@ -17,6 +17,12 @@ type Config struct {
 	BootstrapAdminPass string
 	Environment        string
 	LogLevel           string
+
+	// バックアップ関連
+	BackupDir             string // ダンプの保存先ディレクトリ
+	BackupDockerContainer string // ホストに pg_dump が無い場合に使う PostgreSQL コンテナ名
+	GoogleOAuthClientID   string // Google Drive 連携用 OAuth クライアント（TV と限定入力デバイス型）
+	GoogleOAuthSecret     string
 }
 
 // Load 環境変数から設定を読み込み
@@ -36,6 +42,11 @@ func Load() (*Config, error) {
 		BootstrapAdminPass: getEnv("ADMIN_PASSWORD", "admin"),
 		Environment:        getEnv("ENVIRONMENT", "development"),
 		LogLevel:           getEnv("LOG_LEVEL", "INFO"),
+
+		BackupDir:             getEnv("BACKUP_DIR", "./backups"),
+		BackupDockerContainer: getEnv("BACKUP_PG_CONTAINER", "setori-postgres"),
+		GoogleOAuthClientID:   getEnv("GOOGLE_OAUTH_CLIENT_ID", ""),
+		GoogleOAuthSecret:     getEnv("GOOGLE_OAUTH_CLIENT_SECRET", ""),
 	}
 
 	return cfg, nil

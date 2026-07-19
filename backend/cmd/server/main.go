@@ -63,6 +63,9 @@ func main() {
 		}
 	}()
 
+	// 自動バックアップ（設定で有効な場合、間隔ごとに pg_dump + Google Drive アップロード）
+	router.BackupService().StartScheduler()
+
 	// サーバーを起動
 	port := os.Getenv("PORT")
 	if port == "" {

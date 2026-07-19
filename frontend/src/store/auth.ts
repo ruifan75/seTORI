@@ -12,6 +12,7 @@ export const PERM = {
   AI_MANAGE: 'ai:manage',
   LOGS_VIEW: 'logs:view',
   USERS_MANAGE: 'users:manage',
+  BACKUP_MANAGE: 'backup:manage',
 } as const;
 
 // hasPermission はユーザーが指定権限を持つか判定する純関数（コンポーネントの reactive 判定用）。

@@ -32,3 +32,6 @@ logs/
 
 # Downloaded live chat cache
 data/
+
+# DB backups (pg_dump)
+backups/

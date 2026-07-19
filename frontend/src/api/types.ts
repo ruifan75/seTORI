@@ -675,3 +675,58 @@ export interface UpdateUserRequest {
   role_id: string;
   is_active: boolean;
 }
+
+// ========== DB バックアップ ==========
+
+export interface BackupSettings {
+  auto_enabled: boolean;
+  interval_hours: number;
+  retention_local: number;
+  retention_drive: number;
+  drive_upload: boolean;
+  drive_folder_id?: string;
+  last_backup_at?: string | null;
+  last_backup_status?: string;
+}
+
+export interface BackupFileInfo {
+  name: string;
+  size: number;
+  modified_at: string;
+}
+
+export interface DriveStatus {
+  configured: boolean;
+  connected: boolean;
+  email?: string;
+  folder_name?: string;
+}
+
+export interface BackupStatusResponse {
+  settings: BackupSettings;
+  backups: BackupFileInfo[];
+  gdrive: DriveStatus;
+}
+
+export interface BackupResult {
+  name: string;
+  size: number;
+  drive_uploaded: boolean;
+  drive_error?: string;
+}
+
+export interface DriveDeviceAuth {
+  device_code: string;
+  user_code: string;
+  verification_url: string;
+  expires_in: number;
+  interval: number;
+}
+
+export interface DriveFile {
+  id: string;
+  name: string;
+  size?: number;
+  createdTime?: string;
+  mimeType?: string;
+}

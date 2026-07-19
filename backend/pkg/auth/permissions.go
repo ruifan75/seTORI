@@ -9,6 +9,8 @@ const (
 	PermAIManage    = "ai:manage"    // AI プロバイダー設定
 	PermLogsView    = "logs:view"    // ログ閲覧・ログレベル変更
 	PermUsersManage = "users:manage" // ユーザー/ロール管理
+	// DB バックアップ/リストア・Google Drive 連携
+	PermBackupManage = "backup:manage"
 )
 
 // PermissionInfo は UI 表示用の権限メタ情報。
@@ -27,6 +29,7 @@ func AllPermissions() []PermissionInfo {
 		{Key: PermAIManage, Description: "AI プロバイダー設定"},
 		{Key: PermLogsView, Description: "ログ閲覧・レベル変更"},
 		{Key: PermUsersManage, Description: "ユーザー・ロール管理"},
+		{Key: PermBackupManage, Description: "DB バックアップ・リストア"},
 	}
 }
 

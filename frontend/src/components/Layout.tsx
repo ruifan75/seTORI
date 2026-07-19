@@ -20,6 +20,7 @@ const adminItems = [
   { path: '/admin/settings', label: '設定', permission: PERM.CONTENT_EDIT },
   { path: '/admin/logs', label: 'ログ', permission: PERM.LOGS_VIEW },
   { path: '/admin/users', label: 'ユーザー', permission: PERM.USERS_MANAGE },
+  { path: '/admin/backups', label: 'バックアップ', permission: PERM.BACKUP_MANAGE },
 ];
 
 export default function Layout() {

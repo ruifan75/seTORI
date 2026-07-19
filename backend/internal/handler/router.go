@@ -21,6 +21,7 @@ import (
 	"github.com/ruifan75/setori/internal/service"
 	"github.com/ruifan75/setori/pkg/ai"
 	"github.com/ruifan75/setori/pkg/auth"
+	"github.com/ruifan75/setori/pkg/gdrive"
 	"github.com/ruifan75/setori/pkg/itunes"
 	"github.com/ruifan75/setori/pkg/youtube"
 )
@@ -48,6 +49,7 @@ type Router struct {
 	authService          *service.AuthService
 	readingService       *service.ReadingService
 	suggestionService    *service.SuggestionService
+	backupService        *service.BackupService
 }
 
 // NewRouter 新しいルーターを作成
@@ -88,6 +90,9 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	readingService := service.NewReadingService(artistRepo, songRepo)
 	suggestionRepo := repository.NewSuggestionRepository(db)
 	suggestionService := service.NewSuggestionService(suggestionRepo, songService, artistService)
+	appSettingsRepo := repository.NewAppSettingsRepository(db)
+	driveClient := gdrive.NewClient(cfg.GoogleOAuthClientID, cfg.GoogleOAuthSecret)
+	backupService := service.NewBackupService(db, appSettingsRepo, driveClient, cfg.DatabaseURL, cfg.BackupDir, cfg.BackupDockerContainer)
 
 	r := &Router{
 		db:                   db,
@@ -110,6 +115,7 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 		authService:          authService,
 		readingService:       readingService,
 		suggestionService:    suggestionService,
+		backupService:        backupService,
 	}
 
 	r.setupRoutes()
@@ -119,6 +125,11 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 // AuthService は main.go でのブートストラップ（初期管理者作成）に使う。
 func (r *Router) AuthService() *service.AuthService {
 	return r.authService
+}
+
+// BackupService は main.go での自動バックアップスケジューラ起動に使う。
+func (r *Router) BackupService() *service.BackupService {
+	return r.backupService
 }
 
 func (r *Router) setupRoutes() {
@@ -259,6 +270,23 @@ func (r *Router) setupRoutes() {
 	// Log management (for admin)
 	r.mux.HandleFunc("GET /api/logs", r.handleGetLogs)
 	r.mux.HandleFunc("PUT /api/logs/level", r.handleSetLogLevel)
+
+	// DB バックアップ/リストア（要 backup:manage）
+	r.mux.HandleFunc("GET /api/backups", r.handleBackupStatus)
+	r.mux.HandleFunc("POST /api/backups", r.handleCreateBackup)
+	r.mux.HandleFunc("PUT /api/backups/settings", r.handleUpdateBackupSettings)
+	r.mux.HandleFunc("POST /api/backups/restore-upload", r.handleRestoreUpload)
+	r.mux.HandleFunc("GET /api/backups/{name}/download", r.handleDownloadBackup)
+	r.mux.HandleFunc("POST /api/backups/{name}/restore", r.handleRestoreBackup)
+	r.mux.HandleFunc("DELETE /api/backups/{name}", r.handleDeleteBackup)
+
+	// Google Drive 連携（要 backup:manage）
+	r.mux.HandleFunc("POST /api/backups/gdrive/auth/start", r.handleGDriveAuthStart)
+	r.mux.HandleFunc("POST /api/backups/gdrive/auth/poll", r.handleGDriveAuthPoll)
+	r.mux.HandleFunc("DELETE /api/backups/gdrive", r.handleGDriveDisconnect)
+	r.mux.HandleFunc("GET /api/backups/gdrive/files", r.handleGDriveListFiles)
+	r.mux.HandleFunc("DELETE /api/backups/gdrive/files/{id}", r.handleGDriveDeleteFile)
+	r.mux.HandleFunc("POST /api/backups/gdrive/files/{id}/restore", r.handleGDriveRestoreFile)
 
 	// iTunes API
 	r.mux.HandleFunc("GET /api/itunes/search", r.handleItunesSearch)
@@ -2292,6 +2320,9 @@ func requiredPermission(method, path string) (perm string, needsAuth bool) {
 		return auth.PermLogsView, true
 	case strings.HasPrefix(path, "/api/sync"):
 		return auth.PermSyncRun, true
+	case strings.HasPrefix(path, "/api/backups"):
+		// バックアップ/リストアはダウンロード（GET）含め全操作で専用権限が必要
+		return auth.PermBackupManage, true
 	}
 
 	// それ以外：安全メソッドは公開閲覧、書き込みは content:edit
