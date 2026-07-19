@@ -270,7 +270,9 @@ export default function PlayerBar() {
         }
       }
     }
-    scheduleBlockedCheck();
+    // 注意：ここでは blocked チェックを仕掛けない。読み込みが遅いだけの
+    // UNSTARTED を「ブロックされた」と誤判定し、再生直前の曲を一時停止して
+    // しまうため（チェックは初回生成時の onReady のみ）
     setProgress(0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [track?.performanceId]);
