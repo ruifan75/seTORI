@@ -60,7 +60,9 @@ export default function Layout() {
       {/* Header */}
       <header className="relative z-30 bg-white shadow-sm border-b shrink-0">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center h-16">
+          {/* モバイルはヘッダーからの下引っ張り（pull-to-refresh）を防ぐ。
+              lg 以上は検索・ナビ操作があるため通常のタッチ挙動 */}
+          <div className="flex items-center h-16 touch-none lg:touch-auto">
             {/* Logo */}
             <Link to="/" className="flex shrink-0 items-center gap-2">
               <span className="text-2xl font-bold text-indigo-600 inline-flex items-center">
@@ -270,7 +272,7 @@ export default function Layout() {
         className={
           isStreamDetail
             ? 'flex-1 w-full max-w-none px-2 sm:px-4 lg:px-6 py-6 overflow-hidden min-h-0'
-            : 'flex-1 overflow-y-auto [scrollbar-gutter:stable_both-edges]'
+            : 'flex-1 overflow-y-auto overscroll-y-contain [scrollbar-gutter:stable_both-edges]'
         }
       >
         {isStreamDetail ? (

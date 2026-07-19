@@ -25,6 +25,11 @@ export default function PlayerBar() {
   const playerRef = useRef<YouTubePlayerInstance | null>(null);
   const readyRef = useRef(false);
   const currentVideoRef = useRef<string>('');
+  // トラック切り替え直後は true。YT が切り替え中に発する一時的な PAUSED を
+  // 状態同期から除外するためのフラグ（PLAYING が来たら解除）
+  const switchingRef = useRef(false);
+  // 自動再生ブロック検知タイマー
+  const blockedCheckRef = useRef<number | undefined>(undefined);
   const [progress, setProgress] = useState(0); // 区間内の経過秒
   const [expanded, setExpanded] = useState(false);
   // 音量は自前 UI で管理（縮小時の iframe は小さすぎて操作できないためロックする）
@@ -46,6 +51,21 @@ export default function PlayerBar() {
     }
   };
 
+  // 自動再生がブロックされたままなら UI を「再生」表示に合わせる（ワンタップで開始可能に）。
+  // 曲の読み込み（load/seek）のたびに仕掛け直す
+  const scheduleBlockedCheck = () => {
+    window.clearTimeout(blockedCheckRef.current);
+    blockedCheckRef.current = window.setTimeout(() => {
+      const p = playerRef.current;
+      if (!p || !readyRef.current || typeof p.getPlayerState !== 'function') return;
+      const st = p.getPlayerState();
+      // -1: UNSTARTED / 5: CUED（自動再生がブロックされた状態）
+      if ((st === -1 || st === 5) && usePlayerStore.getState().playing) {
+        usePlayerStore.getState().setPlaying(false);
+      }
+    }, 1500);
+  };
+
   const changeVolume = (v: number) => {
     setVolume(v);
     const m = v === 0 ? true : false;
@@ -64,18 +84,69 @@ export default function PlayerBar() {
   useEffect(() => {
     if (!expanded) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setExpanded(false);
+      if (e.key === 'Escape') collapseAnimated();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expanded]);
 
-  // YT IFrame API のロード（既存の YoutubePlayer と同じ script を共有）
+  // スワイプ判定用（ミニバー：上へ→拡大 / 拡大表示：下へ→縮小）
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+  const queueListRef = useRef<HTMLDivElement>(null);
+
+  // 拡大表示のアニメーション：オーバーレイと動画コンテナ（別 fixed 要素）を
+  // 同じ transform で動かす。ドラッグ追従は再レンダー回避のため DOM 直接操作。
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const videoWrapRef = useRef<HTMLDivElement>(null);
+  const closingRef = useRef(false);
+
+  const setPanelTransform = (transform: string, transition: string) => {
+    for (const el of [overlayRef.current, videoWrapRef.current]) {
+      if (!el) continue;
+      el.style.transition = transition;
+      el.style.transform = transform;
+    }
+  };
+
+  // 下方向へスライドアウトしてから閉じる
+  const collapseAnimated = () => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    setPanelTransform('translateY(100vh)', 'transform 220ms ease-in');
+    window.setTimeout(() => {
+      setExpanded(false);
+      closingRef.current = false;
+      // ミニ表示に戻った動画コンテナへ transform を残さない
+      setPanelTransform('', '');
+    }, 220);
+  };
+
+  // 拡大表示中は背面ページのスクロールを完全にロックする。
+  // iOS はオーバーレイ上のスワイプでも背後のページが動く（ラバーバンド含む）ため、
+  // キュー一覧内と input 以外の touchmove を preventDefault で止める。
+  useEffect(() => {
+    if (!expanded) return;
+    const onTouchMove = (e: TouchEvent) => {
+      const t = e.target as HTMLElement;
+      if (queueListRef.current?.contains(t) || t.closest('input')) return;
+      e.preventDefault();
+    };
+    document.addEventListener('touchmove', onTouchMove, { passive: false });
+    return () => document.removeEventListener('touchmove', onTouchMove);
+  }, [expanded]);
+
+  // YT IFrame API のロード（既存の YoutubePlayer と同じ script を共有）。
+  // プレイヤーは最初の曲が積まれたときに生成する。
   useEffect(() => {
     const container = containerRef.current;
     if (!track || playerRef.current || !container) return;
 
+    // リトライ連鎖が複数走って同じ container に player が二重生成されないよう、
+    // cancelled と playerRef の再チェックで必ず一本・一回だけ生成する。
+    let cancelled = false;
     const init = () => {
+      if (cancelled || playerRef.current) return;
       const YT = window.YT;
       if (!YT || !YT.Player) {
         setTimeout(init, 100);
@@ -89,17 +160,42 @@ export default function PlayerBar() {
         videoId: track.streamId,
         // controls: 1 → 拡大表示時に YouTube ネイティブの操作
         // （全画面・画質・音量など）がそのまま使える
-        playerVars: { autoplay: 1, controls: 1, modestbranding: 1, start: Math.floor(track.start), origin },
+        // playsinline: 1 → iOS でフルスクリーンに切り替わらずインライン再生
+        playerVars: { autoplay: 1, controls: 1, modestbranding: 1, playsinline: 1, start: Math.floor(track.start), origin },
         events: {
           onReady: () => {
             readyRef.current = true;
             currentVideoRef.current = track.streamId;
             applyVolume(volume, muted);
+            // iOS は初回の自動再生（ユーザー操作から時間が経った play）をブロックする。
+            // もう一度 play を試し、それでも始まらなければ scheduleBlockedCheck が
+            // UI を「再生」表示に合わせ、ワンタップで開始できるようにする。
+            try {
+              playerRef.current?.playVideo();
+            } catch {
+              /* noop */
+            }
+            scheduleBlockedCheck();
           },
           onStateChange: (e: YouTubePlayerStateChangeEvent) => {
             // 動画自体が終わった（end 未設定 or 区間が動画末尾）→ 次へ
             if (e.data === window.YT?.PlayerState?.ENDED) {
               usePlayerStore.getState().next();
+              return;
+            }
+            // YouTube 側の操作（動画クリックやネイティブコントロール）で
+            // 再生/一時停止された場合もバーのボタン表示を同期する。
+            // 同値なら zustand が再レンダーしないためループしない。
+            if (e.data === window.YT?.PlayerState?.PLAYING) {
+              switchingRef.current = false;
+              usePlayerStore.getState().setPlaying(true);
+            } else if (e.data === window.YT?.PlayerState?.PAUSED) {
+              // トラック切り替え中（load/seek 直後）に iOS が発する
+              // 一時的な PAUSED は無視する。同期してしまうと [playing] effect が
+              // 開始直前の新動画を pause してしまい、自動再生が始まらない。
+              if (!switchingRef.current) {
+                usePlayerStore.getState().setPlaying(false);
+              }
             }
           },
           onError: () => {
@@ -117,10 +213,30 @@ export default function PlayerBar() {
       document.head.appendChild(script);
     }
     init();
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [!!track]);
 
-  // アンマウント（キュー空）でインスタンス破棄
+  // キューが空になったらインスタンスを破棄する（container の DOM も消えるため、
+  // 次にキューが積まれたときに作り直す）
+  useEffect(() => {
+    if (track) return;
+    const p = playerRef.current;
+    if (!p) return;
+    try {
+      p.destroy?.();
+    } catch {
+      /* noop */
+    }
+    playerRef.current = null;
+    readyRef.current = false;
+    currentVideoRef.current = '';
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [!!track]);
+
+  // アンマウントでインスタンス破棄
   useEffect(() => {
     return () => {
       try {
@@ -138,13 +254,23 @@ export default function PlayerBar() {
   useEffect(() => {
     const p = playerRef.current;
     if (!p || !readyRef.current || !track) return;
+    switchingRef.current = true;
     if (currentVideoRef.current === track.streamId) {
       p.seekTo(track.start, true);
       p.playVideo();
     } else {
       currentVideoRef.current = track.streamId;
       p.loadVideoById({ videoId: track.streamId, startSeconds: track.start });
+      // iOS で autoplay が始まらないことがあるため、再生意図があれば明示的に押す
+      if (usePlayerStore.getState().playing) {
+        try {
+          p.playVideo();
+        } catch {
+          /* noop */
+        }
+      }
     }
+    scheduleBlockedCheck();
     setProgress(0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [track?.performanceId]);
@@ -277,9 +403,10 @@ export default function PlayerBar() {
       {/* 動画コンテナ：同一 DOM 要素を fixed 配置の切り替えだけで移動する。
           拡大時は厳密な 16:9（幅と高さの両制約の小さい方）で黒帯を出さない */}
       <div
+        ref={videoWrapRef}
         className={
           expanded
-            ? 'fixed z-[60] top-16 left-2 right-2 h-[36vh] lg:top-20 lg:left-8 lg:right-auto lg:h-auto lg:aspect-video lg:w-[min(calc((100vh-17rem)*1.7778),60vw)] bg-black rounded-lg overflow-hidden [&_iframe]:w-full [&_iframe]:h-full'
+            ? 'fixed z-[60] top-12 sm:top-16 left-2 right-2 h-[min(calc((100vw-1rem)*9/16),36vh)] lg:top-20 lg:left-8 lg:right-auto lg:h-auto lg:aspect-video lg:w-[min(calc((100vh-17rem)*1.7778),60vw)] bg-black rounded-lg overflow-hidden [&_iframe]:w-full [&_iframe]:h-full animate-[player-slide-up_240ms_ease-out]'
             : 'fixed z-[45] bottom-2 left-3 w-32 h-[72px] hidden sm:block bg-black rounded overflow-hidden [&_iframe]:w-full [&_iframe]:h-full'
         }
       >
@@ -297,28 +424,52 @@ export default function PlayerBar() {
 
       {expanded ? (
         /* ===== 拡大表示（Musicdex 風：左＝動画、右＝キュー） ===== */
-        <div className="fixed inset-0 z-50 bg-gray-950 text-white flex flex-col pb-[env(safe-area-inset-bottom)]">
-          {/* Header */}
-          <div className="h-14 shrink-0 flex items-center justify-between px-4 border-b border-white/10">
+        <div
+          ref={overlayRef}
+          className="fixed inset-0 z-50 bg-gray-950 text-white flex flex-col pb-[env(safe-area-inset-bottom)] animate-[player-slide-up_240ms_ease-out]"
+          // キュー一覧以外の領域は下へドラッグで追従し、離した位置で縮小/復帰（ヘッダー・動画・情報部）
+          onTouchStart={(e) => {
+            if (closingRef.current || queueListRef.current?.contains(e.target as Node)) {
+              touchStartRef.current = null;
+              return;
+            }
+            touchStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+          }}
+          onTouchMove={(e) => {
+            const s = touchStartRef.current;
+            if (!s) return;
+            const dy = e.touches[0].clientY - s.y;
+            // 指に追従（上方向へは動かさない）。transition なしで即時反映
+            setPanelTransform(`translateY(${Math.max(0, dy)}px)`, 'none');
+          }}
+          onTouchEnd={(e) => {
+            const s = touchStartRef.current;
+            touchStartRef.current = null;
+            if (!s) return;
+            const dx = e.changedTouches[0].clientX - s.x;
+            const dy = e.changedTouches[0].clientY - s.y;
+            if (dy > 50 && dy > Math.abs(dx)) {
+              collapseAnimated();
+            } else {
+              // しきい値未満は元の位置へスナップバック
+              setPanelTransform('translateY(0)', 'transform 180ms ease-out');
+            }
+          }}
+          onTouchCancel={() => {
+            touchStartRef.current = null;
+            if (!closingRef.current) setPanelTransform('translateY(0)', 'transform 180ms ease-out');
+          }}
+        >
+          {/* Header：右上の縮小ボタンのみ（残りはスワイプ用の余白）。モバイルは低め */}
+          <div className="h-10 sm:h-14 shrink-0 flex items-center justify-end px-4 border-b border-white/10">
             <button
-              onClick={() => setExpanded(false)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-300 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+              onClick={collapseAnimated}
+              className="p-2 text-gray-300 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
               title="縮小してページに戻る（Esc）"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
               </svg>
-              縮小
-            </button>
-            <span className="text-sm text-gray-400">再生中 {index + 1}/{queue.length}</span>
-            <button
-              onClick={() => {
-                clear();
-                setExpanded(false);
-              }}
-              className="px-3 py-1.5 text-sm text-gray-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
-            >
-              キューをクリア
             </button>
           </div>
 
@@ -327,7 +478,8 @@ export default function PlayerBar() {
             {/* 左：動画（fixed の動画コンテナがこの領域に浮いている）＋情報・コントロール。
                 幅は動画（16:9）の実寸に合わせ、余白はすべて右のキューに渡す */}
             <div className="shrink-0 lg:w-[calc(min(calc((100vh-17rem)*1.7778),60vw)+4rem)] flex flex-col">
-              <div className="h-[36vh] lg:flex-1 mt-2" /> {/* 動画スペース */}
+              {/* モバイルは幅基準の 16:9（36vh 上限）にして残りをキューへ渡す */}
+              <div className="h-[min(calc((100vw-1rem)*9/16),36vh)] lg:flex-1 mt-2" /> {/* 動画スペース */}
               <div className="px-6 py-4 space-y-3 lg:h-36 shrink-0">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-baseline gap-x-2">
@@ -379,17 +531,31 @@ export default function PlayerBar() {
                 <div className="flex items-center gap-4">
                   {controls('lg')}
                   {progressBar(true)}
-                  {volumeControl(true)}
+                  {/* iOS は Web からの音量変更不可（ハードウェアキーのみ）のためモバイルでは非表示 */}
+                  <div className="hidden sm:flex">{volumeControl(true)}</div>
                 </div>
               </div>
             </div>
 
             {/* 右：キュー一覧（残り幅をすべて使う） */}
             <div className="flex-1 min-w-0 min-h-0 border-t lg:border-t-0 lg:border-l border-white/10 flex flex-col">
-              <div className="px-4 py-2.5 text-sm font-medium text-gray-300 border-b border-white/10 shrink-0">
-                再生キュー（{queue.length}曲）
+              <div className="px-4 py-2.5 text-sm border-b border-white/10 shrink-0 flex items-center justify-between">
+                <span className="font-medium text-gray-300">
+                  再生キュー <span className="font-mono text-gray-400">{index + 1}/{queue.length}</span>
+                </span>
+                <button
+                  onClick={() => {
+                    clear();
+                    setExpanded(false);
+                  }}
+                  className="text-gray-500 hover:text-white transition-colors"
+                  title="キューを空にしてプレイヤーを閉じる"
+                >
+                  クリア
+                </button>
               </div>
-              <div className="flex-1 overflow-y-auto">
+              {/* overflow-x-hidden：長い曲名/アーティスト名で横スクロールが生まれないように */}
+              <div ref={queueListRef} className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain">
                 {queue.map((t, i) => (
                   <div
                     key={`${t.performanceId}-${i}`}
@@ -411,7 +577,7 @@ export default function PlayerBar() {
                         <span className={`text-sm truncate ${i === index ? 'text-indigo-200 font-medium' : 'text-gray-100'}`}>
                           {t.songName}
                         </span>
-                        {t.artist && <span className="text-[11px] text-gray-500 truncate shrink-0">{t.artist}</span>}
+                        {t.artist && <span className="text-[11px] text-gray-500 truncate shrink-0 max-w-[40%]">{t.artist}</span>}
                       </span>
                       <span className="block text-xs text-gray-500 truncate">
                         {t.streamDate && (
@@ -516,13 +682,25 @@ export default function PlayerBar() {
             </div>
           )}
 
-          {/* モバイルはコントロール以外のタップで全画面表示（Musicdex 風） */}
+          {/* モバイルはコントロール以外のタップで全画面表示（Musicdex 風）、上スワイプでも拡大。
+              touch-none でバー上のスワイプがページを動かさないようにする */}
           <div
-            className="flex items-center gap-3 px-3 py-2 cursor-pointer sm:cursor-default"
+            className="flex items-center gap-3 px-3 py-2 cursor-pointer sm:cursor-default touch-none sm:touch-auto"
             onClick={(e) => {
               if (window.matchMedia('(min-width: 640px)').matches) return;
               if ((e.target as HTMLElement).closest('button, a')) return;
               setExpanded(true);
+            }}
+            onTouchStart={(e) => {
+              touchStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+            }}
+            onTouchEnd={(e) => {
+              const s = touchStartRef.current;
+              touchStartRef.current = null;
+              if (!s) return;
+              const dx = e.changedTouches[0].clientX - s.x;
+              const dy = e.changedTouches[0].clientY - s.y;
+              if (dy < -40 && Math.abs(dy) > Math.abs(dx)) setExpanded(true);
             }}
           >
             {/* 動画のスペース（実映像は fixed のコンテナが浮いている） */}
@@ -554,11 +732,12 @@ export default function PlayerBar() {
                   linkClassName="hover:text-indigo-600"
                 />
               </div>
-              <div className="flex items-center gap-2 text-xs text-gray-400 min-w-0">
+              {/* 歌手名が長い/多い場合は右端をフェードアウト（ボタンへの重なり防止） */}
+              <div className="flex items-center gap-2 text-xs text-gray-400 min-w-0 overflow-hidden [mask-image:linear-gradient(to_right,#000_calc(100%-1.5rem),transparent)] [-webkit-mask-image:linear-gradient(to_right,#000_calc(100%-1.5rem),transparent)]">
                 {/* モバイルはキュー位置を小さく表示（ボタンではなく情報として） */}
                 <span className="sm:hidden font-mono shrink-0">{index + 1}/{queue.length}</span>
                 {track.singers.length > 0 && (
-                  <span className="truncate shrink-0 pointer-events-none sm:pointer-events-auto">
+                  <span className="whitespace-nowrap shrink-0 pointer-events-none sm:pointer-events-auto">
                     {track.singers.map((s, i) => (
                       <span key={s.id}>
                         {i > 0 && '、'}

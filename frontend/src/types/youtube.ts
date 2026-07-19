@@ -1,6 +1,7 @@
 export interface YouTubePlayerInstance {
   destroy(): void;
   getCurrentTime(): number;
+  getPlayerState(): number;
   loadVideoById(options: { videoId: string; startSeconds?: number }): void;
   mute(): void;
   pauseVideo(): void;
@@ -22,7 +23,8 @@ interface YouTubePlayerOptions {
   origin?: string;
   width?: string;
   height?: string;
-  videoId: string;
+  // 省略時は空のプレイヤーを生成し、後から loadVideoById で読み込む
+  videoId?: string;
   playerVars?: Record<string, string | number>;
   events?: {
     onReady?: (event: YouTubePlayerEvent) => void;
@@ -35,6 +37,8 @@ interface YouTubeNamespace {
   Player: new (element: HTMLElement, options: YouTubePlayerOptions) => YouTubePlayerInstance;
   PlayerState?: {
     ENDED: number;
+    PLAYING: number;
+    PAUSED: number;
   };
 }
 

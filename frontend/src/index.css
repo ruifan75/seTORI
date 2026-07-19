@@ -17,11 +17,29 @@ body {
   min-height: 100dvh;
 }
 
+/* モバイルの引っ張って更新（pull-to-refresh）を無効化。
+   誤操作でページ全体がリロードされると再生キューが消えるため。
+   スクロールは main 等の内部コンテナで行うのでページ本体には不要。 */
+html,
+body {
+  overscroll-behavior-y: none;
+}
+
 /* iOS Safari の 100vh は下部ツールバー収納時の高さのため、ツールバー表示中は
    画面最下部（プレイヤーバー）が隠れる。dvh 対応ブラウザでは動的高さを使う。 */
 .h-screen-dynamic {
   height: 100vh;
   height: 100dvh;
+}
+
+/* 全画面プレイヤーのスライドイン（動画コンテナと重ねて同距離 100vh を動かす） */
+@keyframes player-slide-up {
+  from {
+    transform: translateY(100vh);
+  }
+  to {
+    transform: translateY(0);
+  }
 }
 
 /* Toast Animation */
