@@ -1,4 +1,10 @@
 
-# Holodex frontend reference clones (42MB each, own .git — not part of this repo)
+# Frontend reference clones (own .git — not part of this repo)
 /Holodex/
 /backend/Holodex/
+/Musicdex/
+
+# Scratch screenshots dropped at repo root (not part of this repo)
+/*.png
+/*.jpg
+/*.jpeg
