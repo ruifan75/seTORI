@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { commentApi } from '../api/client';
+import { findRawCommentTimestamps, hasRawCommentTimestamp } from '../utils/rawCommentTimestamps';
 
 // 編集ページ「生コメント」タブの中身。
 // コメント分析が誤ったときに原文を確認し、行内のタイムスタンプから直接曲を追加する。
@@ -19,25 +20,13 @@ interface Props {
   onAddSong: (input: AddSongInput) => void;
 }
 
-// 行内のタイムスタンプ（H:MM:SS / MM:SS）を全部拾う
-const TS_RE = /(\d{1,2}):(\d{2})(?::(\d{2}))?/g;
-// g フラグ付き正規表現の .test() は lastIndex が残って交互に false になるため、判定用は別に持つ
-const HAS_TS_RE = /\d{1,2}:\d{2}/;
-
-function tsToSeconds(m: RegExpMatchArray): number {
-  const [, a, b, c] = m;
-  return c !== undefined
-    ? parseInt(a) * 3600 + parseInt(b) * 60 + parseInt(c)
-    : parseInt(a) * 60 + parseInt(b);
-}
-
 // 行のテキストから曲名/アーティストを推測する。
 // 最後のタイムスタンプより後ろを取り、先頭の記号を落として「/」「-」等で分割。
 function guessSong(line: string): { name: string; artist: string } {
   let text = line;
   let lastEnd = -1;
-  for (const m of line.matchAll(TS_RE)) {
-    lastEnd = (m.index ?? 0) + m[0].length;
+  for (const timestamp of findRawCommentTimestamps(line)) {
+    lastEnd = timestamp.index + timestamp.text.length;
   }
   if (lastEnd >= 0) text = line.slice(lastEnd);
   text = text.replace(/^[\s~〜\-–—・:：.。,、)）\]】>》]+/, '').trim();
@@ -61,7 +50,7 @@ function guessSong(line: string): { name: string; artist: string } {
 
 // 1行分：タイムスタンプをチップ化し、＋で曲追加
 function CommentLine({ line, onSeek, onAddSong }: { line: string; onSeek: Props['onSeek']; onAddSong: Props['onAddSong'] }) {
-  const matches = [...line.matchAll(TS_RE)];
+  const matches = findRawCommentTimestamps(line);
   if (matches.length === 0) {
     return <p className="text-gray-600 whitespace-pre-wrap break-words">{line}</p>;
   }
@@ -70,24 +59,23 @@ function CommentLine({ line, onSeek, onAddSong }: { line: string; onSeek: Props[
   const parts: React.ReactNode[] = [];
   let cursor = 0;
   matches.forEach((m, i) => {
-    const idx = m.index ?? 0;
+    const idx = m.index;
     if (idx > cursor) parts.push(<span key={`t${i}`}>{line.slice(cursor, idx)}</span>);
-    const secs = tsToSeconds(m);
     parts.push(
       <button
         key={`ts${i}`}
-        onClick={() => onSeek(secs)}
+        onClick={() => onSeek(m.start)}
         className="inline-flex items-center px-1.5 rounded bg-indigo-50 text-indigo-700 font-mono text-xs hover:bg-indigo-100 transition-colors align-baseline"
         title="この時間にジャンプ"
       >
-        {m[0]}
+        {m.text}
       </button>
     );
-    cursor = idx + m[0].length;
+    cursor = idx + m.text.length;
   });
   if (cursor < line.length) parts.push(<span key="tail">{line.slice(cursor)}</span>);
 
-  const firstSecs = tsToSeconds(matches[0]);
+  const firstSecs = matches[0].start;
   const guess = guessSong(line);
 
   return (
@@ -124,7 +112,7 @@ export default function RawCommentsPanel({ videoId, onSeek, onAddSong }: Props) 
   const filtered = useMemo(() => {
     const q = filter.trim().toLowerCase();
     return comments
-      .filter((c) => !tsOnly || HAS_TS_RE.test(c))
+      .filter((c) => !tsOnly || hasRawCommentTimestamp(c))
       .filter((c) => !q || c.toLowerCase().includes(q))
       .map((c) => c.split('\n'));
   }, [comments, filter, tsOnly]);

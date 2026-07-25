@@ -15,6 +15,7 @@ import TimestampTweaker from '../components/TimestampTweaker';
 import QueueAddButton from '../components/QueueAddButton';
 import RawCommentsPanel from '../components/RawCommentsPanel';
 import ArtistLinks from '../components/ArtistLinks';
+import { extractRawCommentTimestamps } from '../utils/rawCommentTimestamps';
 
 
 // 編集可能な配信情報
@@ -689,6 +690,14 @@ export default function StreamDetailPage() {
     queryFn: () => streamApi.get(id!),
     enabled: !!id,
     staleTime: 0, // ページに入るたびに再読み込みを保証
+  });
+
+  // 編集画面の raw comment タイムラインと生コメントタブで同じキャッシュを共有する。
+  const { data: rawCommentsData } = useQuery({
+    queryKey: ['raw-comments', id],
+    queryFn: () => commentApi.getComments(id!),
+    enabled: !!id && isEditing,
+    staleTime: Infinity,
   });
 
   const { data: streamTagsData = [] } = useQuery({
@@ -1425,7 +1434,8 @@ export default function StreamDetailPage() {
     };
   });
 
-  const holodexTimeline = holodexTimelineSongs.map((song, index) => {
+  // タイムラインは分析後の state ではなく、stream に保存された Holodex 原文を使う。
+  const holodexTimeline = (stream.holodex_timeline_songs || []).map((song, index) => {
     const end = song.end_seconds > 0 ? song.end_seconds : song.start_seconds;
     return {
       id: `holodex-${index}`,
@@ -1436,22 +1446,15 @@ export default function StreamDetailPage() {
     };
   });
 
-  const commentTimeline = commentTimelineSongs.map((song, index) => {
-    const end = song.end > 0 ? song.end : song.start;
-    return {
-      id: `comment-${index}`,
-      start: song.start,
-      end,
-      label: song.name,
-      artist: song.original_artist || '',
-    };
-  });
+  const rawCommentTimeline = isEditing
+    ? extractRawCommentTimestamps(rawCommentsData?.comments || [])
+    : [];
 
   const timelineDuration = Math.max(
     stream.duration_seconds || 0,
     ...setoriTimeline.map((s) => s.end),
-    ...holodexTimeline.map((s) => s.end),
-    ...commentTimeline.map((s) => s.end),
+    ...(isEditing ? holodexTimeline.map((s) => s.end) : []),
+    ...rawCommentTimeline.map((s) => s.start),
     1,
   );
 
@@ -1916,7 +1919,8 @@ export default function StreamDetailPage() {
           </div>
 
           <div className="border-t py-3 px-0 shrink-0">
-            <div className="space-y-1 px-3">
+            {/* YouTube の進捗バーと左右端を揃える（デスクトップ UI は左側の余白が少し広い）。 */}
+            <div className="space-y-1 px-3 sm:pl-9 sm:pr-8">
               <div className="relative h-3 bg-gray-100 rounded-none">
                 {setoriTimeline.map((item) => (
                   <button
@@ -1946,6 +1950,54 @@ export default function StreamDetailPage() {
                   </button>
                 ))}
               </div>
+              {isEditing && (
+                <>
+                  <div className="relative h-3 bg-blue-50 rounded-none">
+                    {holodexTimeline.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => youtubePlayerSeekTo(item.start)}
+                        className="absolute top-0 h-full rounded bg-blue-500/70 hover:bg-blue-600 transition-colors group"
+                        style={{
+                          left: `${getTimelineLeft(item.start)}%`,
+                          width: `${getTimelineWidth(item.start, item.end)}%`,
+                        }}
+                      >
+                        <div className={`absolute bottom-full ${getTooltipAlignClass(item.start)} mb-2 hidden group-hover:block z-50 pointer-events-none`}>
+                          <div className="bg-gray-900 text-white text-xs rounded-lg p-2 shadow-lg whitespace-nowrap">
+                            <div className="font-semibold">{item.label}</div>
+                            {item.artist && <div className="text-gray-300">{item.artist}</div>}
+                            <div className="text-gray-400 mt-1">
+                              {formatTime(item.start)} - {formatTime(item.end)}
+                            </div>
+                            <div className="text-blue-400 text-[10px] mt-1">Holodex（未処理）</div>
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                  <div className="relative h-3 bg-orange-50 rounded-none">
+                    {rawCommentTimeline.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => youtubePlayerSeekTo(item.start)}
+                        className="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-orange-500 hover:bg-orange-600 transition-colors group"
+                        style={{ left: `${getTimelineLeft(item.start)}%` }}
+                      >
+                        <div className={`absolute bottom-full ${getTooltipAlignClass(item.start)} mb-2 hidden group-hover:block z-50 pointer-events-none`}>
+                          <div className="w-max max-w-80 bg-gray-900 text-white text-xs rounded-lg p-2 shadow-lg text-left whitespace-normal">
+                            <div className="font-mono text-gray-300">{formatTime(item.start)}</div>
+                            <div className="mt-1 break-words">{item.label}</div>
+                            <div className="text-orange-400 text-[10px] mt-1">Raw comment（未処理）</div>
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>

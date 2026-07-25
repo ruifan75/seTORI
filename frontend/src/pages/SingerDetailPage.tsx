@@ -456,9 +456,9 @@ export default function SingerDetailPage() {
                       )}
                       {/* Status badges */}
                       <div className="absolute top-2 left-2 flex flex-col gap-1">
-                        {stream.is_processed && (
-                          <span className="px-2 py-0.5 bg-green-500 text-white text-xs font-medium rounded">
-                            処理済み
+                        {!stream.is_processed && (
+                          <span className="px-2 py-0.5 bg-amber-500 text-white text-xs font-medium rounded">
+                            未処理
                           </span>
                         )}
                         {stream.is_hidden && (
