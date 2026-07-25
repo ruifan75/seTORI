@@ -226,6 +226,7 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("POST /api/streams/{id}/comments/sync-youtube", r.handleSyncYouTubeComments)
 	r.mux.HandleFunc("POST /api/streams/{id}/comments/analyze", r.handleAnalyzeComments)
 	r.mux.HandleFunc("POST /api/comments/backfill", r.handleBackfillCommentSongs)
+	r.mux.HandleFunc("POST /api/comments/backfill-hashes", r.handleBackfillCommentSongsHashes)
 	r.mux.HandleFunc("POST /api/streams/{id}/analyze-chat-ends", r.handleAnalyzeChatEnds)
 	r.mux.HandleFunc("POST /api/streams/{id}/chat-end-estimate", r.handleEstimateChatEnds)
 	r.mux.HandleFunc("POST /api/chat-ends/backfill", r.handleBackfillChatEnds)
@@ -1751,6 +1752,17 @@ func (r *Router) handleBackfillCommentSongs(w http.ResponseWriter, req *http.Req
 		"message": fmt.Sprintf("%d件のストリームを補填しました", count),
 		"count":   count,
 	})
+}
+
+// handleBackfillCommentSongsHashes は comment_songs_hash を現行の正規化アルゴリズムへ移行する
+// （旧: 生bytes sha → 新: 正規化 sha）。AI は呼ばず、快取が効かなくなっていた歌回を修復する。
+func (r *Router) handleBackfillCommentSongsHashes(w http.ResponseWriter, req *http.Request) {
+	res, err := r.commentService.BackfillCommentSongsHashes()
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, res)
 }
 
 // ========== Tag Management Handlers ==========

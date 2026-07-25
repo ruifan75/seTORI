@@ -283,6 +283,61 @@ func (s *CommentService) BackfillCommentSongs() (int, error) {
 	return count, nil
 }
 
+// HashBackfillResult は comment_songs_hash 補正の結果内訳。
+type HashBackfillResult struct {
+	Total    int `json:"total"`    // comment_songs を持つ歌回数
+	Migrated int `json:"migrated"` // 旧アルゴリズム hash → 正規化 hash へ書き換えた数
+	AlreadyOK int `json:"already_ok"` // 既に正規化 hash（快取が既に効く）
+	Skipped  int `json:"skipped"`  // comment_raw が空 / hash 未設定 / 未知形式で触らなかった数
+}
+
+// BackfillCommentSongsHashes は comment_songs_hash を現行の正規化アルゴリズムへ移行する。
+//
+// 背景: 以前は生の JSONB bytes の sha256 を保存していたが、現在の快取判定は
+// 「unmarshal → json.Marshal → sha256」の正規化 hash を使う。旧形式で保存された
+// 歌回は hash が永遠に一致せず、force=false でも毎回 AI 再分析されていた。
+//
+// comment_raw は不変なので AI は一切呼ばない。安全のため、保存済み hash が
+// 旧アルゴリズム（生bytes sha）と一致する場合のみ正規化 hash へ差し替える。
+// 既に正規化済み・hash 未設定・未知形式のものは触らない（冪等・再実行安全）。
+func (s *CommentService) BackfillCommentSongsHashes() (HashBackfillResult, error) {
+	rows, err := s.streamRepo.FindCommentHashRows()
+	if err != nil {
+		return HashBackfillResult{}, fmt.Errorf("find comment hash rows: %w", err)
+	}
+
+	res := HashBackfillResult{Total: len(rows)}
+	for _, row := range rows {
+		canonical := hashStoredComments(row.CommentRaw)
+		// comment_raw が空 / 壊れている、または hash 未設定なら快取対象外 → 触らない
+		if canonical == "" || !row.Hash.Valid || row.Hash.String == "" {
+			res.Skipped++
+			continue
+		}
+		if row.Hash.String == canonical {
+			res.AlreadyOK++
+			continue
+		}
+		// 旧アルゴリズム（生 JSONB bytes の sha256）と一致するものだけ移行する。
+		// 一致しない = 由来不明なので、既存の comment_songs を誤って「有効」扱いしないよう据え置く。
+		if row.Hash.String != hashBytes(row.CommentRaw) {
+			res.Skipped++
+			logger.Warnf("[comment] hash backfill: %s は未知形式のため据え置き（stored=%s）", row.ID, row.Hash.String)
+			continue
+		}
+		if err := s.streamRepo.UpdateCommentSongsHash(row.ID, canonical); err != nil {
+			logger.Warnf("[comment] hash backfill update failed (%s): %v", row.ID, err)
+			res.Skipped++
+			continue
+		}
+		res.Migrated++
+	}
+
+	logger.Infof("[comment] hash backfill 完了: total=%d migrated=%d already_ok=%d skipped=%d",
+		res.Total, res.Migrated, res.AlreadyOK, res.Skipped)
+	return res, nil
+}
+
 // loadFilterKeywords 從 DB 載入 filter/keep keywords
 func (s *CommentService) loadFilterKeywords() (filterKW, keepKW []string, err error) {
 	keywords, err := s.filterKeywordRepo.FindAll()

@@ -242,6 +242,44 @@ func (r *StreamRepository) FindIDsWithCommentSongs() ([]string, error) {
 	return ids, rows.Err()
 }
 
+// CommentHashRow は comment_songs_hash 補正用の最小行（id + 現在の comment_raw + 保存済み hash）。
+type CommentHashRow struct {
+	ID         string
+	CommentRaw []byte
+	Hash       sql.NullString
+}
+
+// FindCommentHashRows は comment_songs を持つ全歌回の (id, comment_raw, comment_songs_hash) を返す。
+// comment_songs_hash のアルゴリズム移行（旧: 生bytes sha → 新: 正規化 sha）補正に使う。
+func (r *StreamRepository) FindCommentHashRows() ([]CommentHashRow, error) {
+	rows, err := r.db.Query(`
+		SELECT id, comment_raw, comment_songs_hash FROM streams
+		WHERE comment_songs IS NOT NULL AND comment_songs::text NOT IN ('null', '[]')`)
+	if err != nil {
+		return nil, fmt.Errorf("query comment hash rows: %w", err)
+	}
+	defer rows.Close()
+
+	var out []CommentHashRow
+	for rows.Next() {
+		var row CommentHashRow
+		if err := rows.Scan(&row.ID, &row.CommentRaw, &row.Hash); err != nil {
+			return nil, fmt.Errorf("scan comment hash row: %w", err)
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+// UpdateCommentSongsHash は comment_songs_hash のみを書き換える（comment_songs / comment_raw は不変）。
+func (r *StreamRepository) UpdateCommentSongsHash(id, hash string) error {
+	_, err := r.db.Exec(`UPDATE streams SET comment_songs_hash = $2 WHERE id = $1`, id, hash)
+	if err != nil {
+		return fmt.Errorf("update comment_songs_hash: %w", err)
+	}
+	return nil
+}
+
 // FindByDateRange 根據日期範圍取得歌回
 func (r *StreamRepository) FindByDateRange(start, end time.Time) ([]models.Stream, error) {
 	query := `
