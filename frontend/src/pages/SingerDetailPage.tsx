@@ -4,10 +4,12 @@ import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { singerApi, holodexApi } from '../api/client';
 import { useAuthStore, hasPermission, PERM } from '../store/auth';
 import { usePlayerStore, type PlayerTrack } from '../store/player';
+import type { SongPerformance } from '../api/types';
 import Loading from '../components/ui/Loading';
 import Pagination from '../components/ui/Pagination';
 import Tag from '../components/ui/Tag';
 import ArtistLinks from '../components/ArtistLinks';
+import QueueAddButton from '../components/QueueAddButton';
 import { SortableTh, type SortDir, type SortState } from '../components/ui/Sort';
 
 type TabType = 'streams' | 'performances';
@@ -92,22 +94,35 @@ export default function SingerDetailPage() {
     enabled: !!id && activeTab === 'performances',
   });
 
-  // 歌唱曲一覧をキューに載せて startIndex から連続再生
+  // 歌唱記録1件を再生キューのトラックへ変換
+  const toTrack = (perf: SongPerformance): PlayerTrack => ({
+    performanceId: perf.id,
+    streamId: perf.stream_id,
+    songId: perf.song_id,
+    songName: perf.song_name ?? '(不明)',
+    artist: perf.original_artist ?? '',
+    artists: perf.artists ?? [],
+    singers: perf.singers?.map((s) => ({ id: s.id, name: s.name })) ?? [],
+    streamTitle: perf.stream_title,
+    streamDate: perf.stream_date,
+    start: perf.start_seconds,
+    end: perf.end_seconds,
+  });
+
+  // 歌唱曲一覧（現在のページ）をキューに載せて startIndex から連続再生
   const playPerformancesFrom = (startIndex: number) => {
-    const tracks: PlayerTrack[] = (performances?.performances ?? []).map((perf) => ({
-      performanceId: perf.id,
-      streamId: perf.stream_id,
-      songId: perf.song_id,
-      songName: perf.song_name ?? '(不明)',
-      artist: perf.original_artist ?? '',
-      artists: perf.artists ?? [],
-      singers: perf.singers?.map((s) => ({ id: s.id, name: s.name })) ?? [],
-      streamTitle: perf.stream_title,
-      streamDate: perf.stream_date,
-      start: perf.start_seconds,
-      end: perf.end_seconds,
-    }));
+    const tracks = (performances?.performances ?? []).map(toTrack);
     usePlayerStore.getState().playTracks(tracks, startIndex);
+  };
+
+  // 現在のページの歌唱曲をシャッフルして先頭から連続再生（Fisher–Yates）
+  const shufflePlay = () => {
+    const tracks = (performances?.performances ?? []).map(toTrack);
+    for (let i = tracks.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [tracks[i], tracks[j]] = [tracks[j], tracks[i]];
+    }
+    usePlayerStore.getState().playTracks(tracks, 0);
   };
 
   // Sync mutation
@@ -516,6 +531,25 @@ export default function SingerDetailPage() {
             </div>
           ) : (
             <>
+              {/* 一覧全体の再生操作（このページの歌唱曲が対象） */}
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => playPerformancesFrom(0)}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 text-sm bg-indigo-600 text-white font-medium rounded-full hover:bg-indigo-700 transition-colors"
+                  title="このページの歌唱曲を上から連続再生"
+                >
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+                  再生
+                </button>
+                <button
+                  onClick={shufflePlay}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 text-sm bg-white border border-gray-300 text-gray-700 font-medium rounded-full hover:bg-gray-50 transition-colors"
+                  title="このページの歌唱曲をシャッフル再生"
+                >
+                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z" /></svg>
+                  ランダム再生
+                </button>
+              </div>
               <div className="bg-white rounded-lg shadow-sm border overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">
@@ -526,8 +560,8 @@ export default function SingerDetailPage() {
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         時間
                       </th>
-                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-20">
-                        再生
+                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-32">
+                        操作
                       </th>
                     </tr>
                   </thead>
@@ -588,16 +622,30 @@ export default function SingerDetailPage() {
                         <td className="px-4 py-4 text-sm text-gray-500 font-mono">
                           {formatTime(perf.start_seconds)}
                         </td>
-                        <td className="px-4 py-4 text-right">
-                          <button
-                            onClick={() => playPerformancesFrom(perfIndex)}
-                            className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-indigo-100 text-indigo-600 hover:bg-indigo-200 transition-colors"
-                            title="この歌唱から連続再生"
-                          >
-                            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                              <path d="M8 5v14l11-7z" />
-                            </svg>
-                          </button>
+                        <td className="px-4 py-4">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              onClick={() => playPerformancesFrom(perfIndex)}
+                              className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
+                              title="この歌唱から連続再生"
+                            >
+                              <svg className="w-4 h-4 ml-0.5" fill="currentColor" viewBox="0 0 24 24">
+                                <path d="M8 5v14l11-7z" />
+                              </svg>
+                            </button>
+                            <QueueAddButton track={toTrack(perf)} />
+                            <a
+                              href={perf.youtube_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center justify-center w-8 h-8 rounded-full text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                              title="YouTubeで開く"
+                            >
+                              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                                <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
+                              </svg>
+                            </a>
+                          </div>
                         </td>
                       </tr>
                     ))}

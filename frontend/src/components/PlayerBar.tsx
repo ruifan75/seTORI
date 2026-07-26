@@ -38,6 +38,18 @@ export default function PlayerBar() {
     return Number.isFinite(saved) && saved >= 0 && saved <= 100 ? saved : 80;
   });
   const [muted, setMuted] = useState(false);
+  // キーボードで音量を変えたときに一瞬だけ表示する音量 HUD（バーが畳まれていても分かるように）
+  const [volumeHud, setVolumeHud] = useState<number | null>(null);
+  const volumeHudTimer = useRef<number | undefined>(undefined);
+  // キー連打時に stale closure を避けるため、最新の音量/ミュート状態を ref でも保持する
+  const volumeRef = useRef(volume);
+  const mutedRef = useRef(muted);
+  useEffect(() => {
+    volumeRef.current = volume;
+  }, [volume]);
+  useEffect(() => {
+    mutedRef.current = muted;
+  }, [muted]);
 
   const applyVolume = (v: number, m: boolean) => {
     const p = playerRef.current;
@@ -90,6 +102,53 @@ export default function PlayerBar() {
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expanded]);
+
+  // ページ全体のプレイヤー用キーボードショートカット:
+  //   ↑ / ↓ = 音量 ±5、← / → = 5 秒シーク。
+  // 入力欄（input/textarea/select/contenteditable）にフォーカスがあるときや
+  // 修飾キー併用時は無効。track が無いとき（プレイヤー非表示）も何もしない。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!track || e.ctrlKey || e.metaKey || e.altKey) return;
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)) {
+        return;
+      }
+      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        e.preventDefault();
+        // 連打が 1 レンダー内に収まっても正しく加算されるよう ref から現在値を読む
+        const base = mutedRef.current ? 0 : volumeRef.current;
+        const v = Math.max(0, Math.min(100, base + (e.key === 'ArrowUp' ? 5 : -5)));
+        volumeRef.current = v;
+        mutedRef.current = v === 0;
+        changeVolume(v);
+        setVolumeHud(v);
+        window.clearTimeout(volumeHudTimer.current);
+        volumeHudTimer.current = window.setTimeout(() => setVolumeHud(null), 1000);
+      } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        e.preventDefault();
+        const p = playerRef.current;
+        if (!p || !readyRef.current || typeof p.getCurrentTime !== 'function') return;
+        let t = 0;
+        try {
+          t = p.getCurrentTime();
+        } catch {
+          return;
+        }
+        const lo = track.start;
+        // 区間末尾ちょうどへ飛ぶと終端監視が次曲へ送ってしまうので 1 秒手前まで
+        const hi = track.end > track.start ? track.end - 1 : Infinity;
+        let nt = t + (e.key === 'ArrowRight' ? 5 : -5);
+        if (nt < lo) nt = lo;
+        if (nt > hi) nt = Math.max(lo, hi);
+        p.seekTo(nt, true);
+        setProgress(Math.max(0, nt - track.start));
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [track]);
 
   // スワイプ判定用（ミニバー：上へ→拡大 / 拡大表示：下へ→縮小）
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
@@ -402,6 +461,20 @@ export default function PlayerBar() {
 
   return (
     <>
+      {/* 音量 HUD（キーボード ↑/↓ 操作時に一瞬だけ表示） */}
+      {volumeHud !== null && (
+        <div className="fixed left-1/2 -translate-x-1/2 bottom-28 z-[70] flex items-center gap-2 px-4 py-2 rounded-full bg-gray-900/85 text-white text-sm shadow-lg pointer-events-none">
+          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+            {volumeHud === 0 ? (
+              <path d="M3 9v6h4l5 5V4L7 9H3zm13.59 3l2.7-2.7-1.41-1.41L15.17 10.6 12.46 7.9 11.05 9.3 13.76 12l-2.71 2.7 1.41 1.41 2.71-2.7 2.7 2.7 1.42-1.41z" />
+            ) : (
+              <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" />
+            )}
+          </svg>
+          <span className="font-mono tabular-nums">{volumeHud}</span>
+        </div>
+      )}
+
       {/* 動画コンテナ：同一 DOM 要素を fixed 配置の切り替えだけで移動する。
           拡大時は厳密な 16:9（幅と高さの両制約の小さい方）で黒帯を出さない */}
       <div
