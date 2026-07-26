@@ -61,6 +61,9 @@ func (s *CommentService) AnalyzeComments(videoID string, force bool) (*dto.Analy
 		if cachedHash.Valid && cachedHash.String == rawHash {
 			var cached []dto.CommentSong
 			if err := json.Unmarshal(stream.CommentSongs, &cached); err == nil && len(cached) > 0 {
+				// DB 照合だけ現在の状態へ再解決する（AI は打たない）。matched_song_id は
+				// 分析時点の DB に依存するため、キャッシュに凍結された古いマッチ／未マッチを補正する。
+				s.reresolveMatches(cached)
 				logger.Infof("/comments/analyze cache hit for %s (%d songs)", videoID, len(cached))
 				return &dto.AnalyzeCommentsResponse{Songs: cached}, nil
 			}
@@ -124,6 +127,33 @@ func (s *CommentService) AnalyzeComments(videoID string, force bool) (*dto.Analy
 
 	logger.Infof("comment analysis completed for %s: %d songs", videoID, len(songs))
 	return &dto.AnalyzeCommentsResponse{Songs: songs, Warning: aiWarning}, nil
+}
+
+// reresolveMatches は AI を呼ばず、正規化済みの名称で DB 照合だけをやり直し、
+// matched_song_* を現在の DB 状態に更新する（キャッシュ命中時に呼ぶ）。
+// 正規化名が無い古いデータは抽出名にフォールバックする。
+func (s *CommentService) reresolveMatches(songs []dto.CommentSong) {
+	if s.normalizationService == nil {
+		return
+	}
+	for i := range songs {
+		name := songs[i].NormalizedName
+		if name == "" {
+			name = songs[i].Name
+		}
+		artist := songs[i].NormalizedArtist
+		if artist == "" {
+			artist = songs[i].OriginalArtist
+		}
+		m := s.normalizationService.ResolveMatch(name, artist)
+		songs[i].MatchedSongID = m.MatchedSongID
+		songs[i].MatchedSongName = m.MatchedSongName
+		songs[i].MatchedSongNameReading = m.MatchedSongNameReading
+		songs[i].MatchedSongArtist = m.MatchedSongArtist
+		songs[i].MatchedSongArtistReading = m.MatchedSongArtistReading
+		songs[i].MatchedSongArtURL = m.MatchedSongArtURL
+		songs[i].MatchedSongItunesID = m.MatchedSongItunesID
+	}
 }
 
 // normalizeInto 對 songs 跑 AI 正規化＋DB 照合，把結果填回每首 song（in-place）。

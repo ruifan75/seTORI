@@ -252,6 +252,17 @@ func (s *NormalizationService) matchAndPopulateSong(result *dto.AISuggestionResu
 	}
 }
 
+// ResolveMatch は AI を呼ばず、正規化済みの名称・アーティストで DB 照合のみを行い、
+// マッチ結果（matched_song_*）を埋めた AISuggestionResult を返す。
+// キャッシュ命中時に、凍結された古いマッチ（曲が後から追加された等）を現在の DB 状態へ
+// 再解決するために使う。マッチ無しなら matched_song_* は空のまま。
+func (s *NormalizationService) ResolveMatch(normalizedName, normalizedArtist string) dto.AISuggestionResult {
+	var res dto.AISuggestionResult
+	item := dto.AINormalizationItem{Name: normalizedName, OriginalArtist: normalizedArtist}
+	s.matchAndPopulateSong(&res, &item, normalizedName, normalizedArtist)
+	return res
+}
+
 // parseBatchAIResponse バッチ AI 応答をパース
 func (s *NormalizationService) parseBatchAIResponse(response string) ([]BatchAISuggestion, error) {
 	response = ai.CleanJSONResponse(response)
