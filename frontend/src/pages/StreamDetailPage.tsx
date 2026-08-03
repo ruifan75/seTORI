@@ -33,6 +33,9 @@ interface EditableSong {
   matchedSongId: string | null; // マッチした楽曲ID、null は新規作成を示す
   artUrl: string | null; // アートワークURL
   itunesId: number | null; // Holodex が提供する iTunes ID
+  // itunesId が既に DB（song_itunes）に紐付いているか。false は保存時に新規紐付けが作られることを示す
+  // （primary な iTunes ID は Holodex へのアップロードにも使われるため、誤りは外部に伝播する）
+  itunesFromDb?: boolean;
   trackDuration: number | null; // iTunes 楽曲長（秒）
   originalName: string; // 元の名称を追跡（変更判定用）
   originalArtist: string; // 元のアーティストを追跡
@@ -86,6 +89,7 @@ function mergeDuplicateSongs(songs: EditableSong[]): EditableSong[] {
             matchedSongId: song.matchedSongId || existing.matchedSongId,
             artUrl: song.artUrl || existing.artUrl,
             itunesId: song.itunesId ?? existing.itunesId,
+            itunesFromDb: song.itunesId != null ? song.itunesFromDb : existing.itunesFromDb,
             trackDuration: song.trackDuration ?? existing.trackDuration,
             nameReading: song.nameReading || existing.nameReading,
             artistReading: song.artistReading || existing.artistReading,
@@ -98,6 +102,7 @@ function mergeDuplicateSongs(songs: EditableSong[]): EditableSong[] {
             matchedSongId: existing.matchedSongId || song.matchedSongId,
             artUrl: existing.artUrl || song.artUrl,
             itunesId: existing.itunesId ?? song.itunesId,
+            itunesFromDb: existing.itunesId != null ? existing.itunesFromDb : song.itunesFromDb,
             trackDuration: existing.trackDuration ?? song.trackDuration,
             nameReading: existing.nameReading || song.nameReading,
             artistReading: existing.artistReading || song.artistReading,
@@ -912,7 +917,10 @@ export default function StreamDetailPage() {
     const finalArtistReading = hasMatch && song.matched_song_artist_reading != null
       ? song.matched_song_artist_reading : (song.normalized_artist_reading || '');
     const artUrl = (hasMatch ? song.matched_song_art_url : undefined) || song.art_url || null;
+    // matched_song_itunes_id は DB 照合で得た既存の紐付け。無い場合のみ Holodex 提供の ID を使う
+    // （後者は未登録なので、保存時に song_itunes へ新規紐付けが作られる）
     const itunesId = song.matched_song_itunes_id || song.itunes_id || null;
+    const itunesFromDb = !!song.matched_song_itunes_id;
     const trackDuration = itunesId ? await fetchTrackDurationByItunesId(itunesId) : null;
     const explicitEnd = song.end_seconds > 0 && song.end_seconds !== song.chat_end;
     return {
@@ -928,6 +936,7 @@ export default function StreamDetailPage() {
       matchedSongId: song.matched_song_id || null,
       artUrl,
       itunesId,
+      itunesFromDb,
       trackDuration,
       originalName: finalName,
       originalArtist: finalArtist,
@@ -973,6 +982,7 @@ export default function StreamDetailPage() {
       matchedSongId: song.matched_song_id || null,
       artUrl,
       itunesId,
+      itunesFromDb: itunesId != null, // コメント経路の ID は DB 照合由来のみ
       trackDuration,
       originalName: finalName,
       originalArtist: finalArtist,
@@ -1245,12 +1255,21 @@ export default function StreamDetailPage() {
 
   // 選擇搜尋到的歌曲
   const handleSelectExistingSong = async (index: number, song: Song) => {
-    const itunesId = song.itunes_ids && song.itunes_ids.length > 0 ? song.itunes_ids[0].itunes_id : null;
-    const trackDuration = itunesId ? await fetchTrackDurationByItunesId(Number(itunesId)) : null;
+    const selectedItunesId = song.itunes_ids && song.itunes_ids.length > 0 ? Number(song.itunes_ids[0].itunes_id) : null;
+    const selectedTrackDuration = selectedItunesId ? await fetchTrackDurationByItunesId(selectedItunesId) : null;
 
     setEditableSongs((prev) => {
       const updated = [...prev];
-      
+      const current = updated[index];
+      // 選んだ曲が iTunes ID を持たない場合は、行に載っている ID（Holodex 由来）を引き継ぐ。
+      // これにより保存時に song_itunes へ紐付けが作られ、次回以降は iTunes ID で自動マッチする。
+      // mergeDuplicateSongs と同じ ?? 規約。誤って引き継いだ場合は行の iTunes チップから解除できる。
+      const itunesId = selectedItunesId ?? current.itunesId;
+      // DB 楽曲（song.id あり）の ID は登録済み。純 iTunes 検索結果（id 空）は未登録なので保存時に紐付く
+      const itunesFromDb = selectedItunesId != null ? !!song.id : current.itunesFromDb;
+      // trackDuration は採用した ID と対応させる（取得失敗時に別 ID の値を流用しない）
+      const trackDuration = selectedItunesId != null ? selectedTrackDuration : current.trackDuration;
+
       // 檢查是否是從 iTunes 選擇的（id 為空）
       if (!song.id) {
         // 從 iTunes 選擇：填入基本資訊和 iTunes ID
@@ -1259,8 +1278,9 @@ export default function StreamDetailPage() {
           name: song.name,
           artist: song.original_artist,
           artUrl: song.arts || null,
-          itunesId: itunesId ? Number(itunesId) : null,
-          trackDuration: trackDuration,
+          itunesId,
+          itunesFromDb,
+          trackDuration,
           matchedSongId: null, // 這是新歌曲
           originalName: song.name,
           originalArtist: song.original_artist,
@@ -1274,14 +1294,30 @@ export default function StreamDetailPage() {
           artist: song.original_artist,
           artistReading: song.original_artist_reading || '',
           artUrl: song.arts || null,
-          itunesId: itunesId ? Number(itunesId) : null,
-          trackDuration: trackDuration,
+          itunesId,
+          itunesFromDb,
+          trackDuration,
           matchedSongId: song.id,
           originalName: song.name,
           originalArtist: song.original_artist,
         };
       }
       
+      return updated;
+    });
+  };
+
+  // iTunes ID の紐付けを解除（誤った ID が song_itunes に焼き付くのを防ぐ）。
+  // trackDuration も対応が崩れるため一緒に消す。
+  const clearItunesId = (index: number) => {
+    setEditableSongs((prev) => {
+      const updated = [...prev];
+      updated[index] = {
+        ...updated[index],
+        itunesId: null,
+        itunesFromDb: undefined,
+        trackDuration: null,
+      };
       return updated;
     });
   };
@@ -2140,6 +2176,14 @@ export default function StreamDetailPage() {
                     <span className="text-xs font-mono text-gray-500 shrink-0">
                       {formatTimeInput(song.start)} - {song.end > 0 ? formatTimeInput(song.end) : '--:--'}
                     </span>
+                    {song.itunesId && !song.itunesFromDb && (
+                      <span
+                        className="px-1.5 py-0.5 bg-amber-100 text-amber-800 text-[10px] font-medium rounded shrink-0"
+                        title={`iTunes ID ${song.itunesId} を保存時にこの楽曲へ紐付けます`}
+                      >
+                        iTunes＋
+                      </span>
+                    )}
                     {!song.matchedSongId && (
                       <span className="px-1.5 py-0.5 bg-green-100 text-green-700 text-[10px] font-medium rounded shrink-0">New</span>
                     )}
@@ -2180,7 +2224,32 @@ export default function StreamDetailPage() {
                                 New
                               </span>
                             )}
-                            {/* Removed edit song button */}
+                            {/* iTunes ID：未登録（amber）は保存時に song_itunes へ紐付けが作られる。
+                                primary な ID は Holodex へのアップロードにも使われるため誤りは外部に伝播する */}
+                            {song.itunesId && (
+                              <span
+                                className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-mono rounded ${
+                                  song.itunesFromDb
+                                    ? 'bg-gray-100 text-gray-600'
+                                    : 'bg-amber-100 text-amber-800'
+                                }`}
+                                title={
+                                  song.itunesFromDb
+                                    ? `iTunes ID ${song.itunesId}（登録済み）`
+                                    : `iTunes ID ${song.itunesId}（未登録：保存時にこの楽曲へ紐付けます）`
+                                }
+                              >
+                                iTunes: {song.itunesId}
+                                {!song.itunesFromDb && <span aria-hidden="true">＋</span>}
+                                <button
+                                  onClick={() => clearItunesId(index)}
+                                  className="ml-0.5 text-gray-400 hover:text-red-600"
+                                  title="この iTunes ID の紐付けを外す"
+                                >
+                                  ×
+                                </button>
+                              </span>
+                            )}
                           </div>
                         </div>
                       </div>
