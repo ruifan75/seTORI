@@ -2,8 +2,11 @@ package handler
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"strings"
 
@@ -26,6 +29,23 @@ func currentUser(req *http.Request) *models.User {
 		return u
 	}
 	return nil
+}
+
+// clientHint は匿名リクエストの同一性の手がかりを返す（IP の SHA-256 先頭16桁）。
+// 生 IP は保存しないが、同じ相手からの連投は数えられる、という妥協点。
+// リバースプロキシ下では X-Forwarded-For の先頭を使う。
+func clientHint(req *http.Request) string {
+	ip := req.RemoteAddr
+	if xff := req.Header.Get("X-Forwarded-For"); xff != "" {
+		ip = strings.TrimSpace(strings.Split(xff, ",")[0])
+	} else if host, _, err := net.SplitHostPort(ip); err == nil {
+		ip = host
+	}
+	if ip == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(ip))
+	return hex.EncodeToString(sum[:])[:16]
 }
 
 // bearerToken は Authorization ヘッダーから Bearer トークンを取り出す。

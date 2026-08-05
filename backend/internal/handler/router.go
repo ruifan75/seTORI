@@ -92,7 +92,7 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	authService := service.NewAuthService(authRepo)
 	readingService := service.NewReadingService(artistRepo, songRepo)
 	suggestionRepo := repository.NewSuggestionRepository(db)
-	suggestionService := service.NewSuggestionService(suggestionRepo, songService, artistService)
+	suggestionService := service.NewSuggestionService(suggestionRepo, songService, artistService, performanceService)
 	appSettingsRepo := repository.NewAppSettingsRepository(db)
 	driveClient := gdrive.NewClient(cfg.GoogleOAuthClientID, cfg.GoogleOAuthSecret)
 	backupService := service.NewBackupService(db, appSettingsRepo, driveClient, cfg.DatabaseURL, cfg.BackupDir, cfg.BackupDockerContainer)
@@ -258,6 +258,10 @@ func (r *Router) setupRoutes() {
 	// Create performances directly
 	r.mux.HandleFunc("POST /api/streams/{id}/performances", r.handleCreatePerformances)
 	r.mux.HandleFunc("DELETE /api/streams/{id}/performances", r.handleDeletePerformances)
+
+	// 歌唱記録の単件操作（セットリスト全体を送り直さずに1件だけ直す）
+	r.mux.HandleFunc("GET /api/performances/{id}", r.handleGetPerformance)
+	r.mux.HandleFunc("PUT /api/performances/{id}", r.handleUpdatePerformance)
 
 	// Comment analysis
 	r.mux.HandleFunc("GET /api/streams/{id}/comments", r.handleGetComments)
@@ -793,13 +797,19 @@ func (r *Router) handleCreateSuggestion(w http.ResponseWriter, req *http.Request
 		return
 	}
 
-	sug, err := r.suggestionService.Create(&body)
+	actor := service.SuggestionActor{
+		User:       currentUser(req),
+		ClientHint: clientHint(req),
+	}
+	sug, err := r.suggestionService.Create(&body, actor)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrInvalidTarget), errors.Is(err, service.ErrNoChange):
 			respondError(w, http.StatusBadRequest, err.Error())
 		case errors.Is(err, service.ErrTargetNotFound):
 			respondError(w, http.StatusNotFound, err.Error())
+		case errors.Is(err, service.ErrTooManySuggestions):
+			respondError(w, http.StatusTooManyRequests, err.Error())
 		default:
 			respondError(w, http.StatusInternalServerError, err.Error())
 		}
@@ -836,14 +846,24 @@ func (r *Router) handleCountSuggestions(w http.ResponseWriter, req *http.Request
 }
 
 // handleApproveSuggestion は提案を承認して対象へ反映する（content:edit）。
+// ?force=1 で、提案後に対象が変更されていても現在値を上書きして承認する。
 func (r *Router) handleApproveSuggestion(w http.ResponseWriter, req *http.Request) {
 	id, err := uuid.Parse(req.PathValue("id"))
 	if err != nil {
 		respondError(w, http.StatusBadRequest, "無効な提案ID")
 		return
 	}
-	if err := r.suggestionService.Approve(id); err != nil {
+	force := req.URL.Query().Get("force") == "1"
+	if err := r.suggestionService.Approve(id, currentUser(req), force); err != nil {
+		var conflict *service.ConflictError
 		switch {
+		case errors.As(err, &conflict):
+			// 提案後に対象が変わっている。どのフィールドがどうズレたかを返し、
+			// 管理者が「上書きしてよいか」を判断できるようにする。
+			respondJSON(w, http.StatusConflict, map[string]any{
+				"error":     conflict.Error(),
+				"conflicts": conflict.Fields,
+			})
 		case errors.Is(err, service.ErrSuggestionNotFound):
 			respondError(w, http.StatusNotFound, err.Error())
 		case errors.Is(err, service.ErrAlreadyReviewed):
@@ -863,7 +883,13 @@ func (r *Router) handleRejectSuggestion(w http.ResponseWriter, req *http.Request
 		respondError(w, http.StatusBadRequest, "無効な提案ID")
 		return
 	}
-	if err := r.suggestionService.Reject(id); err != nil {
+	// 却下理由（任意）。ボディが無くても却下できる。
+	var body struct {
+		Note string `json:"note"`
+	}
+	_ = json.NewDecoder(req.Body).Decode(&body)
+
+	if err := r.suggestionService.Reject(id, currentUser(req), body.Note); err != nil {
 		switch {
 		case errors.Is(err, service.ErrSuggestionNotFound):
 			respondError(w, http.StatusNotFound, err.Error())
@@ -1593,6 +1619,56 @@ func (r *Router) handleDeletePerformances(w http.ResponseWriter, req *http.Reque
 		Success: true,
 		Message: "すべての演奏記録を削除しました",
 	})
+}
+
+// handleGetPerformance は歌唱1件を配信・楽曲情報付きで返す（閲覧は公開）。
+func (r *Router) handleGetPerformance(w http.ResponseWriter, req *http.Request) {
+	id, err := uuid.Parse(req.PathValue("id"))
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "無効な歌唱ID")
+		return
+	}
+	perf, err := r.performanceService.GetByID(id)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if perf == nil {
+		respondError(w, http.StatusNotFound, "歌唱記録が見つかりません")
+		return
+	}
+	respondJSON(w, http.StatusOK, perf)
+}
+
+// handleUpdatePerformance は歌唱1件を部分更新する（content:edit）。
+// セットリスト全体を送り直す POST /api/streams/{id}/performances と違い、他の曲を巻き込まない。
+func (r *Router) handleUpdatePerformance(w http.ResponseWriter, req *http.Request) {
+	id, err := uuid.Parse(req.PathValue("id"))
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "無効な歌唱ID")
+		return
+	}
+	var body dto.UpdatePerformanceRequest
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		respondError(w, http.StatusBadRequest, "無効なリクエスト形式")
+		return
+	}
+
+	updated, err := r.performanceService.UpdatePerformance(id, &body)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrPerformanceNotFound):
+			respondError(w, http.StatusNotFound, err.Error())
+		case errors.Is(err, service.ErrDuplicatePerformance):
+			respondError(w, http.StatusConflict, err.Error())
+		case errors.Is(err, service.ErrInvalidTimeRange):
+			respondError(w, http.StatusBadRequest, err.Error())
+		default:
+			respondError(w, http.StatusBadRequest, err.Error())
+		}
+		return
+	}
+	respondJSON(w, http.StatusOK, updated)
 }
 
 // ========== Comment Analysis Handlers ==========

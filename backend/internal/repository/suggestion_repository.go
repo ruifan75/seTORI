@@ -17,13 +17,34 @@ func NewSuggestionRepository(db *sql.DB) *SuggestionRepository {
 	return &SuggestionRepository{db: db}
 }
 
+// suggestionColumns は SELECT 句とスキャン順を1か所に揃えるための共通定義。
+const suggestionColumns = `id, target_type, target_id, target_label, kind,
+	before_data, after_data, payload, note, status,
+	created_by, created_by_name, client_hint, reviewed_by, review_note,
+	created_at, reviewed_at`
+
+func scanSuggestion(scan func(...any) error) (models.EditSuggestion, error) {
+	var s models.EditSuggestion
+	err := scan(&s.ID, &s.TargetType, &s.TargetID, &s.TargetLabel, &s.Kind,
+		&s.BeforeData, &s.AfterData, &s.Payload, &s.Note, &s.Status,
+		&s.CreatedBy, &s.CreatedByName, &s.ClientHint, &s.ReviewedBy, &s.ReviewNote,
+		&s.CreatedAt, &s.ReviewedAt)
+	return s, err
+}
+
 // Create は提案を1件登録し、生成された行を返す。
 func (r *SuggestionRepository) Create(s *models.EditSuggestion) (*models.EditSuggestion, error) {
+	if len(s.Payload) == 0 {
+		s.Payload = []byte("{}")
+	}
 	err := r.db.QueryRow(`
-		INSERT INTO edit_suggestions (target_type, target_id, target_label, before_data, after_data, note)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO edit_suggestions
+			(target_type, target_id, target_label, kind, before_data, after_data, payload, note,
+			 created_by, created_by_name, client_hint)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		RETURNING id, created_at, status`,
-		s.TargetType, s.TargetID, s.TargetLabel, s.BeforeData, s.AfterData, s.Note).
+		s.TargetType, s.TargetID, s.TargetLabel, s.Kind, s.BeforeData, s.AfterData, s.Payload, s.Note,
+		s.CreatedBy, s.CreatedByName, s.ClientHint).
 		Scan(&s.ID, &s.CreatedAt, &s.Status)
 	if err != nil {
 		return nil, fmt.Errorf("create suggestion: %w", err)
@@ -46,11 +67,11 @@ func (r *SuggestionRepository) List(status string, limit, offset int) ([]models.
 	}
 
 	query := fmt.Sprintf(`
-		SELECT id, target_type, target_id, target_label, before_data, after_data, note, status, created_at, reviewed_at
+		SELECT %s
 		FROM edit_suggestions
 		%s
 		ORDER BY created_at DESC
-		LIMIT $%d OFFSET $%d`, where, len(args)+1, len(args)+2)
+		LIMIT $%d OFFSET $%d`, suggestionColumns, where, len(args)+1, len(args)+2)
 	args = append(args, limit, offset)
 
 	rows, err := r.db.Query(query, args...)
@@ -61,9 +82,8 @@ func (r *SuggestionRepository) List(status string, limit, offset int) ([]models.
 
 	var out []models.EditSuggestion
 	for rows.Next() {
-		var s models.EditSuggestion
-		if err := rows.Scan(&s.ID, &s.TargetType, &s.TargetID, &s.TargetLabel,
-			&s.BeforeData, &s.AfterData, &s.Note, &s.Status, &s.CreatedAt, &s.ReviewedAt); err != nil {
+		s, err := scanSuggestion(rows.Scan)
+		if err != nil {
 			return nil, 0, fmt.Errorf("scan suggestion: %w", err)
 		}
 		out = append(out, s)
@@ -73,12 +93,8 @@ func (r *SuggestionRepository) List(status string, limit, offset int) ([]models.
 
 // FindByID は提案を1件取得する。見つからなければ nil。
 func (r *SuggestionRepository) FindByID(id uuid.UUID) (*models.EditSuggestion, error) {
-	var s models.EditSuggestion
-	err := r.db.QueryRow(`
-		SELECT id, target_type, target_id, target_label, before_data, after_data, note, status, created_at, reviewed_at
-		FROM edit_suggestions WHERE id = $1`, id).
-		Scan(&s.ID, &s.TargetType, &s.TargetID, &s.TargetLabel,
-			&s.BeforeData, &s.AfterData, &s.Note, &s.Status, &s.CreatedAt, &s.ReviewedAt)
+	row := r.db.QueryRow(`SELECT `+suggestionColumns+` FROM edit_suggestions WHERE id = $1`, id)
+	s, err := scanSuggestion(row.Scan)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -88,9 +104,13 @@ func (r *SuggestionRepository) FindByID(id uuid.UUID) (*models.EditSuggestion, e
 	return &s, nil
 }
 
-// UpdateStatus は提案のステータスを更新し reviewed_at を現在時刻にする。
-func (r *SuggestionRepository) UpdateStatus(id uuid.UUID, status string) error {
-	_, err := r.db.Exec(`UPDATE edit_suggestions SET status = $2, reviewed_at = NOW() WHERE id = $1`, id, status)
+// UpdateStatus は提案のステータスを更新し、レビュー者・理由・時刻を記録する。
+// reviewer は未ログイン経路では nil（現状レビューは要権限なので通常は入る）。
+func (r *SuggestionRepository) UpdateStatus(id uuid.UUID, status string, reviewer *uuid.UUID, note string) error {
+	_, err := r.db.Exec(`
+		UPDATE edit_suggestions
+		SET status = $2, reviewed_by = $3, review_note = $4, reviewed_at = NOW()
+		WHERE id = $1`, id, status, reviewer, note)
 	if err != nil {
 		return fmt.Errorf("update suggestion status: %w", err)
 	}
@@ -98,10 +118,40 @@ func (r *SuggestionRepository) UpdateStatus(id uuid.UUID, status string) error {
 }
 
 // CountPending は未処理（pending）の提案件数を返す（バッジ表示用）。
+// 衝突（conflict）も人手の判断待ちなので同じバッジに含める。
 func (r *SuggestionRepository) CountPending() (int, error) {
 	var n int
-	if err := r.db.QueryRow(`SELECT COUNT(*) FROM edit_suggestions WHERE status = 'pending'`).Scan(&n); err != nil {
+	if err := r.db.QueryRow(
+		`SELECT COUNT(*) FROM edit_suggestions WHERE status IN ('pending', 'conflict')`).Scan(&n); err != nil {
 		return 0, fmt.Errorf("count pending suggestions: %w", err)
+	}
+	return n, nil
+}
+
+// CountRecentBy は直近 windowSeconds 秒間に同じ提案者から投稿された件数を返す。
+// createdBy が nil のときは clientHint（匿名）で数える。投稿の rate limit 判定に使う。
+func (r *SuggestionRepository) CountRecentBy(createdBy *uuid.UUID, clientHint string, windowSeconds int) (int, error) {
+	var (
+		n   int
+		err error
+	)
+	if createdBy != nil {
+		err = r.db.QueryRow(`
+			SELECT COUNT(*) FROM edit_suggestions
+			WHERE created_by = $1 AND created_at > NOW() - ($2 || ' seconds')::interval`,
+			*createdBy, windowSeconds).Scan(&n)
+	} else {
+		if clientHint == "" {
+			return 0, nil // 手がかりが無ければ数えようがない（判定はスキップ）
+		}
+		err = r.db.QueryRow(`
+			SELECT COUNT(*) FROM edit_suggestions
+			WHERE created_by IS NULL AND client_hint = $1
+			  AND created_at > NOW() - ($2 || ' seconds')::interval`,
+			clientHint, windowSeconds).Scan(&n)
+	}
+	if err != nil {
+		return 0, fmt.Errorf("count recent suggestions: %w", err)
 	}
 	return n, nil
 }

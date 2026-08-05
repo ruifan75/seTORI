@@ -23,6 +23,8 @@ import type {
   LoadHolodexSongsResponse,
   CreatePerformancesRequest,
   CreatePerformancesResponse,
+  Performance,
+  UpdatePerformanceRequest,
   BatchAINormalizationRequest,
   BatchAINormalizationResponse,
   ITunesSearchResponse,
@@ -44,6 +46,7 @@ import type {
   ImportReadingsResult,
   CreateSuggestionRequest,
   SuggestionListResponse,
+  SuggestionStatus,
   AIProvider,
   AIProviderInput,
   AIModelInfo,
@@ -344,6 +347,19 @@ export const performanceApi = {
     const { data } = await api.delete(`/api/streams/${streamId}/performances`);
     return data;
   },
+
+  // 歌唱1件を取得（配信・楽曲情報付き）
+  get: async (id: string): Promise<Performance> => {
+    const { data } = await api.get(`/api/performances/${id}`);
+    return data;
+  },
+
+  // 歌唱1件だけを更新（要 content:edit）。
+  // セットリスト全体を送り直す create と違い、他の曲を巻き込まない。
+  update: async (id: string, req: UpdatePerformanceRequest): Promise<Performance> => {
+    const { data } = await api.put(`/api/performances/${id}`, req);
+    return data;
+  },
 };
 
 // ========== AI 正規化 API ==========
@@ -610,7 +626,7 @@ export const suggestionApi = {
 
   // 提案一覧（要 content:edit）。status で絞り込み
   list: async (
-    status: 'pending' | 'approved' | 'rejected' | '' = 'pending',
+    status: SuggestionStatus | '' = 'pending',
     page = 1,
     limit = 20
   ): Promise<SuggestionListResponse> => {
@@ -626,13 +642,15 @@ export const suggestionApi = {
     return data.pending ?? 0;
   },
 
-  approve: async (id: string): Promise<{ message: string }> => {
-    const { data } = await api.post(`/api/suggestions/${id}/approve`);
+  // 承認して対象へ反映。提案後に対象が変更されていると 409（conflicts 付き）で止まる。
+  // force = true は差分を確認した上で現在値を上書きする場合。
+  approve: async (id: string, force = false): Promise<{ message: string }> => {
+    const { data } = await api.post(`/api/suggestions/${id}/approve${force ? '?force=1' : ''}`);
     return data;
   },
 
-  reject: async (id: string): Promise<{ message: string }> => {
-    const { data } = await api.post(`/api/suggestions/${id}/reject`);
+  reject: async (id: string, note = ''): Promise<{ message: string }> => {
+    const { data } = await api.post(`/api/suggestions/${id}/reject`, { note });
     return data;
   },
 };

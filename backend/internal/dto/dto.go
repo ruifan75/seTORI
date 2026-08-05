@@ -492,10 +492,16 @@ type ImportReadingsResult struct {
 
 // CreateSuggestionRequest 修正提案の投稿（匿名可）。
 type CreateSuggestionRequest struct {
-	TargetType string            `json:"target_type"` // song / artist
+	TargetType string            `json:"target_type"` // song / artist / performance
 	TargetID   string            `json:"target_id"`
 	Fields     map[string]string `json:"fields"` // 提案する編集値（キーは対象の編集可能フィールド）
 	Note       string            `json:"note"`   // 提案者コメント（任意）
+}
+
+// FieldConflict 承認時に検出した「提案時点の値」と「現在の値」のズレ。
+type FieldConflict struct {
+	Expected string `json:"expected"`
+	Current  string `json:"current"`
 }
 
 // SuggestionResponse 提案1件（before/after を差分表示できるよう両方返す）。
@@ -504,12 +510,31 @@ type SuggestionResponse struct {
 	TargetType  string            `json:"target_type"`
 	TargetID    uuid.UUID         `json:"target_id"`
 	TargetLabel string            `json:"target_label"`
+	Kind        string            `json:"kind"`
 	Before      map[string]string `json:"before"`
 	After       map[string]string `json:"after"`
 	Note        string            `json:"note"`
 	Status      string            `json:"status"`
-	CreatedAt   time.Time         `json:"created_at"`
-	ReviewedAt  *time.Time        `json:"reviewed_at"`
+
+	// Conflicts は未処理の提案について、対象が提案後に変更されたフィールドを示す。
+	// 空でなければ、そのまま承認すると他人の編集を巻き戻すことになる。
+	Conflicts map[string]FieldConflict `json:"conflicts,omitempty"`
+
+	CreatedBy     *uuid.UUID `json:"created_by"`
+	CreatedByName string     `json:"created_by_name"` // 匿名投稿では空
+	ReviewNote    string     `json:"review_note"`
+	CreatedAt     time.Time  `json:"created_at"`
+	ReviewedAt    *time.Time `json:"reviewed_at"`
+}
+
+// UpdatePerformanceRequest 歌唱記録1件の部分更新。nil のフィールドは変更しない。
+type UpdatePerformanceRequest struct {
+	SongID       *string   `json:"song_id"`       // 別の曲へ差し替える場合
+	StartSeconds *int      `json:"start_seconds"` // 開始秒
+	EndSeconds   *int      `json:"end_seconds"`   // 終了秒（0 = 動画終了まで）
+	CustomTags   *[]string `json:"custom_tags"`
+	Tags         *[]string `json:"tags"`       // performance_tags の ID
+	SingerIDs    *[]string `json:"singer_ids"` // 歌唱チャンネル
 }
 
 type SuggestionListResponse struct {

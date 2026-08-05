@@ -219,6 +219,17 @@ export interface StreamDetailResponse extends Stream {
   performances: Performance[];
 }
 
+// 歌唱記録1件の部分更新。省いたフィールドは変更されない。
+// end_seconds = 0 は「動画の最後まで」を意味する。
+export interface UpdatePerformanceRequest {
+  song_id?: string;
+  start_seconds?: number;
+  end_seconds?: number;
+  custom_tags?: string[];
+  tags?: string[];
+  singer_ids?: string[];
+}
+
 // 楽曲詳細ページからの逆引きクエリ用（歌手詳細ページでも使用）
 export interface SongPerformance {
   id: string;
@@ -466,8 +477,9 @@ export interface ImportReadingsResult {
 }
 
 // 修正提案（閲覧モードからの提案 → 管理者レビュー）
-export type SuggestionTargetType = 'song' | 'artist';
-export type SuggestionStatus = 'pending' | 'approved' | 'rejected';
+export type SuggestionTargetType = 'song' | 'artist' | 'performance';
+// conflict … 提案後に対象が変更された状態。承認すると他人の編集を巻き戻すため保留される
+export type SuggestionStatus = 'pending' | 'approved' | 'rejected' | 'conflict';
 
 export interface CreateSuggestionRequest {
   target_type: SuggestionTargetType;
@@ -476,15 +488,27 @@ export interface CreateSuggestionRequest {
   note?: string;
 }
 
+// 提案時点の値（expected）と現在の値（current）のズレ
+export interface FieldConflict {
+  expected: string;
+  current: string;
+}
+
 export interface Suggestion {
   id: string;
   target_type: SuggestionTargetType;
   target_id: string;
   target_label: string;
+  kind: string; // field（編集可能フィールドの差し替え）
   before: Record<string, string>;
   after: Record<string, string>;
   note: string;
   status: SuggestionStatus;
+  // 未処理の提案で、対象が提案後に変更されたフィールド。空でなければ承認前に確認が要る
+  conflicts?: Record<string, FieldConflict>;
+  created_by?: string | null;
+  created_by_name: string; // 匿名投稿では空
+  review_note: string;
   created_at: string;
   reviewed_at?: string | null;
 }

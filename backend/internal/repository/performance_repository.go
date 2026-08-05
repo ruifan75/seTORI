@@ -282,6 +282,19 @@ func (r *PerformanceRepository) Create(p *models.Performance) error {
 	return nil
 }
 
+// FindByID は歌唱1件を配信・楽曲情報付きで取得する。見つからなければ nil。
+// perfDetailSelect を使うため、非表示配信の歌唱も返る（編集・提案の対象になりうるため）。
+func (r *PerformanceRepository) FindByID(id uuid.UUID) (*PerformanceWithDetails, error) {
+	perfs, err := r.queryPerformanceDetails(perfDetailSelect+` WHERE p.id = $1`, id)
+	if err != nil {
+		return nil, err
+	}
+	if len(perfs) == 0 {
+		return nil, nil
+	}
+	return &perfs[0], nil
+}
+
 // Update 既存の演出を ID を保ったまま更新する。
 // ID を維持することが重要：プレイリスト項目が performance_id を参照しているため、
 // 編集のたびに ID が変わると利用者のプレイリストから曲が消えてしまう。
