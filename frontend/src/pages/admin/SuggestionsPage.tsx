@@ -28,7 +28,12 @@ const FIELD_LABELS: Record<string, string> = {
   end_seconds: '終了時間',
 };
 
-const TYPE_LABELS: Record<string, string> = { song: '楽曲', artist: 'アーティスト', performance: '歌唱' };
+const TYPE_LABELS: Record<string, string> = {
+  song: '楽曲',
+  artist: 'アーティスト',
+  performance: '歌唱',
+  stream: '曲の追加',
+};
 
 // 秒数フィールドは M:SS / H:MM:SS でも見せる（6714 だけでは判断できないため）
 const TIME_FIELDS = new Set(['start_seconds', 'end_seconds']);
@@ -48,14 +53,21 @@ function formatFieldValue(key: string, value: string): string {
   return `${clock}（${n}s）`;
 }
 
-// この提案が実際に変更するフィールド
+// この提案が実際に変更するフィールド。
+// 未登録曲の追加は既存レコードを触らないので、差分としては空になる（payload 側で表示する）。
 function changedKeysOf(s: Suggestion): string[] {
   return Object.keys(s.after).filter((k) => (s.after[k] ?? '') !== (s.before[k] ?? ''));
 }
 
-function detailPathOf(targetType: string, targetID: string): string {
+// この提案が処理可能か（差分か payload のどちらかがある）
+function isActionable(s: Suggestion): boolean {
+  return s.kind === 'perf.missing' ? !!s.payload : changedKeysOf(s).length > 0;
+}
+
+function detailPathOf(targetType: string, targetID: string, targetKey: string): string {
   if (targetType === 'song') return `/songs/${targetID}`;
   if (targetType === 'artist') return `/artists/${targetID}`;
+  if (targetType === 'stream') return `/streams/${targetKey}`;
   return '/songs'; // 歌唱は単独ページを持たない（対象名に配信が入っている）
 }
 
@@ -231,7 +243,7 @@ function GroupCard({
             {TYPE_LABELS[group.target_type] ?? group.target_type}
           </span>
           <Link
-            to={detailPathOf(group.target_type, group.target_id)}
+            to={detailPathOf(group.target_type, group.target_id, group.target_key)}
             className="text-indigo-600 hover:text-indigo-900 font-medium break-words"
           >
             {group.target_label}
@@ -309,28 +321,32 @@ function SuggestionRow({
         </span>
 
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0 flex-1">
-          {changed.map((k) => (
-            <span key={k} className="text-sm flex items-center gap-1.5 flex-wrap">
-              <span className="text-gray-500 text-xs">{FIELD_LABELS[k] ?? k}</span>
-              <span className="px-1.5 py-0.5 rounded bg-red-50 text-red-700 line-through text-xs break-words">
-                {formatFieldValue(k, before[k])}
+          {suggestion.kind === 'perf.missing' ? (
+            <MissingSongSummary suggestion={suggestion} />
+          ) : (
+            changed.map((k) => (
+              <span key={k} className="text-sm flex items-center gap-1.5 flex-wrap">
+                <span className="text-gray-500 text-xs">{FIELD_LABELS[k] ?? k}</span>
+                <span className="px-1.5 py-0.5 rounded bg-red-50 text-red-700 line-through text-xs break-words">
+                  {formatFieldValue(k, before[k])}
+                </span>
+                <span className="text-gray-400 text-xs">→</span>
+                <span className="px-1.5 py-0.5 rounded bg-green-50 text-green-700 font-medium text-xs break-words">
+                  {formatFieldValue(k, after[k])}
+                </span>
               </span>
-              <span className="text-gray-400 text-xs">→</span>
-              <span className="px-1.5 py-0.5 rounded bg-green-50 text-green-700 font-medium text-xs break-words">
-                {formatFieldValue(k, after[k])}
-              </span>
-            </span>
-          ))}
+            ))
+          )}
         </div>
 
         <button
           onClick={onAdopt}
-          disabled={busy || changed.length === 0}
+          disabled={busy || !isActionable(suggestion)}
           className={`shrink-0 px-3 py-1 text-xs text-white font-medium rounded-lg disabled:opacity-50 ${
             hasConflict ? 'bg-amber-600 hover:bg-amber-700' : 'bg-indigo-600 hover:bg-indigo-700'
           }`}
         >
-          {hasConflict ? '上書きして採用' : 'これを採用'}
+          {suggestion.kind === 'perf.missing' ? '登録する' : hasConflict ? '上書きして採用' : 'これを採用'}
         </button>
       </div>
 
@@ -351,6 +367,25 @@ function SuggestionRow({
   );
 }
 
+// MissingSongSummary 未登録曲の追加報告の中身（差分ではなく「追加したい内容」）。
+function MissingSongSummary({ suggestion }: { suggestion: Suggestion }) {
+  const p = suggestion.payload;
+  if (!p) return <span className="text-xs text-gray-400">内容が読み取れません</span>;
+  return (
+    <span className="text-sm flex items-center gap-1.5 flex-wrap">
+      <span className="px-1.5 py-0.5 rounded bg-green-50 text-green-700 font-medium text-xs break-words">
+        {p.song_name}
+        {p.original_artist ? ` / ${p.original_artist}` : ''}
+      </span>
+      <span className="text-xs text-gray-500 font-mono">
+        {formatFieldValue('start_seconds', String(p.start_seconds))}
+        {' – '}
+        {p.end_seconds === 0 ? '最後まで' : formatFieldValue('end_seconds', String(p.end_seconds))}
+      </span>
+    </span>
+  );
+}
+
 // HistoryCard 承認済み・却下の履歴表示（時系列の一覧）。
 function HistoryCard({ suggestion }: { suggestion: Suggestion }) {
   const { before, after } = suggestion;
@@ -364,7 +399,7 @@ function HistoryCard({ suggestion }: { suggestion: Suggestion }) {
             {TYPE_LABELS[suggestion.target_type] ?? suggestion.target_type}
           </span>
           <Link
-            to={detailPathOf(suggestion.target_type, suggestion.target_id)}
+            to={detailPathOf(suggestion.target_type, suggestion.target_id, suggestion.target_key)}
             className="text-indigo-600 hover:text-indigo-900 font-medium break-words"
           >
             {suggestion.target_label}
@@ -384,18 +419,22 @@ function HistoryCard({ suggestion }: { suggestion: Suggestion }) {
       </div>
 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        {changed.map((k) => (
-          <span key={k} className="text-sm flex items-center gap-1.5 flex-wrap">
-            <span className="text-gray-500 text-xs">{FIELD_LABELS[k] ?? k}</span>
-            <span className="px-1.5 py-0.5 rounded bg-red-50 text-red-700 line-through text-xs">
-              {formatFieldValue(k, before[k])}
+        {suggestion.kind === 'perf.missing' ? (
+          <MissingSongSummary suggestion={suggestion} />
+        ) : (
+          changed.map((k) => (
+            <span key={k} className="text-sm flex items-center gap-1.5 flex-wrap">
+              <span className="text-gray-500 text-xs">{FIELD_LABELS[k] ?? k}</span>
+              <span className="px-1.5 py-0.5 rounded bg-red-50 text-red-700 line-through text-xs">
+                {formatFieldValue(k, before[k])}
+              </span>
+              <span className="text-gray-400 text-xs">→</span>
+              <span className="px-1.5 py-0.5 rounded bg-green-50 text-green-700 font-medium text-xs">
+                {formatFieldValue(k, after[k])}
+              </span>
             </span>
-            <span className="text-gray-400 text-xs">→</span>
-            <span className="px-1.5 py-0.5 rounded bg-green-50 text-green-700 font-medium text-xs">
-              {formatFieldValue(k, after[k])}
-            </span>
-          </span>
-        ))}
+          ))
+        )}
       </div>
 
       {suggestion.review_note && (

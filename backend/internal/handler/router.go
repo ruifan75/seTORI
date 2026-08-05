@@ -86,7 +86,7 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	// HolodexService も AnalyzeHolodexSongs で正規化・拍手 end を実行する（holodex_hash キャッシュ）
 	holodexService.SetAnalysisServices(normalizationService, chatEndService)
 	batchAnalyzeService := service.NewBatchAnalyzeService(commentService, streamRepo)
-	performanceService := service.NewPerformanceService(perfRepo, songRepo, songItunesRepo, artistRepo)
+	performanceService := service.NewPerformanceService(perfRepo, songRepo, songItunesRepo, artistRepo, streamRepo)
 	itunesClient := itunes.NewClient()
 	endTimeEstimateService := service.NewEndTimeEstimateService(itunesClient)
 	authService := service.NewAuthService(authRepo)
@@ -793,7 +793,8 @@ func (r *Router) handleCreateSuggestion(w http.ResponseWriter, req *http.Request
 		respondError(w, http.StatusBadRequest, "無効なリクエスト形式")
 		return
 	}
-	if len(body.Fields) == 0 {
+	// 未登録曲の追加は fields ではなく payload で内容を渡す
+	if body.Kind != service.KindMissingSong && len(body.Fields) == 0 {
 		respondError(w, http.StatusBadRequest, "提案する変更がありません")
 		return
 	}
@@ -804,8 +805,12 @@ func (r *Router) handleCreateSuggestion(w http.ResponseWriter, req *http.Request
 	}
 	sug, err := r.suggestionService.Create(&body, actor)
 	if err != nil {
+		var invalidInput *service.ValidationError
 		switch {
-		case errors.Is(err, service.ErrInvalidTarget), errors.Is(err, service.ErrNoChange):
+		case errors.As(err, &invalidInput):
+			respondError(w, http.StatusBadRequest, err.Error())
+		case errors.Is(err, service.ErrInvalidTarget), errors.Is(err, service.ErrNoChange),
+			errors.Is(err, service.ErrInvalidTimeRange):
 			respondError(w, http.StatusBadRequest, err.Error())
 		case errors.Is(err, service.ErrTargetNotFound):
 			respondError(w, http.StatusNotFound, err.Error())

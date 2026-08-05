@@ -220,16 +220,19 @@ const (
 
 // EditSuggestion 閲覧モードからの修正提案。管理者が承認/却下する。
 type EditSuggestion struct {
-	ID          uuid.UUID `json:"id"`
-	TargetType  string    `json:"target_type"` // song / artist / performance
-	TargetID    uuid.UUID `json:"target_id"`
-	TargetLabel string    `json:"target_label"`
-	Kind        string    `json:"kind"` // field（編集可能フィールドの差し替え）
-	BeforeData  []byte    `json:"-"`    // JSONB（生バイト、ハンドラで json.RawMessage として出力）
-	AfterData   []byte    `json:"-"`
-	Payload     []byte    `json:"-"` // kind 固有の追加情報（field では未使用）
-	Note        string    `json:"note"`
-	Status      string    `json:"status"` // pending / approved / rejected / conflict
+	ID         uuid.UUID `json:"id"`
+	TargetType string    `json:"target_type"` // song / artist / performance / stream
+	TargetID   uuid.UUID `json:"target_id"`
+	// TargetKey は UUID で表せない対象の識別子（配信の YouTube 動画 ID）。UUID 対象では空。
+	// 対象の同一性は (TargetType, TargetID, TargetKey) で判断する。
+	TargetKey   string `json:"target_key"`
+	TargetLabel string `json:"target_label"`
+	Kind        string `json:"kind"` // field（フィールドの差し替え）/ perf.missing（未登録曲の追加）
+	BeforeData  []byte `json:"-"`    // JSONB（生バイト、ハンドラで json.RawMessage として出力）
+	AfterData   []byte `json:"-"`
+	Payload     []byte `json:"-"` // kind 固有の追加情報（field では未使用）
+	Note        string `json:"note"`
+	Status      string `json:"status"` // pending / approved / rejected / conflict
 
 	// 提案者。匿名投稿を許すため NULL 可。CreatedByName は削除後も残る表示名スナップショット。
 	CreatedBy     *uuid.UUID `json:"created_by"`

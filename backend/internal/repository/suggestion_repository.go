@@ -20,14 +20,14 @@ func NewSuggestionRepository(db *sql.DB) *SuggestionRepository {
 }
 
 // suggestionColumns は SELECT 句とスキャン順を1か所に揃えるための共通定義。
-const suggestionColumns = `id, target_type, target_id, target_label, kind,
+const suggestionColumns = `id, target_type, target_id, target_key, target_label, kind,
 	before_data, after_data, payload, note, status,
 	created_by, created_by_name, client_hint, reviewed_by, review_note,
 	created_at, reviewed_at`
 
 func scanSuggestion(scan func(...any) error) (models.EditSuggestion, error) {
 	var s models.EditSuggestion
-	err := scan(&s.ID, &s.TargetType, &s.TargetID, &s.TargetLabel, &s.Kind,
+	err := scan(&s.ID, &s.TargetType, &s.TargetID, &s.TargetKey, &s.TargetLabel, &s.Kind,
 		&s.BeforeData, &s.AfterData, &s.Payload, &s.Note, &s.Status,
 		&s.CreatedBy, &s.CreatedByName, &s.ClientHint, &s.ReviewedBy, &s.ReviewNote,
 		&s.CreatedAt, &s.ReviewedAt)
@@ -41,11 +41,11 @@ func (r *SuggestionRepository) Create(s *models.EditSuggestion) (*models.EditSug
 	}
 	err := r.db.QueryRow(`
 		INSERT INTO edit_suggestions
-			(target_type, target_id, target_label, kind, before_data, after_data, payload, note,
+			(target_type, target_id, target_key, target_label, kind, before_data, after_data, payload, note,
 			 created_by, created_by_name, client_hint)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 		RETURNING id, created_at, status`,
-		s.TargetType, s.TargetID, s.TargetLabel, s.Kind, s.BeforeData, s.AfterData, s.Payload, s.Note,
+		s.TargetType, s.TargetID, s.TargetKey, s.TargetLabel, s.Kind, s.BeforeData, s.AfterData, s.Payload, s.Note,
 		s.CreatedBy, s.CreatedByName, s.ClientHint).
 		Scan(&s.ID, &s.CreatedAt, &s.Status)
 	if err != nil {
@@ -94,9 +94,11 @@ func (r *SuggestionRepository) List(status string, limit, offset int) ([]models.
 }
 
 // TargetGroup は同一対象に集まった提案の1グループ。
+// 対象の同一性は (TargetType, TargetID, TargetKey) で見る（配信は UUID を持たないため）。
 type TargetGroup struct {
 	TargetType  string
 	TargetID    uuid.UUID
+	TargetKey   string
 	TargetLabel string
 	Suggestions []models.EditSuggestion
 }
@@ -117,17 +119,17 @@ func (r *SuggestionRepository) ListGroupedByTarget(status string, limit, offset 
 	// グループ総数（＝対象の種類数）
 	var total int
 	countQuery := fmt.Sprintf(
-		`SELECT COUNT(*) FROM (SELECT 1 FROM edit_suggestions %s GROUP BY target_type, target_id) g`, where)
+		`SELECT COUNT(*) FROM (SELECT 1 FROM edit_suggestions %s GROUP BY target_type, target_id, target_key) g`, where)
 	if err := r.db.QueryRow(countQuery, args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count suggestion groups: %w", err)
 	}
 
 	// 先に対象を決めてから、その対象の提案だけを引く（グループがページ境界で割れないように）
 	pageQuery := fmt.Sprintf(`
-		SELECT target_type, target_id, MAX(created_at) AS latest
+		SELECT target_type, target_id, target_key, MAX(created_at) AS latest
 		FROM edit_suggestions
 		%s
-		GROUP BY target_type, target_id
+		GROUP BY target_type, target_id, target_key
 		ORDER BY latest DESC
 		LIMIT $%d OFFSET $%d`, where, len(args)+1, len(args)+2)
 
@@ -139,12 +141,13 @@ func (r *SuggestionRepository) ListGroupedByTarget(status string, limit, offset 
 	type key struct {
 		targetType string
 		targetID   uuid.UUID
+		targetKey  string
 	}
 	var order []key
 	for rows.Next() {
 		var k key
 		var latest time.Time
-		if err := rows.Scan(&k.targetType, &k.targetID, &latest); err != nil {
+		if err := rows.Scan(&k.targetType, &k.targetID, &k.targetKey, &latest); err != nil {
 			rows.Close()
 			return nil, 0, fmt.Errorf("scan suggestion group: %w", err)
 		}
@@ -158,15 +161,19 @@ func (r *SuggestionRepository) ListGroupedByTarget(status string, limit, offset 
 		return nil, total, nil
 	}
 
-	ids := make([]string, len(order))
-	for i, k := range order {
-		ids[i] = k.targetID.String()
+	// UUID と文字列キーの両方で絞る。両方に合致しても別グループの行が混ざりうるが、
+	// 下の byKey で3つ組の完全一致だけを拾うので問題ない。
+	ids := make([]string, 0, len(order))
+	keys := make([]string, 0, len(order))
+	for _, k := range order {
+		ids = append(ids, k.targetID.String())
+		keys = append(keys, k.targetKey)
 	}
 
-	detailArgs := []any{pq.Array(ids)}
-	detailWhere := "WHERE target_id = ANY($1::uuid[])"
+	detailArgs := []any{pq.Array(ids), pq.Array(keys)}
+	detailWhere := "WHERE target_id = ANY($1::uuid[]) AND target_key = ANY($2::varchar[])"
 	if status != "" {
-		detailWhere += " AND status = $2"
+		detailWhere += " AND status = $3"
 		detailArgs = append(detailArgs, status)
 	}
 	detailRows, err := r.db.Query(
@@ -182,7 +189,8 @@ func (r *SuggestionRepository) ListGroupedByTarget(status string, limit, offset 
 		if err != nil {
 			return nil, 0, fmt.Errorf("scan suggestion: %w", err)
 		}
-		byKey[key{s.TargetType, s.TargetID}] = append(byKey[key{s.TargetType, s.TargetID}], s)
+		k := key{s.TargetType, s.TargetID, s.TargetKey}
+		byKey[k] = append(byKey[k], s)
 	}
 	if err := detailRows.Err(); err != nil {
 		return nil, 0, err
@@ -197,6 +205,7 @@ func (r *SuggestionRepository) ListGroupedByTarget(status string, limit, offset 
 		groups = append(groups, TargetGroup{
 			TargetType:  k.targetType,
 			TargetID:    k.targetID,
+			TargetKey:   k.targetKey,
 			TargetLabel: items[len(items)-1].TargetLabel, // 最新の提案時点の表示名
 			Suggestions: items,
 		})

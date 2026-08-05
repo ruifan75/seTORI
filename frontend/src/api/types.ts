@@ -477,14 +477,28 @@ export interface ImportReadingsResult {
 }
 
 // 修正提案（閲覧モードからの提案 → 管理者レビュー）
-export type SuggestionTargetType = 'song' | 'artist' | 'performance';
+export type SuggestionTargetType = 'song' | 'artist' | 'performance' | 'stream';
 // conflict … 提案後に対象が変更された状態。承認すると他人の編集を巻き戻すため保留される
 export type SuggestionStatus = 'pending' | 'approved' | 'rejected' | 'conflict';
 
+// 提案の種別。field = 既存レコードのフィールド差し替え、perf.missing = 未登録曲の追加報告
+export type SuggestionKind = 'field' | 'perf.missing';
+
+// 「この配信のこの時点に、登録されていない曲がある」という報告の中身
+export interface MissingSongPayload {
+  stream_id: string;
+  song_name: string;
+  original_artist: string;
+  start_seconds: number;
+  end_seconds: number; // 0 = 未指定（動画の最後まで）
+}
+
 export interface CreateSuggestionRequest {
-  target_type: SuggestionTargetType;
-  target_id: string;
-  fields: Record<string, string>;
+  target_type?: SuggestionTargetType;
+  target_id?: string;
+  kind?: SuggestionKind; // 省略時は field
+  fields?: Record<string, string>;
+  payload?: MissingSongPayload; // kind = perf.missing のとき
   note?: string;
 }
 
@@ -498,10 +512,12 @@ export interface Suggestion {
   id: string;
   target_type: SuggestionTargetType;
   target_id: string;
+  target_key: string; // 配信の YouTube 動画 ID（UUID 対象では空）
   target_label: string;
-  kind: string; // field（編集可能フィールドの差し替え）
+  kind: SuggestionKind;
   before: Record<string, string>;
   after: Record<string, string>;
+  payload?: MissingSongPayload; // kind = perf.missing のときだけ
   note: string;
   status: SuggestionStatus;
   // 未処理の提案で、対象が提案後に変更されたフィールド。空でなければ承認前に確認が要る
@@ -522,6 +538,7 @@ export interface SuggestionListResponse {
 export interface SuggestionGroup {
   target_type: SuggestionTargetType;
   target_id: string;
+  target_key: string;
   target_label: string;
   current: Record<string, string>; // 対象の現在値（提案と見比べるため）
   suggestions: Suggestion[];

@@ -39,6 +39,16 @@ const (
 	suggestionRateLimitAnon     = 8
 )
 
+// ValidationError は投稿内容が不正であることを示す。
+// サーバー側の障害（500）と区別して 400 で返すために型で持つ。
+type ValidationError struct{ Msg string }
+
+func (e *ValidationError) Error() string { return e.Msg }
+
+func invalid(format string, a ...any) error {
+	return &ValidationError{Msg: fmt.Sprintf(format, a...)}
+}
+
 // FieldConflict は承認時に検出した「提案時点の値」と「現在の値」のズレ。
 type FieldConflict struct {
 	Expected string `json:"expected"` // 提案時点のスナップショット（before_data）
@@ -67,10 +77,17 @@ type SuggestionActor struct {
 	ClientHint string
 }
 
+// 提案の種別。
+const (
+	KindField       = "field"        // 既存レコードのフィールド差し替え
+	KindMissingSong = "perf.missing" // 未登録曲の追加報告
+)
+
 // SuggestionService は閲覧モードからの修正提案の投稿・レビュー・反映を担う。
 type SuggestionService struct {
 	repo    *repository.SuggestionRepository
 	editors map[string]TargetEditor
+	missing MissingSongCreator
 }
 
 func NewSuggestionService(
@@ -86,12 +103,17 @@ func NewSuggestionService(
 			"artist":      artistService,
 			"performance": performanceService,
 		},
+		missing: performanceService,
 	}
 }
 
 // Create は修正提案を登録する。対象の現状を before、提案値を after として保存する。
 // 変更が無い（全フィールドが現状と同じ）場合は ErrNoChange。
 func (s *SuggestionService) Create(req *dto.CreateSuggestionRequest, actor SuggestionActor) (*models.EditSuggestion, error) {
+	if req.Kind == KindMissingSong {
+		return s.createMissingSong(req, actor)
+	}
+
 	editor, ok := s.editors[req.TargetType]
 	if !ok {
 		return nil, ErrInvalidTarget
@@ -159,6 +181,107 @@ func (s *SuggestionService) Create(req *dto.CreateSuggestionRequest, actor Sugge
 		logger.Warnf("auto apply check failed (%s %s): %v", req.TargetType, id, err)
 	}
 	return created, nil
+}
+
+// ========== 未登録曲の追加提案（perf.missing）==========
+
+// MissingSongCreator は「この配信のこの時点に曲がある」という報告を実際の歌唱記録にする。
+// PerformanceService が実装する。
+type MissingSongCreator interface {
+	CreateFromMissingSong(p dto.MissingSongPayload) error
+	StreamLabel(streamID string) (string, error)
+}
+
+// createMissingSong は未登録曲の報告を登録する。
+// 既存レコードの修正ではないので before/after は持たず、payload に内容を入れる。
+// 対象は配信（UUID を持たないので target_key に動画 ID を入れる）。
+func (s *SuggestionService) createMissingSong(req *dto.CreateSuggestionRequest, actor SuggestionActor) (*models.EditSuggestion, error) {
+	if s.missing == nil {
+		return nil, ErrInvalidTarget
+	}
+	p := req.Payload
+	if p == nil {
+		return nil, invalid("追加したい曲の内容がありません")
+	}
+	p.StreamID = strings.TrimSpace(p.StreamID)
+	p.SongName = strings.TrimSpace(p.SongName)
+	p.OriginalArtist = strings.TrimSpace(p.OriginalArtist)
+	if p.StreamID == "" {
+		return nil, invalid("配信が指定されていません")
+	}
+	if p.SongName == "" {
+		return nil, invalid("曲名は必須です")
+	}
+	if p.StartSeconds < 0 || p.EndSeconds < 0 {
+		return nil, invalid("時間が不正です")
+	}
+	if p.EndSeconds != 0 && p.EndSeconds <= p.StartSeconds {
+		return nil, ErrInvalidTimeRange
+	}
+
+	// 配信が実在するか（存在しない動画 ID を溜め込まないため）
+	streamLabel, err := s.missing.StreamLabel(p.StreamID)
+	if err != nil {
+		return nil, err
+	}
+	if streamLabel == "" {
+		return nil, ErrTargetNotFound
+	}
+
+	if err := s.checkRate(actor); err != nil {
+		return nil, err
+	}
+
+	label := p.SongName
+	if p.OriginalArtist != "" {
+		label += " / " + p.OriginalArtist
+	}
+	label += "（" + streamLabel + "）"
+
+	payloadJSON, _ := json.Marshal(p)
+	sug := &models.EditSuggestion{
+		TargetType:  "stream",
+		TargetID:    uuid.Nil, // 配信は UUID を持たない。同一性は TargetKey で見る
+		TargetKey:   p.StreamID,
+		TargetLabel: label,
+		Kind:        KindMissingSong,
+		BeforeData:  []byte("{}"),
+		AfterData:   []byte("{}"),
+		Payload:     payloadJSON,
+		Note:        strings.TrimSpace(req.Note),
+		ClientHint:  actor.ClientHint,
+	}
+	if actor.User != nil {
+		sug.CreatedBy = &actor.User.ID
+		sug.CreatedByName = displayNameOf(actor.User)
+	}
+	created, err := s.repo.Create(sug)
+	if err != nil {
+		return nil, err
+	}
+	logger.Infof("missing song suggestion created: %s @%ds (%s) by %s",
+		p.SongName, p.StartSeconds, p.StreamID, actorLabel(actor))
+	return created, nil
+}
+
+// approveMissingSong は未登録曲の報告を承認し、歌唱記録を作る。
+// 曲が未登録なら曲も作られる（既存の findOrCreateSong と同じ経路）。
+func (s *SuggestionService) approveMissingSong(sug *models.EditSuggestion, reviewer *models.User) error {
+	if s.missing == nil {
+		return ErrInvalidTarget
+	}
+	var p dto.MissingSongPayload
+	if err := json.Unmarshal(sug.Payload, &p); err != nil {
+		return fmt.Errorf("提案内容の解析に失敗しました: %w", err)
+	}
+	if err := s.missing.CreateFromMissingSong(p); err != nil {
+		return err // 例：同じ時間に既に歌唱がある
+	}
+	if err := s.repo.UpdateStatus(sug.ID, "approved", reviewerID(reviewer), "歌唱記録を作成"); err != nil {
+		return err
+	}
+	logger.Infof("missing song suggestion approved: %s (%s @%ds)", sug.ID, p.SongName, p.StartSeconds)
+	return nil
 }
 
 // ========== 自動適用 ==========
@@ -374,6 +497,7 @@ func (s *SuggestionService) ListGrouped(status string, page, limit int) (*dto.Su
 		resp = append(resp, dto.SuggestionGroup{
 			TargetType:  g.TargetType,
 			TargetID:    g.TargetID,
+			TargetKey:   g.TargetKey,
 			TargetLabel: g.TargetLabel,
 			Current:     current,
 			Suggestions: items,
@@ -445,6 +569,12 @@ func (s *SuggestionService) Approve(id uuid.UUID, reviewer *models.User, force b
 	if sug.Status == "conflict" && !force {
 		return ErrAlreadyReviewed
 	}
+
+	// 未登録曲の追加は「フィールドの差し替え」ではないので別経路（歌唱記録を新規作成する）
+	if sug.Kind == KindMissingSong {
+		return s.approveMissingSong(sug, reviewer)
+	}
+
 	editor, ok := s.editors[sug.TargetType]
 	if !ok {
 		return ErrInvalidTarget
@@ -590,6 +720,7 @@ func (s *SuggestionService) toSuggestionResponse(m models.EditSuggestion) dto.Su
 		ID:            m.ID,
 		TargetType:    m.TargetType,
 		TargetID:      m.TargetID,
+		TargetKey:     m.TargetKey,
 		TargetLabel:   m.TargetLabel,
 		Kind:          m.Kind,
 		Before:        before,
@@ -601,6 +732,14 @@ func (s *SuggestionService) toSuggestionResponse(m models.EditSuggestion) dto.Su
 		ReviewNote:    m.ReviewNote,
 		CreatedAt:     m.CreatedAt,
 		ReviewedAt:    m.ReviewedAt,
+	}
+
+	if m.Kind == KindMissingSong {
+		var p dto.MissingSongPayload
+		if json.Unmarshal(m.Payload, &p) == nil {
+			resp.Payload = &p
+		}
+		return resp // 未登録曲の追加は既存レコードを触らないので衝突判定は不要
 	}
 
 	// pending の間に対象が変わっていないかを一覧の時点で見せる（承認前に気付けるように）。

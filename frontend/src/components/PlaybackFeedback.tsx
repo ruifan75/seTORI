@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { usePlayerStore, type PlayerTrack } from '../store/player';
 import PerformanceTimingDialog from './PerformanceTimingDialog';
+import MissingSongDialog from './MissingSongDialog';
 import { usePerformanceTiming, formatSeconds, type TimingTarget } from './usePerformanceTiming';
 
 // 再生中に「タイムスタンプがずれている」と気づいた人がその場で直せる導線。
@@ -25,6 +26,8 @@ export default function PlaybackFeedback({
   const [open, setOpen] = useState(false);
   const [now, setNow] = useState<number | null>(null);
   const [dialogFor, setDialogFor] = useState<PlayerTrack | null>(null);
+  // 未登録曲の報告ダイアログ。開いた瞬間の再生位置を開始時間の初期値にする
+  const [missingAt, setMissingAt] = useState<number | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
 
   const current = queue[index];
@@ -138,6 +141,19 @@ export default function PlaybackFeedback({
               }}
             />
           )}
+
+          {/* 既存の曲の話ではなく「ここに曲が登録されていない」という指摘 */}
+          <div className="border-t pt-2 mt-2">
+            <button
+              onClick={() => {
+                setMissingAt(Math.round(getCurrentTime() ?? current.start));
+                setOpen(false);
+              }}
+              className="text-xs text-indigo-600 hover:bg-indigo-50 rounded-lg px-2 py-1 -ml-2"
+            >
+              ここに登録されていない曲がある
+            </button>
+          </div>
         </div>
       )}
 
@@ -147,6 +163,15 @@ export default function PlaybackFeedback({
           subtitle={dialogFor.streamTitle}
           currentTime={dialogFor.streamId === current.streamId ? getCurrentTime() : null}
           onClose={() => setDialogFor(null)}
+        />
+      )}
+
+      {missingAt !== null && (
+        <MissingSongDialog
+          streamId={current.streamId}
+          streamTitle={current.streamTitle}
+          startSeconds={missingAt}
+          onClose={() => setMissingAt(null)}
         />
       )}
     </div>
