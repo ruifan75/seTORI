@@ -1,9 +1,12 @@
 import { useState } from 'react';
+import { useAuthStore } from '../store/auth';
+import LoginToSuggest from './LoginToSuggest';
 
 // 「可修改的地方」に置くインライン編集フィールド。
 // 表示中はホバーで鉛筆アイコンが現れ、クリックでその場編集。
 // - 編集権限あり（canEdit）: onSave で即時保存
-// - 閲覧のみ: onSuggest で管理者への修正提案として送信
+// - ログイン済み・権限なし: onSuggest で管理者への修正提案として送信
+// - 未ログイン: 提案は投稿できないのでログインへ案内する（導線自体は隠さない）
 // テキストボタンではなくアイコンで編集導線を示すための共通コンポーネント。
 interface EditableFieldProps {
   label: string;
@@ -51,6 +54,8 @@ export default function EditableField({
   const [draft, setDraft] = useState(value);
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
+  // 提案の投稿はログイン必須。編集権限があるユーザーは当然ログイン済み。
+  const canSubmit = useAuthStore((s) => s.user) !== null;
 
   const start = () => {
     setDraft(value);
@@ -78,6 +83,22 @@ export default function EditableField({
       setBusy(false);
     }
   };
+
+  // 未ログイン：提案を投稿できないので、フォームを出さずログインへ案内する
+  if (editing && !canSubmit) {
+    return (
+      <div className="space-y-2 max-w-md">
+        <LoginToSuggest message={`${label}の修正提案にはログインが必要です。`} />
+        <button
+          type="button"
+          onClick={cancel}
+          className="px-3 py-1.5 text-sm bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+        >
+          閉じる
+        </button>
+      </div>
+    );
+  }
 
   if (editing) {
     return (

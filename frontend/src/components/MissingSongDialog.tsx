@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { suggestionApi } from '../api/client';
+import { useAuthStore } from '../store/auth';
+import LoginToSuggest from './LoginToSuggest';
 import { useToast } from './ui/ToastContext';
 import { formatSeconds, parseSeconds } from './usePerformanceTiming';
 
@@ -22,6 +24,7 @@ export default function MissingSongDialog({
   onClose: () => void;
 }) {
   const { showToast } = useToast();
+  const canSubmit = useAuthStore((s) => s.user) !== null; // 提案の投稿はログイン必須
   const [songName, setSongName] = useState('');
   const [artist, setArtist] = useState('');
   const [startText, setStartText] = useState(formatSeconds(startSeconds));
@@ -87,6 +90,12 @@ export default function MissingSongDialog({
         <h2 className="text-lg font-bold text-gray-900">抜けている曲を報告</h2>
         {streamTitle && <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{streamTitle}</p>}
         <p className="text-xs text-gray-400 mt-1">管理者が確認して歌唱記録を追加します</p>
+
+        {!canSubmit && (
+          <div className="mt-3 rounded-lg bg-gray-50 border p-3">
+            <LoginToSuggest message="抜けている曲の報告にはログインが必要です。" />
+          </div>
+        )}
 
         <label className="block mt-4">
           <span className="text-sm text-gray-600">曲名</span>
@@ -155,7 +164,7 @@ export default function MissingSongDialog({
           <button
             type="button"
             onClick={submit}
-            disabled={busy || songName.trim() === ''}
+            disabled={busy || songName.trim() === '' || !canSubmit}
             className="px-4 py-2 text-sm bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50"
           >
             {busy ? '送信中...' : '報告を送信'}

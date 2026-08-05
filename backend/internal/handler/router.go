@@ -214,6 +214,7 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("GET /api/suggestions", r.handleListSuggestions)
 	r.mux.HandleFunc("GET /api/suggestions/count", r.handleCountSuggestions)
 	r.mux.HandleFunc("POST /api/suggestions/batch", r.handleBatchReviewSuggestions)
+	r.mux.HandleFunc("POST /api/suggestions/merge", r.handleMergeSuggestions)
 	r.mux.HandleFunc("POST /api/suggestions/{id}/approve", r.handleApproveSuggestion)
 	r.mux.HandleFunc("POST /api/suggestions/{id}/reject", r.handleRejectSuggestion)
 
@@ -885,6 +886,35 @@ func (r *Router) handleBatchReviewSuggestions(w http.ResponseWriter, req *http.R
 	}
 
 	result := r.suggestionService.BatchReview(ids, body.Action, currentUser(req), body.Force, body.Note)
+	respondJSON(w, http.StatusOK, result)
+}
+
+// handleMergeSuggestions は同一対象の提案を管理者が決めた値へ統合して反映する（content:edit）。
+// 「どれか1つを丸ごと採用」では表せない決着（中央値・誰も出していない値）のための操作。
+func (r *Router) handleMergeSuggestions(w http.ResponseWriter, req *http.Request) {
+	var body dto.MergeSuggestionsRequest
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		respondError(w, http.StatusBadRequest, "無効なリクエスト形式")
+		return
+	}
+
+	result, err := r.suggestionService.Merge(&body, currentUser(req))
+	if err != nil {
+		var invalidInput *service.ValidationError
+		switch {
+		case errors.As(err, &invalidInput):
+			respondError(w, http.StatusBadRequest, err.Error())
+		case errors.Is(err, service.ErrInvalidTarget):
+			respondError(w, http.StatusBadRequest, err.Error())
+		case errors.Is(err, service.ErrTargetNotFound):
+			respondError(w, http.StatusNotFound, err.Error())
+		case errors.Is(err, service.ErrDuplicatePerformance):
+			respondError(w, http.StatusConflict, err.Error())
+		default:
+			respondError(w, http.StatusBadRequest, err.Error())
+		}
+		return
+	}
 	respondJSON(w, http.StatusOK, result)
 }
 
@@ -2485,10 +2515,12 @@ func requiredPermission(method, path string) (perm string, needsAuth bool) {
 		return "", true
 	}
 
-	// 修正提案：投稿（POST /api/suggestions）は閲覧モードでも可（公開）。
-	// 一覧・件数・承認・却下は content:edit（管理者レビュー）。
+	// 修正提案：投稿（POST /api/suggestions）はログインのみ必要（編集権限は不要）。
+	// 匿名でも投稿できるようにしていたが、再生中のワンタップ通報を載せた結果、
+	// 誰の指摘かを追えないと信頼度の重み付けも濫用への対処もできないため要ログインにした。
+	// 一覧・件数・承認・却下・統合は content:edit（管理者レビュー）。
 	if path == "/api/suggestions" && method == http.MethodPost {
-		return "", false
+		return "", true
 	}
 	if strings.HasPrefix(path, "/api/suggestions") {
 		return auth.PermContentEdit, true

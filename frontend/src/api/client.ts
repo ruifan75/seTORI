@@ -48,6 +48,8 @@ import type {
   SuggestionListResponse,
   SuggestionGroupListResponse,
   BatchReviewResponse,
+  MergeSuggestionsRequest,
+  MergeSuggestionsResponse,
   SuggestionStatus,
   AIProvider,
   AIProviderInput,
@@ -658,6 +660,13 @@ export const suggestionApi = {
     opts: { force?: boolean; note?: string } = {}
   ): Promise<BatchReviewResponse> => {
     const { data } = await api.post('/api/suggestions/batch', { ids, action, ...opts });
+    return data;
+  },
+
+  // 同一対象の提案を、管理者が決めた値へ統合して反映する。
+  // 「どれか1つを丸ごと採用」では表せない決着（中央値・誰も出していない値）のための操作。
+  merge: async (req: MergeSuggestionsRequest): Promise<MergeSuggestionsResponse> => {
+    const { data } = await api.post('/api/suggestions/merge', req);
     return data;
   },
 

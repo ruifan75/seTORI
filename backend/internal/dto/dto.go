@@ -597,6 +597,25 @@ type BatchReviewResponse struct {
 	Results   []BatchReviewResult `json:"results"`
 }
 
+// MergeSuggestionsRequest 同一対象に集まった提案を、管理者が決めた値へ統合して反映する。
+//
+// 「どれか1つを丸ごと採用」では表せないケース（3人が 6708 / 6710 / 6716 と提案していて
+// 中央値を採りたい、誰も出していない値にしたい、項目ごとに別の提案を採りたい）のための操作。
+type MergeSuggestionsRequest struct {
+	TargetType string            `json:"target_type"`
+	TargetID   string            `json:"target_id"`
+	Fields     map[string]string `json:"fields"` // 実際に反映する値
+	IDs        []string          `json:"ids"`    // このグループの提案（すべて処理済みにする）
+	Note       string            `json:"note"`   // レビューメモ（任意）
+}
+
+// MergeSuggestionsResponse 反映した値と、採用/不採用として記録した件数。
+type MergeSuggestionsResponse struct {
+	Applied  map[string]string `json:"applied"`
+	Approved int               `json:"approved"` // 採用値と一致していた提案
+	Rejected int               `json:"rejected"` // 別の値になった提案
+}
+
 // ========== グローバル検索 ==========
 
 // SearchStreamItem 検索結果の配信（軽量版）

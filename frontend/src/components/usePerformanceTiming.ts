@@ -48,10 +48,11 @@ export function parseSeconds(input: string): number | null {
 }
 
 export function usePerformanceTiming() {
-  const canEdit = hasPermission(
-    useAuthStore((s) => s.user),
-    PERM.CONTENT_EDIT
-  );
+  const user = useAuthStore((s) => s.user);
+  const canEdit = hasPermission(user, PERM.CONTENT_EDIT);
+  // 提案の投稿はログイン必須（誰の指摘かを追えないと信頼度も濫用対策も成り立たないため）。
+  // 未ログインでも導線自体は見せ、押した時点でログインへ促す。
+  const canSubmit = user !== null;
   const { showToast } = useToast();
   const queryClient = useQueryClient();
   const updateTrackTiming = usePlayerStore((s) => s.updateTrackTiming);
@@ -85,6 +86,11 @@ export function usePerformanceTiming() {
     change: TimingChange,
     note = ''
   ): Promise<boolean> => {
+    if (!canSubmit) {
+      // 401 を踏ませてセッション失効扱いにしないよう、送る前に止める
+      showToast('修正の提案にはログインが必要です', 'info');
+      return false;
+    }
     const problem = validate(target, change);
     if (problem) {
       showToast(problem, 'error');
@@ -138,7 +144,7 @@ export function usePerformanceTiming() {
     }
   };
 
-  return { canEdit, submit };
+  return { canEdit, canSubmit, submit };
 }
 
 function describeChange(target: TimingTarget, change: TimingChange): string {

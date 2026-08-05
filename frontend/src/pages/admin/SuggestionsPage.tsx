@@ -5,6 +5,7 @@ import { suggestionApi } from '../../api/client';
 import type { Suggestion, SuggestionGroup, SuggestionStatus } from '../../api/types';
 import Loading from '../../components/ui/Loading';
 import Pagination from '../../components/ui/Pagination';
+import MergeSuggestionsDialog from '../../components/MergeSuggestionsDialog';
 import { useToast } from '../../components/ui/ToastContext';
 
 const STATUS_TABS: { value: SuggestionStatus; label: string }[] = [
@@ -200,6 +201,7 @@ export default function SuggestionsPage() {
                     busy={busy}
                     onAdopt={(pick, siblings) => adoptMutation.mutate({ pick, siblings })}
                     onRejectAll={(ids) => batchRejectMutation.mutate(ids)}
+                    onMerged={invalidate}
                   />
                 ))
               : listQuery.data!.suggestions.map((s) => (
@@ -223,17 +225,22 @@ function GroupCard({
   busy,
   onAdopt,
   onRejectAll,
+  onMerged,
 }: {
   group: SuggestionGroup;
   busy: boolean;
   onAdopt: (pick: Suggestion, siblings: Suggestion[]) => void;
   onRejectAll: (ids: string[]) => void;
+  onMerged: () => void;
 }) {
   const { suggestions, current } = group;
   const multiple = suggestions.length > 1;
+  const [merging, setMerging] = useState(false);
 
   // 現在値のうち、どれかの提案が触っている項目だけを見出しに出す
   const touched = [...new Set(suggestions.flatMap(changedKeysOf))];
+  // 統合は「値を突き合わせて決める」操作なので、差分を持つ提案が複数あるときだけ意味がある
+  const canMerge = touched.length > 0 && suggestions.filter((s) => changedKeysOf(s).length > 0).length > 1;
 
   return (
     <div className="bg-white rounded-lg shadow-sm border p-4 sm:p-5">
@@ -287,7 +294,17 @@ function GroupCard({
         ))}
       </div>
 
-      <div className="flex justify-end mt-3">
+      <div className="flex justify-end gap-2 mt-3">
+        {canMerge && (
+          <button
+            onClick={() => setMerging(true)}
+            disabled={busy}
+            className="px-3 py-1.5 text-xs bg-white border border-indigo-300 text-indigo-700 rounded-lg hover:bg-indigo-50 disabled:opacity-50"
+            title="値を見比べて1つに決める（中央値や、誰も出していない値も選べます）"
+          >
+            まとめて反映
+          </button>
+        )}
         <button
           onClick={() => onRejectAll(suggestions.map((s) => s.id))}
           disabled={busy}
@@ -296,6 +313,10 @@ function GroupCard({
           {multiple ? 'すべて却下' : '却下'}
         </button>
       </div>
+
+      {merging && (
+        <MergeSuggestionsDialog group={group} onClose={() => setMerging(false)} onDone={onMerged} />
+      )}
     </div>
   );
 }

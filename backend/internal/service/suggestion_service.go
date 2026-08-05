@@ -543,6 +543,106 @@ func (s *SuggestionService) BatchReview(ids []uuid.UUID, action string, reviewer
 	return resp
 }
 
+// Merge は同一対象に集まった提案を、管理者が決めた値へ統合して反映する。
+//
+// 「どれか1つを丸ごと採用」では表せない決着のための操作：
+// 3人が別々の秒数を出していて中央値にしたい、誰も出していない値にしたい、など。
+// 反映後、指定された提案はすべて処理済みにする。採用値と一致していたものを承認、
+// それ以外を却下として記録する（誰の指摘が通ったかを履歴に残すため）。
+func (s *SuggestionService) Merge(req *dto.MergeSuggestionsRequest, reviewer *models.User) (*dto.MergeSuggestionsResponse, error) {
+	editor, ok := s.editors[req.TargetType]
+	if !ok {
+		return nil, ErrInvalidTarget
+	}
+	targetID, err := uuid.Parse(req.TargetID)
+	if err != nil {
+		return nil, ErrInvalidTarget
+	}
+	if len(req.Fields) == 0 {
+		return nil, invalid("反映する値がありません")
+	}
+
+	current, _, err := editor.GetEditableFields(targetID)
+	if err != nil {
+		return nil, err
+	}
+	if current == nil {
+		return nil, ErrTargetNotFound
+	}
+
+	// 現在値と同じ項目は送っても意味がないので落とす（全部同じなら何もしない）
+	apply := map[string]string{}
+	for k, v := range req.Fields {
+		v = strings.TrimSpace(v)
+		if cur, known := current[k]; known && cur != v {
+			apply[k] = v
+		}
+	}
+	if len(apply) > 0 {
+		if err := editor.ApplyEditableFields(targetID, apply); err != nil {
+			return nil, err
+		}
+	}
+
+	// 反映後の値を基準に、各提案が通ったか否かを判定する
+	final := map[string]string{}
+	for k, v := range current {
+		final[k] = v
+	}
+	for k, v := range apply {
+		final[k] = v
+	}
+
+	resp := &dto.MergeSuggestionsResponse{Applied: apply}
+	note := strings.TrimSpace(req.Note)
+	for _, raw := range req.IDs {
+		id, err := uuid.Parse(raw)
+		if err != nil {
+			return nil, invalid("無効な提案ID: %s", raw)
+		}
+		sug, err := s.repo.FindByID(id)
+		if err != nil {
+			return nil, err
+		}
+		if sug == nil || sug.Status == "approved" || sug.Status == "rejected" {
+			continue // 取得の合間に処理済みになったものは触らない
+		}
+
+		changed, err := changedFieldsOf(sug)
+		if err != nil {
+			return nil, err
+		}
+		// 提案が変えたかった項目がすべて採用値と一致していれば「採用された」
+		adopted := len(changed) > 0
+		for k, v := range changed {
+			if final[k] != v {
+				adopted = false
+				break
+			}
+		}
+
+		status, reviewNote := "rejected", "統合して反映（別の値を採用）"
+		if adopted {
+			status, reviewNote = "approved", "統合して反映"
+		}
+		if note != "" {
+			reviewNote += "：" + note
+		}
+		if err := s.repo.UpdateStatus(id, status, reviewerID(reviewer), reviewNote); err != nil {
+			return nil, err
+		}
+		if adopted {
+			resp.Approved++
+		} else {
+			resp.Rejected++
+		}
+	}
+
+	logger.Infof("suggestions merged: %s %s applied=%v approved=%d rejected=%d",
+		req.TargetType, targetID, apply, resp.Approved, resp.Rejected)
+	return resp, nil
+}
+
 // CountPending は未処理提案数を返す（バッジ表示用）。
 func (s *SuggestionService) CountPending() (int, error) {
 	return s.repo.CountPending()

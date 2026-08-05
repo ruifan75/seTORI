@@ -563,6 +563,22 @@ export interface BatchReviewResponse {
   results: BatchReviewResult[];
 }
 
+// 同一対象に集まった提案を、管理者が決めた値へ統合して反映する。
+// 「どれか1つを丸ごと採用」では表せない決着（中央値・誰も出していない値）のための操作。
+export interface MergeSuggestionsRequest {
+  target_type: SuggestionTargetType;
+  target_id: string;
+  fields: Record<string, string>; // 実際に反映する値
+  ids: string[]; // このグループの提案（すべて処理済みにする）
+  note?: string;
+}
+
+export interface MergeSuggestionsResponse {
+  applied: Record<string, string>;
+  approved: number; // 採用値と一致していた提案
+  rejected: number; // 別の値になった提案
+}
+
 // ========== グローバル検索 ==========
 
 export interface SearchStreamItem {

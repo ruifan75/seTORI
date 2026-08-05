@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { usePlayerStore, type PlayerTrack } from '../store/player';
 import PerformanceTimingDialog from './PerformanceTimingDialog';
 import MissingSongDialog from './MissingSongDialog';
+import LoginToSuggest from './LoginToSuggest';
 import { usePerformanceTiming, formatSeconds, type TimingTarget } from './usePerformanceTiming';
 
 // 再生中に「タイムスタンプがずれている」と気づいた人がその場で直せる導線。
@@ -21,7 +22,7 @@ export default function PlaybackFeedback({
 }) {
   const queue = usePlayerStore((s) => s.queue);
   const index = usePlayerStore((s) => s.index);
-  const { canEdit, submit } = usePerformanceTiming();
+  const { canEdit, canSubmit, submit } = usePerformanceTiming();
 
   const [open, setOpen] = useState(false);
   const [now, setNow] = useState<number | null>(null);
@@ -105,6 +106,10 @@ export default function PlaybackFeedback({
 
       {open && (
         <div className="absolute bottom-full right-0 mb-2 w-[22rem] max-w-[calc(100vw-2rem)] bg-white rounded-xl shadow-xl border p-3 z-50">
+          {!canSubmit ? (
+            <LoginToSuggest message="タイムスタンプの誤りを報告するにはログインが必要です。" />
+          ) : (
+            <>
           <p className="text-xs text-gray-500 mb-2">
             {now != null ? (
               <>
@@ -154,6 +159,8 @@ export default function PlaybackFeedback({
               ここに登録されていない曲がある
             </button>
           </div>
+            </>
+          )}
         </div>
       )}
 
