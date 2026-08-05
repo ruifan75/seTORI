@@ -7,7 +7,6 @@ import (
 
 	"github.com/ruifan75/setori/internal/dto"
 	"github.com/ruifan75/setori/internal/logger"
-	"github.com/ruifan75/setori/internal/models"
 	"github.com/ruifan75/setori/internal/repository"
 )
 
@@ -43,6 +42,7 @@ const (
 	BatchModeUnanalyzed  = "unanalyzed"  // 分析結果が一度も無い配信（is_processed 問わず）
 	BatchModeUnprocessed = "unprocessed" // 未処理（ユーザー未確認）の配信すべて
 	BatchModeRefresh     = "refresh"     // 未処理の配信のコメントを再取得してから分析
+	BatchModeReanalyze   = "reanalyze"   // comment_raw を持つ配信すべてを force で再分析（分析済みも作り直す）
 )
 
 func NewBatchAnalyzeService(commentService *CommentService, streamRepo *repository.StreamRepository) *BatchAnalyzeService {
@@ -50,11 +50,12 @@ func NewBatchAnalyzeService(commentService *CommentService, streamRepo *reposito
 }
 
 // Start はジョブを開始する（実行中なら ErrBatchAlreadyRunning）。
-func (s *BatchAnalyzeService) Start(mode string) error {
+// singerID を指定するとそのチャンネルが参加した配信のみが対象（空なら全チャンネル）。
+func (s *BatchAnalyzeService) Start(mode, singerID string) error {
 	switch mode {
-	case BatchModeUnanalyzed, BatchModeUnprocessed, BatchModeRefresh:
+	case BatchModeUnanalyzed, BatchModeUnprocessed, BatchModeRefresh, BatchModeReanalyze:
 	default:
-		return errors.New("無効なモードです（unanalyzed / unprocessed / refresh）")
+		return errors.New("無効なモードです（unanalyzed / unprocessed / refresh / reanalyze）")
 	}
 
 	s.mu.Lock()
@@ -64,9 +65,9 @@ func (s *BatchAnalyzeService) Start(mode string) error {
 	}
 	s.running = true
 	s.cancelled = false
-	s.status = dto.BatchAnalyzeStatus{Running: true, Mode: mode}
+	s.status = dto.BatchAnalyzeStatus{Running: true, Mode: mode, SingerID: singerID}
 
-	go s.run(mode)
+	go s.run(mode, singerID)
 	return nil
 }
 
@@ -98,7 +99,7 @@ func (s *BatchAnalyzeService) update(fn func(*dto.BatchAnalyzeStatus)) {
 	fn(&s.status)
 }
 
-func (s *BatchAnalyzeService) run(mode string) {
+func (s *BatchAnalyzeService) run(mode, singerID string) {
 	defer func() {
 		s.mu.Lock()
 		s.running = false
@@ -115,21 +116,18 @@ func (s *BatchAnalyzeService) run(mode string) {
 		logger.Infof("[batch-analyze] finished: done=%d failed=%d", s.status.Done, s.status.Failed)
 	}()
 
-	var streams []models.Stream
-	var err error
-	if mode == BatchModeUnanalyzed {
-		streams, err = s.streamRepo.FindUnanalyzedWithComments()
-	} else {
-		streams, err = s.streamRepo.FindUnprocessedWithComments()
-	}
+	streams, err := s.streamRepo.FindStreamsForBatch(mode, singerID)
 	if err != nil {
 		logger.Warnf("[batch-analyze] list streams failed: %v", err)
 		s.update(func(st *dto.BatchAnalyzeStatus) { st.Message = "対象の取得に失敗しました" })
 		return
 	}
 
+	// reanalyze は分析済みも作り直すため、最初から force でキャッシュを無視する。
+	forceStart := mode == BatchModeReanalyze
+
 	s.update(func(st *dto.BatchAnalyzeStatus) { st.Total = len(streams) })
-	logger.Infof("[batch-analyze] started: mode=%s %d streams", mode, len(streams))
+	logger.Infof("[batch-analyze] started: mode=%s singer=%q %d streams", mode, singerID, len(streams))
 
 	for _, stream := range streams {
 		if s.isCancelled() {
@@ -145,7 +143,7 @@ func (s *BatchAnalyzeService) run(mode string) {
 			}
 		}
 
-		if s.processOne(stream.ID) {
+		if s.processOne(stream.ID, forceStart) {
 			s.update(func(st *dto.BatchAnalyzeStatus) { st.Done++ })
 		} else if s.isCancelled() {
 			return
@@ -161,8 +159,9 @@ func (s *BatchAnalyzeService) run(mode string) {
 }
 
 // processOne は1配信を分析する。AI 劣化（warning あり）は冷却待ち後に force で再試行。
-func (s *BatchAnalyzeService) processOne(videoID string) bool {
-	force := false
+// forceStart=true のときは初回から force（キャッシュ無視）で分析する（reanalyze 用）。
+func (s *BatchAnalyzeService) processOne(videoID string, forceStart bool) bool {
+	force := forceStart
 	for attempt := 1; attempt <= batchMaxAttempts; attempt++ {
 		if s.isCancelled() {
 			return false

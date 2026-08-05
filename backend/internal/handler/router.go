@@ -559,16 +559,23 @@ func parseIDQueryParams(req *http.Request, multiKey string, legacyKeys ...string
 // ========== Batch Analyze Handlers ==========
 
 // handleStartBatchAnalyze 未処理配信の一括プレ分析を開始する（content:edit）。
+// mode / singer_id は JSON body で受け取る（後方互換で query param の mode もフォールバック）。
 func (r *Router) handleStartBatchAnalyze(w http.ResponseWriter, req *http.Request) {
-	mode := req.URL.Query().Get("mode")
+	var body dto.BatchAnalyzeRequest
+	_ = json.NewDecoder(req.Body).Decode(&body) // 空ボディは許容（既定モードにフォールバック）
+
+	mode := body.Mode
+	if mode == "" {
+		mode = req.URL.Query().Get("mode")
+	}
 	if mode == "" {
 		mode = service.BatchModeUnprocessed
 	}
-	if err := r.batchAnalyzeService.Start(mode); err != nil {
+	if err := r.batchAnalyzeService.Start(mode, body.SingerID); err != nil {
 		respondError(w, http.StatusConflict, err.Error())
 		return
 	}
-	logger.Infof("batch analyze started")
+	logger.Infof("batch analyze started: mode=%s singer=%q", mode, body.SingerID)
 	respondJSON(w, http.StatusAccepted, map[string]string{"message": "一括分析を開始しました"})
 }
 

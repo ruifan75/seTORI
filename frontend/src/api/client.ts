@@ -303,9 +303,13 @@ export const commentApi = {
 
 export const batchAnalyzeApi = {
   // 一括プレ分析を開始（背景ジョブ・singleton）
-  // mode: unanalyzed（未分析のみ）/ unprocessed（未処理すべて）/ refresh（コメント再取得）
-  start: async (mode: string): Promise<{ message: string }> => {
-    const { data } = await api.post(`/api/streams/batch-analyze?mode=${encodeURIComponent(mode)}`);
+  // mode: unanalyzed（未分析のみ）/ unprocessed（未処理すべて）/ refresh（コメント再取得）/ reanalyze（全部再分析）
+  // singerId: 対象チャンネル（空なら全チャンネル）
+  start: async (mode: string, singerId?: string): Promise<{ message: string }> => {
+    const { data } = await api.post('/api/streams/batch-analyze', {
+      mode,
+      singer_id: singerId ?? '',
+    });
     return data;
   },
 

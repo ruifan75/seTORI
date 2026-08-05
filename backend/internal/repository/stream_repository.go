@@ -458,41 +458,37 @@ func (r *StreamRepository) FindByTagID(tagID string, limit, offset int) ([]model
 	return streams, total, rows.Err()
 }
 
-// FindUnanalyzedWithComments は comment_raw があるのに分析結果（comment_songs）が
-// 一度も生成されていない配信を返す（is_processed は問わない：本当に未分析のもの）。
-func (r *StreamRepository) FindUnanalyzedWithComments() ([]models.Stream, error) {
-	rows, err := r.db.Query(`
-		SELECT id, title FROM streams
-		WHERE is_hidden = FALSE
-		  AND comment_raw IS NOT NULL AND comment_raw != 'null'
-		  AND (comment_songs IS NULL OR comment_songs = 'null')
-		ORDER BY stream_date ASC`)
-	if err != nil {
-		return nil, fmt.Errorf("query unanalyzed streams: %w", err)
+// FindStreamsForBatch は一括分析の対象配信（id/title のみ）を mode と（任意の）歌手で
+// 絞り込んで古い順に返す。singerID が空なら全チャンネルが対象。
+//
+// mode 別の対象範囲（いずれも非隠し・comment_raw あり）:
+//   - "unanalyzed"           : 分析結果（comment_songs）が一度も無い配信のみ
+//   - "unprocessed"/"refresh": 未処理（ユーザー未確認）の配信すべて
+//   - "reanalyze"            : comment_raw を持つ配信すべて（分析済みも対象。force で作り直す）
+//
+// singerID 指定時は stream_singers を EXISTS で絞る（owner / 参加者どちらでも一致）。
+func (r *StreamRepository) FindStreamsForBatch(mode, singerID string) ([]models.Stream, error) {
+	where := "is_hidden = FALSE AND comment_raw IS NOT NULL AND comment_raw != 'null'"
+	switch mode {
+	case "unanalyzed":
+		where += " AND (comment_songs IS NULL OR comment_songs = 'null')"
+	case "unprocessed", "refresh":
+		where += " AND is_processed = FALSE"
+	case "reanalyze":
+		// 追加条件なし：comment_raw を持つ配信すべてを再分析対象にする
+	default:
+		return nil, fmt.Errorf("unknown batch mode: %s", mode)
 	}
-	defer rows.Close()
 
-	var streams []models.Stream
-	for rows.Next() {
-		var s models.Stream
-		if err := rows.Scan(&s.ID, &s.Title); err != nil {
-			return nil, fmt.Errorf("scan stream: %w", err)
-		}
-		streams = append(streams, s)
+	args := []any{}
+	if singerID != "" {
+		args = append(args, singerID)
+		where += fmt.Sprintf(" AND EXISTS (SELECT 1 FROM stream_singers ss WHERE ss.stream_id = s.id AND ss.singer_id = $%d)", len(args))
 	}
-	return streams, rows.Err()
-}
 
-// FindUnprocessedWithComments は未処理・非隠しで comment_raw を持つ配信（id/title のみ）を
-// 古い順に返す（一括分析の対象抽出）。
-func (r *StreamRepository) FindUnprocessedWithComments() ([]models.Stream, error) {
-	rows, err := r.db.Query(`
-		SELECT id, title FROM streams
-		WHERE is_processed = FALSE AND is_hidden = FALSE
-		  AND comment_raw IS NOT NULL AND comment_raw != 'null'
-		ORDER BY stream_date ASC`)
+	rows, err := r.db.Query(`SELECT s.id, s.title FROM streams s WHERE `+where+` ORDER BY s.stream_date ASC`, args...)
 	if err != nil {
-		return nil, fmt.Errorf("query unprocessed streams: %w", err)
+		return nil, fmt.Errorf("query batch streams: %w", err)
 	}
 	defer rows.Close()
 

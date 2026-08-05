@@ -304,6 +304,7 @@ export interface AnalyzeCommentsResponse {
 export interface BatchAnalyzeStatus {
   running: boolean;
   mode?: string;
+  singer_id?: string;
   total: number;
   done: number;
   failed: number;

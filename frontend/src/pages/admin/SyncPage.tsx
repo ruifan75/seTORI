@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { holodexApi, batchAnalyzeApi } from '../../api/client';
+import { holodexApi, batchAnalyzeApi, singerApi } from '../../api/client';
 import { useToast } from '../../components/ui/ToastContext';
 
 // 一括分析のモード定義（バックエンドの BatchMode* と対応）
@@ -20,6 +20,12 @@ const BATCH_MODES = [
     label: 'コメント再取得',
     description: '未処理配信のコメントを取得し直してから分析。新しいコメントが増えた配信だけ AI が再実行される。',
   },
+  {
+    value: 'reanalyze',
+    label: '全部再分析（force）',
+    description:
+      '対象のすべての配信を最新の解析ロジックで作り直す（分析済みも含む）。誤検出フィルタ強化後に古いキャッシュを更新したいとき用。AI を呼び直すため時間がかかります。',
+  },
 ] as const;
 
 export default function SyncPage() {
@@ -27,8 +33,17 @@ export default function SyncPage() {
   const [videoId, setVideoId] = useState('');
   const [syncMode, setSyncMode] = useState<'new' | 'all'>('new');
   const [batchMode, setBatchMode] = useState<string>('unanalyzed');
+  const [batchSingerId, setBatchSingerId] = useState<string>(''); // '' = 全チャンネル
   const { showToast } = useToast();
   const queryClient = useQueryClient();
+
+  // チャンネル選択用の歌手一覧（名前順）
+  const { data: singerList } = useQuery({
+    queryKey: ['singers-for-batch'],
+    queryFn: () => singerApi.list(1, 300, 'name', 'asc'),
+    staleTime: 5 * 60 * 1000,
+  });
+  const singers = singerList?.singers ?? [];
 
   // 一括分析：実行中は 3 秒ごとに進捗をポーリング
   const { data: batchStatus } = useQuery({
@@ -38,7 +53,7 @@ export default function SyncPage() {
   });
 
   const startBatchMutation = useMutation({
-    mutationFn: () => batchAnalyzeApi.start(batchMode),
+    mutationFn: () => batchAnalyzeApi.start(batchMode, batchSingerId),
     onSuccess: () => {
       showToast('一括分析を開始しました（バックグラウンドで実行されます）', 'success');
       queryClient.invalidateQueries({ queryKey: ['batch-analyze-status'] });
@@ -250,6 +265,30 @@ export default function SyncPage() {
           ))}
         </div>
 
+        {/* 対象チャンネルの絞り込み */}
+        <div className="mb-4">
+          <label htmlFor="batch-singer" className="block text-sm font-medium text-gray-900 mb-1">
+            対象チャンネル
+          </label>
+          <select
+            id="batch-singer"
+            value={batchSingerId}
+            onChange={(e) => setBatchSingerId(e.target.value)}
+            disabled={batchStatus?.running}
+            className="w-full max-w-md px-3 py-2 text-sm border border-gray-300 rounded-lg bg-white focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400 disabled:opacity-50"
+          >
+            <option value="">すべてのチャンネル</option>
+            {singers.map((sg) => (
+              <option key={sg.id} value={sg.id}>
+                {sg.name}
+              </option>
+            ))}
+          </select>
+          <p className="mt-1 text-xs text-gray-500">
+            選んだチャンネルが参加した配信だけを対象にします（オーナー／コラボ参加どちらも含む）。
+          </p>
+        </div>
+
         {batchStatus?.running ? (
           <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3 text-sm flex flex-wrap items-center gap-3">
             <svg className="animate-spin h-4 w-4 text-indigo-500 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -257,7 +296,11 @@ export default function SyncPage() {
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
             </svg>
             <span className="font-medium text-indigo-700">
-              一括分析中（{BATCH_MODES.find((m) => m.value === batchStatus.mode)?.label ?? batchStatus.mode}）{' '}
+              一括分析中（{BATCH_MODES.find((m) => m.value === batchStatus.mode)?.label ?? batchStatus.mode}
+              {batchStatus.singer_id
+                ? ` / ${singers.find((sg) => sg.id === batchStatus.singer_id)?.name ?? batchStatus.singer_id}`
+                : ' / 全チャンネル'}
+              ）{' '}
               {batchStatus.done + batchStatus.failed}/{batchStatus.total}
             </span>
             {batchStatus.current && <span className="text-gray-500 truncate max-w-md">{batchStatus.current}</span>}
