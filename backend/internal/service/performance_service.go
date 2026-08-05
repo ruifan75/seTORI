@@ -32,14 +32,9 @@ func NewPerformanceService(
 }
 
 // CreatePerformances 直接從前端編輯結果建立演出記錄
-// 會先刪除該 stream 的所有現有演出記錄，再建立新的
+// 既存記録は全削除せず差分更新する（performance ID を保つため。ID はプレイリストから参照される）
 func (s *PerformanceService) CreatePerformances(streamID string, items []dto.CreatePerformanceItem) (*dto.CreatePerformancesResponse, error) {
-	// 先刪除現有的演出記錄
-	if err := s.DeleteByStreamID(streamID); err != nil {
-		return nil, fmt.Errorf("delete existing performances: %w", err)
-	}
-
-	createdCount := 0
+	desired := make([]models.Performance, 0, len(items))
 
 	for _, item := range items {
 		// 1. 尋找或建立歌曲（優先使用 iTunes ID 配對）
@@ -77,39 +72,35 @@ func (s *PerformanceService) CreatePerformances(streamID string, items []dto.Cre
 			}
 		}
 
-		// 3. 建立演出記錄
-		perf := &models.Performance{
+		// 3. 目標状態を組み立てる（書き込みは後段の差分更新でまとめて行う）
+		desired = append(desired, models.Performance{
 			StreamID:     streamID,
 			SongID:       song.ID,
 			StartSeconds: item.StartSeconds,
 			EndSeconds:   item.EndSeconds,
 			OrderIndex:   0, // 不再使用，改用 start_seconds 排序
 			CustomTags:   item.CustomTags,
-		}
+		})
+	}
 
-		if err := s.perfRepo.Create(perf); err != nil {
-			return nil, fmt.Errorf("create performance: %w", err)
-		}
+	// 4. 既存記録との差分を反映（ID を維持）。返る ID は desired と同じ並び。
+	perfIDs, err := s.perfRepo.ReconcilePerformances(streamID, desired)
+	if err != nil {
+		return nil, fmt.Errorf("reconcile performances: %w", err)
+	}
 
-		// 4. 設定標籤
-		if len(item.Tags) > 0 {
-			if err := s.perfRepo.SetTags(perf.ID, item.Tags); err != nil {
-				return nil, fmt.Errorf("set performance tags: %w", err)
-			}
+	// 5. タグ・歌手は毎回設定し直す（維持された記録も内容が変わりうるため、空でも呼ぶ）
+	for i, item := range items {
+		if err := s.perfRepo.SetTags(perfIDs[i], item.Tags); err != nil {
+			return nil, fmt.Errorf("set performance tags: %w", err)
 		}
-
-		// 5. 設定演唱者
-		if len(item.SingerIDs) > 0 {
-			if err := s.perfRepo.SetSingers(perf.ID, item.SingerIDs); err != nil {
-				return nil, fmt.Errorf("set performance singers: %w", err)
-			}
+		if err := s.perfRepo.SetSingers(perfIDs[i], item.SingerIDs); err != nil {
+			return nil, fmt.Errorf("set performance singers: %w", err)
 		}
-
-		createdCount++
 	}
 
 	return &dto.CreatePerformancesResponse{
-		CreatedCount: createdCount,
+		CreatedCount: len(perfIDs),
 	}, nil
 }
 
@@ -179,7 +170,8 @@ func (s *PerformanceService) findOrCreateSong(item dto.CreatePerformanceItem) (*
 	return song, true, nil
 }
 
-// DeleteByStreamID 刪除指定 stream 的所有演出記錄（用於重新編輯時）
+// DeleteByStreamID 刪除指定 stream 的所有演出記錄（セットリストの明示的な全削除用）
+// 編集時の保存は ReconcilePerformances による差分更新を使い、ここは通らない。
 func (s *PerformanceService) DeleteByStreamID(streamID string) error {
 	// 取得所有演出
 	performances, err := s.perfRepo.FindByStreamID(streamID)

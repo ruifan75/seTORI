@@ -282,6 +282,27 @@ func (r *PerformanceRepository) Create(p *models.Performance) error {
 	return nil
 }
 
+// Update 既存の演出を ID を保ったまま更新する。
+// ID を維持することが重要：プレイリスト項目が performance_id を参照しているため、
+// 編集のたびに ID が変わると利用者のプレイリストから曲が消えてしまう。
+func (r *PerformanceRepository) Update(p *models.Performance) error {
+	query := `
+		UPDATE performances
+		SET stream_id = $2, song_id = $3, start_seconds = $4, end_seconds = $5,
+		    order_index = $6, holodex_song_id = $7, custom_tags = $8
+		WHERE id = $1`
+
+	res, err := r.db.Exec(query, p.ID, p.StreamID, p.SongID, p.StartSeconds, p.EndSeconds,
+		p.OrderIndex, p.HolodexSongID, p.CustomTags)
+	if err != nil {
+		return fmt.Errorf("update performance: %w", err)
+	}
+	if n, err := res.RowsAffected(); err == nil && n == 0 {
+		return fmt.Errorf("update performance: not found: %s", p.ID)
+	}
+	return nil
+}
+
 // Delete 刪除演出
 func (r *PerformanceRepository) Delete(id uuid.UUID) error {
 	// 先刪除關聯
@@ -447,6 +468,148 @@ func (r *PerformanceRepository) SetSingers(performanceID uuid.UUID, singerIDs []
 		}
 	}
 	return nil
+}
+
+// ReconcilePerformances は stream の演出を desired の状態へ差分更新し、
+// desired と同じ並びの performance ID を返す（呼び出し側がタグ・歌手の設定に使う）。
+//
+// 全削除→再作成をしないのは ID を保つため。プレイリスト項目が performance_id を
+// 参照するので、編集のたびに ID が変わると利用者のプレイリストから曲が消える。
+// 既存との対応付けは (song_id, start_seconds) の完全一致を優先し、余った分は
+// 同一 song_id で開始秒が最も近いものに割り当てる（開始時間の微調整で ID を失わないため）。
+//
+// UNIQUE(stream_id, song_id, start_seconds) があるため、開始秒を入れ替えるような
+// 編集では更新途中に一時的な衝突が起きうる。これを避けるため、更新対象をいったん
+// 負の開始秒へ退避してから最終値を書く。全体を1トランザクションで行う。
+func (r *PerformanceRepository) ReconcilePerformances(streamID string, desired []models.Performance) ([]uuid.UUID, error) {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	type existingPerf struct {
+		id     uuid.UUID
+		songID uuid.UUID
+		start  int
+	}
+
+	rows, err := tx.Query("SELECT id, song_id, start_seconds FROM performances WHERE stream_id = $1", streamID)
+	if err != nil {
+		return nil, fmt.Errorf("query existing performances: %w", err)
+	}
+	var existing []existingPerf
+	for rows.Next() {
+		var e existingPerf
+		if err := rows.Scan(&e.id, &e.songID, &e.start); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("scan existing performance: %w", err)
+		}
+		existing = append(existing, e)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate existing performances: %w", err)
+	}
+
+	// 対応付け：desired の各要素へ既存 ID を割り当てる（未割り当ては uuid.Nil）
+	assigned := make([]uuid.UUID, len(desired))
+	used := make(map[uuid.UUID]bool, len(existing))
+
+	// 1巡目：(song_id, start_seconds) 完全一致
+	for i, d := range desired {
+		for _, e := range existing {
+			if !used[e.id] && e.songID == d.SongID && e.start == d.StartSeconds {
+				assigned[i] = e.id
+				used[e.id] = true
+				break
+			}
+		}
+	}
+	// 2巡目：同一 song_id のうち開始秒が最も近いもの（開始時間の微調整を吸収）
+	for i, d := range desired {
+		if assigned[i] != uuid.Nil {
+			continue
+		}
+		best, bestDiff := uuid.Nil, 0
+		for _, e := range existing {
+			if used[e.id] || e.songID != d.SongID {
+				continue
+			}
+			diff := e.start - d.StartSeconds
+			if diff < 0 {
+				diff = -diff
+			}
+			if best == uuid.Nil || diff < bestDiff {
+				best, bestDiff = e.id, diff
+			}
+		}
+		if best != uuid.Nil {
+			assigned[i] = best
+			used[best] = true
+		}
+	}
+
+	// 対応の付かなかった既存は削除（関連も含めて）
+	for _, e := range existing {
+		if used[e.id] {
+			continue
+		}
+		for _, q := range []string{
+			"DELETE FROM performance_performance_tags WHERE performance_id = $1",
+			"DELETE FROM performance_singers WHERE performance_id = $1",
+			"DELETE FROM performances WHERE id = $1",
+		} {
+			if _, err := tx.Exec(q, e.id); err != nil {
+				return nil, fmt.Errorf("delete obsolete performance: %w", err)
+			}
+		}
+	}
+
+	// 維持する行を一時的に負の開始秒へ退避（UNIQUE 制約の一時衝突を回避）
+	park := 0
+	for _, id := range assigned {
+		if id == uuid.Nil {
+			continue
+		}
+		park++
+		if _, err := tx.Exec("UPDATE performances SET start_seconds = $2 WHERE id = $1", id, -park); err != nil {
+			return nil, fmt.Errorf("park performance: %w", err)
+		}
+	}
+
+	// 最終値を書き込む（既存は更新、無ければ新規作成）
+	result := make([]uuid.UUID, len(desired))
+	for i := range desired {
+		d := desired[i]
+		if id := assigned[i]; id != uuid.Nil {
+			_, err := tx.Exec(`
+				UPDATE performances
+				SET song_id = $2, start_seconds = $3, end_seconds = $4,
+				    order_index = $5, holodex_song_id = $6, custom_tags = $7
+				WHERE id = $1`,
+				id, d.SongID, d.StartSeconds, d.EndSeconds, d.OrderIndex, d.HolodexSongID, d.CustomTags)
+			if err != nil {
+				return nil, fmt.Errorf("update performance: %w", err)
+			}
+			result[i] = id
+			continue
+		}
+		newID := uuid.New()
+		_, err := tx.Exec(`
+			INSERT INTO performances (id, stream_id, song_id, start_seconds, end_seconds, order_index, holodex_song_id, custom_tags)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+			newID, streamID, d.SongID, d.StartSeconds, d.EndSeconds, d.OrderIndex, d.HolodexSongID, d.CustomTags)
+		if err != nil {
+			return nil, fmt.Errorf("insert performance: %w", err)
+		}
+		result[i] = newID
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit reconcile: %w", err)
+	}
+	return result, nil
 }
 
 // DeleteByStreamID 刪除指定 Stream 的所有演出記錄
