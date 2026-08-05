@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -14,8 +15,22 @@ const baseURL = "https://www.googleapis.com/youtube/v3"
 
 // Client YouTube API Client
 type Client struct {
+	mu         sync.RWMutex // apiKey は管理画面から実行中に差し替えられる
 	apiKey     string
 	httpClient *http.Client
+}
+
+// SetAPIKey は API キーを差し替える（設定画面での変更を再起動なしに反映するため）。
+func (c *Client) SetAPIKey(key string) {
+	c.mu.Lock()
+	c.apiKey = key
+	c.mu.Unlock()
+}
+
+func (c *Client) key() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.apiKey
 }
 
 // NewClient 新しい YouTube クライアントを作成
@@ -228,7 +243,7 @@ func (c *Client) GetChannelByHandle(handle string) (*Channel, error) {
 }
 
 func (c *Client) getChannelByFilter(filterName string, filterValue string) (*Channel, error) {
-	if c.apiKey == "" {
+	if c.key() == "" {
 		return nil, fmt.Errorf("YouTube API key not configured")
 	}
 	if strings.TrimSpace(filterValue) == "" {
@@ -236,7 +251,7 @@ func (c *Client) getChannelByFilter(filterName string, filterValue string) (*Cha
 	}
 
 	params := url.Values{}
-	params.Set("key", c.apiKey)
+	params.Set("key", c.key())
 	params.Set("part", "snippet")
 	params.Set(filterName, filterValue)
 
@@ -315,7 +330,7 @@ func (c *Client) ListVideoComments(videoID string) ([]string, error) {
 
 	for {
 		params := url.Values{}
-		params.Set("key", c.apiKey)
+		params.Set("key", c.key())
 		params.Set("part", "snippet")
 		params.Set("videoId", videoID)
 		params.Set("maxResults", "100")
@@ -370,5 +385,5 @@ func (c *Client) ListVideoComments(videoID string) ([]string, error) {
 
 // IsConfigured API Key が設定されているかを確認
 func (c *Client) IsConfigured() bool {
-	return c != nil && c.apiKey != ""
+	return c != nil && c.key() != ""
 }

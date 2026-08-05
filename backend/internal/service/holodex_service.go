@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ruifan75/setori/internal/dto"
@@ -32,10 +33,24 @@ type HolodexService struct {
 	perfRepo             *repository.PerformanceRepository
 	songRepo             *repository.SongRepository
 	songItunesRepo       *repository.SongItunesRepository
+	editorMu             sync.RWMutex // editorToken は管理画面から実行中に差し替えられる
 	editorToken          string
 	aiClient             *ai.Client
 	normalizationService *NormalizationService
 	chatEndService       *ChatEndService
+}
+
+// SetEditorToken は Holodex への書き込みに使うトークンを差し替える。
+func (s *HolodexService) SetEditorToken(token string) {
+	s.editorMu.Lock()
+	s.editorToken = token
+	s.editorMu.Unlock()
+}
+
+func (s *HolodexService) editor() string {
+	s.editorMu.RLock()
+	defer s.editorMu.RUnlock()
+	return s.editorToken
 }
 
 // SetAnalysisServices 注入正規化・拍手 end 偵測服務（AnalyzeHolodexSongs 用）。
@@ -66,6 +81,14 @@ func NewHolodexService(
 		editorToken:   editorToken,
 		aiClient:      aiClient,
 	}
+}
+
+// ApplyKeys は Holodex / YouTube / 編集トークンをまとめて差し替える。
+// 設定画面での変更を再起動なしに反映するため、SettingsService から呼ばれる。
+func (s *HolodexService) ApplyKeys(holodexKey, youtubeKey, editorToken string) {
+	s.client.SetAPIKey(holodexKey)
+	s.youtubeClient.SetAPIKey(youtubeKey)
+	s.SetEditorToken(editorToken)
 }
 
 // SetRepositories 設定額外的 repositories（用於 SyncSetoriToHolodex）
@@ -922,7 +945,7 @@ func (s *HolodexService) SyncSetoriToHolodex(streamID string) (*dto.SyncHolodexR
 	}
 
 	// 2. 檢查 editor token 是否配置
-	if s.editorToken == "" || s.editorToken == "your-holodex-editor-token-here" {
+	if tok := s.editor(); tok == "" || tok == "your-holodex-editor-token-here" {
 		return nil, fmt.Errorf("Holodex editor token not configured")
 	}
 
@@ -1089,7 +1112,7 @@ func (s *HolodexService) SyncSetoriToHolodex(streamID string) (*dto.SyncHolodexR
 						}
 
 						req.Header.Set("Content-Type", "application/json")
-						req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", s.editorToken))
+						req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", s.editor()))
 						req.Header.Set("Origin", "https://holodex.net")
 
 						client := &http.Client{Timeout: 30 * time.Second}

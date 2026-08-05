@@ -11,8 +11,6 @@ type Config struct {
 	HolodexEditorToken string
 	YouTubeAPIKey      string
 	GroqAPIKey         string
-	JWTSecret          string
-	APIAuthToken       string
 	BootstrapAdminUser string
 	BootstrapAdminPass string
 	Environment        string
@@ -32,6 +30,11 @@ type Config struct {
 	OAuthRedirectBaseURL string
 	// 認証後に戻すフロントエンドの URL
 	FrontendBaseURL string
+
+	// 管理画面から保存する API キー類を DB 上で暗号化するための鍵。
+	// DB のバックアップは Google Drive へ自動アップロードされるため、
+	// 鍵だけは DB に置かず環境変数で持つ（鍵が無ければ機密の保存を拒否する）。
+	SettingsEncryptionKey string
 }
 
 // Load 環境変数から設定を読み込み
@@ -42,10 +45,6 @@ func Load() (*Config, error) {
 		HolodexEditorToken: getEnv("HOLODEX_EDITOR_TOKEN", ""),
 		YouTubeAPIKey:      getEnv("YOUTUBE_API_KEY", ""),
 		GroqAPIKey:         getEnv("GROQ_API_KEY", ""),
-		JWTSecret:          getEnv("JWT_SECRET", "your-secret-key-change-in-production"),
-		// APIAuthToken が設定されている場合、書き込み操作（POST/PUT/DELETE/PATCH）に対し
-		// Authorization: Bearer <token> を要求。空欄時は公開（ローカル開発向け）。
-		APIAuthToken: getEnv("API_AUTH_TOKEN", ""),
 		// 初回起動時、ユーザーが 0 件なら作成する管理者アカウント。
 		BootstrapAdminUser: getEnv("ADMIN_USERNAME", "admin"),
 		BootstrapAdminPass: getEnv("ADMIN_PASSWORD", "admin"),
@@ -61,6 +60,8 @@ func Load() (*Config, error) {
 		GoogleSigninSecret:   getEnv("GOOGLE_SIGNIN_CLIENT_SECRET", ""),
 		OAuthRedirectBaseURL: getEnv("OAUTH_REDIRECT_BASE_URL", "http://localhost:8080"),
 		FrontendBaseURL:      getEnv("FRONTEND_BASE_URL", "http://localhost:5173"),
+
+		SettingsEncryptionKey: getEnv("SETTINGS_ENCRYPTION_KEY", ""),
 	}
 
 	return cfg, nil

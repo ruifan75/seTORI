@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 
 	"github.com/ruifan75/setori/pkg/ratelimit"
@@ -17,9 +18,23 @@ const baseURL = "https://holodex.net/api/v2"
 
 // Client Holodex API クライアント
 type Client struct {
+	mu          sync.RWMutex // apiKey は管理画面から実行中に差し替えられる
 	apiKey      string
 	httpClient  *http.Client
 	rateLimiter *ratelimit.RateLimiter
+}
+
+// SetAPIKey は API キーを差し替える（設定画面での変更を再起動なしに反映するため）。
+func (c *Client) SetAPIKey(key string) {
+	c.mu.Lock()
+	c.apiKey = key
+	c.mu.Unlock()
+}
+
+func (c *Client) key() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.apiKey
 }
 
 // APIError Holodex API のステータス付きエラー
@@ -264,7 +279,7 @@ func (c *Client) get(endpoint string, params url.Values, result interface{}) err
 		return fmt.Errorf("create request: %w", err)
 	}
 
-	req.Header.Set("X-APIKEY", c.apiKey)
+	req.Header.Set("X-APIKEY", c.key())
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := c.httpClient.Do(req)
@@ -313,7 +328,7 @@ func (c *Client) AddSongs(songs []AddSongsRequest) error {
 			return fmt.Errorf("create request: %w", err)
 		}
 
-		req.Header.Set("X-APIKEY", c.apiKey)
+		req.Header.Set("X-APIKEY", c.key())
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept", "application/json")
 

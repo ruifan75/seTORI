@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { filterKeywordApi, tagApi, tagRuleApi, aiProviderApi } from '../../api/client';
 import { useToast } from '../../components/ui/ToastContext';
 import { useAuthStore, hasPermission, PERM } from '../../store/auth';
+import IntegrationSettingsSection from './IntegrationSettingsSection';
 import type { FilterKeyword, StreamTag, PerformanceTag, TagKeywordRule, AIProvider, AIProviderInput, AIModelInfo } from '../../api/types';
 
 function KeywordSection({
@@ -784,10 +785,19 @@ export default function SettingsPage() {
 
   const me = useAuthStore((s) => s.user);
   const canManageAI = hasPermission(me, PERM.AI_MANAGE);
+  // 連携設定は資格情報の管理なので、バックエンドと同じく users:manage を要求する
+  const canManageIntegrations = hasPermission(me, PERM.USERS_MANAGE);
 
   return (
     <div className="space-y-6">
       <h1 className="text-3xl font-bold text-gray-900">設定</h1>
+
+      {/* 外部サービス連携（要 users:manage） */}
+      {canManageIntegrations && (
+        <div className="bg-white rounded-lg shadow-sm border p-6">
+          <IntegrationSettingsSection />
+        </div>
+      )}
 
       {/* AI Providers（要 ai:manage） */}
       {canManageAI && <AIProviderSection />}

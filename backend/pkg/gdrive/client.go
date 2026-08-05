@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -30,10 +31,27 @@ const (
 )
 
 // Client は OAuth クライアント資格情報を保持する。
+// 資格情報は管理画面から実行中に差し替えられるため mu で保護する。
 type Client struct {
+	mu           sync.RWMutex
 	ClientID     string
 	ClientSecret string
 	http         *http.Client
+}
+
+// SetCredentials は資格情報を差し替える（設定画面での変更を再起動なしに反映するため）。
+func (c *Client) SetCredentials(clientID, clientSecret string) {
+	c.mu.Lock()
+	c.ClientID = clientID
+	c.ClientSecret = clientSecret
+	c.mu.Unlock()
+}
+
+// creds は資格情報を安全に読み出す。
+func (c *Client) creds() (string, string) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.ClientID, c.ClientSecret
 }
 
 func NewClient(clientID, clientSecret string) *Client {
@@ -46,7 +64,11 @@ func NewClient(clientID, clientSecret string) *Client {
 
 // Configured はクライアント ID/シークレットが設定済みかを返す。
 func (c *Client) Configured() bool {
-	return c != nil && c.ClientID != "" && c.ClientSecret != ""
+	if c == nil {
+		return false
+	}
+	id, secret := c.creds()
+	return id != "" && secret != ""
 }
 
 // ========== OAuth デバイスフロー ==========
@@ -70,7 +92,8 @@ type Token struct {
 
 // StartDeviceAuth はデバイスフローを開始し、ユーザーに提示するコードと URL を返す。
 func (c *Client) StartDeviceAuth() (*DeviceAuth, error) {
-	form := url.Values{"client_id": {c.ClientID}, "scope": {ScopeDriveFile}}
+	id, _ := c.creds()
+	form := url.Values{"client_id": {id}, "scope": {ScopeDriveFile}}
 	var auth DeviceAuth
 	if err := c.postForm(deviceCodeURL, form, &auth); err != nil {
 		return nil, err
@@ -87,9 +110,10 @@ var ErrAuthPending = fmt.Errorf("authorization_pending")
 // PollDeviceToken はデバイスフローのトークン取得を1回試行する。
 // ユーザー未承認の間は ErrAuthPending を返す。
 func (c *Client) PollDeviceToken(deviceCode string) (*Token, error) {
+	clientID, clientSecret := c.creds()
 	form := url.Values{
-		"client_id":     {c.ClientID},
-		"client_secret": {c.ClientSecret},
+		"client_id":     {clientID},
+		"client_secret": {clientSecret},
 		"device_code":   {deviceCode},
 		"grant_type":    {"urn:ietf:params:oauth:grant-type:device_code"},
 	}
@@ -106,9 +130,10 @@ func (c *Client) PollDeviceToken(deviceCode string) (*Token, error) {
 
 // RefreshAccessToken はリフレッシュトークンからアクセストークンを取得する。
 func (c *Client) RefreshAccessToken(refreshToken string) (*Token, error) {
+	clientID, clientSecret := c.creds()
 	form := url.Values{
-		"client_id":     {c.ClientID},
-		"client_secret": {c.ClientSecret},
+		"client_id":     {clientID},
+		"client_secret": {clientSecret},
 		"refresh_token": {refreshToken},
 		"grant_type":    {"refresh_token"},
 	}

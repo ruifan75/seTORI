@@ -21,6 +21,7 @@ const aiCooldownDuration = 60 * time.Second
 // 未設定任何 DB provider 時，退回環境變數的 Groq key（向後相容、零設定可用）。
 type AIService struct {
 	repo        *repository.AIProviderRepository
+	fallbackMu  sync.RWMutex // fallbackKey は管理画面から実行中に差し替えられる
 	fallbackKey string
 
 	mu        sync.Mutex
@@ -29,6 +30,19 @@ type AIService struct {
 
 // 確保 AIService 實作 ai.Chatter
 var _ ai.Chatter = (*AIService)(nil)
+
+// SetFallbackKey は provider 未設定時に使う Groq キーを差し替える。
+func (s *AIService) SetFallbackKey(key string) {
+	s.fallbackMu.Lock()
+	s.fallbackKey = key
+	s.fallbackMu.Unlock()
+}
+
+func (s *AIService) fallback() string {
+	s.fallbackMu.RLock()
+	defer s.fallbackMu.RUnlock()
+	return s.fallbackKey
+}
 
 func NewAIService(repo *repository.AIProviderRepository, fallbackGroqKey string) *AIService {
 	return &AIService{
@@ -47,11 +61,11 @@ func (s *AIService) SimpleChat(systemPrompt, userMessage string) (string, error)
 
 	// 沒有設定任何 provider → 退回環境變數的 Groq key
 	if len(providers) == 0 {
-		if s.fallbackKey == "" {
+		if s.fallback() == "" {
 			return "", errors.New("no AI provider configured")
 		}
 		// fallback 使用較長的預設 timeout（60s）
-		return ai.NewClientWithTimeout("", "", s.fallbackKey, 60*time.Second).SimpleChat(systemPrompt, userMessage)
+		return ai.NewClientWithTimeout("", "", s.fallback(), 60*time.Second).SimpleChat(systemPrompt, userMessage)
 	}
 
 	// 依 priority 順序嘗試（providers 已由 repo 依 priority ASC 排序）：
@@ -86,8 +100,8 @@ func (s *AIService) SimpleChat(systemPrompt, userMessage string) (string, error)
 	}
 
 	// 全部 provider 失敗 → 最後再試環境變數 fallback
-	if s.fallbackKey != "" {
-		if resp, err := ai.NewClientWithTimeout("", "", s.fallbackKey, 60*time.Second).SimpleChat(systemPrompt, userMessage); err == nil {
+	if s.fallback() != "" {
+		if resp, err := ai.NewClientWithTimeout("", "", s.fallback(), 60*time.Second).SimpleChat(systemPrompt, userMessage); err == nil {
 			logger.Infof("AI fallback (env key) succeeded")
 			return resp, nil
 		}

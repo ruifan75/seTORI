@@ -24,6 +24,7 @@ import (
 	"github.com/ruifan75/setori/pkg/gdrive"
 	"github.com/ruifan75/setori/pkg/itunes"
 	"github.com/ruifan75/setori/pkg/oauth"
+	"github.com/ruifan75/setori/pkg/secrets"
 	"github.com/ruifan75/setori/pkg/youtube"
 )
 
@@ -53,6 +54,7 @@ type Router struct {
 	backupService        *service.BackupService
 	playlistService      *service.PlaylistService
 	oauthService         *service.OAuthService
+	settingsService      *service.SettingsService
 }
 
 // NewRouter 新しいルーターを作成
@@ -100,9 +102,31 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	playlistService := service.NewPlaylistService(playlistRepo)
 	oauthRepo := repository.NewOAuthRepository(db)
 	// 連携先は Provider を足すだけで増やせる（X / Discord は実装を追加する）
-	oauthService := service.NewOAuthService(authRepo, oauthRepo, cfg.OAuthRedirectBaseURL,
-		oauth.NewGoogleProvider(cfg.GoogleSigninClientID, cfg.GoogleSigninSecret),
+	googleProvider := oauth.NewGoogleProvider(cfg.GoogleSigninClientID, cfg.GoogleSigninSecret)
+	oauthService := service.NewOAuthService(authRepo, oauthRepo, cfg.OAuthRedirectBaseURL, googleProvider)
+
+	// 外部サービス連携の設定：DB（暗号化保存）→ .env の順に解決し、変更を各サービスへ即時反映する。
+	// これにより .env を編集して再起動しなくても管理画面からキーを差し替えられる。
+	settingsCipher, err := secrets.NewCipher(cfg.SettingsEncryptionKey)
+	if err != nil {
+		logger.Errorf("設定の暗号化を初期化できませんでした: %v", err)
+		settingsCipher, _ = secrets.NewCipher("")
+	}
+	settingsService := service.NewSettingsService(
+		appSettingsRepo, settingsCipher,
+		cfg.HolodexAPIKey, cfg.HolodexEditorToken, cfg.YouTubeAPIKey, cfg.GroqAPIKey,
+		cfg.GoogleOAuthClientID, cfg.GoogleOAuthSecret,
+		cfg.GoogleSigninClientID, cfg.GoogleSigninSecret,
 	)
+	settingsService.OnChange(func(s service.IntegrationSettings) {
+		holodexService.ApplyKeys(s.HolodexAPIKey, s.YouTubeAPIKey, s.HolodexEditorToken)
+		aiService.SetFallbackKey(s.GroqAPIKey)
+		driveClient.SetCredentials(s.GoogleDriveClientID, s.GoogleDriveSecret)
+		googleProvider.SetCredentials(s.GoogleSigninClientID, s.GoogleSigninSecret)
+	})
+	if err := settingsService.Load(); err != nil {
+		logger.Errorf("連携設定の読み込みに失敗しました: %v", err)
+	}
 
 	r := &Router{
 		db:                   db,
@@ -128,6 +152,7 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 		backupService:        backupService,
 		playlistService:      playlistService,
 		oauthService:         oauthService,
+		settingsService:      settingsService,
 	}
 
 	r.setupRoutes()
@@ -215,6 +240,10 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("GET /api/suggestions/count", r.handleCountSuggestions)
 	r.mux.HandleFunc("POST /api/suggestions/{id}/approve", r.handleApproveSuggestion)
 	r.mux.HandleFunc("POST /api/suggestions/{id}/reject", r.handleRejectSuggestion)
+
+	// 外部サービス連携の設定（キーの値は返さない。要 users:manage）
+	r.mux.HandleFunc("GET /api/settings/integrations", r.handleGetIntegrationSettings)
+	r.mux.HandleFunc("PUT /api/settings/integrations", r.handleUpdateIntegrationSettings)
 
 	// プレイリスト
 	// 公開範囲の判定は行単位なので、認可は各ハンドラ（PlaylistService）側で行う。
@@ -2379,22 +2408,11 @@ func (r *Router) handlePreviewAIProviderModels(w http.ResponseWriter, req *http.
 
 // ========== Auth / ACL ==========
 
-// resolveUser は Bearer トークンから現在のユーザーを解決する。
-// 未ログインなら (nil, nil)。後方互換として、静的 API_AUTH_TOKEN に一致する場合は
-// 全権限を持つ疑似管理者として扱う（既存のスクリプト/デプロイ向け）。
+// resolveUser は Bearer トークンから現在のユーザーを解決する。未ログインなら (nil, nil)。
 func (r *Router) resolveUser(req *http.Request) (*models.User, error) {
 	token := bearerToken(req)
 	if token == "" {
 		return nil, nil
-	}
-	if r.cfg.APIAuthToken != "" && token == r.cfg.APIAuthToken {
-		return &models.User{
-			Username:    "api-token",
-			DisplayName: "API Token",
-			RoleName:    "admin",
-			Permissions: []string{auth.PermAll},
-			IsActive:    true,
-		}, nil
 	}
 	return r.authService.Authenticate(token)
 }
@@ -2484,6 +2502,9 @@ func requiredPermission(method, path string) (perm string, needsAuth bool) {
 	case strings.HasPrefix(path, "/api/users"),
 		strings.HasPrefix(path, "/api/roles"),
 		path == "/api/permissions":
+		return auth.PermUsersManage, true
+	case strings.HasPrefix(path, "/api/settings"):
+		// 連携設定は実質的に資格情報の管理なのでユーザー管理と同格の権限を要求する
 		return auth.PermUsersManage, true
 	case strings.HasPrefix(path, "/api/ai-providers"):
 		return auth.PermAIManage, true

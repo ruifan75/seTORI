@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -21,9 +22,24 @@ const (
 // Drive バックアップで使っている「TV と限定入力デバイス」型のクライアントとは別物で、
 // あちらはデバイスフロー専用のためリダイレクトフローには使えない。
 type GoogleProvider struct {
+	mu           sync.RWMutex // 資格情報は管理画面から実行中に差し替えられる
 	clientID     string
 	clientSecret string
 	httpClient   *http.Client
+}
+
+// SetCredentials は資格情報を差し替える（設定画面での変更を再起動なしに反映するため）。
+func (p *GoogleProvider) SetCredentials(clientID, clientSecret string) {
+	p.mu.Lock()
+	p.clientID = clientID
+	p.clientSecret = clientSecret
+	p.mu.Unlock()
+}
+
+func (p *GoogleProvider) creds() (string, string) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.clientID, p.clientSecret
 }
 
 func NewGoogleProvider(clientID, clientSecret string) *GoogleProvider {
@@ -37,12 +53,14 @@ func NewGoogleProvider(clientID, clientSecret string) *GoogleProvider {
 func (p *GoogleProvider) Name() string { return "google" }
 
 func (p *GoogleProvider) Configured() bool {
-	return p.clientID != "" && p.clientSecret != ""
+	id, secret := p.creds()
+	return id != "" && secret != ""
 }
 
 func (p *GoogleProvider) AuthCodeURL(state, redirectURI string) string {
+	id, _ := p.creds()
 	q := url.Values{}
-	q.Set("client_id", p.clientID)
+	q.Set("client_id", id)
 	q.Set("redirect_uri", redirectURI)
 	q.Set("response_type", "code")
 	q.Set("scope", "openid email profile")
@@ -66,10 +84,11 @@ func (p *GoogleProvider) Exchange(ctx context.Context, code, redirectURI string)
 		return nil, fmt.Errorf("google oauth client is not configured")
 	}
 
+	clientID, clientSecret := p.creds()
 	form := url.Values{}
 	form.Set("code", code)
-	form.Set("client_id", p.clientID)
-	form.Set("client_secret", p.clientSecret)
+	form.Set("client_id", clientID)
+	form.Set("client_secret", clientSecret)
 	form.Set("redirect_uri", redirectURI)
 	form.Set("grant_type", "authorization_code")
 

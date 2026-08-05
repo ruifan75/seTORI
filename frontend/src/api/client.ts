@@ -57,6 +57,8 @@ import type {
   PermissionInfo,
   CreateUserRequest,
   UpdateUserRequest,
+  IntegrationSettings,
+  UpdateIntegrationSettingsRequest,
   OAuthIdentity,
   Playlist,
   PlaylistListResponse,
@@ -946,6 +948,21 @@ export const playlistApi = {
 
   sharedItems: async (slug: string): Promise<PerformanceListResponse> => {
     const { data } = await api.get(`/api/shared/playlists/${slug}/items`);
+    return data;
+  },
+};
+
+// ========== 外部サービス連携の設定 API（要 users:manage） ==========
+// キーの値は返らない。設定済みか・末尾4桁・.env 由来かだけが返る。
+
+export const integrationSettingsApi = {
+  get: async (): Promise<IntegrationSettings> => {
+    const { data } = await api.get('/api/settings/integrations');
+    return data;
+  },
+
+  update: async (body: UpdateIntegrationSettingsRequest): Promise<IntegrationSettings> => {
+    const { data } = await api.put('/api/settings/integrations', body);
     return data;
   },
 };

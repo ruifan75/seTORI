@@ -714,3 +714,29 @@ type AddPlaylistItemRequest struct {
 type ReorderPlaylistRequest struct {
 	PerformanceIDs []string `json:"performance_ids"`
 }
+
+// ========== 外部サービス連携の設定（管理画面） ==========
+
+// SecretFieldStatus は機密項目の状態。値そのものは返さない。
+type SecretFieldStatus struct {
+	Configured bool   `json:"configured"`
+	Hint       string `json:"hint,omitempty"` // 末尾4文字
+	FromEnv    bool   `json:"from_env"`       // true なら .env 由来（UI で保存すると DB 側が優先される）
+}
+
+type IntegrationSettingsResponse struct {
+	// EncryptionEnabled が false だと機密を保存できない（SETTINGS_ENCRYPTION_KEY 未設定）
+	EncryptionEnabled bool                         `json:"encryption_enabled"`
+	Secrets           map[string]SecretFieldStatus `json:"secrets"`
+	Plain             map[string]string            `json:"plain"`
+	PlainFromEnv      map[string]bool              `json:"plain_from_env"`
+}
+
+type UpdateIntegrationSettingsRequest struct {
+	// Secrets は項目名 -> 新しい値。空文字の項目は「変更なし」として無視される。
+	Secrets map[string]string `json:"secrets,omitempty"`
+	// Clear は明示的に消したい項目名。
+	Clear                []string `json:"clear,omitempty"`
+	GoogleDriveClientID  *string  `json:"google_drive_client_id,omitempty"`
+	GoogleSigninClientID *string  `json:"google_signin_client_id,omitempty"`
+}

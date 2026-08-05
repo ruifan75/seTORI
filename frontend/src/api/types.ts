@@ -804,3 +804,30 @@ export interface OAuthIdentity {
   created_at: string;
   updated_at: string;
 }
+
+// ========== 外部サービス連携の設定 ==========
+
+export interface SecretFieldStatus {
+  configured: boolean;
+  /** 末尾4文字のヒント。値そのものは API から返らない */
+  hint?: string;
+  /** true なら .env 由来。UI で保存すると DB 側が優先される */
+  from_env: boolean;
+}
+
+export interface IntegrationSettings {
+  /** false なら SETTINGS_ENCRYPTION_KEY 未設定で、機密を保存できない */
+  encryption_enabled: boolean;
+  secrets: Record<string, SecretFieldStatus>;
+  plain: Record<string, string>;
+  plain_from_env: Record<string, boolean>;
+}
+
+export interface UpdateIntegrationSettingsRequest {
+  /** 項目名 -> 新しい値。空文字は「変更なし」として無視される */
+  secrets?: Record<string, string>;
+  /** 明示的に消す項目名 */
+  clear?: string[];
+  google_drive_client_id?: string;
+  google_signin_client_id?: string;
+}
