@@ -2,8 +2,10 @@ package service
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -150,7 +152,151 @@ func (s *SuggestionService) Create(req *dto.CreateSuggestionRequest, actor Sugge
 		return nil, err
 	}
 	logger.Infof("edit suggestion created: %s %s (%s) by %s", req.TargetType, id, label, actorLabel(actor))
+
+	// 複数人が同じズレを指摘していれば人手を待たずに反映する。
+	// 失敗しても提案の投稿自体は成功として扱う（あくまで自動処理の上乗せ）。
+	if err := s.tryAutoApply(req.TargetType, id); err != nil {
+		logger.Warnf("auto apply check failed (%s %s): %v", req.TargetType, id, err)
+	}
 	return created, nil
+}
+
+// ========== 自動適用 ==========
+//
+// 再生中のワンタップ通報は件数が多く、その大半は「開始/終了が数秒ずれている」だけの
+// 単純な指摘になる。これを全部人手のレビューに積むと管理者が溺れるため、
+// 十分に裏が取れたものは自動で反映する。
+//
+// 条件（すべて満たすときだけ）：
+//   - 対象が歌唱記録で、フィールドが開始/終了秒
+//   - ログイン済みユーザーからの提案であること（匿名は数に入れない）
+//   - 異なる利用者が autoApplyMinVotes 人以上、同じフィールドについて提案している
+//   - その提案値のばらつきが autoApplyMaxSpreadSeconds 秒以内（意見が割れていない）
+//   - 現在値からの差が autoApplyMaxDeltaSeconds 秒以内（大きな変更は人が見る）
+//   - 提案時点のスナップショットが現在値と一致（対象が別途編集されていない）
+//
+// 採用値は中央値。極端な値1つに引きずられないようにするため。
+const (
+	autoApplyMinVotes         = 2
+	autoApplyMaxSpreadSeconds = 3
+	autoApplyMaxDeltaSeconds  = 5
+)
+
+// autoApplyFields は自動適用の対象フィールド（歌唱記録の時間軸のみ）。
+var autoApplyFields = []string{"start_seconds", "end_seconds"}
+
+// tryAutoApply は対象に溜まった pending 提案を見て、条件を満たすフィールドを自動反映する。
+func (s *SuggestionService) tryAutoApply(targetType string, targetID uuid.UUID) error {
+	if targetType != "performance" {
+		return nil
+	}
+	editor, ok := s.editors[targetType]
+	if !ok {
+		return nil
+	}
+	current, _, err := editor.GetEditableFields(targetID)
+	if err != nil || current == nil {
+		return err
+	}
+
+	pending, err := s.repo.FindPendingTimingByTarget(targetType, targetID)
+	if err != nil {
+		return err
+	}
+
+	applied := map[string]string{}
+	var usedIDs []uuid.UUID
+
+	for _, field := range autoApplyFields {
+		value, ids, ok := s.voteFor(pending, current, field)
+		if !ok {
+			continue
+		}
+		applied[field] = value
+		usedIDs = append(usedIDs, ids...)
+	}
+	if len(applied) == 0 {
+		return nil
+	}
+
+	if err := editor.ApplyEditableFields(targetID, applied); err != nil {
+		// 反映できない（範囲が不正など）なら人手のレビューに残す
+		logger.Warnf("auto apply rejected by target (%s): %v", targetID, err)
+		return nil
+	}
+	for _, id := range usedIDs {
+		if err := s.repo.UpdateStatus(id, "approved", nil, "複数の提案が一致したため自動適用"); err != nil {
+			return err
+		}
+	}
+	logger.Infof("auto applied %v to performance %s from %d suggestions", applied, targetID, len(usedIDs))
+	return nil
+}
+
+// voteFor は1フィールドについて自動適用の可否を判定し、採用値と根拠になった提案 ID を返す。
+func (s *SuggestionService) voteFor(pending []models.EditSuggestion, current map[string]string, field string) (string, []uuid.UUID, bool) {
+	curValue, ok := current[field]
+	if !ok {
+		return "", nil, false
+	}
+	curSeconds, err := strconv.Atoi(curValue)
+	if err != nil {
+		return "", nil, false
+	}
+
+	// 1人1票（同じ人の複数提案は最新のものだけ数える）
+	type vote struct {
+		seconds int
+		id      uuid.UUID
+	}
+	byUser := map[uuid.UUID]vote{}
+
+	for _, sug := range pending {
+		if sug.CreatedBy == nil {
+			continue
+		}
+		var before, after map[string]string
+		if json.Unmarshal(sug.BeforeData, &before) != nil || json.Unmarshal(sug.AfterData, &after) != nil {
+			continue
+		}
+		proposed, ok := after[field]
+		if !ok || proposed == before[field] {
+			continue // このフィールドを変更しない提案
+		}
+		// 提案時点と現在値がズレている＝対象が別途編集済み。人手の判断に回す。
+		if before[field] != curValue {
+			continue
+		}
+		n, err := strconv.Atoi(proposed)
+		if err != nil {
+			continue
+		}
+		if abs(n-curSeconds) > autoApplyMaxDeltaSeconds {
+			continue // 大きな変更は自動で入れない
+		}
+		byUser[*sug.CreatedBy] = vote{seconds: n, id: sug.ID}
+	}
+
+	if len(byUser) < autoApplyMinVotes {
+		return "", nil, false
+	}
+
+	values := make([]int, 0, len(byUser))
+	ids := make([]uuid.UUID, 0, len(byUser))
+	for _, v := range byUser {
+		values = append(values, v.seconds)
+		ids = append(ids, v.id)
+	}
+	sort.Ints(values)
+	if values[len(values)-1]-values[0] > autoApplyMaxSpreadSeconds {
+		return "", nil, false // 意見が割れている
+	}
+	return strconv.Itoa(median(values)), ids, true
+}
+
+// median は昇順に並んだ値の中央値。偶数個なら小さい側（開始/終了は整数秒で扱うため平均は取らない）。
+func median(sorted []int) int {
+	return sorted[(len(sorted)-1)/2]
 }
 
 // checkRate は直近ウィンドウ内の投稿数で投稿を制限する。
@@ -197,6 +343,82 @@ func (s *SuggestionService) List(status string, page, limit int) (*dto.Suggestio
 	}, nil
 }
 
+// ListGrouped は提案を対象ごとにまとめて返す。
+// 再生中のワンタップ通報は同じ歌唱に何件も集まるため、1件ずつではなく
+// 対象単位で見比べて処理できるようにする。
+func (s *SuggestionService) ListGrouped(status string, page, limit int) (*dto.SuggestionGroupListResponse, error) {
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+	groups, total, err := s.repo.ListGroupedByTarget(status, limit, (page-1)*limit)
+	if err != nil {
+		return nil, err
+	}
+
+	resp := make([]dto.SuggestionGroup, 0, len(groups))
+	for _, g := range groups {
+		items := make([]dto.SuggestionResponse, len(g.Suggestions))
+		for i, it := range g.Suggestions {
+			items[i] = s.toSuggestionResponse(it)
+		}
+		// 現在値はグループで1回だけ引く（提案ごとに引くと同じ対象を何度も読むことになる）
+		current := map[string]string{}
+		if editor, ok := s.editors[g.TargetType]; ok {
+			if fields, _, err := editor.GetEditableFields(g.TargetID); err == nil && fields != nil {
+				current = fields
+			}
+		}
+		resp = append(resp, dto.SuggestionGroup{
+			TargetType:  g.TargetType,
+			TargetID:    g.TargetID,
+			TargetLabel: g.TargetLabel,
+			Current:     current,
+			Suggestions: items,
+		})
+	}
+	return &dto.SuggestionGroupListResponse{
+		Groups: resp,
+		Pagination: dto.PaginationResponse{
+			Page: page, Limit: limit, Total: total, TotalPages: (total + limit - 1) / limit,
+		},
+	}, nil
+}
+
+// BatchReview は複数の提案をまとめて承認/却下する。
+// 1件でも失敗したら止めるのではなく、成功したものはそのまま残し、失敗の理由を個別に返す
+// （同一対象への提案は互いに衝突しうるため、途中で止めると中途半端な状態になる）。
+func (s *SuggestionService) BatchReview(ids []uuid.UUID, action string, reviewer *models.User, force bool, note string) *dto.BatchReviewResponse {
+	resp := &dto.BatchReviewResponse{Results: make([]dto.BatchReviewResult, 0, len(ids))}
+	for _, id := range ids {
+		var err error
+		switch action {
+		case "approve":
+			err = s.Approve(id, reviewer, force)
+		case "reject":
+			err = s.Reject(id, reviewer, note)
+		default:
+			err = ErrInvalidTarget
+		}
+
+		r := dto.BatchReviewResult{ID: id, OK: err == nil}
+		if err != nil {
+			r.Error = err.Error()
+			var conflict *ConflictError
+			if errors.As(err, &conflict) {
+				r.Conflict = true
+			}
+			resp.Failed++
+		} else {
+			resp.Succeeded++
+		}
+		resp.Results = append(resp.Results, r)
+	}
+	return resp
+}
+
 // CountPending は未処理提案数を返す（バッジ表示用）。
 func (s *SuggestionService) CountPending() (int, error) {
 	return s.repo.CountPending()
@@ -228,9 +450,16 @@ func (s *SuggestionService) Approve(id uuid.UUID, reviewer *models.User, force b
 		return ErrInvalidTarget
 	}
 
-	var fields map[string]string
-	if err := json.Unmarshal(sug.AfterData, &fields); err != nil {
-		return fmt.Errorf("提案内容の解析に失敗しました: %w", err)
+	// 反映するのは「この提案が実際に変えるフィールド」だけ。after 全体を書き戻すと、
+	// 提案が触っていないフィールドまで提案時点の値で上書きしてしまう
+	// （例：同じ歌唱に終了時間の提案と開始時間の提案が来たとき、後から開始時間を承認すると
+	// 先に反映した終了時間が提案時点の値に巻き戻る）。
+	fields, err := changedFieldsOf(sug)
+	if err != nil {
+		return err
+	}
+	if len(fields) == 0 {
+		return ErrNoChange
 	}
 
 	if !force {
@@ -260,6 +489,25 @@ func (s *SuggestionService) Approve(id uuid.UUID, reviewer *models.User, force b
 	}
 	logger.Infof("edit suggestion approved: %s (force=%v)", id, force)
 	return nil
+}
+
+// changedFieldsOf は提案が実際に変更するフィールドだけを取り出す（after ≠ before のもの）。
+// 提案は「この項目をこの値にしたい」という意思表示であって、対象全体のスナップショットではない。
+func changedFieldsOf(sug *models.EditSuggestion) (map[string]string, error) {
+	var before, after map[string]string
+	if err := json.Unmarshal(sug.BeforeData, &before); err != nil {
+		return nil, fmt.Errorf("提案内容の解析に失敗しました: %w", err)
+	}
+	if err := json.Unmarshal(sug.AfterData, &after); err != nil {
+		return nil, fmt.Errorf("提案内容の解析に失敗しました: %w", err)
+	}
+	changed := map[string]string{}
+	for k, v := range after {
+		if v != before[k] {
+			changed[k] = v
+		}
+	}
+	return changed, nil
 }
 
 // detectConflicts は提案時点の before_data と対象の現在値を比べ、ズレたフィールドを返す。

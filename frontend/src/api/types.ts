@@ -518,6 +518,34 @@ export interface SuggestionListResponse {
   pagination: PaginationResponse;
 }
 
+// 同一対象に集まった提案。同じ歌唱への通報を1枚のカードで捌くための単位。
+export interface SuggestionGroup {
+  target_type: SuggestionTargetType;
+  target_id: string;
+  target_label: string;
+  current: Record<string, string>; // 対象の現在値（提案と見比べるため）
+  suggestions: Suggestion[];
+}
+
+// ページングの単位はグループ（対象）
+export interface SuggestionGroupListResponse {
+  groups: SuggestionGroup[];
+  pagination: PaginationResponse;
+}
+
+export interface BatchReviewResult {
+  id: string;
+  ok: boolean;
+  error?: string;
+  conflict?: boolean; // 対象が変更済みで止まった
+}
+
+export interface BatchReviewResponse {
+  succeeded: number;
+  failed: number;
+  results: BatchReviewResult[];
+}
+
 // ========== グローバル検索 ==========
 
 export interface SearchStreamItem {

@@ -213,6 +213,7 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("POST /api/suggestions", r.handleCreateSuggestion)
 	r.mux.HandleFunc("GET /api/suggestions", r.handleListSuggestions)
 	r.mux.HandleFunc("GET /api/suggestions/count", r.handleCountSuggestions)
+	r.mux.HandleFunc("POST /api/suggestions/batch", r.handleBatchReviewSuggestions)
 	r.mux.HandleFunc("POST /api/suggestions/{id}/approve", r.handleApproveSuggestion)
 	r.mux.HandleFunc("POST /api/suggestions/{id}/reject", r.handleRejectSuggestion)
 
@@ -821,17 +822,64 @@ func (r *Router) handleCreateSuggestion(w http.ResponseWriter, req *http.Request
 	})
 }
 
-// handleListSuggestions は提案一覧を返す（content:edit）。?status=pending|approved|rejected で絞る。
+// handleListSuggestions は提案一覧を返す（content:edit）。
+// ?status=pending|conflict|approved|rejected で絞る。
+// ?group=target で対象ごとにまとめた形（ページングの単位も対象）で返す。
 func (r *Router) handleListSuggestions(w http.ResponseWriter, req *http.Request) {
 	status := req.URL.Query().Get("status")
 	page, _ := strconv.Atoi(req.URL.Query().Get("page"))
 	limit, _ := strconv.Atoi(req.URL.Query().Get("limit"))
+
+	if req.URL.Query().Get("group") == "target" {
+		grouped, err := r.suggestionService.ListGrouped(status, page, limit)
+		if err != nil {
+			respondError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		respondJSON(w, http.StatusOK, grouped)
+		return
+	}
 
 	result, err := r.suggestionService.List(status, page, limit)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	respondJSON(w, http.StatusOK, result)
+}
+
+// handleBatchReviewSuggestions は複数の提案をまとめて承認/却下する（content:edit）。
+// 一部が失敗しても残りは処理し、結果を個別に返す。
+func (r *Router) handleBatchReviewSuggestions(w http.ResponseWriter, req *http.Request) {
+	var body dto.BatchReviewRequest
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		respondError(w, http.StatusBadRequest, "無効なリクエスト形式")
+		return
+	}
+	if body.Action != "approve" && body.Action != "reject" {
+		respondError(w, http.StatusBadRequest, "action は approve か reject を指定してください")
+		return
+	}
+	if len(body.IDs) == 0 {
+		respondError(w, http.StatusBadRequest, "対象の提案がありません")
+		return
+	}
+	if len(body.IDs) > 200 {
+		respondError(w, http.StatusBadRequest, "一度に処理できるのは200件までです")
+		return
+	}
+
+	ids := make([]uuid.UUID, 0, len(body.IDs))
+	for _, raw := range body.IDs {
+		id, err := uuid.Parse(raw)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, "無効な提案ID: "+raw)
+			return
+		}
+		ids = append(ids, id)
+	}
+
+	result := r.suggestionService.BatchReview(ids, body.Action, currentUser(req), body.Force, body.Note)
 	respondJSON(w, http.StatusOK, result)
 }
 

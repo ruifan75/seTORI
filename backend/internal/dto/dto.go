@@ -542,6 +542,42 @@ type SuggestionListResponse struct {
 	Pagination  PaginationResponse   `json:"pagination"`
 }
 
+// SuggestionGroup 同一対象に集まった提案。同じ歌唱への通報を1枚で捌くための単位。
+type SuggestionGroup struct {
+	TargetType  string               `json:"target_type"`
+	TargetID    uuid.UUID            `json:"target_id"`
+	TargetLabel string               `json:"target_label"`
+	Current     map[string]string    `json:"current"` // 対象の現在値（提案と見比べるため）
+	Suggestions []SuggestionResponse `json:"suggestions"`
+}
+
+// SuggestionGroupListResponse ページングの単位はグループ（対象）。
+type SuggestionGroupListResponse struct {
+	Groups     []SuggestionGroup  `json:"groups"`
+	Pagination PaginationResponse `json:"pagination"`
+}
+
+// BatchReviewRequest 複数提案の一括承認/却下。
+type BatchReviewRequest struct {
+	IDs    []string `json:"ids"`
+	Action string   `json:"action"`          // approve / reject
+	Force  bool     `json:"force,omitempty"` // 承認時、衝突していても上書きする
+	Note   string   `json:"note,omitempty"`  // 却下理由
+}
+
+type BatchReviewResult struct {
+	ID       uuid.UUID `json:"id"`
+	OK       bool      `json:"ok"`
+	Error    string    `json:"error,omitempty"`
+	Conflict bool      `json:"conflict,omitempty"` // 対象が変更済みで止まった
+}
+
+type BatchReviewResponse struct {
+	Succeeded int                 `json:"succeeded"`
+	Failed    int                 `json:"failed"`
+	Results   []BatchReviewResult `json:"results"`
+}
+
 // ========== グローバル検索 ==========
 
 // SearchStreamItem 検索結果の配信（軽量版）

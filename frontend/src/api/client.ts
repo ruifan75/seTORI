@@ -46,6 +46,8 @@ import type {
   ImportReadingsResult,
   CreateSuggestionRequest,
   SuggestionListResponse,
+  SuggestionGroupListResponse,
+  BatchReviewResponse,
   SuggestionStatus,
   AIProvider,
   AIProviderInput,
@@ -633,6 +635,29 @@ export const suggestionApi = {
     const params = new URLSearchParams({ page: String(page), limit: String(limit) });
     if (status) params.set('status', status);
     const { data } = await api.get(`/api/suggestions?${params}`);
+    return data;
+  },
+
+  // 対象ごとにまとめた提案一覧（要 content:edit）。同じ歌唱への通報を1枚で捌くため。
+  // ページングの単位はグループ（対象）。
+  listGrouped: async (
+    status: SuggestionStatus | '' = 'pending',
+    page = 1,
+    limit = 20
+  ): Promise<SuggestionGroupListResponse> => {
+    const params = new URLSearchParams({ page: String(page), limit: String(limit), group: 'target' });
+    if (status) params.set('status', status);
+    const { data } = await api.get(`/api/suggestions?${params}`);
+    return data;
+  },
+
+  // 複数の提案をまとめて承認/却下。一部が失敗しても残りは処理され、結果は個別に返る。
+  batchReview: async (
+    ids: string[],
+    action: 'approve' | 'reject',
+    opts: { force?: boolean; note?: string } = {}
+  ): Promise<BatchReviewResponse> => {
+    const { data } = await api.post('/api/suggestions/batch', { ids, action, ...opts });
     return data;
   },
 

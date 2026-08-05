@@ -3,9 +3,11 @@ package repository
 import (
 	"database/sql"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/ruifan75/setori/internal/models"
+	"github.com/lib/pq"
 )
 
 // SuggestionRepository は edit_suggestions（閲覧モードからの修正提案）を扱う。
@@ -89,6 +91,141 @@ func (r *SuggestionRepository) List(status string, limit, offset int) ([]models.
 		out = append(out, s)
 	}
 	return out, total, rows.Err()
+}
+
+// TargetGroup は同一対象に集まった提案の1グループ。
+type TargetGroup struct {
+	TargetType  string
+	TargetID    uuid.UUID
+	TargetLabel string
+	Suggestions []models.EditSuggestion
+}
+
+// ListGroupedByTarget は status で絞った提案を「対象ごと」にまとめて返す。
+// ページングの単位はグループ。同じ歌唱に届いた通報を1枚のカードで捌けるようにするため、
+// グループが分断されないようページングは対象単位で行う。
+//
+// 返るグループは「最も新しい提案が新しい順」、グループ内は投稿の古い順。
+func (r *SuggestionRepository) ListGroupedByTarget(status string, limit, offset int) ([]TargetGroup, int, error) {
+	where := ""
+	args := []any{}
+	if status != "" {
+		where = "WHERE status = $1"
+		args = append(args, status)
+	}
+
+	// グループ総数（＝対象の種類数）
+	var total int
+	countQuery := fmt.Sprintf(
+		`SELECT COUNT(*) FROM (SELECT 1 FROM edit_suggestions %s GROUP BY target_type, target_id) g`, where)
+	if err := r.db.QueryRow(countQuery, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count suggestion groups: %w", err)
+	}
+
+	// 先に対象を決めてから、その対象の提案だけを引く（グループがページ境界で割れないように）
+	pageQuery := fmt.Sprintf(`
+		SELECT target_type, target_id, MAX(created_at) AS latest
+		FROM edit_suggestions
+		%s
+		GROUP BY target_type, target_id
+		ORDER BY latest DESC
+		LIMIT $%d OFFSET $%d`, where, len(args)+1, len(args)+2)
+
+	pageArgs := append(append([]any{}, args...), limit, offset)
+	rows, err := r.db.Query(pageQuery, pageArgs...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list suggestion groups: %w", err)
+	}
+	type key struct {
+		targetType string
+		targetID   uuid.UUID
+	}
+	var order []key
+	for rows.Next() {
+		var k key
+		var latest time.Time
+		if err := rows.Scan(&k.targetType, &k.targetID, &latest); err != nil {
+			rows.Close()
+			return nil, 0, fmt.Errorf("scan suggestion group: %w", err)
+		}
+		order = append(order, k)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	if len(order) == 0 {
+		return nil, total, nil
+	}
+
+	ids := make([]string, len(order))
+	for i, k := range order {
+		ids[i] = k.targetID.String()
+	}
+
+	detailArgs := []any{pq.Array(ids)}
+	detailWhere := "WHERE target_id = ANY($1::uuid[])"
+	if status != "" {
+		detailWhere += " AND status = $2"
+		detailArgs = append(detailArgs, status)
+	}
+	detailRows, err := r.db.Query(
+		`SELECT `+suggestionColumns+` FROM edit_suggestions `+detailWhere+` ORDER BY created_at ASC`, detailArgs...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list grouped suggestions: %w", err)
+	}
+	defer detailRows.Close()
+
+	byKey := make(map[key][]models.EditSuggestion, len(order))
+	for detailRows.Next() {
+		s, err := scanSuggestion(detailRows.Scan)
+		if err != nil {
+			return nil, 0, fmt.Errorf("scan suggestion: %w", err)
+		}
+		byKey[key{s.TargetType, s.TargetID}] = append(byKey[key{s.TargetType, s.TargetID}], s)
+	}
+	if err := detailRows.Err(); err != nil {
+		return nil, 0, err
+	}
+
+	groups := make([]TargetGroup, 0, len(order))
+	for _, k := range order {
+		items := byKey[k]
+		if len(items) == 0 {
+			continue // 取得の合間に処理された（レビュー済みになった）
+		}
+		groups = append(groups, TargetGroup{
+			TargetType:  k.targetType,
+			TargetID:    k.targetID,
+			TargetLabel: items[len(items)-1].TargetLabel, // 最新の提案時点の表示名
+			Suggestions: items,
+		})
+	}
+	return groups, total, nil
+}
+
+// FindPendingTimingByTarget は自動適用の判定に使う。
+// 同一対象について、ログイン済みユーザーが出した未処理（pending）の提案を古い順で返す。
+func (r *SuggestionRepository) FindPendingTimingByTarget(targetType string, targetID uuid.UUID) ([]models.EditSuggestion, error) {
+	rows, err := r.db.Query(`SELECT `+suggestionColumns+`
+		FROM edit_suggestions
+		WHERE target_type = $1 AND target_id = $2 AND status = 'pending'
+		  AND kind = 'field' AND created_by IS NOT NULL
+		ORDER BY created_at ASC`, targetType, targetID)
+	if err != nil {
+		return nil, fmt.Errorf("find pending timing suggestions: %w", err)
+	}
+	defer rows.Close()
+
+	var out []models.EditSuggestion
+	for rows.Next() {
+		s, err := scanSuggestion(rows.Scan)
+		if err != nil {
+			return nil, fmt.Errorf("scan suggestion: %w", err)
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
 }
 
 // FindByID は提案を1件取得する。見つからなければ nil。
