@@ -8,7 +8,7 @@ import Tag from '../components/ui/Tag';
 import { useToast } from '../components/ui/ToastContext';
 import QueueAddButton from '../components/QueueAddButton';
 import ArtistLinks from '../components/ArtistLinks';
-import { usePlayerStore, type PlayerTrack } from '../store/player';
+import { usePlayerStore, performancesToTracks as toTracks } from '../store/player';
 
 const RECOMMENDATION_PAGE_SIZE = 20;
 const RECOMMENDATION_PLAYBACK_MIN = 50;
@@ -20,24 +20,6 @@ function uniqueSongs(perfs: Performance[]): Performance[] {
     songIds.add(perf.song_id);
     return true;
   });
-}
-
-// 配信横断の歌唱一覧を再生キューのトラックへ変換する（TagPage と同形）
-function toTracks(perfs: Performance[]): PlayerTrack[] {
-  return perfs.map((p) => ({
-    performanceId: p.id,
-    streamId: p.stream_id,
-    songId: p.song_id,
-    songName: p.song_name,
-    artist: p.original_artist,
-    artists: p.artists ?? [],
-    artUrl: p.arts,
-    singers: p.singers.map((s) => ({ id: s.id, name: s.name })),
-    streamTitle: p.stream_title,
-    streamDate: p.stream_date,
-    start: p.start_seconds,
-    end: p.end_seconds,
-  }));
 }
 
 function SingerImage({ singer }: { singer: Singer }) {

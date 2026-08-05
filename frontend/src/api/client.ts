@@ -54,6 +54,10 @@ import type {
   PermissionInfo,
   CreateUserRequest,
   UpdateUserRequest,
+  Playlist,
+  PlaylistListResponse,
+  CreatePlaylistRequest,
+  UpdatePlaylistRequest,
   BackupStatusResponse,
   BackupSettings,
   BackupResult,
@@ -831,3 +835,67 @@ export const backupApi = {
 };
 
 export default api;
+
+// ========== プレイリスト API ==========
+// 公開・限定公開の閲覧は未ログインでも可。作成・編集はログインと所有者であることが必要。
+
+export const playlistApi = {
+  /** 自分のプレイリスト一覧（private 含む・要ログイン） */
+  listMine: async (): Promise<PlaylistListResponse> => {
+    const { data } = await api.get('/api/playlists');
+    return data;
+  },
+
+  /** 公開プレイリスト一覧（unlisted は含まれない） */
+  listPublic: async (page = 1, limit = 50): Promise<PlaylistListResponse> => {
+    const { data } = await api.get('/api/playlists/public', { params: { page, limit } });
+    return data;
+  },
+
+  get: async (id: string): Promise<Playlist> => {
+    const { data } = await api.get(`/api/playlists/${id}`);
+    return data;
+  },
+
+  items: async (id: string): Promise<PerformanceListResponse> => {
+    const { data } = await api.get(`/api/playlists/${id}/items`);
+    return data;
+  },
+
+  create: async (body: CreatePlaylistRequest): Promise<Playlist> => {
+    const { data } = await api.post('/api/playlists', body);
+    return data;
+  },
+
+  update: async (id: string, body: UpdatePlaylistRequest): Promise<Playlist> => {
+    const { data } = await api.put(`/api/playlists/${id}`, body);
+    return data;
+  },
+
+  remove: async (id: string): Promise<void> => {
+    await api.delete(`/api/playlists/${id}`);
+  },
+
+  addItem: async (id: string, performanceId: string): Promise<void> => {
+    await api.post(`/api/playlists/${id}/items`, { performance_id: performanceId });
+  },
+
+  removeItem: async (id: string, performanceId: string): Promise<void> => {
+    await api.delete(`/api/playlists/${id}/items/${performanceId}`);
+  },
+
+  reorder: async (id: string, performanceIds: string[]): Promise<void> => {
+    await api.put(`/api/playlists/${id}/order`, { performance_ids: performanceIds });
+  },
+
+  /** 共有リンク（限定公開）から取得。ログイン不要 */
+  getShared: async (slug: string): Promise<Playlist> => {
+    const { data } = await api.get(`/api/shared/playlists/${slug}`);
+    return data;
+  },
+
+  sharedItems: async (slug: string): Promise<PerformanceListResponse> => {
+    const { data } = await api.get(`/api/shared/playlists/${slug}/items`);
+    return data;
+  },
+};

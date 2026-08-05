@@ -5,7 +5,7 @@ import Loading from '../components/ui/Loading';
 import Pagination from '../components/ui/Pagination';
 import Tag from '../components/ui/Tag';
 import ArtistLinks from '../components/ArtistLinks';
-import { usePlayerStore, type PlayerTrack } from '../store/player';
+import { usePlayerStore, performancesToTracks, type PlayerTrack } from '../store/player';
 
 // タグ検索結果ページ。/tags/stream/:id は配信一覧、/tags/performance/:id は演出一覧。
 export default function TagPage() {
@@ -45,20 +45,7 @@ export default function TagPage() {
 
   // このページの演唱一覧をキューに載せて startIndex から連続再生
   const playFrom = (startIndex: number) => {
-    const tracks: PlayerTrack[] = (perfData?.performances ?? []).map((p) => ({
-      performanceId: p.id,
-      streamId: p.stream_id,
-      songId: p.song_id,
-      songName: p.song_name,
-      artist: p.original_artist,
-      artists: p.artists ?? [],
-      artUrl: p.arts,
-      singers: p.singers.map((s) => ({ id: s.id, name: s.name })),
-      streamTitle: p.stream_title,
-      streamDate: p.stream_date,
-      start: p.start_seconds,
-      end: p.end_seconds,
-    }));
+    const tracks: PlayerTrack[] = performancesToTracks(perfData?.performances ?? []);
     usePlayerStore.getState().playTracks(tracks, startIndex);
   };
 

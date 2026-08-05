@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { ArtistReference, Singer } from '../api/types';
 
 // 再生キューの1トラック＝1演唱記録（配信内の start〜end 区間）
 export interface PlayerTrack {
@@ -14,6 +15,46 @@ export interface PlayerTrack {
   streamDate?: string; // 配信日（同一曲を複数配信から再生するときの区別用）
   start: number;
   end: number; // 0 の場合は動画終了まで
+}
+
+// 配信横断の歌唱を再生トラックへ変換するための最小の形。
+// Performance と SongPerformance の両方がこれを満たす（後者は arts を持たないなど差がある）。
+export interface PerformanceLike {
+  id: string;
+  stream_id: string;
+  song_id?: string;
+  song_name?: string;
+  original_artist?: string;
+  artists?: ArtistReference[];
+  arts?: string;
+  singers?: Singer[];
+  stream_title?: string;
+  stream_date?: string;
+  start_seconds: number;
+  end_seconds: number;
+}
+
+// 配信横断の歌唱を再生トラックへ変換する。
+// 首頁・タグ・歌手・プレイリストで同じ形を使う（曲詳細だけは曲側の情報を優先するため独自）。
+export function performanceToTrack(p: PerformanceLike): PlayerTrack {
+  return {
+    performanceId: p.id,
+    streamId: p.stream_id,
+    songId: p.song_id,
+    songName: p.song_name ?? '(不明)',
+    artist: p.original_artist ?? '',
+    artists: p.artists ?? [],
+    artUrl: p.arts,
+    singers: p.singers?.map((s) => ({ id: s.id, name: s.name })) ?? [],
+    streamTitle: p.stream_title,
+    streamDate: p.stream_date,
+    start: p.start_seconds,
+    end: p.end_seconds,
+  };
+}
+
+export function performancesToTracks(perfs: PerformanceLike[]): PlayerTrack[] {
+  return perfs.map(performanceToTrack);
 }
 
 interface PlayerState {

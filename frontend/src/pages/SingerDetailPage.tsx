@@ -3,8 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { singerApi, holodexApi } from '../api/client';
 import { useAuthStore, hasPermission, PERM } from '../store/auth';
-import { usePlayerStore, type PlayerTrack } from '../store/player';
-import type { SongPerformance } from '../api/types';
+import { usePlayerStore, performanceToTrack } from '../store/player';
 import Loading from '../components/ui/Loading';
 import Pagination from '../components/ui/Pagination';
 import Tag from '../components/ui/Tag';
@@ -95,19 +94,7 @@ export default function SingerDetailPage() {
   });
 
   // 歌唱記録1件を再生キューのトラックへ変換
-  const toTrack = (perf: SongPerformance): PlayerTrack => ({
-    performanceId: perf.id,
-    streamId: perf.stream_id,
-    songId: perf.song_id,
-    songName: perf.song_name ?? '(不明)',
-    artist: perf.original_artist ?? '',
-    artists: perf.artists ?? [],
-    singers: perf.singers?.map((s) => ({ id: s.id, name: s.name })) ?? [],
-    streamTitle: perf.stream_title,
-    streamDate: perf.stream_date,
-    start: perf.start_seconds,
-    end: perf.end_seconds,
-  });
+  const toTrack = performanceToTrack;
 
   // 歌唱曲一覧（現在のページ）をキューに載せて startIndex から連続再生
   const playPerformancesFrom = (startIndex: number) => {

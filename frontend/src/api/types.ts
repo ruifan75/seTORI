@@ -730,3 +730,38 @@ export interface DriveFile {
   createdTime?: string;
   mimeType?: string;
 }
+
+// ========== プレイリスト ==========
+
+export type PlaylistVisibility = 'private' | 'unlisted' | 'public';
+
+export interface Playlist {
+  id: string;
+  name: string;
+  description: string;
+  visibility: PlaylistVisibility;
+  /** 所有者にだけ返る限定公開キー */
+  share_slug?: string;
+  item_count: number;
+  owner_name: string;
+  is_owner: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PlaylistListResponse {
+  playlists: Playlist[];
+  total: number;
+}
+
+export interface CreatePlaylistRequest {
+  name: string;
+  description?: string;
+  visibility?: PlaylistVisibility;
+}
+
+export interface UpdatePlaylistRequest {
+  name?: string;
+  description?: string;
+  visibility?: PlaylistVisibility;
+}

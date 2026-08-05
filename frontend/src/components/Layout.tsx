@@ -12,6 +12,7 @@ const navItems = [
   { path: '/artists', label: 'アーティスト' },
   { path: '/streams', label: '歌枠一覧' },
   { path: '/singers', label: 'チャンネル一覧' },
+  { path: '/playlists', label: 'プレイリスト' },
 ];
 
 const adminItems = [
