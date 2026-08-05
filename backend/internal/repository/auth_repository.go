@@ -135,6 +135,49 @@ func (r *AuthRepository) CreateUser(username, displayName, passwordHash string, 
 	return r.FindUserByID(id)
 }
 
+// FindUserByEmail はメールアドレス（大文字小文字を無視）でユーザーを引く。見つからなければ nil。
+func (r *AuthRepository) FindUserByEmail(email string) (*models.User, error) {
+	u, err := scanUserWithRole(r.db.QueryRow(userSelectWithRole+" WHERE LOWER(u.email) = LOWER($1)", email))
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find user by email: %w", err)
+	}
+	return u, nil
+}
+
+// CreateOAuthUser は外部アカウント連携で作るユーザー。パスワードは持たない（NULL）。
+// email_verified はプロバイダー側の確認状態をそのまま引き継ぐ。
+func (r *AuthRepository) CreateOAuthUser(username, displayName, email string, emailVerified bool, roleID uuid.UUID) (*models.User, error) {
+	var id uuid.UUID
+	var emailArg any
+	if email != "" {
+		emailArg = email
+	}
+	err := r.db.QueryRow(
+		`INSERT INTO users (username, display_name, password_hash, email, email_verified, role_id, is_active)
+		 VALUES ($1,$2,NULL,$3,$4,$5,TRUE) RETURNING id`,
+		username, displayName, emailArg, emailVerified, roleID,
+	).Scan(&id)
+	if err != nil {
+		return nil, fmt.Errorf("create oauth user: %w", err)
+	}
+	return r.FindUserByID(id)
+}
+
+// UsernameExists は（大文字小文字を無視して）ユーザー名の重複を確認する。
+// 外部アカウント由来の名前から一意なユーザー名を作るのに使う。
+func (r *AuthRepository) UsernameExists(username string) (bool, error) {
+	var exists bool
+	err := r.db.QueryRow(
+		"SELECT EXISTS(SELECT 1 FROM users WHERE LOWER(username) = LOWER($1))", username).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("check username exists: %w", err)
+	}
+	return exists, nil
+}
+
 // UpdateUser は表示名・ロール・有効状態を更新する。
 func (r *AuthRepository) UpdateUser(id uuid.UUID, displayName string, roleID uuid.UUID, isActive bool) error {
 	_, err := r.db.Exec(

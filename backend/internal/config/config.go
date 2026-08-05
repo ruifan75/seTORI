@@ -23,6 +23,15 @@ type Config struct {
 	BackupDockerContainer string // ホストに pg_dump が無い場合に使う PostgreSQL コンテナ名
 	GoogleOAuthClientID   string // Google Drive 連携用 OAuth クライアント（TV と限定入力デバイス型）
 	GoogleOAuthSecret     string
+
+	// 外部アカウントでのログイン（サインイン用。上の Drive 用とは別のクライアントが必要。
+	// Drive 側は「TV と限定入力デバイス」型で、ウェブのリダイレクトフローには使えない）
+	GoogleSigninClientID string
+	GoogleSigninSecret   string
+	// OAuth コールバックの受け口。Google 側の「承認済みのリダイレクト URI」と完全一致させる。
+	OAuthRedirectBaseURL string
+	// 認証後に戻すフロントエンドの URL
+	FrontendBaseURL string
 }
 
 // Load 環境変数から設定を読み込み
@@ -47,6 +56,11 @@ func Load() (*Config, error) {
 		BackupDockerContainer: getEnv("BACKUP_PG_CONTAINER", "setori-postgres"),
 		GoogleOAuthClientID:   getEnv("GOOGLE_OAUTH_CLIENT_ID", ""),
 		GoogleOAuthSecret:     getEnv("GOOGLE_OAUTH_CLIENT_SECRET", ""),
+
+		GoogleSigninClientID: getEnv("GOOGLE_SIGNIN_CLIENT_ID", ""),
+		GoogleSigninSecret:   getEnv("GOOGLE_SIGNIN_CLIENT_SECRET", ""),
+		OAuthRedirectBaseURL: getEnv("OAUTH_REDIRECT_BASE_URL", "http://localhost:8080"),
+		FrontendBaseURL:      getEnv("FRONTEND_BASE_URL", "http://localhost:5173"),
 	}
 
 	return cfg, nil

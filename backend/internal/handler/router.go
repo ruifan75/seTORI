@@ -23,6 +23,7 @@ import (
 	"github.com/ruifan75/setori/pkg/auth"
 	"github.com/ruifan75/setori/pkg/gdrive"
 	"github.com/ruifan75/setori/pkg/itunes"
+	"github.com/ruifan75/setori/pkg/oauth"
 	"github.com/ruifan75/setori/pkg/youtube"
 )
 
@@ -51,6 +52,7 @@ type Router struct {
 	suggestionService    *service.SuggestionService
 	backupService        *service.BackupService
 	playlistService      *service.PlaylistService
+	oauthService         *service.OAuthService
 }
 
 // NewRouter 新しいルーターを作成
@@ -96,6 +98,11 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	backupService := service.NewBackupService(db, appSettingsRepo, driveClient, cfg.DatabaseURL, cfg.BackupDir, cfg.BackupDockerContainer)
 	playlistRepo := repository.NewPlaylistRepository(db, perfRepo)
 	playlistService := service.NewPlaylistService(playlistRepo)
+	oauthRepo := repository.NewOAuthRepository(db)
+	// 連携先は Provider を足すだけで増やせる（X / Discord は実装を追加する）
+	oauthService := service.NewOAuthService(authRepo, oauthRepo, cfg.OAuthRedirectBaseURL,
+		oauth.NewGoogleProvider(cfg.GoogleSigninClientID, cfg.GoogleSigninSecret),
+	)
 
 	r := &Router{
 		db:                   db,
@@ -120,6 +127,7 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 		suggestionService:    suggestionService,
 		backupService:        backupService,
 		playlistService:      playlistService,
+		oauthService:         oauthService,
 	}
 
 	r.setupRoutes()
@@ -144,6 +152,14 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("POST /api/auth/login", r.handleLogin)
 	r.mux.HandleFunc("POST /api/auth/logout", r.handleLogout)
 	r.mux.HandleFunc("GET /api/auth/me", r.handleMe)
+
+	// 外部アカウント連携（OAuth）
+	r.mux.HandleFunc("GET /api/auth/oauth/providers", r.handleListOAuthProviders)
+	r.mux.HandleFunc("GET /api/auth/oauth/identities", r.handleListMyIdentities)
+	r.mux.HandleFunc("POST /api/auth/oauth/exchange", r.handleOAuthExchange)
+	r.mux.HandleFunc("GET /api/auth/oauth/{provider}/start", r.handleOAuthStart)
+	r.mux.HandleFunc("GET /api/auth/oauth/{provider}/callback", r.handleOAuthCallback)
+	r.mux.HandleFunc("DELETE /api/auth/oauth/{provider}", r.handleUnlinkOAuth)
 
 	// ユーザー・ロール・権限管理（要 users:manage）
 	r.mux.HandleFunc("GET /api/users", r.handleListUsers)
@@ -2345,6 +2361,20 @@ func requiredPermission(method, path string) (perm string, needsAuth bool) {
 	// 限定公開 URL（共有リンク）は未ログインでも閲覧可
 	if strings.HasPrefix(path, "/api/shared/playlists") {
 		return "", false
+	}
+
+	// 外部アカウント連携：ログイン導線なので未ログインで通す必要がある。
+	// start はログイン中なら「連携追加」として扱うため、どちらでも通す（判定はハンドラ側）。
+	// 連携一覧の閲覧と解除だけはログインが要る。
+	if strings.HasPrefix(path, "/api/auth/oauth") {
+		switch {
+		case path == "/api/auth/oauth/identities":
+			return "", true
+		case method == http.MethodDelete:
+			return "", true // 連携解除
+		default:
+			return "", false // providers / start / callback / exchange
+		}
 	}
 
 	// プレイリストは「自分のもの」を扱う機能なので、編集権限ではなくログインだけを求める

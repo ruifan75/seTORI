@@ -163,9 +163,9 @@ type User struct {
 	ID            uuid.UUID  `json:"id"`
 	Username      string     `json:"username"`
 	DisplayName   string     `json:"display_name"`
-	Email         *string    `json:"email"`          // 自助登録・外部連携で設定。管理者が作った旧アカウントは null
+	Email         *string    `json:"email"` // 自助登録・外部連携で設定。管理者が作った旧アカウントは null
 	EmailVerified bool       `json:"email_verified"`
-	PasswordHash  string     `json:"-"`           // 不輸出密碼 hash。外部アカウントのみの利用者は空
+	PasswordHash  string     `json:"-"` // 不輸出密碼 hash。外部アカウントのみの利用者は空
 	RoleID        uuid.UUID  `json:"role_id"`
 	RoleName      string     `json:"role"`        // roles.name（表示用、JOIN で補完）
 	Permissions   []string   `json:"permissions"` // role の permissions（認証時に補完）

@@ -7,6 +7,7 @@ import RequirePermission from './components/RequirePermission';
 import { useAuthStore, PERM } from './store/auth';
 import HomePage from './pages/HomePage';
 import LoginPage from './pages/LoginPage';
+import OAuthCallbackPage from './pages/OAuthCallbackPage';
 import SongsPage from './pages/SongsPage';
 import SongDetailPage from './pages/SongDetailPage';
 import StreamsPage from './pages/StreamsPage';
@@ -48,6 +49,8 @@ function App() {
         <BrowserRouter>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
+            {/* OAuth の戻り先。Layout の外に置き、認証確立まで何も描かない */}
+            <Route path="/login/oauth" element={<OAuthCallbackPage />} />
             <Route path="/" element={<Layout />}>
               <Route index element={<HomePage />} />
               <Route path="songs" element={<SongsPage />} />

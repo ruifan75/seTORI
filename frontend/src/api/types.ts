@@ -765,3 +765,17 @@ export interface UpdatePlaylistRequest {
   description?: string;
   visibility?: PlaylistVisibility;
 }
+
+// ========== 外部アカウント連携 ==========
+
+export interface OAuthIdentity {
+  id: string;
+  user_id: string;
+  provider: string;
+  provider_user_id: string;
+  email?: string | null;
+  display_name?: string | null;
+  avatar_url?: string | null;
+  created_at: string;
+  updated_at: string;
+}

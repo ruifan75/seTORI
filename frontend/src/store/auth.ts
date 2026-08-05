@@ -26,6 +26,8 @@ interface AuthState {
   user: AuthUser | null;
   status: 'loading' | 'authenticated' | 'anonymous';
   login: (username: string, password: string) => Promise<void>;
+  /** OAuth コールバックで受け取った引き換えコードからセッションを確立する */
+  loginWithOAuthCode: (code: string) => Promise<void>;
   logout: () => Promise<void>;
   init: () => Promise<void>;
   can: (permission: string) => boolean;
@@ -44,6 +46,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   login: async (username, password) => {
     const { token, user } = await authApi.login(username, password);
+    localStorage.setItem(TOKEN_KEY, token);
+    setAuthToken(token);
+    set({ token, user, status: 'authenticated' });
+  },
+
+  loginWithOAuthCode: async (code) => {
+    const { token, user } = await authApi.exchangeOAuthCode(code);
     localStorage.setItem(TOKEN_KEY, token);
     setAuthToken(token);
     set({ token, user, status: 'authenticated' });

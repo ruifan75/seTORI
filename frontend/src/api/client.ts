@@ -54,6 +54,7 @@ import type {
   PermissionInfo,
   CreateUserRequest,
   UpdateUserRequest,
+  OAuthIdentity,
   Playlist,
   PlaylistListResponse,
   CreatePlaylistRequest,
@@ -698,7 +699,34 @@ export const authApi = {
     const { data } = await api.get('/api/auth/me');
     return data;
   },
+
+  /** 設定済みの外部連携先（ログイン画面のボタン出し分け） */
+  oauthProviders: async (): Promise<string[]> => {
+    const { data } = await api.get('/api/auth/oauth/providers');
+    return data.providers ?? [];
+  },
+
+  /** OAuth コールバックの引き換えコードをセッショントークンに替える */
+  exchangeOAuthCode: async (code: string): Promise<LoginResponse> => {
+    const { data } = await api.post('/api/auth/oauth/exchange', { code });
+    return data;
+  },
+
+  /** 自分に紐付いた外部アカウント一覧 */
+  oauthIdentities: async (): Promise<OAuthIdentity[]> => {
+    const { data } = await api.get('/api/auth/oauth/identities');
+    return data.identities ?? [];
+  },
+
+  unlinkOAuth: async (provider: string): Promise<void> => {
+    await api.delete(`/api/auth/oauth/${provider}`);
+  },
 };
+
+/** 認可画面へは axios ではなくブラウザ遷移で入る（サーバーが 302 を返すため） */
+export function startOAuth(provider: string) {
+  window.location.href = `${API_BASE_URL}/api/auth/oauth/${provider}/start`;
+}
 
 // ========== ユーザー管理 API（要 users:manage） ==========
 
