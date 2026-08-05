@@ -640,3 +640,45 @@ type AIProviderResponse struct {
 	HasKey         bool   `json:"has_key"`
 	KeyHint        string `json:"key_hint,omitempty"`
 }
+
+// ========== プレイリスト ==========
+
+type CreatePlaylistRequest struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Visibility  string `json:"visibility"` // private | unlisted | public（省略時 private）
+}
+
+type UpdatePlaylistRequest struct {
+	Name        *string `json:"name,omitempty"`
+	Description *string `json:"description,omitempty"`
+	Visibility  *string `json:"visibility,omitempty"`
+}
+
+// PlaylistResponse は一覧・詳細で共通に返すプレイリスト情報。
+// share_slug は所有者にだけ返す（限定公開 URL を第三者へ漏らさないため）。
+type PlaylistResponse struct {
+	ID          uuid.UUID `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	Visibility  string    `json:"visibility"`
+	ShareSlug   string    `json:"share_slug,omitempty"`
+	ItemCount   int       `json:"item_count"`
+	OwnerName   string    `json:"owner_name"`
+	IsOwner     bool      `json:"is_owner"`
+	CreatedAt   string    `json:"created_at"`
+	UpdatedAt   string    `json:"updated_at"`
+}
+
+type PlaylistListResponse struct {
+	Playlists []PlaylistResponse `json:"playlists"`
+	Total     int                `json:"total"`
+}
+
+type AddPlaylistItemRequest struct {
+	PerformanceID string `json:"performance_id"`
+}
+
+type ReorderPlaylistRequest struct {
+	PerformanceIDs []string `json:"performance_ids"`
+}

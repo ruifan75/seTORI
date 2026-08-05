@@ -491,8 +491,9 @@ func (s *StreamService) Update(id string, req *dto.UpdateStreamRequest) (*dto.St
 
 // ========== 首頁（ランダム再生） ==========
 
-// composePerformanceList は配信横断の歌唱一覧をレスポンスへ変換する（配信の文脈付き）。
-func (s *StreamService) composePerformanceList(perfs []repository.PerformanceWithDetails) *dto.PerformanceListResponse {
+// ComposePerformanceList は配信横断の歌唱一覧をレスポンスへ変換する（配信の文脈付き）。
+// プレイリストなど他サービスからも同じ形で返せるよう公開している。
+func (s *StreamService) ComposePerformanceList(perfs []repository.PerformanceWithDetails) *dto.PerformanceListResponse {
 	responses := make([]dto.PerformanceResponse, len(perfs))
 	for i, perf := range perfs {
 		resp := s.toPerformanceResponse(perf)
@@ -515,5 +516,5 @@ func (s *StreamService) GetRandomPerformances(limit int, excludedSongIDs []strin
 	if err != nil {
 		return nil, fmt.Errorf("get random performances: %w", err)
 	}
-	return s.composePerformanceList(perfs), nil
+	return s.ComposePerformanceList(perfs), nil
 }

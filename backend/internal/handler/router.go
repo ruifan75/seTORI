@@ -50,6 +50,7 @@ type Router struct {
 	readingService       *service.ReadingService
 	suggestionService    *service.SuggestionService
 	backupService        *service.BackupService
+	playlistService      *service.PlaylistService
 }
 
 // NewRouter 新しいルーターを作成
@@ -93,6 +94,8 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	appSettingsRepo := repository.NewAppSettingsRepository(db)
 	driveClient := gdrive.NewClient(cfg.GoogleOAuthClientID, cfg.GoogleOAuthSecret)
 	backupService := service.NewBackupService(db, appSettingsRepo, driveClient, cfg.DatabaseURL, cfg.BackupDir, cfg.BackupDockerContainer)
+	playlistRepo := repository.NewPlaylistRepository(db, perfRepo)
+	playlistService := service.NewPlaylistService(playlistRepo)
 
 	r := &Router{
 		db:                   db,
@@ -116,6 +119,7 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 		readingService:       readingService,
 		suggestionService:    suggestionService,
 		backupService:        backupService,
+		playlistService:      playlistService,
 	}
 
 	r.setupRoutes()
@@ -195,6 +199,24 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("GET /api/suggestions/count", r.handleCountSuggestions)
 	r.mux.HandleFunc("POST /api/suggestions/{id}/approve", r.handleApproveSuggestion)
 	r.mux.HandleFunc("POST /api/suggestions/{id}/reject", r.handleRejectSuggestion)
+
+	// プレイリスト
+	// 公開範囲の判定は行単位なので、認可は各ハンドラ（PlaylistService）側で行う。
+	// 限定公開 URL は /api/shared/playlists/... に分ける。/api/playlists/shared/{slug} だと
+	// /api/playlists/{id}/items と「どちらも /api/playlists/shared/items に一致し、
+	// どちらがより具体的とも言えない」ため ServeMux が起動時に panic する。
+	r.mux.HandleFunc("GET /api/playlists/public", r.handleListPublicPlaylists)
+	r.mux.HandleFunc("GET /api/shared/playlists/{slug}", r.handleGetSharedPlaylist)
+	r.mux.HandleFunc("GET /api/shared/playlists/{slug}/items", r.handleListSharedPlaylistItems)
+	r.mux.HandleFunc("GET /api/playlists", r.handleListMyPlaylists)
+	r.mux.HandleFunc("POST /api/playlists", r.handleCreatePlaylist)
+	r.mux.HandleFunc("GET /api/playlists/{id}", r.handleGetPlaylist)
+	r.mux.HandleFunc("PUT /api/playlists/{id}", r.handleUpdatePlaylist)
+	r.mux.HandleFunc("DELETE /api/playlists/{id}", r.handleDeletePlaylist)
+	r.mux.HandleFunc("GET /api/playlists/{id}/items", r.handleListPlaylistItems)
+	r.mux.HandleFunc("POST /api/playlists/{id}/items", r.handleAddPlaylistItem)
+	r.mux.HandleFunc("DELETE /api/playlists/{id}/items/{performanceId}", r.handleRemovePlaylistItem)
+	r.mux.HandleFunc("PUT /api/playlists/{id}/order", r.handleReorderPlaylist)
 
 	// API routes - Singers
 	r.mux.HandleFunc("GET /api/singers", r.handleListSingers)
@@ -2318,6 +2340,30 @@ func requiredPermission(method, path string) (perm string, needsAuth bool) {
 	}
 	if strings.HasPrefix(path, "/api/suggestions") {
 		return auth.PermContentEdit, true
+	}
+
+	// 限定公開 URL（共有リンク）は未ログインでも閲覧可
+	if strings.HasPrefix(path, "/api/shared/playlists") {
+		return "", false
+	}
+
+	// プレイリストは「自分のもの」を扱う機能なので、編集権限ではなくログインだけを求める
+	// （viewer ロールの一般利用者も自分のプレイリストを作れる必要がある）。
+	// 誰のものを触れるかという行単位の判定は PlaylistService が行う。
+	// 公開・限定公開の閲覧は未ログインでも可。
+	if strings.HasPrefix(path, "/api/playlists") {
+		if strings.HasPrefix(path, "/api/playlists/public") {
+			return "", false
+		}
+		if method == http.MethodGet {
+			// 個別取得は公開のものもあるため未ログインで通し、可否はサービス層で判定する。
+			// ただし一覧（GET /api/playlists）は本人のものを返すのでログインが要る。
+			if path == "/api/playlists" {
+				return "", true
+			}
+			return "", false
+		}
+		return "", true // 作成・更新・削除はログイン必須（特定権限は不要）
 	}
 
 	// 管理系リソースはメソッドを問わず専用権限が必要
