@@ -5,9 +5,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const toastIdCounter = useRef(0);
 
-  const showToast = useCallback((message: string, type: ToastMessage['type'] = 'info') => {
+  const showToast = useCallback((message: string, type: ToastMessage['type'] = 'info', action?: ToastMessage['action']) => {
     const id = Date.now() + toastIdCounter.current++;
-    setToasts((prev) => [...prev, { id, message, type }]);
+    setToasts((prev) => [...prev, { id, message, type, action }]);
 
     // 自動移除
     setTimeout(() => {
@@ -45,6 +45,19 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 
             {/* Message */}
             <p className="flex-1 text-sm">{toast.message}</p>
+
+            {/* Action（「元に戻す」など）。押したらトーストは閉じる */}
+            {toast.action && (
+              <button
+                onClick={() => {
+                  toast.action?.onClick();
+                  removeToast(toast.id);
+                }}
+                className="shrink-0 text-sm font-medium underline underline-offset-2 text-white/90 hover:text-white"
+              >
+                {toast.action.label}
+              </button>
+            )}
 
             {/* Close button */}
             <button

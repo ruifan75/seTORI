@@ -3,13 +3,21 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { isAxiosError } from 'axios';
 import { useParams, useSearchParams, Link, useNavigate } from 'react-router-dom';
 import { songApi, itunesApi, suggestionApi } from '../api/client';
-import type { UpdateSongRequest, ITunesSearchResult, Song, ITunesQueryResult } from '../api/types';
+import type {
+  UpdateSongRequest,
+  ITunesSearchResult,
+  Song,
+  ITunesQueryResult,
+  SongPerformance,
+} from '../api/types';
 import Loading from '../components/ui/Loading';
 import Pagination from '../components/ui/Pagination';
 import Tag from '../components/ui/Tag';
 import EditableField from '../components/EditableField';
 import QueueAddButton from '../components/QueueAddButton';
 import ArtistLinks from '../components/ArtistLinks';
+import PerformanceTimingDialog from '../components/PerformanceTimingDialog';
+import { playerBarGetCurrentTime } from '../components/youtubePlayerControl';
 import { useToast } from '../components/ui/ToastContext';
 import { useAuthStore, hasPermission, PERM } from '../store/auth';
 import { usePlayerStore, type PlayerTrack } from '../store/player';
@@ -148,6 +156,10 @@ export default function SongDetailPage() {
   const navigate = useNavigate();
   const canEdit = hasPermission(useAuthStore((s) => s.user), PERM.CONTENT_EDIT);
   const [isEditing, setIsEditing] = useState(false);
+  // 開始/終了時間を直す（提案する）ダイアログの対象。null なら閉じている
+  const [timingTarget, setTimingTarget] = useState<SongPerformance | null>(null);
+  // 再生バーで今かかっている歌唱（ダイアログで「再生位置を使う」を出すかの判定に使う）
+  const playingTrack = usePlayerStore((s) => s.queue[s.index]);
   const [mergeTargetId, setMergeTargetId] = useState('');
   const [mergeTargetQuery, setMergeTargetQuery] = useState('');
   const [itunesDetails, setItunesDetails] = useState<Record<number, ITunesQueryResult>>({});
@@ -1053,6 +1065,16 @@ export default function SongDetailPage() {
                             <svg className="w-4 h-4 ml-0.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
                           </button>
                           <QueueAddButton track={toTrack(perf)} />
+                          <button
+                            onClick={() => setTimingTarget(perf)}
+                            className="inline-flex items-center justify-center w-8 h-8 rounded-full text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+                            title={canEdit ? '歌唱時間を編集' : '歌唱時間の修正を提案'}
+                            aria-label={canEdit ? '歌唱時間を編集' : '歌唱時間の修正を提案'}
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                          </button>
                           <a
                             href={perf.youtube_url}
                             target="_blank"
@@ -1112,6 +1134,22 @@ export default function SongDetailPage() {
         )}
       </div>
 
+      {timingTarget && (
+        <PerformanceTimingDialog
+          target={{
+            performanceId: timingTarget.id,
+            songName: timingTarget.song_name ?? song.name,
+            start: timingTarget.start_seconds,
+            end: timingTarget.end_seconds,
+          }}
+          subtitle={timingTarget.stream_title}
+          // 同じ歌唱を再生バーで再生中のときだけ、その再生位置を取り込めるようにする
+          currentTime={
+            playingTrack?.performanceId === timingTarget.id ? playerBarGetCurrentTime() : null
+          }
+          onClose={() => setTimingTarget(null)}
+        />
+      )}
     </div>
   );
 }

@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { usePlayerStore } from '../store/player';
 import ArtistLinks from './ArtistLinks';
+import PlaybackFeedback from './PlaybackFeedback';
+import { setPlayerBarInstance } from './youtubePlayerControl';
 import type { YouTubePlayerInstance, YouTubePlayerStateChangeEvent } from '../types/youtube';
 
 // 秒 → M:SS
@@ -62,6 +64,18 @@ export default function PlayerBar() {
       /* noop */
     }
   };
+
+  // 動画内の絶対再生位置（秒）。通報パネルが「押した瞬間はどこか」を知るために使う。
+  // パネル側の useEffect の依存に入るので、参照が変わらないよう固定する。
+  const getPlayerCurrentTime = useCallback((): number | null => {
+    const p = playerRef.current;
+    if (!p || !readyRef.current || typeof p.getCurrentTime !== 'function') return null;
+    try {
+      return p.getCurrentTime();
+    } catch {
+      return null;
+    }
+  }, []);
 
   // 自動再生がブロックされたままなら UI を「再生」表示に合わせる（ワンタップで開始可能に）。
   // 曲の読み込み（load/seek）のたびに仕掛け直す
@@ -225,6 +239,8 @@ export default function PlayerBar() {
           onReady: () => {
             readyRef.current = true;
             currentVideoRef.current = track.streamId;
+            // 他ページ（曲詳細など）から再生位置を参照できるようにする
+            setPlayerBarInstance(playerRef.current);
             applyVolume(volume, muted);
             // iOS は初回の自動再生（ユーザー操作から時間が経った play）をブロックする。
             // もう一度 play を試し、それでも始まらなければ scheduleBlockedCheck が
@@ -292,6 +308,7 @@ export default function PlayerBar() {
     playerRef.current = null;
     readyRef.current = false;
     currentVideoRef.current = '';
+    setPlayerBarInstance(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [!!track]);
 
@@ -306,6 +323,7 @@ export default function PlayerBar() {
       playerRef.current = null;
       readyRef.current = false;
       currentVideoRef.current = '';
+      setPlayerBarInstance(null);
     };
   }, []);
 
@@ -606,6 +624,8 @@ export default function PlayerBar() {
                 <div className="flex items-center gap-4">
                   {controls('lg')}
                   {progressBar(true)}
+                  {/* 全画面はモバイル唯一の操作面なので、通報導線もここに置く */}
+                  <PlaybackFeedback getCurrentTime={getPlayerCurrentTime} dark />
                   {/* iOS は Web からの音量変更不可（ハードウェアキーのみ）のためモバイルでは非表示 */}
                   <div className="hidden sm:flex">{volumeControl(true)}</div>
                 </div>
@@ -846,8 +866,9 @@ export default function PlayerBar() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
             </svg>
 
-            {/* 拡大・キュー・閉じる（sm 以上のみ。モバイルは拡大＝バータップ、キュー/閉じるは全画面側で操作） */}
+            {/* 通報・拡大・キュー・閉じる（sm 以上のみ。モバイルは拡大＝バータップ、キュー/閉じるは全画面側で操作） */}
             <div className="hidden sm:flex items-center gap-1 shrink-0">
+              <PlaybackFeedback getCurrentTime={getPlayerCurrentTime} />
               <button
                 onClick={() => setExpanded(true)}
                 className="p-2 text-gray-500 hover:text-gray-900"

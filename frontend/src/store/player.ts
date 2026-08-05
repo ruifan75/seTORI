@@ -71,6 +71,9 @@ interface PlayerState {
   prev: () => void;
   jumpTo: (index: number) => void;
   removeAt: (index: number) => void;
+  // 歌唱の開始/終了が編集されたとき、キュー上の同じ歌唱にも反映する。
+  // これが無いと「終了が早すぎる」を直した直後も、プレイヤーは古い end で次の曲へ送ってしまう。
+  updateTrackTiming: (performanceId: string, timing: { start?: number; end?: number }) => void;
   setPlaying: (playing: boolean) => void;
   setQueueOpen: (open: boolean) => void;
   clear: () => void;
@@ -127,6 +130,18 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     if (i < index) newIndex = index - 1;
     else if (i === index) newIndex = Math.min(index, next.length - 1);
     set({ queue: next, index: newIndex });
+  },
+
+  updateTrackTiming: (performanceId, timing) => {
+    const { queue } = get();
+    if (!queue.some((t) => t.performanceId === performanceId)) return;
+    set({
+      queue: queue.map((t) =>
+        t.performanceId === performanceId
+          ? { ...t, start: timing.start ?? t.start, end: timing.end ?? t.end }
+          : t
+      ),
+    });
   },
 
   setPlaying: (playing) => set({ playing }),
