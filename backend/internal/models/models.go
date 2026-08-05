@@ -160,18 +160,63 @@ type Role struct {
 
 // User 使用者
 type User struct {
-	ID           uuid.UUID  `json:"id"`
-	Username     string     `json:"username"`
-	DisplayName  string     `json:"display_name"`
-	PasswordHash string     `json:"-"` // 不輸出密碼 hash
-	RoleID       uuid.UUID  `json:"role_id"`
-	RoleName     string     `json:"role"`        // roles.name（表示用、JOIN で補完）
-	Permissions  []string   `json:"permissions"` // role の permissions（認証時に補完）
-	IsActive     bool       `json:"is_active"`
-	LastLogin    *time.Time `json:"last_login"` // 未ログインなら null
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
+	ID            uuid.UUID  `json:"id"`
+	Username      string     `json:"username"`
+	DisplayName   string     `json:"display_name"`
+	Email         *string    `json:"email"`          // 自助登録・外部連携で設定。管理者が作った旧アカウントは null
+	EmailVerified bool       `json:"email_verified"`
+	PasswordHash  string     `json:"-"`           // 不輸出密碼 hash。外部アカウントのみの利用者は空
+	RoleID        uuid.UUID  `json:"role_id"`
+	RoleName      string     `json:"role"`        // roles.name（表示用、JOIN で補完）
+	Permissions   []string   `json:"permissions"` // role の permissions（認証時に補完）
+	IsActive      bool       `json:"is_active"`
+	LastLogin     *time.Time `json:"last_login"` // 未ログインなら null
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
 }
+
+// OAuthIdentity 外部アカウント（Google / X / Discord …）との紐付け。
+// provider を値で持つので、対応を増やしてもスキーマは変わらない。
+type OAuthIdentity struct {
+	ID             uuid.UUID `json:"id"`
+	UserID         uuid.UUID `json:"user_id"`
+	Provider       string    `json:"provider"`
+	ProviderUserID string    `json:"provider_user_id"`
+	Email          *string   `json:"email"`
+	DisplayName    *string   `json:"display_name"`
+	AvatarURL      *string   `json:"avatar_url"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+// Playlist 利用者のプレイリスト。
+// visibility: private（本人のみ）/ unlisted（share_slug を知る人のみ）/ public（公開）
+type Playlist struct {
+	ID          uuid.UUID `json:"id"`
+	UserID      uuid.UUID `json:"user_id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	Visibility  string    `json:"visibility"`
+	ShareSlug   string    `json:"share_slug"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// PlaylistItem プレイリストの1項目＝1歌唱記録（performances）。
+type PlaylistItem struct {
+	ID            uuid.UUID `json:"id"`
+	PlaylistID    uuid.UUID `json:"playlist_id"`
+	PerformanceID uuid.UUID `json:"performance_id"`
+	Position      int       `json:"position"`
+	AddedAt       time.Time `json:"added_at"`
+}
+
+// プレイリストの公開範囲
+const (
+	PlaylistPrivate  = "private"
+	PlaylistUnlisted = "unlisted"
+	PlaylistPublic   = "public"
+)
 
 // EditSuggestion 閲覧モードからの修正提案。管理者が承認/却下する。
 type EditSuggestion struct {

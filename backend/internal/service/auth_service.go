@@ -50,6 +50,11 @@ func (s *AuthService) Login(username, password string) (string, *models.User, er
 	if user == nil {
 		return "", nil, ErrInvalidCredentials
 	}
+	// 外部アカウントのみで登録した利用者はパスワードを持たない。
+	// ハッシュ不正として 500 にせず、通常の認証失敗として扱う。
+	if user.PasswordHash == "" {
+		return "", nil, ErrInvalidCredentials
+	}
 	ok, err := auth.VerifyPassword(password, user.PasswordHash)
 	if err != nil {
 		return "", nil, fmt.Errorf("verify password: %w", err)

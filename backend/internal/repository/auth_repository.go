@@ -22,8 +22,11 @@ func NewAuthRepository(db *sql.DB) *AuthRepository {
 // ========== users ==========
 
 // userSelectWithRole は role を JOIN して権限も取得する SELECT。
+// password_hash は外部アカウントのみの利用者では NULL になるため空文字へ寄せる
+// （空文字は VerifyPassword で必ず失敗するので、パスワード認証は自然に拒否される）。
 const userSelectWithRole = `
-	SELECT u.id, u.username, u.display_name, u.password_hash, u.role_id, u.is_active,
+	SELECT u.id, u.username, u.display_name, u.email, u.email_verified,
+	       COALESCE(u.password_hash, ''), u.role_id, u.is_active,
 	       u.last_login, u.created_at, u.updated_at, r.name, r.permissions
 	FROM users u
 	JOIN roles r ON r.id = u.role_id`
@@ -32,10 +35,15 @@ func scanUserWithRole(row interface{ Scan(...any) error }) (*models.User, error)
 	var u models.User
 	var perms pq.StringArray
 	var lastLogin sql.NullTime
-	err := row.Scan(&u.ID, &u.Username, &u.DisplayName, &u.PasswordHash, &u.RoleID,
+	var email sql.NullString
+	err := row.Scan(&u.ID, &u.Username, &u.DisplayName, &email, &u.EmailVerified,
+		&u.PasswordHash, &u.RoleID,
 		&u.IsActive, &lastLogin, &u.CreatedAt, &u.UpdatedAt, &u.RoleName, &perms)
 	if err != nil {
 		return nil, err
+	}
+	if email.Valid {
+		u.Email = &email.String
 	}
 	if lastLogin.Valid {
 		u.LastLogin = &lastLogin.Time
