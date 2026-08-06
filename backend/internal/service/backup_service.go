@@ -82,8 +82,8 @@ type BackupService struct {
 	backupDir       string
 	dockerContainer string
 
-	dbUser string // DATABASE_URL から抽出（docker exec 用）
-	dbName string
+	dbUser    string // DATABASE_URL から抽出（docker exec 用）
+	dbName    string
 	useDocker bool
 
 	mu sync.Mutex // バックアップ/リストアの直列化

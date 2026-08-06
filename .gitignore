@@ -4,10 +4,11 @@
 /deploy/.env.*
 !/deploy/.env.example
 
-# Frontend reference clones (own .git — not part of this repo)
+# Reference clones (own .git — not part of this repo)
 /Holodex/
 /backend/Holodex/
 /Musicdex/
+/utawaku-timestamp/
 
 # Scratch screenshots dropped at repo root (not part of this repo)
 /*.png

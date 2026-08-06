@@ -23,8 +23,8 @@ type aiLineSelection struct {
 	StartTS   string          `json:"start_ts"` // 推薦：原文裡的時間字串，例如 "01:12:42" 或 "1:12:42"
 	EndTS     string          `json:"end_ts"`   // 推薦：如果行內有第二個時間
 	IsSong    bool            `json:"is_song"`
-	Name      string          `json:"name"`     // 曲名（必須逐字出現在原始行）
-	Artist    string          `json:"artist"`   // 歌手（必須逐字出現在原始行）
+	Name      string          `json:"name"`   // 曲名（必須逐字出現在原始行）
+	Artist    string          `json:"artist"` // 歌手（必須逐字出現在原始行）
 }
 
 const commentAISystemPrompt = `あなたはYouTubeのコメントから歌枠のセットリストを抽出するアシスタントです。
@@ -72,13 +72,13 @@ var aiTimestampRe = regexp.MustCompile(`(\d{1,2}:\d{2}:\d{2})|(\d{1,2}:\d{2})|\[
 // name/artist even in irregular formats.
 //
 // Strategy:
-// - We still do a loose pre-filter (extractTimestampLines) to reduce tokens.
-// - AI receives numbered lines and is asked to return raw timestamp *strings*
-//   exactly as they appear in the comment (start_ts / end_ts), plus verbatim name/artist.
-// - Backend always uses deterministic parsing (parseTimestampString + ParseComment)
-//   on either the AI-pointed raw strings or the full original line.
-// - This way AI handles "weird format recognition", while time calculation and
-//   safety (verbatim) stay reliable.
+//   - We still do a loose pre-filter (extractTimestampLines) to reduce tokens.
+//   - AI receives numbered lines and is asked to return raw timestamp *strings*
+//     exactly as they appear in the comment (start_ts / end_ts), plus verbatim name/artist.
+//   - Backend always uses deterministic parsing (parseTimestampString + ParseComment)
+//     on either the AI-pointed raw strings or the full original line.
+//   - This way AI handles "weird format recognition", while time calculation and
+//     safety (verbatim) stay reliable.
 func ParseCommentsWithAI(aiClient ai.Chatter, comments []string) ([]ParsedSong, error) {
 	if aiClient == nil {
 		return nil, fmt.Errorf("ai client is nil")

@@ -291,7 +291,7 @@ type AnalyzeCommentsResponse struct {
 type BatchAnalyzeStatus struct {
 	Running   bool     `json:"running"`
 	Mode      string   `json:"mode,omitempty"`
-	SingerID  string   `json:"singer_id,omitempty"`  // 対象を絞ったチャンネル（空なら全チャンネル）
+	SingerID  string   `json:"singer_id,omitempty"` // 対象を絞ったチャンネル（空なら全チャンネル）
 	Total     int      `json:"total"`
 	Done      int      `json:"done"`
 	Failed    int      `json:"failed"`

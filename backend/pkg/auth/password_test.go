@@ -64,9 +64,9 @@ func TestHasPermission(t *testing.T) {
 	}{
 		{[]string{"content:edit"}, "content:edit", true},
 		{[]string{"content:edit"}, "users:manage", false},
-		{[]string{"*"}, "users:manage", true},   // ワイルドカードは全許可
-		{[]string{}, "content:edit", false},     // 権限なし
-		{[]string{"content:edit"}, "", true},    // 特定権限不要
+		{[]string{"*"}, "users:manage", true}, // ワイルドカードは全許可
+		{[]string{}, "content:edit", false},   // 権限なし
+		{[]string{"content:edit"}, "", true},  // 特定権限不要
 	}
 	for _, c := range cases {
 		if got := HasPermission(c.perms, c.need); got != c.want {

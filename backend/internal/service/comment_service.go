@@ -315,10 +315,10 @@ func (s *CommentService) BackfillCommentSongs() (int, error) {
 
 // HashBackfillResult は comment_songs_hash 補正の結果内訳。
 type HashBackfillResult struct {
-	Total    int `json:"total"`    // comment_songs を持つ歌回数
-	Migrated int `json:"migrated"` // 旧アルゴリズム hash → 正規化 hash へ書き換えた数
+	Total     int `json:"total"`      // comment_songs を持つ歌回数
+	Migrated  int `json:"migrated"`   // 旧アルゴリズム hash → 正規化 hash へ書き換えた数
 	AlreadyOK int `json:"already_ok"` // 既に正規化 hash（快取が既に効く）
-	Skipped  int `json:"skipped"`  // comment_raw が空 / hash 未設定 / 未知形式で触らなかった数
+	Skipped   int `json:"skipped"`    // comment_raw が空 / hash 未設定 / 未知形式で触らなかった数
 }
 
 // BackfillCommentSongsHashes は comment_songs_hash を現行の正規化アルゴリズムへ移行する。

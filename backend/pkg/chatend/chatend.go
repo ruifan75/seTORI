@@ -4,7 +4,8 @@
 // 對每首歌（以 setlist 的 start 為輸入），在 (start+MinSong, next_start) 區間找「最大的純拍手群」，
 // 取該群的起拍時刻 − ReactionLag 當作結束。全庫 1445 首實證 MAE 2.18s / 99% 在 ±10s 內。
 //
-// 這是純文字邏輯（無外部依賴），與 utawaku-timestamp/chat_end_detector.py 的預設行為對齊。
+// 這是純文字邏輯（無外部依賴）。原型是一個獨立的 Python 工具（已不在本專案內），
+// 本實作沿用其預設參數。
 package chatend
 
 import (

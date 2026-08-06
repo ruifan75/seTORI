@@ -27,8 +27,6 @@
 - **iTunes API**: Song information lookup via [pkg/itunes](backend/pkg/itunes)
 - **Groq API**: AI-powered song name normalization
 
-**Python Tools**: [utawaku-timestamp](utawaku-timestamp/README.md) - separate CLI for audio analysis and comment parsing
-
 ### 📊 Data Flow
 
 1. **Stream Ingestion**: Fetch stream metadata via Holodex/YouTube → Store in `streams` table
@@ -128,13 +126,6 @@ npm run lint     # ESLint check
 ```bash
 cd docker
 docker-compose up  # PostgreSQL only (backend/frontend services commented out)
-```
-
-### Python Tools
-```bash
-cd utawaku-timestamp
-pip install -r requirements.txt
-python utawaku-ts.py --help  # Full CLI documentation in README.md
 ```
 
 ## Project-Specific Notes

@@ -5,8 +5,9 @@
 //
 // -mode regex : pure deterministic path (comment.ParseComments). AI 失敗時のフォールバック。
 // -mode ai    : production と同じ抽出（comment.ParseCommentsWithAI, AI 失敗時は regex）。
-//               本機 DB の ai_providers を使う。呼び出しは高いので -cache でディスクに保存し、
-//               -struct の on/off 再実行は同じ AI 結果を使い回す。
+//
+//	本機 DB の ai_providers を使う。呼び出しは高いので -cache でディスクに保存し、
+//	-struct の on/off 再実行は同じ AI 結果を使い回す。
 //
 // どちらのモードでも抽出後に FilterSongsWith(structural) -> Dedup -> Validate を通し、
 // 抽出タイムスタンプを ground truth と start 近接で突き合わせて precision/recall を出す。
@@ -373,10 +374,10 @@ func loadStoredSongs(db *sql.DB, sid string) []comment.ParsedSong {
 		return nil
 	}
 	var rows []struct {
-		Start          int    `json:"start"`
-		End            int    `json:"end"`
-		Name           string `json:"name"`
-		OriginalArtist string `json:"original_artist"`
+		Start           int    `json:"start"`
+		End             int    `json:"end"`
+		Name            string `json:"name"`
+		OriginalArtist  string `json:"original_artist"`
 		OriginalComment string `json:"original_comment"`
 	}
 	json.Unmarshal(raw, &rows)
