@@ -14,3 +14,11 @@
 /*.png
 /*.jpg
 /*.jpeg
+
+# macOS / エディタが撒くファイル
+.DS_Store
+Thumbs.db
+*.swp
+
+# Claude Code のローカル作業ファイル
+/.claude/
