@@ -795,8 +795,8 @@ func (r *Router) handleCreateSuggestion(w http.ResponseWriter, req *http.Request
 		respondError(w, http.StatusBadRequest, "無効なリクエスト形式")
 		return
 	}
-	// 未登録曲の追加は fields ではなく payload で内容を渡す
-	if body.Kind != service.KindMissingSong && len(body.Fields) == 0 {
+	// 未登録曲の追加・曲の差し替えは fields ではなく payload / song_swap で内容を渡す
+	if body.Kind != service.KindMissingSong && body.Kind != service.KindSongSwap && len(body.Fields) == 0 {
 		respondError(w, http.StatusBadRequest, "提案する変更がありません")
 		return
 	}

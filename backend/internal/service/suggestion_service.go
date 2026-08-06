@@ -82,6 +82,7 @@ type SuggestionActor struct {
 const (
 	KindField       = "field"        // 既存レコードのフィールド差し替え
 	KindMissingSong = "perf.missing" // 未登録曲の追加報告
+	KindSongSwap    = "perf.meta"    // 歌唱の曲の差し替え（「この曲ではない」）
 )
 
 // SuggestionService は閲覧モードからの修正提案の投稿・レビュー・反映を担う。
@@ -89,6 +90,7 @@ type SuggestionService struct {
 	repo    *repository.SuggestionRepository
 	editors map[string]TargetEditor
 	missing MissingSongCreator
+	swapper SongSwapper
 }
 
 func NewSuggestionService(
@@ -105,6 +107,7 @@ func NewSuggestionService(
 			"performance": performanceService,
 		},
 		missing: performanceService,
+		swapper: performanceService,
 	}
 }
 
@@ -113,6 +116,9 @@ func NewSuggestionService(
 func (s *SuggestionService) Create(req *dto.CreateSuggestionRequest, actor SuggestionActor) (*models.EditSuggestion, error) {
 	if req.Kind == KindMissingSong {
 		return s.createMissingSong(req, actor)
+	}
+	if req.Kind == KindSongSwap {
+		return s.createSongSwap(req, actor)
 	}
 
 	editor, ok := s.editors[req.TargetType]
@@ -282,6 +288,126 @@ func (s *SuggestionService) approveMissingSong(sug *models.EditSuggestion, revie
 		return err
 	}
 	logger.Infof("missing song suggestion approved: %s (%s @%ds)", sug.ID, p.SongName, p.StartSeconds)
+	return nil
+}
+
+// ========== 曲の差し替え提案（perf.meta）==========
+
+// SongSwapper は「この歌唱は別の曲だ」という指摘を反映する。PerformanceService が実装する。
+type SongSwapper interface {
+	// SongLabelOf は歌唱の現在の曲名と、対象の表示ラベルを返す。歌唱が無ければ空文字。
+	SongLabelOf(performanceID uuid.UUID) (songName string, label string, err error)
+	// ApplySongSwap は歌唱の曲を差し替える（未登録の曲名なら曲も作る）。
+	ApplySongSwap(performanceID uuid.UUID, p dto.SongSwapPayload) error
+}
+
+// createSongSwap は曲の差し替え提案を登録する。
+// 曲の同一性は文字列の差分では表せない（別の曲マスタへ繋ぎ替える操作）ため、
+// before/after ではなく payload で持つ。
+func (s *SuggestionService) createSongSwap(req *dto.CreateSuggestionRequest, actor SuggestionActor) (*models.EditSuggestion, error) {
+	if s.swapper == nil {
+		return nil, ErrInvalidTarget
+	}
+	p := req.SongSwap
+	if p == nil {
+		return nil, invalid("差し替え先の曲がありません")
+	}
+	perfID, err := uuid.Parse(req.TargetID)
+	if err != nil {
+		return nil, ErrInvalidTarget
+	}
+	p.SongID = strings.TrimSpace(p.SongID)
+	p.SongName = strings.TrimSpace(p.SongName)
+	p.OriginalArtist = strings.TrimSpace(p.OriginalArtist)
+	if p.SongID == "" && p.SongName == "" {
+		return nil, invalid("差し替え先の曲を選ぶか、曲名を入力してください")
+	}
+	if p.SongID != "" {
+		if _, err := uuid.Parse(p.SongID); err != nil {
+			return nil, invalid("差し替え先の曲の指定が不正です")
+		}
+	}
+
+	currentSong, label, err := s.swapper.SongLabelOf(perfID)
+	if err != nil {
+		return nil, err
+	}
+	if label == "" {
+		return nil, ErrTargetNotFound
+	}
+	// 今と同じ曲を指しているなら提案する意味がない
+	if p.SongID == "" && p.SongName == currentSong {
+		return nil, ErrNoChange
+	}
+	p.CurrentSongName = currentSong
+
+	if err := s.checkRate(actor); err != nil {
+		return nil, err
+	}
+
+	swapJSON, _ := json.Marshal(p)
+	sug := &models.EditSuggestion{
+		TargetType:  "performance",
+		TargetID:    perfID,
+		TargetLabel: label,
+		Kind:        KindSongSwap,
+		BeforeData:  []byte("{}"),
+		AfterData:   []byte("{}"),
+		Payload:     swapJSON,
+		Note:        strings.TrimSpace(req.Note),
+		ClientHint:  actor.ClientHint,
+	}
+	if actor.User != nil {
+		sug.CreatedBy = &actor.User.ID
+		sug.CreatedByName = displayNameOf(actor.User)
+	}
+	created, err := s.repo.Create(sug)
+	if err != nil {
+		return nil, err
+	}
+	logger.Infof("song swap suggestion created: %s → %s%s by %s",
+		currentSong, p.SongName, p.SongID, actorLabel(actor))
+	return created, nil
+}
+
+// approveSongSwap は曲の差し替えを反映する。
+// 提案後に曲が別途差し替えられていれば、force が無い限り止めて人手の判断に回す
+// （field と同じ lost update 対策）。
+func (s *SuggestionService) approveSongSwap(sug *models.EditSuggestion, reviewer *models.User, force bool) error {
+	if s.swapper == nil {
+		return ErrInvalidTarget
+	}
+	var p dto.SongSwapPayload
+	if err := json.Unmarshal(sug.Payload, &p); err != nil {
+		return fmt.Errorf("提案内容の解析に失敗しました: %w", err)
+	}
+
+	if !force {
+		currentSong, label, err := s.swapper.SongLabelOf(sug.TargetID)
+		if err != nil {
+			return err
+		}
+		if label == "" {
+			return ErrTargetNotFound
+		}
+		if p.CurrentSongName != "" && currentSong != p.CurrentSongName {
+			ce := &ConflictError{Fields: map[string]FieldConflict{
+				"song": {Expected: p.CurrentSongName, Current: currentSong},
+			}}
+			if err := s.repo.UpdateStatus(sug.ID, "conflict", reviewerID(reviewer), ce.Error()); err != nil {
+				return err
+			}
+			return ce
+		}
+	}
+
+	if err := s.swapper.ApplySongSwap(sug.TargetID, p); err != nil {
+		return err
+	}
+	if err := s.repo.UpdateStatus(sug.ID, "approved", reviewerID(reviewer), "曲を差し替え"); err != nil {
+		return err
+	}
+	logger.Infof("song swap approved: %s (%s → %s%s)", sug.ID, p.CurrentSongName, p.SongName, p.SongID)
 	return nil
 }
 
@@ -714,6 +840,10 @@ func (s *SuggestionService) Approve(id uuid.UUID, reviewer *models.User, force b
 	if sug.Kind == KindMissingSong {
 		return s.approveMissingSong(sug, reviewer)
 	}
+	// 曲の差し替えも同様（別の曲マスタへ繋ぎ替える）
+	if sug.Kind == KindSongSwap {
+		return s.approveSongSwap(sug, reviewer, force)
+	}
 
 	editor, ok := s.editors[sug.TargetType]
 	if !ok {
@@ -880,6 +1010,22 @@ func (s *SuggestionService) toSuggestionResponse(m models.EditSuggestion) dto.Su
 			resp.Payload = &p
 		}
 		return resp // 未登録曲の追加は既存レコードを触らないので衝突判定は不要
+	}
+
+	if m.Kind == KindSongSwap {
+		var p dto.SongSwapPayload
+		if json.Unmarshal(m.Payload, &p) == nil {
+			resp.SongSwap = &p
+			// 提案後に曲が差し替えられていないかを一覧の時点で見せる
+			if (m.Status == "pending" || m.Status == "conflict") && s.swapper != nil && p.CurrentSongName != "" {
+				if cur, label, err := s.swapper.SongLabelOf(m.TargetID); err == nil && label != "" && cur != p.CurrentSongName {
+					resp.Conflicts = map[string]dto.FieldConflict{
+						"song": {Expected: p.CurrentSongName, Current: cur},
+					}
+				}
+			}
+		}
+		return resp
 	}
 
 	// pending の間に対象が変わっていないかを一覧の時点で見せる（承認前に気付けるように）。

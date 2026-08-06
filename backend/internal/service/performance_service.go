@@ -312,6 +312,46 @@ func (s *PerformanceService) CreateFromMissingSong(p dto.MissingSongPayload) err
 	return nil
 }
 
+// ========== 曲の差し替え提案（SongSwapper） ==========
+
+// SongLabelOf は歌唱の現在の曲名と表示ラベルを返す。歌唱が無ければ空文字。
+func (s *PerformanceService) SongLabelOf(performanceID uuid.UUID) (string, string, error) {
+	perf, err := s.perfRepo.FindByID(performanceID)
+	if err != nil {
+		return "", "", fmt.Errorf("find performance: %w", err)
+	}
+	if perf == nil {
+		return "", "", nil
+	}
+	label := perf.SongName
+	if perf.OriginalArtist != "" {
+		label += " / " + perf.OriginalArtist
+	}
+	if perf.StreamTitle != "" {
+		label += "（" + perf.StreamTitle + "）"
+	}
+	return perf.SongName, label, nil
+}
+
+// ApplySongSwap は歌唱の曲を別の曲へ繋ぎ替える。
+// SongID があればその曲へ、無ければ曲名から探す／作る（未登録の曲へ直す場合）。
+// 歌唱の ID は変わらないので、この歌唱を参照しているプレイリストはそのまま残る。
+func (s *PerformanceService) ApplySongSwap(performanceID uuid.UUID, p dto.SongSwapPayload) error {
+	songID := strings.TrimSpace(p.SongID)
+	if songID == "" {
+		song, _, err := s.findOrCreateSong(dto.CreatePerformanceItem{
+			Name:           p.SongName,
+			OriginalArtist: p.OriginalArtist,
+		})
+		if err != nil {
+			return fmt.Errorf("find or create song: %w", err)
+		}
+		songID = song.ID.String()
+	}
+	_, err := s.UpdatePerformance(performanceID, &dto.UpdatePerformanceRequest{SongID: &songID})
+	return err
+}
+
 // ========== 修正提案の対象（TargetEditor） ==========
 
 // GetEditableFields は修正提案の対象となる編集可能フィールドと表示ラベルを返す。

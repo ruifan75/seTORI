@@ -27,6 +27,7 @@ const FIELD_LABELS: Record<string, string> = {
   original_artist_reading: 'アーティストの読み',
   start_seconds: '開始時間',
   end_seconds: '終了時間',
+  song: '曲',
 };
 
 const TYPE_LABELS: Record<string, string> = {
@@ -60,9 +61,11 @@ function changedKeysOf(s: Suggestion): string[] {
   return Object.keys(s.after).filter((k) => (s.after[k] ?? '') !== (s.before[k] ?? ''));
 }
 
-// この提案が処理可能か（差分か payload のどちらかがある）
+// この提案が処理可能か（差分・payload・差し替え先のいずれかがある）
 function isActionable(s: Suggestion): boolean {
-  return s.kind === 'perf.missing' ? !!s.payload : changedKeysOf(s).length > 0;
+  if (s.kind === 'perf.missing') return !!s.payload;
+  if (s.kind === 'perf.meta') return !!s.song_swap;
+  return changedKeysOf(s).length > 0;
 }
 
 function detailPathOf(targetType: string, targetID: string, targetKey: string): string {
@@ -344,6 +347,8 @@ function SuggestionRow({
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0 flex-1">
           {suggestion.kind === 'perf.missing' ? (
             <MissingSongSummary suggestion={suggestion} />
+          ) : suggestion.kind === 'perf.meta' ? (
+            <SongSwapSummary suggestion={suggestion} />
           ) : (
             changed.map((k) => (
               <span key={k} className="text-sm flex items-center gap-1.5 flex-wrap">
@@ -367,7 +372,13 @@ function SuggestionRow({
             hasConflict ? 'bg-amber-600 hover:bg-amber-700' : 'bg-indigo-600 hover:bg-indigo-700'
           }`}
         >
-          {suggestion.kind === 'perf.missing' ? '登録する' : hasConflict ? '上書きして採用' : 'これを採用'}
+          {suggestion.kind === 'perf.missing'
+            ? '登録する'
+            : hasConflict
+              ? '上書きして採用'
+              : suggestion.kind === 'perf.meta'
+                ? '差し替える'
+                : 'これを採用'}
         </button>
       </div>
 
@@ -403,6 +414,26 @@ function MissingSongSummary({ suggestion }: { suggestion: Suggestion }) {
         {' – '}
         {p.end_seconds === 0 ? '最後まで' : formatFieldValue('end_seconds', String(p.end_seconds))}
       </span>
+    </span>
+  );
+}
+
+// SongSwapSummary 曲の差し替え提案（「この曲ではない」）。差分ではなく曲そのものが変わる。
+function SongSwapSummary({ suggestion }: { suggestion: Suggestion }) {
+  const p = suggestion.song_swap;
+  if (!p) return <span className="text-xs text-gray-400">内容が読み取れません</span>;
+  return (
+    <span className="text-sm flex items-center gap-1.5 flex-wrap">
+      <span className="text-gray-500 text-xs">曲</span>
+      <span className="px-1.5 py-0.5 rounded bg-red-50 text-red-700 line-through text-xs break-words">
+        {p.current_song_name || '（不明）'}
+      </span>
+      <span className="text-gray-400 text-xs">→</span>
+      <span className="px-1.5 py-0.5 rounded bg-green-50 text-green-700 font-medium text-xs break-words">
+        {p.song_name}
+        {p.original_artist ? ` / ${p.original_artist}` : ''}
+      </span>
+      {!p.song_id && <span className="text-[11px] text-amber-700">新規登録</span>}
     </span>
   );
 }

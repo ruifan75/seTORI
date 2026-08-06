@@ -481,8 +481,20 @@ export type SuggestionTargetType = 'song' | 'artist' | 'performance' | 'stream';
 // conflict … 提案後に対象が変更された状態。承認すると他人の編集を巻き戻すため保留される
 export type SuggestionStatus = 'pending' | 'approved' | 'rejected' | 'conflict';
 
-// 提案の種別。field = 既存レコードのフィールド差し替え、perf.missing = 未登録曲の追加報告
-export type SuggestionKind = 'field' | 'perf.missing';
+// 提案の種別
+// field        … 既存レコードのフィールド差し替え
+// perf.missing … 未登録曲の追加報告
+// perf.meta    … 歌唱の曲の差し替え（「この曲ではない」）
+export type SuggestionKind = 'field' | 'perf.missing' | 'perf.meta';
+
+// 「この歌唱は別の曲だ」という指摘の中身。
+// song_id があれば既存の曲へ、無ければ曲名から探す／作る。
+export interface SongSwapPayload {
+  song_id: string;
+  song_name: string;
+  original_artist: string;
+  current_song_name: string; // 提案時点の曲名（レビュー時の表示・衝突判定用）
+}
 
 // 「この配信のこの時点に、登録されていない曲がある」という報告の中身
 export interface MissingSongPayload {
@@ -499,6 +511,7 @@ export interface CreateSuggestionRequest {
   kind?: SuggestionKind; // 省略時は field
   fields?: Record<string, string>;
   payload?: MissingSongPayload; // kind = perf.missing のとき
+  song_swap?: Omit<SongSwapPayload, 'current_song_name'>; // kind = perf.meta のとき
   note?: string;
 }
 
@@ -518,6 +531,7 @@ export interface Suggestion {
   before: Record<string, string>;
   after: Record<string, string>;
   payload?: MissingSongPayload; // kind = perf.missing のときだけ
+  song_swap?: SongSwapPayload; // kind = perf.meta のときだけ
   note: string;
   status: SuggestionStatus;
   // 未処理の提案で、対象が提案後に変更されたフィールド。空でなければ承認前に確認が要る

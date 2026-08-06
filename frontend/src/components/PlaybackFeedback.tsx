@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { usePlayerStore, type PlayerTrack } from '../store/player';
 import PerformanceTimingDialog from './PerformanceTimingDialog';
 import MissingSongDialog from './MissingSongDialog';
+import SongSwapDialog from './SongSwapDialog';
 import LoginToSuggest from './LoginToSuggest';
 import { usePerformanceTiming, formatSeconds, type TimingTarget } from './usePerformanceTiming';
 
@@ -29,6 +30,8 @@ export default function PlaybackFeedback({
   const [dialogFor, setDialogFor] = useState<PlayerTrack | null>(null);
   // 未登録曲の報告ダイアログ。開いた瞬間の再生位置を開始時間の初期値にする
   const [missingAt, setMissingAt] = useState<number | null>(null);
+  // 曲の差し替え（「この曲ではない」）ダイアログの対象
+  const [swapFor, setSwapFor] = useState<PlayerTrack | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
 
   const current = queue[index];
@@ -130,6 +133,10 @@ export default function PlaybackFeedback({
               setDialogFor(current);
               setOpen(false);
             }}
+            onSwap={() => {
+              setSwapFor(current);
+              setOpen(false);
+            }}
           />
 
           {previous && (
@@ -142,6 +149,10 @@ export default function PlaybackFeedback({
               onCapture={(field) => capture(previous, field)}
               onDetail={() => {
                 setDialogFor(previous);
+                setOpen(false);
+              }}
+              onSwap={() => {
+                setSwapFor(previous);
                 setOpen(false);
               }}
             />
@@ -173,6 +184,15 @@ export default function PlaybackFeedback({
         />
       )}
 
+      {swapFor && (
+        <SongSwapDialog
+          performanceId={swapFor.performanceId}
+          currentSongName={swapFor.songName}
+          subtitle={swapFor.streamTitle}
+          onClose={() => setSwapFor(null)}
+        />
+      )}
+
       {missingAt !== null && (
         <MissingSongDialog
           streamId={current.streamId}
@@ -192,6 +212,7 @@ function FeedbackRow({
   sameStream = true,
   onCapture,
   onDetail,
+  onSwap,
 }: {
   heading: string;
   track: PlayerTrack;
@@ -199,6 +220,7 @@ function FeedbackRow({
   sameStream?: boolean;
   onCapture: (field: 'start' | 'end') => void;
   onDetail: () => void;
+  onSwap: () => void;
 }) {
   return (
     <div className="border-t first:border-t-0 pt-2 mt-2 first:pt-0 first:mt-0">
@@ -234,6 +256,13 @@ function FeedbackRow({
           className="px-2 py-1 text-xs rounded-lg text-indigo-600 hover:bg-indigo-50"
         >
           詳しく直す
+        </button>
+        <button
+          onClick={onSwap}
+          className="px-2 py-1 text-xs rounded-lg text-indigo-600 hover:bg-indigo-50"
+          title="この区間は別の曲だと報告する"
+        >
+          曲が違う
         </button>
       </div>
 
