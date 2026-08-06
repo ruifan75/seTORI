@@ -217,6 +217,7 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("POST /api/suggestions/merge", r.handleMergeSuggestions)
 	r.mux.HandleFunc("POST /api/suggestions/{id}/approve", r.handleApproveSuggestion)
 	r.mux.HandleFunc("POST /api/suggestions/{id}/reject", r.handleRejectSuggestion)
+	r.mux.HandleFunc("DELETE /api/suggestions/{id}", r.handleWithdrawSuggestion)
 
 	// プレイリスト
 	// 公開範囲の判定は行単位なので、認可は各ハンドラ（PlaylistService）側で行う。
@@ -887,6 +888,28 @@ func (r *Router) handleBatchReviewSuggestions(w http.ResponseWriter, req *http.R
 
 	result := r.suggestionService.BatchReview(ids, body.Action, currentUser(req), body.Force, body.Note)
 	respondJSON(w, http.StatusOK, result)
+}
+
+// handleWithdrawSuggestion は自分が出した未処理の提案を取り下げる（要ログイン）。
+// content:edit を持つ管理者は他人の分も引ける。他人のものは存在を伏せて 404。
+func (r *Router) handleWithdrawSuggestion(w http.ResponseWriter, req *http.Request) {
+	id, err := uuid.Parse(req.PathValue("id"))
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "無効な提案ID")
+		return
+	}
+	if err := r.suggestionService.Withdraw(id, currentUser(req)); err != nil {
+		switch {
+		case errors.Is(err, service.ErrSuggestionNotFound):
+			respondError(w, http.StatusNotFound, err.Error())
+		case errors.Is(err, service.ErrAlreadyReviewed):
+			respondError(w, http.StatusConflict, err.Error())
+		default:
+			respondError(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"message": "提案を取り下げました"})
 }
 
 // handleMergeSuggestions は同一対象の提案を管理者が決めた値へ統合して反映する（content:edit）。
@@ -2518,11 +2541,16 @@ func requiredPermission(method, path string) (perm string, needsAuth bool) {
 	// 修正提案：投稿（POST /api/suggestions）はログインのみ必要（編集権限は不要）。
 	// 匿名でも投稿できるようにしていたが、再生中のワンタップ通報を載せた結果、
 	// 誰の指摘かを追えないと信頼度の重み付けも濫用への対処もできないため要ログインにした。
+	// 取り下げ（DELETE）も同様：自分の提案を引っ込めるのに編集権限は要らない。
+	// 誰の提案を引けるかという行単位の判定は SuggestionService が行う。
 	// 一覧・件数・承認・却下・統合は content:edit（管理者レビュー）。
 	if path == "/api/suggestions" && method == http.MethodPost {
 		return "", true
 	}
 	if strings.HasPrefix(path, "/api/suggestions") {
+		if method == http.MethodDelete {
+			return "", true
+		}
 		return auth.PermContentEdit, true
 	}
 

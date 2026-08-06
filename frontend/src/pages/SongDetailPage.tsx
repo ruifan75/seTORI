@@ -17,6 +17,7 @@ import EditableField from '../components/EditableField';
 import QueueAddButton from '../components/QueueAddButton';
 import ArtistLinks from '../components/ArtistLinks';
 import PerformanceTimingDialog from '../components/PerformanceTimingDialog';
+import { withdrawSuggestion } from '../components/usePerformanceTiming';
 import { playerBarGetCurrentTime } from '../components/youtubePlayerControl';
 import { useToast } from '../components/ui/ToastContext';
 import { useAuthStore, hasPermission, PERM } from '../store/auth';
@@ -547,7 +548,11 @@ export default function SongDetailPage() {
         fields: { [field]: val },
         note,
       });
-      showToast(r.message, 'success');
+      // まだ反映されていないので「元に戻す」ではなく取り下げ
+      showToast(r.message, 'success', {
+        label: '取り消す',
+        onClick: () => withdrawSuggestion(r.id, showToast),
+      });
     } catch (err) {
       showToast(`送信失敗: ${(err as Error).message}`, 'error');
       throw err;

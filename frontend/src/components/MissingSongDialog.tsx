@@ -3,7 +3,7 @@ import { suggestionApi } from '../api/client';
 import { useAuthStore } from '../store/auth';
 import LoginToSuggest from './LoginToSuggest';
 import { useToast } from './ui/ToastContext';
-import { formatSeconds, parseSeconds } from './usePerformanceTiming';
+import { formatSeconds, parseSeconds, withdrawSuggestion } from './usePerformanceTiming';
 
 // 「この配信のここに、登録されていない曲がある」と報告するダイアログ。
 //
@@ -61,7 +61,7 @@ export default function MissingSongDialog({
 
     setBusy(true);
     try {
-      await suggestionApi.create({
+      const created = await suggestionApi.create({
         kind: 'perf.missing',
         payload: {
           stream_id: streamId,
@@ -72,7 +72,10 @@ export default function MissingSongDialog({
         },
         note: note.trim(),
       });
-      showToast('抜けている曲として報告しました。管理者の確認をお待ちください', 'success');
+      showToast('抜けている曲として報告しました。管理者の確認をお待ちください', 'success', {
+        label: '取り消す',
+        onClick: () => withdrawSuggestion(created.id, showToast),
+      });
       onClose();
     } catch (e) {
       showToast(`送信できませんでした: ${(e as Error).message}`, 'error');

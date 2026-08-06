@@ -13,6 +13,7 @@ import (
 	"github.com/ruifan75/setori/internal/logger"
 	"github.com/ruifan75/setori/internal/models"
 	"github.com/ruifan75/setori/internal/repository"
+	"github.com/ruifan75/setori/pkg/auth"
 )
 
 // TargetEditor は修正提案の対象（曲・アーティスト・歌唱記録）が満たすインターフェース。
@@ -641,6 +642,45 @@ func (s *SuggestionService) Merge(req *dto.MergeSuggestionsRequest, reviewer *mo
 	logger.Infof("suggestions merged: %s %s applied=%v approved=%d rejected=%d",
 		req.TargetType, targetID, apply, resp.Approved, resp.Rejected)
 	return resp, nil
+}
+
+// Withdraw は提案を取り下げる（削除する）。
+//
+// 誤タップや勘違いに気づいた本人が引っ込められるようにするための操作。
+// 却下ではなく削除する：本人が取り下げただけのものをレビュー履歴に積むと、
+// 実際の判断の記録が埋もれるため。
+//
+// 引けるのは自分が出した未処理の提案だけ。content:edit を持つ管理者は他人の分も引ける
+// （荒らしの掃除に使う）。他人のものは存在を伏せて ErrSuggestionNotFound を返す
+// （プレイリストと同じ方針。ID の総当たりで存在を探れないようにする）。
+func (s *SuggestionService) Withdraw(id uuid.UUID, user *models.User) error {
+	if user == nil {
+		return ErrSuggestionNotFound
+	}
+	sug, err := s.repo.FindByID(id)
+	if err != nil {
+		return err
+	}
+	if sug == nil {
+		return ErrSuggestionNotFound
+	}
+
+	isReviewer := auth.HasPermission(user.Permissions, auth.PermContentEdit)
+	isOwner := sug.CreatedBy != nil && *sug.CreatedBy == user.ID
+	if !isOwner && !isReviewer {
+		return ErrSuggestionNotFound
+	}
+	// 処理済みのものは取り下げられない（反映済みの変更は「元に戻す」の話であって
+	// 取り下げではないし、却下済みのものを消しても意味がない）。
+	if sug.Status == "approved" || sug.Status == "rejected" {
+		return ErrAlreadyReviewed
+	}
+
+	if err := s.repo.Delete(id); err != nil {
+		return err
+	}
+	logger.Infof("edit suggestion withdrawn: %s by %s", id, displayNameOf(user))
+	return nil
 }
 
 // CountPending は未処理提案数を返す（バッジ表示用）。

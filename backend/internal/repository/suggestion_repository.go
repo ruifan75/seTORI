@@ -250,6 +250,16 @@ func (r *SuggestionRepository) FindByID(id uuid.UUID) (*models.EditSuggestion, e
 	return &s, nil
 }
 
+// Delete は提案を1件削除する（取り下げ）。
+// 却下と違い履歴を残さない：本人が「やっぱり無し」と引っ込めただけのものを
+// レビュー履歴に積むと、実際の判断の記録が埋もれるため。
+func (r *SuggestionRepository) Delete(id uuid.UUID) error {
+	if _, err := r.db.Exec(`DELETE FROM edit_suggestions WHERE id = $1`, id); err != nil {
+		return fmt.Errorf("delete suggestion: %w", err)
+	}
+	return nil
+}
+
 // UpdateStatus は提案のステータスを更新し、レビュー者・理由・時刻を記録する。
 // reviewer は未ログイン経路では nil（現状レビューは要権限なので通常は入る）。
 func (r *SuggestionRepository) UpdateStatus(id uuid.UUID, status string, reviewer *uuid.UUID, note string) error {

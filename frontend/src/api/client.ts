@@ -687,6 +687,13 @@ export const suggestionApi = {
     const { data } = await api.post(`/api/suggestions/${id}/reject`, { note });
     return data;
   },
+
+  // 自分が出した未処理の提案を取り下げる（content:edit なら他人の分も可）。
+  // 処理済みのものは 409、他人のものは 404。
+  withdraw: async (id: string): Promise<{ message: string }> => {
+    const { data } = await api.delete(`/api/suggestions/${id}`);
+    return data;
+  },
 };
 
 // ========== グローバル検索 API ==========
