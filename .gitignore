@@ -1,4 +1,9 @@
 
+# 本番の秘密情報。.env.example だけを追跡する
+/deploy/.env
+/deploy/.env.*
+!/deploy/.env.example
+
 # Frontend reference clones (own .git — not part of this repo)
 /Holodex/
 /backend/Holodex/

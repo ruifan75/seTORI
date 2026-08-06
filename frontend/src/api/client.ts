@@ -81,7 +81,10 @@ const DEFAULT_API_BASE_URL =
   typeof window !== 'undefined'
     ? `${window.location.protocol}//${window.location.hostname}:8080`
     : 'http://localhost:8080';
-const API_BASE_URL = import.meta.env.VITE_API_URL || DEFAULT_API_BASE_URL;
+// 本番は Caddy が同一オリジンで静的ファイルと /api の両方を配信するため、
+// ビルド時に VITE_API_URL="" を渡して相対パスにする。
+// 空文字は「同一オリジン」という指定なので ?? で受ける（|| だと既定値に落ちる）。
+const API_BASE_URL = import.meta.env.VITE_API_URL ?? DEFAULT_API_BASE_URL;
 
 const api = axios.create({
   baseURL: API_BASE_URL,

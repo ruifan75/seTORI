@@ -1,0 +1,15 @@
+# 機密：イメージに焼き込まない（設定は環境変数で渡す）
+.env
+.env.*
+!.env.example
+
+# ローカルの生成物
+backups/
+*.dump
+tmp/
+
+# Go のビルド成果物
+server
+setori-server
+*.test
+*.out
