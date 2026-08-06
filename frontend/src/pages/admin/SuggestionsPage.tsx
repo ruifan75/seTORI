@@ -7,6 +7,15 @@ import Loading from '../../components/ui/Loading';
 import Pagination from '../../components/ui/Pagination';
 import MergeSuggestionsDialog from '../../components/MergeSuggestionsDialog';
 import { useToast } from '../../components/ui/ToastContext';
+import {
+  FIELD_LABELS,
+  TYPE_LABELS,
+  changedKeysOf,
+  detailPathOf,
+  formatFieldValue,
+  isActionable,
+} from '../../components/suggestionDisplay';
+import { SuggestionChanges } from '../../components/SuggestionChanges';
 
 const STATUS_TABS: { value: SuggestionStatus; label: string }[] = [
   { value: 'pending', label: '未処理' },
@@ -18,62 +27,6 @@ const STATUS_TABS: { value: SuggestionStatus; label: string }[] = [
 // 未処理・要確認は「対象ごとにまとめて見比べる」のが実際の作業。
 // 承認済み・却下は履歴なので時系列の一覧のまま。
 const GROUPED_TABS: SuggestionStatus[] = ['pending', 'conflict'];
-
-// フィールドキー → 日本語ラベル（差分表示用）
-const FIELD_LABELS: Record<string, string> = {
-  name: '名前',
-  name_reading: '読み',
-  original_artist: 'アーティスト',
-  original_artist_reading: 'アーティストの読み',
-  start_seconds: '開始時間',
-  end_seconds: '終了時間',
-  song: '曲',
-};
-
-const TYPE_LABELS: Record<string, string> = {
-  song: '楽曲',
-  artist: 'アーティスト',
-  performance: '歌唱',
-  stream: '曲の追加',
-};
-
-// 秒数フィールドは M:SS / H:MM:SS でも見せる（6714 だけでは判断できないため）
-const TIME_FIELDS = new Set(['start_seconds', 'end_seconds']);
-
-function formatFieldValue(key: string, value: string): string {
-  if (!TIME_FIELDS.has(key)) return value || '（空）';
-  const n = Number(value);
-  if (!Number.isFinite(n)) return value || '（空）';
-  if (n === 0) return '最後まで';
-  const h = Math.floor(n / 3600);
-  const m = Math.floor((n % 3600) / 60);
-  const s = n % 60;
-  const clock =
-    h > 0
-      ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
-      : `${m}:${String(s).padStart(2, '0')}`;
-  return `${clock}（${n}s）`;
-}
-
-// この提案が実際に変更するフィールド。
-// 未登録曲の追加は既存レコードを触らないので、差分としては空になる（payload 側で表示する）。
-function changedKeysOf(s: Suggestion): string[] {
-  return Object.keys(s.after).filter((k) => (s.after[k] ?? '') !== (s.before[k] ?? ''));
-}
-
-// この提案が処理可能か（差分・payload・差し替え先のいずれかがある）
-function isActionable(s: Suggestion): boolean {
-  if (s.kind === 'perf.missing') return !!s.payload;
-  if (s.kind === 'perf.meta') return !!s.song_swap;
-  return changedKeysOf(s).length > 0;
-}
-
-function detailPathOf(targetType: string, targetID: string, targetKey: string): string {
-  if (targetType === 'song') return `/songs/${targetID}`;
-  if (targetType === 'artist') return `/artists/${targetID}`;
-  if (targetType === 'stream') return `/streams/${targetKey}`;
-  return '/songs'; // 歌唱は単独ページを持たない（対象名に配信が入っている）
-}
 
 export default function SuggestionsPage() {
   const queryClient = useQueryClient();
@@ -333,8 +286,7 @@ function SuggestionRow({
   busy: boolean;
   onAdopt: () => void;
 }) {
-  const { before, after, conflicts } = suggestion;
-  const changed = changedKeysOf(suggestion);
+  const { conflicts } = suggestion;
   const hasConflict = !!conflicts && Object.keys(conflicts).length > 0;
 
   return (
@@ -345,24 +297,7 @@ function SuggestionRow({
         </span>
 
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0 flex-1">
-          {suggestion.kind === 'perf.missing' ? (
-            <MissingSongSummary suggestion={suggestion} />
-          ) : suggestion.kind === 'perf.meta' ? (
-            <SongSwapSummary suggestion={suggestion} />
-          ) : (
-            changed.map((k) => (
-              <span key={k} className="text-sm flex items-center gap-1.5 flex-wrap">
-                <span className="text-gray-500 text-xs">{FIELD_LABELS[k] ?? k}</span>
-                <span className="px-1.5 py-0.5 rounded bg-red-50 text-red-700 line-through text-xs break-words">
-                  {formatFieldValue(k, before[k])}
-                </span>
-                <span className="text-gray-400 text-xs">→</span>
-                <span className="px-1.5 py-0.5 rounded bg-green-50 text-green-700 font-medium text-xs break-words">
-                  {formatFieldValue(k, after[k])}
-                </span>
-              </span>
-            ))
-          )}
+          <SuggestionChanges suggestion={suggestion} />
         </div>
 
         <button
@@ -399,50 +334,8 @@ function SuggestionRow({
   );
 }
 
-// MissingSongSummary 未登録曲の追加報告の中身（差分ではなく「追加したい内容」）。
-function MissingSongSummary({ suggestion }: { suggestion: Suggestion }) {
-  const p = suggestion.payload;
-  if (!p) return <span className="text-xs text-gray-400">内容が読み取れません</span>;
-  return (
-    <span className="text-sm flex items-center gap-1.5 flex-wrap">
-      <span className="px-1.5 py-0.5 rounded bg-green-50 text-green-700 font-medium text-xs break-words">
-        {p.song_name}
-        {p.original_artist ? ` / ${p.original_artist}` : ''}
-      </span>
-      <span className="text-xs text-gray-500 font-mono">
-        {formatFieldValue('start_seconds', String(p.start_seconds))}
-        {' – '}
-        {p.end_seconds === 0 ? '最後まで' : formatFieldValue('end_seconds', String(p.end_seconds))}
-      </span>
-    </span>
-  );
-}
-
-// SongSwapSummary 曲の差し替え提案（「この曲ではない」）。差分ではなく曲そのものが変わる。
-function SongSwapSummary({ suggestion }: { suggestion: Suggestion }) {
-  const p = suggestion.song_swap;
-  if (!p) return <span className="text-xs text-gray-400">内容が読み取れません</span>;
-  return (
-    <span className="text-sm flex items-center gap-1.5 flex-wrap">
-      <span className="text-gray-500 text-xs">曲</span>
-      <span className="px-1.5 py-0.5 rounded bg-red-50 text-red-700 line-through text-xs break-words">
-        {p.current_song_name || '（不明）'}
-      </span>
-      <span className="text-gray-400 text-xs">→</span>
-      <span className="px-1.5 py-0.5 rounded bg-green-50 text-green-700 font-medium text-xs break-words">
-        {p.song_name}
-        {p.original_artist ? ` / ${p.original_artist}` : ''}
-      </span>
-      {!p.song_id && <span className="text-[11px] text-amber-700">新規登録</span>}
-    </span>
-  );
-}
-
 // HistoryCard 承認済み・却下の履歴表示（時系列の一覧）。
 function HistoryCard({ suggestion }: { suggestion: Suggestion }) {
-  const { before, after } = suggestion;
-  const changed = changedKeysOf(suggestion);
-
   return (
     <div className="bg-white rounded-lg shadow-sm border p-4">
       <div className="flex flex-wrap items-start justify-between gap-2 mb-2">
@@ -471,22 +364,7 @@ function HistoryCard({ suggestion }: { suggestion: Suggestion }) {
       </div>
 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        {suggestion.kind === 'perf.missing' ? (
-          <MissingSongSummary suggestion={suggestion} />
-        ) : (
-          changed.map((k) => (
-            <span key={k} className="text-sm flex items-center gap-1.5 flex-wrap">
-              <span className="text-gray-500 text-xs">{FIELD_LABELS[k] ?? k}</span>
-              <span className="px-1.5 py-0.5 rounded bg-red-50 text-red-700 line-through text-xs">
-                {formatFieldValue(k, before[k])}
-              </span>
-              <span className="text-gray-400 text-xs">→</span>
-              <span className="px-1.5 py-0.5 rounded bg-green-50 text-green-700 font-medium text-xs">
-                {formatFieldValue(k, after[k])}
-              </span>
-            </span>
-          ))
-        )}
+        <SuggestionChanges suggestion={suggestion} />
       </div>
 
       {suggestion.review_note && (

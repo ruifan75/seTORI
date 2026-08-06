@@ -19,6 +19,7 @@ import ArtistsPage from './pages/ArtistsPage';
 import ArtistDetailPage from './pages/ArtistDetailPage';
 import SearchPage from './pages/SearchPage';
 import PlaylistsPage from './pages/PlaylistsPage';
+import MySuggestionsPage from './pages/MySuggestionsPage';
 import PlaylistDetailPage from './pages/PlaylistDetailPage';
 import SyncPage from './pages/admin/SyncPage';
 import SettingsPage from './pages/admin/SettingsPage';
@@ -67,6 +68,11 @@ function App() {
               <Route path="playlists/:id" element={<PlaylistDetailPage />} />
               {/* 限定公開の共有リンク（未ログインでも開ける） */}
               <Route path="shared/playlists/:slug" element={<PlaylistDetailPage shared />} />
+              {/* 自分が出した提案（要ログイン。権限は不要） */}
+              <Route
+                path="my/suggestions"
+                element={<RequirePermission><MySuggestionsPage /></RequirePermission>}
+              />
               <Route
                 path="admin/sync"
                 element={<RequirePermission permission={PERM.SYNC_RUN}><SyncPage /></RequirePermission>}

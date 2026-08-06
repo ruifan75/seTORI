@@ -213,6 +213,46 @@ func (r *SuggestionRepository) ListGroupedByTarget(status string, limit, offset 
 	return groups, total, nil
 }
 
+// ListByCreator は指定した利用者が出した提案をページングして返す（status が空なら全件）。
+// 「自分の提案」画面で、取り下げや結果の確認に使う。
+func (r *SuggestionRepository) ListByCreator(userID uuid.UUID, status string, limit, offset int) ([]models.EditSuggestion, int, error) {
+	where := "WHERE created_by = $1"
+	args := []any{userID}
+	if status != "" {
+		where += " AND status = $2"
+		args = append(args, status)
+	}
+
+	var total int
+	if err := r.db.QueryRow("SELECT COUNT(*) FROM edit_suggestions "+where, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count own suggestions: %w", err)
+	}
+
+	query := fmt.Sprintf(`
+		SELECT %s
+		FROM edit_suggestions
+		%s
+		ORDER BY created_at DESC
+		LIMIT $%d OFFSET $%d`, suggestionColumns, where, len(args)+1, len(args)+2)
+	args = append(args, limit, offset)
+
+	rows, err := r.db.Query(query, args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list own suggestions: %w", err)
+	}
+	defer rows.Close()
+
+	var out []models.EditSuggestion
+	for rows.Next() {
+		s, err := scanSuggestion(rows.Scan)
+		if err != nil {
+			return nil, 0, fmt.Errorf("scan suggestion: %w", err)
+		}
+		out = append(out, s)
+	}
+	return out, total, rows.Err()
+}
+
 // FindPendingTimingByTarget は自動適用の判定に使う。
 // 同一対象について、ログイン済みユーザーが出した未処理（pending）の提案を古い順で返す。
 func (r *SuggestionRepository) FindPendingTimingByTarget(targetType string, targetID uuid.UUID) ([]models.EditSuggestion, error) {

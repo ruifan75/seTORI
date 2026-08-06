@@ -212,6 +212,7 @@ func (r *Router) setupRoutes() {
 	// 修正提案：投稿は閲覧モードでも可、一覧/承認/却下は content:edit
 	r.mux.HandleFunc("POST /api/suggestions", r.handleCreateSuggestion)
 	r.mux.HandleFunc("GET /api/suggestions", r.handleListSuggestions)
+	r.mux.HandleFunc("GET /api/suggestions/mine", r.handleListMySuggestions)
 	r.mux.HandleFunc("GET /api/suggestions/count", r.handleCountSuggestions)
 	r.mux.HandleFunc("POST /api/suggestions/batch", r.handleBatchReviewSuggestions)
 	r.mux.HandleFunc("POST /api/suggestions/merge", r.handleMergeSuggestions)
@@ -848,6 +849,21 @@ func (r *Router) handleListSuggestions(w http.ResponseWriter, req *http.Request)
 	}
 
 	result, err := r.suggestionService.List(status, page, limit)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, result)
+}
+
+// handleListMySuggestions は自分が出した提案を返す（要ログイン・権限不要）。
+// ?status= で絞る。取り下げと結果の確認のための画面用。
+func (r *Router) handleListMySuggestions(w http.ResponseWriter, req *http.Request) {
+	status := req.URL.Query().Get("status")
+	page, _ := strconv.Atoi(req.URL.Query().Get("page"))
+	limit, _ := strconv.Atoi(req.URL.Query().Get("limit"))
+
+	result, err := r.suggestionService.ListMine(currentUser(req), status, page, limit)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -2545,6 +2561,10 @@ func requiredPermission(method, path string) (perm string, needsAuth bool) {
 	// 誰の提案を引けるかという行単位の判定は SuggestionService が行う。
 	// 一覧・件数・承認・却下・統合は content:edit（管理者レビュー）。
 	if path == "/api/suggestions" && method == http.MethodPost {
+		return "", true
+	}
+	// 自分の提案の一覧は本人のものしか返らないので、編集権限は要らない。
+	if path == "/api/suggestions/mine" {
 		return "", true
 	}
 	if strings.HasPrefix(path, "/api/suggestions") {

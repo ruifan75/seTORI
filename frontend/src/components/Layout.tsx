@@ -146,10 +146,15 @@ export default function Layout() {
                 <div className="flex items-center gap-3 pl-3 border-l border-gray-200">
                   {status === 'authenticated' && user ? (
                     <>
-                      <span className="text-sm text-gray-600" title={`ロール: ${user.role}`}>
+                      {/* 名前から「自分の提案」へ。提案の取り下げと結果の確認はここから */}
+                      <Link
+                        to="/my/suggestions"
+                        className="text-sm text-gray-600 hover:text-indigo-600"
+                        title={`ロール: ${user.role} · 自分の提案`}
+                      >
                         {user.display_name || user.username}
                         <span className="ml-1 text-xs text-gray-400">({user.role})</span>
-                      </span>
+                      </Link>
                       <button
                         onClick={handleLogout}
                         className="text-sm font-medium text-gray-500 hover:text-gray-800"
@@ -238,10 +243,10 @@ export default function Layout() {
               <div className="border-t mt-2 pt-3 pb-1 px-3">
                 {status === 'authenticated' && user ? (
                   <div className="flex items-center justify-between gap-3">
-                    <span className="text-sm text-gray-600">
+                    <Link to="/my/suggestions" className="text-sm text-gray-600 hover:text-indigo-600">
                       {user.display_name || user.username}
                       <span className="ml-1 text-xs text-gray-400">({user.role})</span>
-                    </span>
+                    </Link>
                     <button
                       onClick={handleLogout}
                       className="text-sm font-medium text-gray-500 hover:text-gray-800"

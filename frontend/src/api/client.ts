@@ -640,6 +640,18 @@ export const suggestionApi = {
     return data;
   },
 
+  // 自分が出した提案（要ログイン・権限不要）。取り下げと結果の確認用。
+  listMine: async (
+    status: SuggestionStatus | '' = '',
+    page = 1,
+    limit = 20
+  ): Promise<SuggestionListResponse> => {
+    const params = new URLSearchParams({ page: String(page), limit: String(limit) });
+    if (status) params.set('status', status);
+    const { data } = await api.get(`/api/suggestions/mine?${params}`);
+    return data;
+  },
+
   // 対象ごとにまとめた提案一覧（要 content:edit）。同じ歌唱への通報を1枚で捌くため。
   // ページングの単位はグループ（対象）。
   listGrouped: async (

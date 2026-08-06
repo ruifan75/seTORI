@@ -593,6 +593,34 @@ func (s *SuggestionService) List(status string, page, limit int) (*dto.Suggestio
 	}, nil
 }
 
+// ListMine は自分が出した提案を返す。取り下げと結果の確認のための画面用。
+// レビュー用の一覧と違い content:edit は要らない（自分の分しか見えない）。
+func (s *SuggestionService) ListMine(user *models.User, status string, page, limit int) (*dto.SuggestionListResponse, error) {
+	if user == nil {
+		return nil, ErrSuggestionNotFound
+	}
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+	items, total, err := s.repo.ListByCreator(user.ID, status, limit, (page-1)*limit)
+	if err != nil {
+		return nil, err
+	}
+	resp := make([]dto.SuggestionResponse, len(items))
+	for i, it := range items {
+		resp[i] = s.toSuggestionResponse(it)
+	}
+	return &dto.SuggestionListResponse{
+		Suggestions: resp,
+		Pagination: dto.PaginationResponse{
+			Page: page, Limit: limit, Total: total, TotalPages: (total + limit - 1) / limit,
+		},
+	}, nil
+}
+
 // ListGrouped は提案を対象ごとにまとめて返す。
 // 再生中のワンタップ通報は同じ歌唱に何件も集まるため、1件ずつではなく
 // 対象単位で見比べて処理できるようにする。
