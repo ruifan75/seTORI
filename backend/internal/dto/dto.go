@@ -547,6 +547,8 @@ type SuggestionResponse struct {
 	After       map[string]string `json:"after"`
 	// Payload は kind = perf.missing のときだけ入る（追加したい曲の内容）
 	Payload *MissingSongPayload `json:"payload,omitempty"`
+	// Overlaps は kind = perf.missing で、提案の時間帯に既存の歌唱があるときだけ入る
+	Overlaps []OverlapInfo `json:"overlaps,omitempty"`
 	// SongSwap は kind = perf.meta のときだけ入る（差し替え先の曲）
 	SongSwap *SongSwapPayload `json:"song_swap,omitempty"`
 	Note     string           `json:"note"`
@@ -576,6 +578,15 @@ type UpdatePerformanceRequest struct {
 type SuggestionListResponse struct {
 	Suggestions []SuggestionResponse `json:"suggestions"`
 	Pagination  PaginationResponse   `json:"pagination"`
+}
+
+// OverlapInfo 未登録曲の追加提案と時間が重なる既存の歌唱。
+// メドレーなど正当に重なる場合もあるので承認は止めないが、
+// 「もう登録されている曲を報告していないか」をレビュー時に気づけるようにする。
+type OverlapInfo struct {
+	SongName     string `json:"song_name"`
+	StartSeconds int    `json:"start_seconds"`
+	EndSeconds   int    `json:"end_seconds"`
 }
 
 // SuggestionGroup 同一対象に集まった提案。同じ歌唱への通報を1枚で捌くための単位。

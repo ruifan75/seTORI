@@ -15,7 +15,8 @@ import {
   formatFieldValue,
   isActionable,
 } from '../../components/suggestionDisplay';
-import { SuggestionChanges } from '../../components/SuggestionChanges';
+import { OverlapWarning, SuggestionChanges } from '../../components/SuggestionChanges';
+import AutoApplySettingsPanel from '../../components/AutoApplySettingsPanel';
 
 const STATUS_TABS: { value: SuggestionStatus; label: string }[] = [
   { value: 'pending', label: '未処理' },
@@ -124,6 +125,8 @@ export default function SuggestionsPage() {
           複数の利用者が同じ時間のズレを指摘した場合は、自動で反映されることがあります。
         </p>
       </div>
+
+      <AutoApplySettingsPanel />
 
       {/* Status tabs */}
       <div className="inline-flex rounded-lg border border-gray-300 overflow-hidden text-sm">
@@ -316,6 +319,8 @@ function SuggestionRow({
                 : 'これを採用'}
         </button>
       </div>
+
+      <OverlapWarning overlaps={suggestion.overlaps} />
 
       {hasConflict && (
         <p className="text-xs text-amber-800 mt-1">

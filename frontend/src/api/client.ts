@@ -50,6 +50,7 @@ import type {
   BatchReviewResponse,
   MergeSuggestionsRequest,
   MergeSuggestionsResponse,
+  AutoApplySettings,
   SuggestionStatus,
   AIProvider,
   AIProviderInput,
@@ -679,6 +680,18 @@ export const suggestionApi = {
   // 「どれか1つを丸ごと採用」では表せない決着（中央値・誰も出していない値）のための操作。
   merge: async (req: MergeSuggestionsRequest): Promise<MergeSuggestionsResponse> => {
     const { data } = await api.post('/api/suggestions/merge', req);
+    return data;
+  },
+
+  // timing 提案の自動適用条件（要 content:edit）
+  getSettings: async (): Promise<AutoApplySettings> => {
+    const { data } = await api.get('/api/suggestions/settings');
+    return data;
+  },
+
+  // 値はサーバー側で安全な範囲に丸められる（丸めた結果が返る）
+  updateSettings: async (settings: AutoApplySettings): Promise<AutoApplySettings> => {
+    const { data } = await api.put('/api/suggestions/settings', settings);
     return data;
   },
 

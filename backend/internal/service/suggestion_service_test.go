@@ -119,7 +119,7 @@ func TestVoteFor(t *testing.T) {
 	s := &SuggestionService{}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, ids, ok := s.voteFor(tt.pending, current, "end_seconds")
+			got, ids, ok := s.voteFor(tt.pending, current, "end_seconds", DefaultAutoApplySettings())
 			if ok != tt.wantOK {
 				t.Fatalf("ok = %v, want %v (value=%q)", ok, tt.wantOK, got)
 			}
@@ -160,6 +160,54 @@ func TestChangedFieldsOf(t *testing.T) {
 	}
 	if _, ok := changed["start_seconds"]; ok {
 		t.Error("変更していない start_seconds が含まれている（他の承認を巻き戻す原因になる）")
+	}
+}
+
+// しきい値は運用しながら調整できるよう設定値になっている。
+// 既定では自動適用されない組み合わせが、緩めた設定では通ることを確かめる。
+func TestVoteForRespectsSettings(t *testing.T) {
+	current := map[string]string{"start_seconds": "100", "end_seconds": "200"}
+	userA, userB := uuid.New(), uuid.New()
+	s := &SuggestionService{}
+
+	// 現在値から 20 秒離れた提案：既定（MaxDelta=5）では通らない
+	pending := []models.EditSuggestion{
+		mkTiming(userA, "200", "180"),
+		mkTiming(userB, "200", "181"),
+	}
+	if _, _, ok := s.voteFor(pending, current, "end_seconds", DefaultAutoApplySettings()); ok {
+		t.Error("既定のしきい値では自動適用されないはず")
+	}
+	loose := AutoApplySettings{Enabled: true, MinVotes: 2, MaxSpreadSeconds: 3, MaxDeltaSeconds: 30}
+	got, _, ok := s.voteFor(pending, current, "end_seconds", loose)
+	if !ok || got != "180" {
+		t.Errorf("緩めた設定では通るはず: ok=%v value=%q", ok, got)
+	}
+
+	// MinVotes を上げれば2人では足りなくなる
+	strict := AutoApplySettings{Enabled: true, MinVotes: 3, MaxSpreadSeconds: 3, MaxDeltaSeconds: 30}
+	if _, _, ok := s.voteFor(pending, current, "end_seconds", strict); ok {
+		t.Error("MinVotes=3 では2人の一致で自動適用されないはず")
+	}
+}
+
+func TestClampAutoApply(t *testing.T) {
+	// 1票での自動適用は「提案」の意味が無くなるので下限 2 に丸める
+	got := clampAutoApply(AutoApplySettings{Enabled: true, MinVotes: 1, MaxSpreadSeconds: -5, MaxDeltaSeconds: 9999})
+	if got.MinVotes != 2 {
+		t.Errorf("MinVotes = %d, want 2", got.MinVotes)
+	}
+	if got.MaxSpreadSeconds != 0 {
+		t.Errorf("MaxSpreadSeconds = %d, want 0", got.MaxSpreadSeconds)
+	}
+	if got.MaxDeltaSeconds != 300 {
+		t.Errorf("MaxDeltaSeconds = %d, want 300", got.MaxDeltaSeconds)
+	}
+
+	// 範囲内の値はそのまま
+	in := AutoApplySettings{Enabled: false, MinVotes: 3, MaxSpreadSeconds: 4, MaxDeltaSeconds: 10}
+	if clampAutoApply(in) != in {
+		t.Errorf("範囲内の値が変わっている: %+v", clampAutoApply(in))
 	}
 }
 

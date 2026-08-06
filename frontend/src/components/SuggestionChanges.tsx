@@ -44,6 +44,26 @@ function MissingSongSummary({ suggestion }: { suggestion: Suggestion }) {
   );
 }
 
+// OverlapWarning 未登録曲の追加提案が、既に登録済みの歌唱と時間的に重なっているときの注意書き。
+// メドレーや掛け合いで正当に重なることもあるので承認は止めない（判断はレビュー担当に委ねる）。
+export function OverlapWarning({ overlaps }: { overlaps: Suggestion['overlaps'] }) {
+  if (!overlaps || overlaps.length === 0) return null;
+  return (
+    <p className="text-xs text-amber-800 mt-1">
+      ⚠ この時間帯には既に{' '}
+      {overlaps
+        .map(
+          (o) =>
+            `${o.song_name}（${formatFieldValue('start_seconds', String(o.start_seconds))}–${
+              o.end_seconds === 0 ? '最後' : formatFieldValue('end_seconds', String(o.end_seconds))
+            }）`
+        )
+        .join('、')}{' '}
+      が登録されています。同じ曲の重複報告でないか確認してください
+    </p>
+  );
+}
+
 // SongSwapSummary 曲の差し替え（「この曲ではない」）。曲そのものが変わる。
 function SongSwapSummary({ suggestion }: { suggestion: Suggestion }) {
   const p = suggestion.song_swap;

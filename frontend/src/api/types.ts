@@ -521,6 +521,21 @@ export interface FieldConflict {
   current: string;
 }
 
+// 未登録曲の追加提案と時間が重なる既存の歌唱（メドレー等で正当に重なることもある）
+export interface OverlapInfo {
+  song_name: string;
+  start_seconds: number;
+  end_seconds: number;
+}
+
+// timing 提案の自動適用条件（管理画面から調整できる）
+export interface AutoApplySettings {
+  enabled: boolean;
+  min_votes: number;
+  max_spread_seconds: number;
+  max_delta_seconds: number;
+}
+
 export interface Suggestion {
   id: string;
   target_type: SuggestionTargetType;
@@ -531,6 +546,8 @@ export interface Suggestion {
   before: Record<string, string>;
   after: Record<string, string>;
   payload?: MissingSongPayload; // kind = perf.missing のときだけ
+  // 提案の時間帯に既存の歌唱があるとき（perf.missing のみ）。承認は止まらないが確認が要る
+  overlaps?: OverlapInfo[];
   song_swap?: SongSwapPayload; // kind = perf.meta のときだけ
   note: string;
   status: SuggestionStatus;

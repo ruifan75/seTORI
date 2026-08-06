@@ -87,20 +87,23 @@ const (
 
 // SuggestionService は閲覧モードからの修正提案の投稿・レビュー・反映を担う。
 type SuggestionService struct {
-	repo    *repository.SuggestionRepository
-	editors map[string]TargetEditor
-	missing MissingSongCreator
-	swapper SongSwapper
+	repo         *repository.SuggestionRepository
+	settingsRepo *repository.AppSettingsRepository
+	editors      map[string]TargetEditor
+	missing      MissingSongCreator
+	swapper      SongSwapper
 }
 
 func NewSuggestionService(
 	repo *repository.SuggestionRepository,
+	settingsRepo *repository.AppSettingsRepository,
 	songService *SongService,
 	artistService *ArtistService,
 	performanceService *PerformanceService,
 ) *SuggestionService {
 	return &SuggestionService{
-		repo: repo,
+		repo:         repo,
+		settingsRepo: settingsRepo,
 		editors: map[string]TargetEditor{
 			"song":        songService,
 			"artist":      artistService,
@@ -197,6 +200,8 @@ func (s *SuggestionService) Create(req *dto.CreateSuggestionRequest, actor Sugge
 type MissingSongCreator interface {
 	CreateFromMissingSong(p dto.MissingSongPayload) error
 	StreamLabel(streamID string) (string, error)
+	// OverlappingPerformances は提案の時間帯と重なる既存の歌唱を返す（レビュー時の注意喚起用）。
+	OverlappingPerformances(streamID string, start, end int) ([]dto.OverlapInfo, error)
 }
 
 // createMissingSong は未登録曲の報告を登録する。
@@ -420,17 +425,71 @@ func (s *SuggestionService) approveSongSwap(sug *models.EditSuggestion, reviewer
 // 条件（すべて満たすときだけ）：
 //   - 対象が歌唱記録で、フィールドが開始/終了秒
 //   - ログイン済みユーザーからの提案であること（匿名は数に入れない）
-//   - 異なる利用者が autoApplyMinVotes 人以上、同じフィールドについて提案している
-//   - その提案値のばらつきが autoApplyMaxSpreadSeconds 秒以内（意見が割れていない）
-//   - 現在値からの差が autoApplyMaxDeltaSeconds 秒以内（大きな変更は人が見る）
+//   - 異なる利用者が MinVotes 人以上、同じフィールドについて提案している
+//   - その提案値のばらつきが MaxSpreadSeconds 秒以内（意見が割れていない）
+//   - 現在値からの差が MaxDeltaSeconds 秒以内（大きな変更は人が見る）
 //   - 提案時点のスナップショットが現在値と一致（対象が別途編集されていない）
 //
 // 採用値は中央値。極端な値1つに引きずられないようにするため。
-const (
-	autoApplyMinVotes         = 2
-	autoApplyMaxSpreadSeconds = 3
-	autoApplyMaxDeltaSeconds  = 5
-)
+//
+// しきい値は運用しながら調整するものなので app_settings に置く（管理画面から変更可能）。
+
+const settingsKeyAutoApply = "suggestion_auto_apply"
+
+// AutoApplySettings は timing 提案の自動適用条件。
+type AutoApplySettings struct {
+	Enabled          bool `json:"enabled"`
+	MinVotes         int  `json:"min_votes"`          // 何人以上の一致で反映するか
+	MaxSpreadSeconds int  `json:"max_spread_seconds"` // 提案値のばらつきの許容
+	MaxDeltaSeconds  int  `json:"max_delta_seconds"`  // 現在値からの差の許容
+}
+
+// DefaultAutoApplySettings は未設定時の既定値。
+func DefaultAutoApplySettings() AutoApplySettings {
+	return AutoApplySettings{Enabled: true, MinVotes: 2, MaxSpreadSeconds: 3, MaxDeltaSeconds: 5}
+}
+
+// GetAutoApplySettings は保存済みの設定（無ければ既定値）を返す。
+func (s *SuggestionService) GetAutoApplySettings() AutoApplySettings {
+	settings := DefaultAutoApplySettings()
+	if s.settingsRepo != nil {
+		if _, err := s.settingsRepo.Get(settingsKeyAutoApply, &settings); err != nil {
+			logger.Warnf("auto apply settings load: %v", err)
+		}
+	}
+	return settings
+}
+
+// clampAutoApply は極端な値で事故らないよう設定を安全な範囲へ丸める。
+func clampAutoApply(in AutoApplySettings) AutoApplySettings {
+	clamp := func(v, min, max int) int {
+		if v < min {
+			return min
+		}
+		if v > max {
+			return max
+		}
+		return v
+	}
+	// MinVotes の下限は 2：1票で反映するなら「提案」ではなく直接編集と変わらない
+	in.MinVotes = clamp(in.MinVotes, 2, 20)
+	in.MaxSpreadSeconds = clamp(in.MaxSpreadSeconds, 0, 60)
+	in.MaxDeltaSeconds = clamp(in.MaxDeltaSeconds, 1, 300)
+	return in
+}
+
+// UpdateAutoApplySettings は設定を保存する。
+func (s *SuggestionService) UpdateAutoApplySettings(in AutoApplySettings) (AutoApplySettings, error) {
+	if s.settingsRepo == nil {
+		return AutoApplySettings{}, ErrInvalidTarget
+	}
+	in = clampAutoApply(in)
+	if err := s.settingsRepo.Set(settingsKeyAutoApply, in); err != nil {
+		return AutoApplySettings{}, err
+	}
+	logger.Infof("auto apply settings updated: %+v", in)
+	return in, nil
+}
 
 // autoApplyFields は自動適用の対象フィールド（歌唱記録の時間軸のみ）。
 var autoApplyFields = []string{"start_seconds", "end_seconds"}
@@ -438,6 +497,10 @@ var autoApplyFields = []string{"start_seconds", "end_seconds"}
 // tryAutoApply は対象に溜まった pending 提案を見て、条件を満たすフィールドを自動反映する。
 func (s *SuggestionService) tryAutoApply(targetType string, targetID uuid.UUID) error {
 	if targetType != "performance" {
+		return nil
+	}
+	cfg := s.GetAutoApplySettings()
+	if !cfg.Enabled {
 		return nil
 	}
 	editor, ok := s.editors[targetType]
@@ -458,7 +521,7 @@ func (s *SuggestionService) tryAutoApply(targetType string, targetID uuid.UUID) 
 	var usedIDs []uuid.UUID
 
 	for _, field := range autoApplyFields {
-		value, ids, ok := s.voteFor(pending, current, field)
+		value, ids, ok := s.voteFor(pending, current, field, cfg)
 		if !ok {
 			continue
 		}
@@ -484,7 +547,7 @@ func (s *SuggestionService) tryAutoApply(targetType string, targetID uuid.UUID) 
 }
 
 // voteFor は1フィールドについて自動適用の可否を判定し、採用値と根拠になった提案 ID を返す。
-func (s *SuggestionService) voteFor(pending []models.EditSuggestion, current map[string]string, field string) (string, []uuid.UUID, bool) {
+func (s *SuggestionService) voteFor(pending []models.EditSuggestion, current map[string]string, field string, cfg AutoApplySettings) (string, []uuid.UUID, bool) {
 	curValue, ok := current[field]
 	if !ok {
 		return "", nil, false
@@ -521,13 +584,13 @@ func (s *SuggestionService) voteFor(pending []models.EditSuggestion, current map
 		if err != nil {
 			continue
 		}
-		if abs(n-curSeconds) > autoApplyMaxDeltaSeconds {
+		if abs(n-curSeconds) > cfg.MaxDeltaSeconds {
 			continue // 大きな変更は自動で入れない
 		}
 		byUser[*sug.CreatedBy] = vote{seconds: n, id: sug.ID}
 	}
 
-	if len(byUser) < autoApplyMinVotes {
+	if len(byUser) < cfg.MinVotes {
 		return "", nil, false
 	}
 
@@ -538,7 +601,7 @@ func (s *SuggestionService) voteFor(pending []models.EditSuggestion, current map
 		ids = append(ids, v.id)
 	}
 	sort.Ints(values)
-	if values[len(values)-1]-values[0] > autoApplyMaxSpreadSeconds {
+	if values[len(values)-1]-values[0] > cfg.MaxSpreadSeconds {
 		return "", nil, false // 意見が割れている
 	}
 	return strconv.Itoa(median(values)), ids, true
@@ -1036,8 +1099,15 @@ func (s *SuggestionService) toSuggestionResponse(m models.EditSuggestion) dto.Su
 		var p dto.MissingSongPayload
 		if json.Unmarshal(m.Payload, &p) == nil {
 			resp.Payload = &p
+			// 既に登録されている曲を報告していないか、レビュー時に気づけるようにする。
+			// 重なっていても承認は止めない（メドレーなど正当に重なる歌唱があるため）。
+			if (m.Status == "pending" || m.Status == "conflict") && s.missing != nil {
+				if ov, err := s.missing.OverlappingPerformances(p.StreamID, p.StartSeconds, p.EndSeconds); err == nil && len(ov) > 0 {
+					resp.Overlaps = ov
+				}
+			}
 		}
-		return resp // 未登録曲の追加は既存レコードを触らないので衝突判定は不要
+		return resp // 未登録曲の追加は既存フィールドを触らないので衝突判定は不要
 	}
 
 	if m.Kind == KindSongSwap {

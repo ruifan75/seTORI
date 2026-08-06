@@ -284,6 +284,25 @@ func (s *PerformanceService) StreamLabel(streamID string) (string, error) {
 	return stream.Title, nil
 }
 
+// OverlappingPerformances は提案の時間帯と重なる既存の歌唱を返す。
+// レビュー時に「もう登録されている曲を報告していないか」へ気づけるようにするための情報で、
+// 重なっていても承認は止めない（メドレーや掛け合いなど、正当に重なる歌唱があるため）。
+func (s *PerformanceService) OverlappingPerformances(streamID string, start, end int) ([]dto.OverlapInfo, error) {
+	perfs, err := s.perfRepo.FindOverlapping(streamID, start, end, uuid.Nil)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]dto.OverlapInfo, 0, len(perfs))
+	for _, p := range perfs {
+		out = append(out, dto.OverlapInfo{
+			SongName:     p.SongName,
+			StartSeconds: p.StartSeconds,
+			EndSeconds:   p.EndSeconds,
+		})
+	}
+	return out, nil
+}
+
 // CreateFromMissingSong は「この配信のこの時点に曲がある」という報告から歌唱記録を作る。
 // 曲が未登録なら曲も作られる（セットリスト保存と同じ findOrCreateSong を通す）。
 func (s *PerformanceService) CreateFromMissingSong(p dto.MissingSongPayload) error {

@@ -92,8 +92,8 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	authService := service.NewAuthService(authRepo)
 	readingService := service.NewReadingService(artistRepo, songRepo)
 	suggestionRepo := repository.NewSuggestionRepository(db)
-	suggestionService := service.NewSuggestionService(suggestionRepo, songService, artistService, performanceService)
 	appSettingsRepo := repository.NewAppSettingsRepository(db)
+	suggestionService := service.NewSuggestionService(suggestionRepo, appSettingsRepo, songService, artistService, performanceService)
 	driveClient := gdrive.NewClient(cfg.GoogleOAuthClientID, cfg.GoogleOAuthSecret)
 	backupService := service.NewBackupService(db, appSettingsRepo, driveClient, cfg.DatabaseURL, cfg.BackupDir, cfg.BackupDockerContainer)
 	playlistRepo := repository.NewPlaylistRepository(db, perfRepo)
@@ -216,6 +216,8 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("GET /api/suggestions/count", r.handleCountSuggestions)
 	r.mux.HandleFunc("POST /api/suggestions/batch", r.handleBatchReviewSuggestions)
 	r.mux.HandleFunc("POST /api/suggestions/merge", r.handleMergeSuggestions)
+	r.mux.HandleFunc("GET /api/suggestions/settings", r.handleGetSuggestionSettings)
+	r.mux.HandleFunc("PUT /api/suggestions/settings", r.handleUpdateSuggestionSettings)
 	r.mux.HandleFunc("POST /api/suggestions/{id}/approve", r.handleApproveSuggestion)
 	r.mux.HandleFunc("POST /api/suggestions/{id}/reject", r.handleRejectSuggestion)
 	r.mux.HandleFunc("DELETE /api/suggestions/{id}", r.handleWithdrawSuggestion)
@@ -904,6 +906,27 @@ func (r *Router) handleBatchReviewSuggestions(w http.ResponseWriter, req *http.R
 
 	result := r.suggestionService.BatchReview(ids, body.Action, currentUser(req), body.Force, body.Note)
 	respondJSON(w, http.StatusOK, result)
+}
+
+// handleGetSuggestionSettings は timing 提案の自動適用条件を返す（content:edit）。
+func (r *Router) handleGetSuggestionSettings(w http.ResponseWriter, req *http.Request) {
+	respondJSON(w, http.StatusOK, r.suggestionService.GetAutoApplySettings())
+}
+
+// handleUpdateSuggestionSettings は自動適用条件を更新する（content:edit）。
+// 値はサービス層で安全な範囲に丸められる。
+func (r *Router) handleUpdateSuggestionSettings(w http.ResponseWriter, req *http.Request) {
+	var body service.AutoApplySettings
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		respondError(w, http.StatusBadRequest, "無効なリクエスト形式")
+		return
+	}
+	saved, err := r.suggestionService.UpdateAutoApplySettings(body)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, saved)
 }
 
 // handleWithdrawSuggestion は自分が出した未処理の提案を取り下げる（要ログイン）。
