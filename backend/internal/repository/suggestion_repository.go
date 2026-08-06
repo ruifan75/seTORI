@@ -3,9 +3,11 @@ package repository
 import (
 	"database/sql"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/ruifan75/setori/internal/models"
+	"github.com/lib/pq"
 )
 
 // SuggestionRepository は edit_suggestions（閲覧モードからの修正提案）を扱う。
@@ -18,14 +20,14 @@ func NewSuggestionRepository(db *sql.DB) *SuggestionRepository {
 }
 
 // suggestionColumns は SELECT 句とスキャン順を1か所に揃えるための共通定義。
-const suggestionColumns = `id, target_type, target_id, target_label, kind,
+const suggestionColumns = `id, target_type, target_id, target_key, target_label, kind,
 	before_data, after_data, payload, note, status,
 	created_by, created_by_name, client_hint, reviewed_by, review_note,
 	created_at, reviewed_at`
 
 func scanSuggestion(scan func(...any) error) (models.EditSuggestion, error) {
 	var s models.EditSuggestion
-	err := scan(&s.ID, &s.TargetType, &s.TargetID, &s.TargetLabel, &s.Kind,
+	err := scan(&s.ID, &s.TargetType, &s.TargetID, &s.TargetKey, &s.TargetLabel, &s.Kind,
 		&s.BeforeData, &s.AfterData, &s.Payload, &s.Note, &s.Status,
 		&s.CreatedBy, &s.CreatedByName, &s.ClientHint, &s.ReviewedBy, &s.ReviewNote,
 		&s.CreatedAt, &s.ReviewedAt)
@@ -39,11 +41,11 @@ func (r *SuggestionRepository) Create(s *models.EditSuggestion) (*models.EditSug
 	}
 	err := r.db.QueryRow(`
 		INSERT INTO edit_suggestions
-			(target_type, target_id, target_label, kind, before_data, after_data, payload, note,
+			(target_type, target_id, target_key, target_label, kind, before_data, after_data, payload, note,
 			 created_by, created_by_name, client_hint)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 		RETURNING id, created_at, status`,
-		s.TargetType, s.TargetID, s.TargetLabel, s.Kind, s.BeforeData, s.AfterData, s.Payload, s.Note,
+		s.TargetType, s.TargetID, s.TargetKey, s.TargetLabel, s.Kind, s.BeforeData, s.AfterData, s.Payload, s.Note,
 		s.CreatedBy, s.CreatedByName, s.ClientHint).
 		Scan(&s.ID, &s.CreatedAt, &s.Status)
 	if err != nil {
@@ -91,6 +93,190 @@ func (r *SuggestionRepository) List(status string, limit, offset int) ([]models.
 	return out, total, rows.Err()
 }
 
+// TargetGroup は同一対象に集まった提案の1グループ。
+// 対象の同一性は (TargetType, TargetID, TargetKey) で見る（配信は UUID を持たないため）。
+type TargetGroup struct {
+	TargetType  string
+	TargetID    uuid.UUID
+	TargetKey   string
+	TargetLabel string
+	Suggestions []models.EditSuggestion
+}
+
+// ListGroupedByTarget は status で絞った提案を「対象ごと」にまとめて返す。
+// ページングの単位はグループ。同じ歌唱に届いた通報を1枚のカードで捌けるようにするため、
+// グループが分断されないようページングは対象単位で行う。
+//
+// 返るグループは「最も新しい提案が新しい順」、グループ内は投稿の古い順。
+func (r *SuggestionRepository) ListGroupedByTarget(status string, limit, offset int) ([]TargetGroup, int, error) {
+	where := ""
+	args := []any{}
+	if status != "" {
+		where = "WHERE status = $1"
+		args = append(args, status)
+	}
+
+	// グループ総数（＝対象の種類数）
+	var total int
+	countQuery := fmt.Sprintf(
+		`SELECT COUNT(*) FROM (SELECT 1 FROM edit_suggestions %s GROUP BY target_type, target_id, target_key) g`, where)
+	if err := r.db.QueryRow(countQuery, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count suggestion groups: %w", err)
+	}
+
+	// 先に対象を決めてから、その対象の提案だけを引く（グループがページ境界で割れないように）
+	pageQuery := fmt.Sprintf(`
+		SELECT target_type, target_id, target_key, MAX(created_at) AS latest
+		FROM edit_suggestions
+		%s
+		GROUP BY target_type, target_id, target_key
+		ORDER BY latest DESC
+		LIMIT $%d OFFSET $%d`, where, len(args)+1, len(args)+2)
+
+	pageArgs := append(append([]any{}, args...), limit, offset)
+	rows, err := r.db.Query(pageQuery, pageArgs...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list suggestion groups: %w", err)
+	}
+	type key struct {
+		targetType string
+		targetID   uuid.UUID
+		targetKey  string
+	}
+	var order []key
+	for rows.Next() {
+		var k key
+		var latest time.Time
+		if err := rows.Scan(&k.targetType, &k.targetID, &k.targetKey, &latest); err != nil {
+			rows.Close()
+			return nil, 0, fmt.Errorf("scan suggestion group: %w", err)
+		}
+		order = append(order, k)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	if len(order) == 0 {
+		return nil, total, nil
+	}
+
+	// UUID と文字列キーの両方で絞る。両方に合致しても別グループの行が混ざりうるが、
+	// 下の byKey で3つ組の完全一致だけを拾うので問題ない。
+	ids := make([]string, 0, len(order))
+	keys := make([]string, 0, len(order))
+	for _, k := range order {
+		ids = append(ids, k.targetID.String())
+		keys = append(keys, k.targetKey)
+	}
+
+	detailArgs := []any{pq.Array(ids), pq.Array(keys)}
+	detailWhere := "WHERE target_id = ANY($1::uuid[]) AND target_key = ANY($2::varchar[])"
+	if status != "" {
+		detailWhere += " AND status = $3"
+		detailArgs = append(detailArgs, status)
+	}
+	detailRows, err := r.db.Query(
+		`SELECT `+suggestionColumns+` FROM edit_suggestions `+detailWhere+` ORDER BY created_at ASC`, detailArgs...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list grouped suggestions: %w", err)
+	}
+	defer detailRows.Close()
+
+	byKey := make(map[key][]models.EditSuggestion, len(order))
+	for detailRows.Next() {
+		s, err := scanSuggestion(detailRows.Scan)
+		if err != nil {
+			return nil, 0, fmt.Errorf("scan suggestion: %w", err)
+		}
+		k := key{s.TargetType, s.TargetID, s.TargetKey}
+		byKey[k] = append(byKey[k], s)
+	}
+	if err := detailRows.Err(); err != nil {
+		return nil, 0, err
+	}
+
+	groups := make([]TargetGroup, 0, len(order))
+	for _, k := range order {
+		items := byKey[k]
+		if len(items) == 0 {
+			continue // 取得の合間に処理された（レビュー済みになった）
+		}
+		groups = append(groups, TargetGroup{
+			TargetType:  k.targetType,
+			TargetID:    k.targetID,
+			TargetKey:   k.targetKey,
+			TargetLabel: items[len(items)-1].TargetLabel, // 最新の提案時点の表示名
+			Suggestions: items,
+		})
+	}
+	return groups, total, nil
+}
+
+// ListByCreator は指定した利用者が出した提案をページングして返す（status が空なら全件）。
+// 「自分の提案」画面で、取り下げや結果の確認に使う。
+func (r *SuggestionRepository) ListByCreator(userID uuid.UUID, status string, limit, offset int) ([]models.EditSuggestion, int, error) {
+	where := "WHERE created_by = $1"
+	args := []any{userID}
+	if status != "" {
+		where += " AND status = $2"
+		args = append(args, status)
+	}
+
+	var total int
+	if err := r.db.QueryRow("SELECT COUNT(*) FROM edit_suggestions "+where, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count own suggestions: %w", err)
+	}
+
+	query := fmt.Sprintf(`
+		SELECT %s
+		FROM edit_suggestions
+		%s
+		ORDER BY created_at DESC
+		LIMIT $%d OFFSET $%d`, suggestionColumns, where, len(args)+1, len(args)+2)
+	args = append(args, limit, offset)
+
+	rows, err := r.db.Query(query, args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list own suggestions: %w", err)
+	}
+	defer rows.Close()
+
+	var out []models.EditSuggestion
+	for rows.Next() {
+		s, err := scanSuggestion(rows.Scan)
+		if err != nil {
+			return nil, 0, fmt.Errorf("scan suggestion: %w", err)
+		}
+		out = append(out, s)
+	}
+	return out, total, rows.Err()
+}
+
+// FindPendingTimingByTarget は自動適用の判定に使う。
+// 同一対象について、ログイン済みユーザーが出した未処理（pending）の提案を古い順で返す。
+func (r *SuggestionRepository) FindPendingTimingByTarget(targetType string, targetID uuid.UUID) ([]models.EditSuggestion, error) {
+	rows, err := r.db.Query(`SELECT `+suggestionColumns+`
+		FROM edit_suggestions
+		WHERE target_type = $1 AND target_id = $2 AND status = 'pending'
+		  AND kind = 'field' AND created_by IS NOT NULL
+		ORDER BY created_at ASC`, targetType, targetID)
+	if err != nil {
+		return nil, fmt.Errorf("find pending timing suggestions: %w", err)
+	}
+	defer rows.Close()
+
+	var out []models.EditSuggestion
+	for rows.Next() {
+		s, err := scanSuggestion(rows.Scan)
+		if err != nil {
+			return nil, fmt.Errorf("scan suggestion: %w", err)
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
 // FindByID は提案を1件取得する。見つからなければ nil。
 func (r *SuggestionRepository) FindByID(id uuid.UUID) (*models.EditSuggestion, error) {
 	row := r.db.QueryRow(`SELECT `+suggestionColumns+` FROM edit_suggestions WHERE id = $1`, id)
@@ -102,6 +288,16 @@ func (r *SuggestionRepository) FindByID(id uuid.UUID) (*models.EditSuggestion, e
 		return nil, fmt.Errorf("find suggestion: %w", err)
 	}
 	return &s, nil
+}
+
+// Delete は提案を1件削除する（取り下げ）。
+// 却下と違い履歴を残さない：本人が「やっぱり無し」と引っ込めただけのものを
+// レビュー履歴に積むと、実際の判断の記録が埋もれるため。
+func (r *SuggestionRepository) Delete(id uuid.UUID) error {
+	if _, err := r.db.Exec(`DELETE FROM edit_suggestions WHERE id = $1`, id); err != nil {
+		return fmt.Errorf("delete suggestion: %w", err)
+	}
+	return nil
 }
 
 // UpdateStatus は提案のステータスを更新し、レビュー者・理由・時刻を記録する。

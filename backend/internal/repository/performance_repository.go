@@ -295,6 +295,25 @@ func (r *PerformanceRepository) FindByID(id uuid.UUID) (*PerformanceWithDetails,
 	return &perfs[0], nil
 }
 
+// FindOverlapping は配信内で [start, end) と時間が重なる歌唱を返す。
+// end = 0 は「動画の最後まで」なので終端なしとして扱う。
+// 未登録曲の追加提案をレビューするとき、既に登録済みの曲を指していないか気づくために使う。
+func (r *PerformanceRepository) FindOverlapping(streamID string, start, end int, excludeID uuid.UUID) ([]PerformanceWithDetails, error) {
+	// 区間の重なり判定：既存の開始 < 提案の終了 && 提案の開始 < 既存の終了
+	// 0（終端なし）は非常に大きい値として扱う
+	const openEnd = 1 << 30
+	proposedEnd := end
+	if proposedEnd == 0 {
+		proposedEnd = openEnd
+	}
+	return r.queryPerformanceDetails(perfDetailSelect+`
+		WHERE p.stream_id = $1
+		  AND p.id <> $4
+		  AND p.start_seconds < $3
+		  AND $2 < (CASE WHEN p.end_seconds = 0 THEN `+fmt.Sprint(openEnd)+` ELSE p.end_seconds END)
+		ORDER BY p.start_seconds`, streamID, start, proposedEnd, excludeID)
+}
+
 // Update 既存の演出を ID を保ったまま更新する。
 // ID を維持することが重要：プレイリスト項目が performance_id を参照しているため、
 // 編集のたびに ID が変わると利用者のプレイリストから曲が消えてしまう。

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import TimestampTweaker from './TimestampTweaker';
+import LoginToSuggest from './LoginToSuggest';
 import {
   usePerformanceTiming,
   formatSeconds,
@@ -23,7 +24,7 @@ export default function PerformanceTimingDialog({
   currentTime?: number | null;
   onClose: () => void;
 }) {
-  const { canEdit, submit } = usePerformanceTiming();
+  const { canEdit, canSubmit, submit } = usePerformanceTiming();
   const [start, setStart] = useState(target.start);
   const [end, setEnd] = useState(target.end);
   const [startText, setStartText] = useState(formatSeconds(target.start));
@@ -81,6 +82,12 @@ export default function PerformanceTimingDialog({
           </p>
         </div>
 
+        {!canSubmit && (
+          <div className="rounded-lg bg-gray-50 border p-3">
+            <LoginToSuggest />
+          </div>
+        )}
+
         <TimeRow
           label="開始"
           value={start}
@@ -129,7 +136,7 @@ export default function PerformanceTimingDialog({
           <button
             type="button"
             onClick={handleSubmit}
-            disabled={busy || !changed}
+            disabled={busy || !changed || !canSubmit}
             className="px-4 py-2 text-sm bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50"
           >
             {busy ? '送信中...' : canEdit ? '保存' : '提案を送信'}

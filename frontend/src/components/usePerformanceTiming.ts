@@ -48,10 +48,11 @@ export function parseSeconds(input: string): number | null {
 }
 
 export function usePerformanceTiming() {
-  const canEdit = hasPermission(
-    useAuthStore((s) => s.user),
-    PERM.CONTENT_EDIT
-  );
+  const user = useAuthStore((s) => s.user);
+  const canEdit = hasPermission(user, PERM.CONTENT_EDIT);
+  // 提案の投稿はログイン必須（誰の指摘かを追えないと信頼度も濫用対策も成り立たないため）。
+  // 未ログインでも導線自体は見せ、押した時点でログインへ促す。
+  const canSubmit = user !== null;
   const { showToast } = useToast();
   const queryClient = useQueryClient();
   const updateTrackTiming = usePlayerStore((s) => s.updateTrackTiming);
@@ -85,6 +86,11 @@ export function usePerformanceTiming() {
     change: TimingChange,
     note = ''
   ): Promise<boolean> => {
+    if (!canSubmit) {
+      // 401 を踏ませてセッション失効扱いにしないよう、送る前に止める
+      showToast('修正の提案にはログインが必要です', 'info');
+      return false;
+    }
     const problem = validate(target, change);
     if (problem) {
       showToast(problem, 'error');
@@ -123,13 +129,18 @@ export function usePerformanceTiming() {
         const fields: Record<string, string> = {};
         if (change.start !== undefined) fields.start_seconds = String(change.start);
         if (change.end !== undefined) fields.end_seconds = String(change.end);
-        await suggestionApi.create({
+        const created = await suggestionApi.create({
           target_type: 'performance',
           target_id: target.performanceId,
           fields,
           note,
         });
-        showToast('修正を提案しました。管理者の確認をお待ちください', 'success');
+        // 提案はまだ反映されていないので「元に戻す」ではなく取り下げ。
+        // 誤タップに気づいたその場で引っ込められるようにする。
+        showToast('修正を提案しました。管理者の確認をお待ちください', 'success', {
+          label: '取り消す',
+          onClick: () => withdrawSuggestion(created.id, showToast),
+        });
       }
       return true;
     } catch (e) {
@@ -138,7 +149,21 @@ export function usePerformanceTiming() {
     }
   };
 
-  return { canEdit, submit };
+  return { canEdit, canSubmit, submit };
+}
+
+// withdrawSuggestion は投稿直後の提案を取り下げる。
+// 既に管理者が処理していれば 409 が返るので、その旨をそのまま伝える。
+export async function withdrawSuggestion(
+  id: string,
+  showToast: (message: string, type?: 'success' | 'error' | 'info') => void
+): Promise<void> {
+  try {
+    await suggestionApi.withdraw(id);
+    showToast('提案を取り消しました', 'info');
+  } catch (e) {
+    showToast(`取り消せませんでした: ${(e as Error).message}`, 'error');
+  }
 }
 
 function describeChange(target: TimingTarget, change: TimingChange): string {

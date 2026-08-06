@@ -2,10 +2,21 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { suggestionApi } from '../../api/client';
-import type { Suggestion, SuggestionStatus } from '../../api/types';
+import type { Suggestion, SuggestionGroup, SuggestionStatus } from '../../api/types';
 import Loading from '../../components/ui/Loading';
 import Pagination from '../../components/ui/Pagination';
+import MergeSuggestionsDialog from '../../components/MergeSuggestionsDialog';
 import { useToast } from '../../components/ui/ToastContext';
+import {
+  FIELD_LABELS,
+  TYPE_LABELS,
+  changedKeysOf,
+  detailPathOf,
+  formatFieldValue,
+  isActionable,
+} from '../../components/suggestionDisplay';
+import { OverlapWarning, SuggestionChanges } from '../../components/SuggestionChanges';
+import AutoApplySettingsPanel from '../../components/AutoApplySettingsPanel';
 
 const STATUS_TABS: { value: SuggestionStatus; label: string }[] = [
   { value: 'pending', label: '未処理' },
@@ -14,91 +25,108 @@ const STATUS_TABS: { value: SuggestionStatus; label: string }[] = [
   { value: 'rejected', label: '却下' },
 ];
 
-// フィールドキー → 日本語ラベル（差分表示用）
-const FIELD_LABELS: Record<string, string> = {
-  name: '名前',
-  name_reading: '読み',
-  original_artist: 'アーティスト',
-  original_artist_reading: 'アーティストの読み',
-  start_seconds: '開始時間',
-  end_seconds: '終了時間',
-};
-
-const TYPE_LABELS: Record<string, string> = { song: '楽曲', artist: 'アーティスト', performance: '歌唱' };
-
-// 秒数フィールドは M:SS / H:MM:SS でも見せる（6714 だけでは判断できないため）
-const TIME_FIELDS = new Set(['start_seconds', 'end_seconds']);
-
-function formatFieldValue(key: string, value: string): string {
-  if (!TIME_FIELDS.has(key)) return value || '（空）';
-  const n = Number(value);
-  if (!Number.isFinite(n)) return value || '（空）';
-  if (n === 0) return '最後まで';
-  const h = Math.floor(n / 3600);
-  const m = Math.floor((n % 3600) / 60);
-  const s = n % 60;
-  const clock =
-    h > 0
-      ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
-      : `${m}:${String(s).padStart(2, '0')}`;
-  return `${clock}（${n}s）`;
-}
+// 未処理・要確認は「対象ごとにまとめて見比べる」のが実際の作業。
+// 承認済み・却下は履歴なので時系列の一覧のまま。
+const GROUPED_TABS: SuggestionStatus[] = ['pending', 'conflict'];
 
 export default function SuggestionsPage() {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const [status, setStatus] = useState<SuggestionStatus>('pending');
   const [page, setPage] = useState(1);
+  const grouped = GROUPED_TABS.includes(status);
 
-  const { data, isLoading } = useQuery({
+  const groupQuery = useQuery({
+    queryKey: ['suggestions', 'grouped', status, page],
+    queryFn: () => suggestionApi.listGrouped(status, page, 20),
+    enabled: grouped,
+  });
+  const listQuery = useQuery({
     queryKey: ['suggestions', status, page],
     queryFn: () => suggestionApi.list(status, page, 20),
+    enabled: !grouped,
   });
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['suggestions'] });
-    queryClient.invalidateQueries({ queryKey: ['suggestions', 'count'] });
     queryClient.invalidateQueries({ queryKey: ['songs'] });
     queryClient.invalidateQueries({ queryKey: ['artists'] });
     queryClient.invalidateQueries({ queryKey: ['streams'] });
     queryClient.invalidateQueries({ queryKey: ['performances'] });
   };
 
-  const approveMutation = useMutation({
-    mutationFn: ({ id, force }: { id: string; force: boolean }) => suggestionApi.approve(id, force),
-    onSuccess: (r) => {
-      showToast(r.message, 'success');
+  // 1件を採用する。同じフィールドを触る他の提案は同時に却下する
+  // （同じ項目に対する異なる値は両立しないため、残しても必ず衝突になる）。
+  const adoptMutation = useMutation({
+    mutationFn: async ({ pick, siblings }: { pick: Suggestion; siblings: Suggestion[] }) => {
+      await suggestionApi.approve(pick.id, !!pick.conflicts && Object.keys(pick.conflicts).length > 0);
+      const supersededIDs = siblings.map((s) => s.id);
+      if (supersededIDs.length > 0) {
+        await suggestionApi.batchReview(supersededIDs, 'reject', {
+          note: '同じ項目の別の提案を採用したため',
+        });
+      }
+      return supersededIDs.length;
+    },
+    onSuccess: (superseded) => {
+      showToast(
+        superseded > 0 ? `提案を反映しました（重複する${superseded}件は却下）` : '提案を反映しました',
+        'success'
+      );
       invalidate();
     },
-    // 衝突（409）で止まった場合もサーバーが status を conflict にしているので、一覧を引き直す
     onError: (err: Error) => {
-      showToast(`承認できません: ${err.message}`, 'error');
+      showToast(`反映できません: ${err.message}`, 'error');
       invalidate();
     },
   });
 
-  const rejectMutation = useMutation({
-    mutationFn: (id: string) => suggestionApi.reject(id),
+  const batchRejectMutation = useMutation({
+    mutationFn: (ids: string[]) => suggestionApi.batchReview(ids, 'reject'),
     onSuccess: (r) => {
-      showToast(r.message, 'success');
+      showToast(`${r.succeeded}件を却下しました`, 'success');
       invalidate();
     },
     onError: (err: Error) => showToast(`却下失敗: ${err.message}`, 'error'),
   });
+
+  const singleMutation = useMutation({
+    mutationFn: ({ id, action, force }: { id: string; action: 'approve' | 'reject'; force: boolean }) =>
+      action === 'approve' ? suggestionApi.approve(id, force) : suggestionApi.reject(id),
+    onSuccess: (r) => {
+      showToast(r.message, 'success');
+      invalidate();
+    },
+    onError: (err: Error) => {
+      showToast(`処理できません: ${err.message}`, 'error');
+      invalidate();
+    },
+  });
+
+  const busy = adoptMutation.isPending || batchRejectMutation.isPending || singleMutation.isPending;
 
   const handleStatusChange = (s: SuggestionStatus) => {
     setStatus(s);
     setPage(1);
   };
 
+  const isLoading = grouped ? groupQuery.isLoading : listQuery.isLoading;
+  const pagination = grouped ? groupQuery.data?.pagination : listQuery.data?.pagination;
+  const isEmpty = grouped
+    ? !groupQuery.data || groupQuery.data.groups.length === 0
+    : !listQuery.data || listQuery.data.suggestions.length === 0;
+
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold text-gray-900">修正提案のレビュー</h1>
         <p className="text-gray-500 mt-1 text-sm">
-          閲覧モードのユーザーから届いた修正案です。承認すると対象へ反映されます。
+          閲覧モードのユーザーから届いた修正案です。同じ対象への提案はまとめて表示されます。
+          複数の利用者が同じ時間のズレを指摘した場合は、自動で反映されることがあります。
         </p>
       </div>
+
+      <AutoApplySettingsPanel />
 
       {/* Status tabs */}
       <div className="inline-flex rounded-lg border border-gray-300 overflow-hidden text-sm">
@@ -117,26 +145,31 @@ export default function SuggestionsPage() {
 
       {isLoading ? (
         <Loading />
-      ) : !data || data.suggestions.length === 0 ? (
+      ) : isEmpty ? (
         <div className="text-center py-12 text-gray-500 bg-white rounded-lg border">
           {status === 'pending' ? '未処理の提案はありません' : '該当する提案はありません'}
         </div>
       ) : (
         <>
           <div className="space-y-4">
-            {data.suggestions.map((s) => (
-              <SuggestionCard
-                key={s.id}
-                suggestion={s}
-                onApprove={(force) => approveMutation.mutate({ id: s.id, force })}
-                onReject={() => rejectMutation.mutate(s.id)}
-                busy={approveMutation.isPending || rejectMutation.isPending}
-              />
-            ))}
+            {grouped
+              ? groupQuery.data!.groups.map((g) => (
+                  <GroupCard
+                    key={`${g.target_type}:${g.target_id}`}
+                    group={g}
+                    busy={busy}
+                    onAdopt={(pick, siblings) => adoptMutation.mutate({ pick, siblings })}
+                    onRejectAll={(ids) => batchRejectMutation.mutate(ids)}
+                    onMerged={invalidate}
+                  />
+                ))
+              : listQuery.data!.suggestions.map((s) => (
+                  <HistoryCard key={s.id} suggestion={s} />
+                ))}
           </div>
 
-          {data.pagination.total_pages > 1 && (
-            <Pagination page={page} totalPages={data.pagination.total_pages} onPageChange={setPage} />
+          {pagination && pagination.total_pages > 1 && (
+            <Pagination page={page} totalPages={pagination.total_pages} onPageChange={setPage} />
           )}
         </>
       )}
@@ -144,124 +177,186 @@ export default function SuggestionsPage() {
   );
 }
 
-function SuggestionCard({
-  suggestion,
-  onApprove,
-  onReject,
+// GroupCard 同一対象に届いた提案をまとめて見比べるカード。
+// 現在値を基準に各提案の差分を並べ、1つ採用すると同じ項目の他案は却下される。
+function GroupCard({
+  group,
   busy,
+  onAdopt,
+  onRejectAll,
+  onMerged,
 }: {
-  suggestion: Suggestion;
-  onApprove: (force: boolean) => void;
-  onReject: () => void;
+  group: SuggestionGroup;
   busy: boolean;
+  onAdopt: (pick: Suggestion, siblings: Suggestion[]) => void;
+  onRejectAll: (ids: string[]) => void;
+  onMerged: () => void;
 }) {
-  const { before, after, conflicts } = suggestion;
-  const changedKeys = Object.keys(after).filter((k) => (after[k] ?? '') !== (before[k] ?? ''));
-  const hasConflict = !!conflicts && Object.keys(conflicts).length > 0;
-  const detailPath =
-    suggestion.target_type === 'song'
-      ? `/songs/${suggestion.target_id}`
-      : suggestion.target_type === 'artist'
-        ? `/artists/${suggestion.target_id}`
-        : `/songs`; // 歌唱は単独ページを持たないため一覧へ（配信は target_label に含まれる）
-  const isOpen = suggestion.status === 'pending' || suggestion.status === 'conflict';
+  const { suggestions, current } = group;
+  const multiple = suggestions.length > 1;
+  const [merging, setMerging] = useState(false);
+
+  // 現在値のうち、どれかの提案が触っている項目だけを見出しに出す
+  const touched = [...new Set(suggestions.flatMap(changedKeysOf))];
+  // 統合は「値を突き合わせて決める」操作なので、差分を持つ提案が複数あるときだけ意味がある
+  const canMerge = touched.length > 0 && suggestions.filter((s) => changedKeysOf(s).length > 0).length > 1;
 
   return (
-    <div className={`bg-white rounded-lg shadow-sm border p-4 sm:p-5 ${hasConflict ? 'border-amber-300' : ''}`}>
-      <div className="flex flex-wrap items-start justify-between gap-2 mb-3">
+    <div className="bg-white rounded-lg shadow-sm border p-4 sm:p-5">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600 mr-2">
+            {TYPE_LABELS[group.target_type] ?? group.target_type}
+          </span>
+          <Link
+            to={detailPathOf(group.target_type, group.target_id, group.target_key)}
+            className="text-indigo-600 hover:text-indigo-900 font-medium break-words"
+          >
+            {group.target_label}
+          </Link>
+        </div>
+        {multiple && (
+          <span className="text-xs font-medium text-amber-700 bg-amber-50 px-2 py-0.5 rounded shrink-0">
+            {suggestions.length}件の提案
+          </span>
+        )}
+      </div>
+
+      {/* 現在値：提案を見比べるときの基準 */}
+      {touched.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
+          <span className="text-gray-400">現在</span>
+          {touched.map((k) => (
+            <span key={k}>
+              {FIELD_LABELS[k] ?? k}{' '}
+              <span className="font-mono text-gray-700">{formatFieldValue(k, current[k] ?? '')}</span>
+            </span>
+          ))}
+        </div>
+      )}
+
+      <div className="mt-3 divide-y">
+        {suggestions.map((s) => (
+          <SuggestionRow
+            key={s.id}
+            suggestion={s}
+            busy={busy}
+            onAdopt={() => {
+              // 同じ項目を触る他の提案は両立しないので一緒に却下する
+              const keys = new Set(changedKeysOf(s));
+              const siblings = suggestions.filter(
+                (o) => o.id !== s.id && changedKeysOf(o).some((k) => keys.has(k))
+              );
+              onAdopt(s, siblings);
+            }}
+          />
+        ))}
+      </div>
+
+      <div className="flex justify-end gap-2 mt-3">
+        {canMerge && (
+          <button
+            onClick={() => setMerging(true)}
+            disabled={busy}
+            className="px-3 py-1.5 text-xs bg-white border border-indigo-300 text-indigo-700 rounded-lg hover:bg-indigo-50 disabled:opacity-50"
+            title="値を見比べて1つに決める（中央値や、誰も出していない値も選べます）"
+          >
+            まとめて反映
+          </button>
+        )}
+        <button
+          onClick={() => onRejectAll(suggestions.map((s) => s.id))}
+          disabled={busy}
+          className="px-3 py-1.5 text-xs bg-white border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+        >
+          {multiple ? 'すべて却下' : '却下'}
+        </button>
+      </div>
+
+      {merging && (
+        <MergeSuggestionsDialog group={group} onClose={() => setMerging(false)} onDone={onMerged} />
+      )}
+    </div>
+  );
+}
+
+function SuggestionRow({
+  suggestion,
+  busy,
+  onAdopt,
+}: {
+  suggestion: Suggestion;
+  busy: boolean;
+  onAdopt: () => void;
+}) {
+  const { conflicts } = suggestion;
+  const hasConflict = !!conflicts && Object.keys(conflicts).length > 0;
+
+  return (
+    <div className={`py-2.5 ${hasConflict ? 'bg-amber-50/50 -mx-2 px-2 rounded' : ''}`}>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="text-xs text-gray-400 shrink-0" title={suggestion.created_by_name ? '登録ユーザー' : '未ログイン'}>
+          {suggestion.created_by_name || '匿名'}
+        </span>
+
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0 flex-1">
+          <SuggestionChanges suggestion={suggestion} />
+        </div>
+
+        <button
+          onClick={onAdopt}
+          disabled={busy || !isActionable(suggestion)}
+          className={`shrink-0 px-3 py-1 text-xs text-white font-medium rounded-lg disabled:opacity-50 ${
+            hasConflict ? 'bg-amber-600 hover:bg-amber-700' : 'bg-indigo-600 hover:bg-indigo-700'
+          }`}
+        >
+          {suggestion.kind === 'perf.missing'
+            ? '登録する'
+            : hasConflict
+              ? '上書きして採用'
+              : suggestion.kind === 'perf.meta'
+                ? '差し替える'
+                : 'これを採用'}
+        </button>
+      </div>
+
+      <OverlapWarning overlaps={suggestion.overlaps} />
+
+      {hasConflict && (
+        <p className="text-xs text-amber-800 mt-1">
+          ⚠ 提案後に対象が変更されています（
+          {Object.entries(conflicts!)
+            .map(([k, c]) => `${FIELD_LABELS[k] ?? k}: 提案時 ${formatFieldValue(k, c.expected)} → 現在 ${formatFieldValue(k, c.current)}`)
+            .join('、')}
+          ）
+        </p>
+      )}
+
+      {suggestion.note && (
+        <p className="text-xs text-gray-600 mt-1 whitespace-pre-wrap break-words">💬 {suggestion.note}</p>
+      )}
+    </div>
+  );
+}
+
+// HistoryCard 承認済み・却下の履歴表示（時系列の一覧）。
+function HistoryCard({ suggestion }: { suggestion: Suggestion }) {
+  return (
+    <div className="bg-white rounded-lg shadow-sm border p-4">
+      <div className="flex flex-wrap items-start justify-between gap-2 mb-2">
         <div className="min-w-0">
           <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600 mr-2">
             {TYPE_LABELS[suggestion.target_type] ?? suggestion.target_type}
           </span>
-          <Link to={detailPath} className="text-indigo-600 hover:text-indigo-900 font-medium break-words">
+          <Link
+            to={detailPathOf(suggestion.target_type, suggestion.target_id, suggestion.target_key)}
+            className="text-indigo-600 hover:text-indigo-900 font-medium break-words"
+          >
             {suggestion.target_label}
           </Link>
         </div>
-        <div className="flex items-center gap-2 shrink-0 text-xs text-gray-400">
-          <span title={suggestion.created_by_name ? '登録ユーザーからの提案' : '未ログインからの提案'}>
-            {suggestion.created_by_name || '匿名'}
-          </span>
-          <span>·</span>
-          <span>{new Date(suggestion.created_at).toLocaleString('ja-JP')}</span>
-        </div>
-      </div>
-
-      {/* Diff */}
-      <div className="space-y-2">
-        {changedKeys.length === 0 ? (
-          <p className="text-sm text-gray-400">変更なし</p>
-        ) : (
-          changedKeys.map((k) => (
-            <div key={k} className="text-sm flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2">
-              <span className="text-gray-500 sm:w-40 shrink-0">{FIELD_LABELS[k] ?? k}</span>
-              <div className="flex items-center gap-2 min-w-0 flex-wrap">
-                <span className="px-2 py-0.5 rounded bg-red-50 text-red-700 line-through break-words">
-                  {formatFieldValue(k, before[k])}
-                </span>
-                <span className="text-gray-400">→</span>
-                <span className="px-2 py-0.5 rounded bg-green-50 text-green-700 font-medium break-words">
-                  {formatFieldValue(k, after[k])}
-                </span>
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-
-      {/* 衝突：提案後に対象が別途編集されている。承認するとその編集を巻き戻す。 */}
-      {hasConflict && (
-        <div className="mt-3 rounded border border-amber-300 bg-amber-50 p-3 text-sm">
-          <p className="font-medium text-amber-900">
-            ⚠ この提案が作られた後、対象が別途編集されています
-          </p>
-          <div className="mt-2 space-y-1">
-            {Object.entries(conflicts!).map(([k, c]) => (
-              <div key={k} className="flex flex-wrap items-center gap-2 text-amber-900">
-                <span className="text-amber-700 sm:w-40 shrink-0">{FIELD_LABELS[k] ?? k}</span>
-                <span>
-                  提案時 <code className="px-1 rounded bg-white">{formatFieldValue(k, c.expected)}</code>
-                  {' → '}
-                  現在 <code className="px-1 rounded bg-white font-medium">{formatFieldValue(k, c.current)}</code>
-                </span>
-              </div>
-            ))}
-          </div>
-          <p className="mt-2 text-xs text-amber-700">
-            そのまま承認すると、現在の値は提案内容で上書きされます。
-          </p>
-        </div>
-      )}
-
-      {suggestion.note && (
-        <p className="mt-3 text-sm text-gray-600 bg-gray-50 rounded p-2 whitespace-pre-wrap break-words">
-          💬 {suggestion.note}
-        </p>
-      )}
-
-      {isOpen ? (
-        <div className="flex justify-end gap-2 mt-4">
-          <button
-            onClick={onReject}
-            disabled={busy}
-            className="px-4 py-2 text-sm bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 disabled:opacity-50"
-          >
-            却下
-          </button>
-          <button
-            onClick={() => onApprove(hasConflict)}
-            disabled={busy || changedKeys.length === 0}
-            className={`px-4 py-2 text-sm text-white font-medium rounded-lg disabled:opacity-50 ${
-              hasConflict ? 'bg-amber-600 hover:bg-amber-700' : 'bg-indigo-600 hover:bg-indigo-700'
-            }`}
-          >
-            {hasConflict ? '現在の値を上書きして承認' : '承認して反映'}
-          </button>
-        </div>
-      ) : (
-        <div className="flex items-center justify-end gap-2 mt-4">
-          {suggestion.review_note && (
-            <span className="text-xs text-gray-400 truncate">{suggestion.review_note}</span>
-          )}
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="text-xs text-gray-400">{suggestion.created_by_name || '匿名'}</span>
           <span
             className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
               suggestion.status === 'approved' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'
@@ -271,6 +366,17 @@ function SuggestionCard({
             {suggestion.reviewed_at && ` · ${new Date(suggestion.reviewed_at).toLocaleDateString('ja-JP')}`}
           </span>
         </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <SuggestionChanges suggestion={suggestion} />
+      </div>
+
+      {suggestion.review_note && (
+        <p className="text-xs text-gray-400 mt-1.5">{suggestion.review_note}</p>
+      )}
+      {suggestion.note && (
+        <p className="text-xs text-gray-600 mt-1 whitespace-pre-wrap break-words">💬 {suggestion.note}</p>
       )}
     </div>
   );

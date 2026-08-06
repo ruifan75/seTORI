@@ -490,12 +490,43 @@ type ImportReadingsResult struct {
 
 // ========== 修正提案（閲覧モードからの提案 → 管理者レビュー） ==========
 
-// CreateSuggestionRequest 修正提案の投稿（匿名可）。
+// MissingSongPayload 「この配信のこの時点に、登録されていない曲がある」という報告の中身。
+// 既存レコードの修正ではないので before/after ではなくこの形で持つ。
+type MissingSongPayload struct {
+	StreamID       string `json:"stream_id"` // YouTube 動画 ID
+	SongName       string `json:"song_name"`
+	OriginalArtist string `json:"original_artist"`
+	StartSeconds   int    `json:"start_seconds"`
+	EndSeconds     int    `json:"end_seconds"` // 0 = 未指定（動画の最後まで）
+}
+
+// SongSwapPayload 「この歌唱は別の曲だ」という指摘の中身。
+//
+// 曲の同一性は文字列の差分では表せない（曲名を直すのではなく、別の曲マスタへ繋ぎ替える）ため、
+// フィールド差し替えではなくこの形で持つ。
+// SongID があれば既存の曲へ、無ければ名前から曲を探す／作る（perf.missing と同じ経路）。
+type SongSwapPayload struct {
+	SongID         string `json:"song_id"`
+	SongName       string `json:"song_name"`
+	OriginalArtist string `json:"original_artist"`
+	// CurrentSongName は提案時点の曲名。レビュー時に「何から何へ」を見せるためと、
+	// 提案後に曲が差し替えられていないかの確認に使う。
+	CurrentSongName string `json:"current_song_name"`
+}
+
+// CreateSuggestionRequest 修正提案の投稿（要ログイン）。
+//
+// kind = "field"（既定）… 既存レコードのフィールド差し替え。TargetType / TargetID / Fields を使う。
+// kind = "perf.missing" … 未登録曲の追加報告。Payload を使う（TargetID は不要）。
+// kind = "perf.meta"    … 歌唱の曲の差し替え。TargetID（歌唱）と SongSwap を使う。
 type CreateSuggestionRequest struct {
-	TargetType string            `json:"target_type"` // song / artist / performance
-	TargetID   string            `json:"target_id"`
-	Fields     map[string]string `json:"fields"` // 提案する編集値（キーは対象の編集可能フィールド）
-	Note       string            `json:"note"`   // 提案者コメント（任意）
+	TargetType string              `json:"target_type"` // song / artist / performance
+	TargetID   string              `json:"target_id"`
+	Kind       string              `json:"kind,omitempty"`
+	Fields     map[string]string   `json:"fields"` // 提案する編集値（キーは対象の編集可能フィールド）
+	Payload    *MissingSongPayload `json:"payload,omitempty"`
+	SongSwap   *SongSwapPayload    `json:"song_swap,omitempty"`
+	Note       string              `json:"note"` // 提案者コメント（任意）
 }
 
 // FieldConflict 承認時に検出した「提案時点の値」と「現在の値」のズレ。
@@ -509,12 +540,19 @@ type SuggestionResponse struct {
 	ID          uuid.UUID         `json:"id"`
 	TargetType  string            `json:"target_type"`
 	TargetID    uuid.UUID         `json:"target_id"`
+	TargetKey   string            `json:"target_key"` // 配信の YouTube 動画 ID（UUID 対象では空）
 	TargetLabel string            `json:"target_label"`
 	Kind        string            `json:"kind"`
 	Before      map[string]string `json:"before"`
 	After       map[string]string `json:"after"`
-	Note        string            `json:"note"`
-	Status      string            `json:"status"`
+	// Payload は kind = perf.missing のときだけ入る（追加したい曲の内容）
+	Payload *MissingSongPayload `json:"payload,omitempty"`
+	// Overlaps は kind = perf.missing で、提案の時間帯に既存の歌唱があるときだけ入る
+	Overlaps []OverlapInfo `json:"overlaps,omitempty"`
+	// SongSwap は kind = perf.meta のときだけ入る（差し替え先の曲）
+	SongSwap *SongSwapPayload `json:"song_swap,omitempty"`
+	Note     string           `json:"note"`
+	Status   string           `json:"status"`
 
 	// Conflicts は未処理の提案について、対象が提案後に変更されたフィールドを示す。
 	// 空でなければ、そのまま承認すると他人の編集を巻き戻すことになる。
@@ -540,6 +578,71 @@ type UpdatePerformanceRequest struct {
 type SuggestionListResponse struct {
 	Suggestions []SuggestionResponse `json:"suggestions"`
 	Pagination  PaginationResponse   `json:"pagination"`
+}
+
+// OverlapInfo 未登録曲の追加提案と時間が重なる既存の歌唱。
+// メドレーなど正当に重なる場合もあるので承認は止めないが、
+// 「もう登録されている曲を報告していないか」をレビュー時に気づけるようにする。
+type OverlapInfo struct {
+	SongName     string `json:"song_name"`
+	StartSeconds int    `json:"start_seconds"`
+	EndSeconds   int    `json:"end_seconds"`
+}
+
+// SuggestionGroup 同一対象に集まった提案。同じ歌唱への通報を1枚で捌くための単位。
+type SuggestionGroup struct {
+	TargetType  string               `json:"target_type"`
+	TargetID    uuid.UUID            `json:"target_id"`
+	TargetKey   string               `json:"target_key"`
+	TargetLabel string               `json:"target_label"`
+	Current     map[string]string    `json:"current"` // 対象の現在値（提案と見比べるため）
+	Suggestions []SuggestionResponse `json:"suggestions"`
+}
+
+// SuggestionGroupListResponse ページングの単位はグループ（対象）。
+type SuggestionGroupListResponse struct {
+	Groups     []SuggestionGroup  `json:"groups"`
+	Pagination PaginationResponse `json:"pagination"`
+}
+
+// BatchReviewRequest 複数提案の一括承認/却下。
+type BatchReviewRequest struct {
+	IDs    []string `json:"ids"`
+	Action string   `json:"action"`          // approve / reject
+	Force  bool     `json:"force,omitempty"` // 承認時、衝突していても上書きする
+	Note   string   `json:"note,omitempty"`  // 却下理由
+}
+
+type BatchReviewResult struct {
+	ID       uuid.UUID `json:"id"`
+	OK       bool      `json:"ok"`
+	Error    string    `json:"error,omitempty"`
+	Conflict bool      `json:"conflict,omitempty"` // 対象が変更済みで止まった
+}
+
+type BatchReviewResponse struct {
+	Succeeded int                 `json:"succeeded"`
+	Failed    int                 `json:"failed"`
+	Results   []BatchReviewResult `json:"results"`
+}
+
+// MergeSuggestionsRequest 同一対象に集まった提案を、管理者が決めた値へ統合して反映する。
+//
+// 「どれか1つを丸ごと採用」では表せないケース（3人が 6708 / 6710 / 6716 と提案していて
+// 中央値を採りたい、誰も出していない値にしたい、項目ごとに別の提案を採りたい）のための操作。
+type MergeSuggestionsRequest struct {
+	TargetType string            `json:"target_type"`
+	TargetID   string            `json:"target_id"`
+	Fields     map[string]string `json:"fields"` // 実際に反映する値
+	IDs        []string          `json:"ids"`    // このグループの提案（すべて処理済みにする）
+	Note       string            `json:"note"`   // レビューメモ（任意）
+}
+
+// MergeSuggestionsResponse 反映した値と、採用/不採用として記録した件数。
+type MergeSuggestionsResponse struct {
+	Applied  map[string]string `json:"applied"`
+	Approved int               `json:"approved"` // 採用値と一致していた提案
+	Rejected int               `json:"rejected"` // 別の値になった提案
 }
 
 // ========== グローバル検索 ==========

@@ -18,6 +18,7 @@ type PerformanceService struct {
 	songRepo       *repository.SongRepository
 	songItunesRepo *repository.SongItunesRepository
 	artistRepo     *repository.ArtistRepository
+	streamRepo     *repository.StreamRepository
 }
 
 func NewPerformanceService(
@@ -25,12 +26,14 @@ func NewPerformanceService(
 	songRepo *repository.SongRepository,
 	songItunesRepo *repository.SongItunesRepository,
 	artistRepo *repository.ArtistRepository,
+	streamRepo *repository.StreamRepository,
 ) *PerformanceService {
 	return &PerformanceService{
 		perfRepo:       perfRepo,
 		songRepo:       songRepo,
 		songItunesRepo: songItunesRepo,
 		artistRepo:     artistRepo,
+		streamRepo:     streamRepo,
 	}
 }
 
@@ -264,6 +267,108 @@ func (s *PerformanceService) UpdatePerformance(id uuid.UUID, req *dto.UpdatePerf
 	}
 	logger.Infof("performance updated: %s (%s %d-%d)", id, updated.SongName, updated.StartSeconds, updated.EndSeconds)
 	return updated, nil
+}
+
+// ========== 未登録曲の追加提案（MissingSongCreator） ==========
+
+// StreamLabel は配信の表示名（タイトル）を返す。存在しなければ空文字。
+// 提案の投稿時に「その配信が実在するか」を確かめ、表示用のラベルを作るために使う。
+func (s *PerformanceService) StreamLabel(streamID string) (string, error) {
+	stream, err := s.streamRepo.FindByID(streamID)
+	if err != nil {
+		return "", fmt.Errorf("find stream: %w", err)
+	}
+	if stream == nil {
+		return "", nil
+	}
+	return stream.Title, nil
+}
+
+// OverlappingPerformances は提案の時間帯と重なる既存の歌唱を返す。
+// レビュー時に「もう登録されている曲を報告していないか」へ気づけるようにするための情報で、
+// 重なっていても承認は止めない（メドレーや掛け合いなど、正当に重なる歌唱があるため）。
+func (s *PerformanceService) OverlappingPerformances(streamID string, start, end int) ([]dto.OverlapInfo, error) {
+	perfs, err := s.perfRepo.FindOverlapping(streamID, start, end, uuid.Nil)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]dto.OverlapInfo, 0, len(perfs))
+	for _, p := range perfs {
+		out = append(out, dto.OverlapInfo{
+			SongName:     p.SongName,
+			StartSeconds: p.StartSeconds,
+			EndSeconds:   p.EndSeconds,
+		})
+	}
+	return out, nil
+}
+
+// CreateFromMissingSong は「この配信のこの時点に曲がある」という報告から歌唱記録を作る。
+// 曲が未登録なら曲も作られる（セットリスト保存と同じ findOrCreateSong を通す）。
+func (s *PerformanceService) CreateFromMissingSong(p dto.MissingSongPayload) error {
+	song, _, err := s.findOrCreateSong(dto.CreatePerformanceItem{
+		Name:           p.SongName,
+		OriginalArtist: p.OriginalArtist,
+	})
+	if err != nil {
+		return fmt.Errorf("find or create song: %w", err)
+	}
+
+	perf := &models.Performance{
+		StreamID:     p.StreamID,
+		SongID:       song.ID,
+		StartSeconds: p.StartSeconds,
+		EndSeconds:   p.EndSeconds,
+		OrderIndex:   0, // start_seconds で並べるため使わない
+	}
+	if err := s.perfRepo.Create(perf); err != nil {
+		if isUniqueViolation(err) {
+			return ErrDuplicatePerformance
+		}
+		return fmt.Errorf("create performance: %w", err)
+	}
+	logger.Infof("performance created from suggestion: %s @%ds (%s)", p.SongName, p.StartSeconds, p.StreamID)
+	return nil
+}
+
+// ========== 曲の差し替え提案（SongSwapper） ==========
+
+// SongLabelOf は歌唱の現在の曲名と表示ラベルを返す。歌唱が無ければ空文字。
+func (s *PerformanceService) SongLabelOf(performanceID uuid.UUID) (string, string, error) {
+	perf, err := s.perfRepo.FindByID(performanceID)
+	if err != nil {
+		return "", "", fmt.Errorf("find performance: %w", err)
+	}
+	if perf == nil {
+		return "", "", nil
+	}
+	label := perf.SongName
+	if perf.OriginalArtist != "" {
+		label += " / " + perf.OriginalArtist
+	}
+	if perf.StreamTitle != "" {
+		label += "（" + perf.StreamTitle + "）"
+	}
+	return perf.SongName, label, nil
+}
+
+// ApplySongSwap は歌唱の曲を別の曲へ繋ぎ替える。
+// SongID があればその曲へ、無ければ曲名から探す／作る（未登録の曲へ直す場合）。
+// 歌唱の ID は変わらないので、この歌唱を参照しているプレイリストはそのまま残る。
+func (s *PerformanceService) ApplySongSwap(performanceID uuid.UUID, p dto.SongSwapPayload) error {
+	songID := strings.TrimSpace(p.SongID)
+	if songID == "" {
+		song, _, err := s.findOrCreateSong(dto.CreatePerformanceItem{
+			Name:           p.SongName,
+			OriginalArtist: p.OriginalArtist,
+		})
+		if err != nil {
+			return fmt.Errorf("find or create song: %w", err)
+		}
+		songID = song.ID.String()
+	}
+	_, err := s.UpdatePerformance(performanceID, &dto.UpdatePerformanceRequest{SongID: &songID})
+	return err
 }
 
 // ========== 修正提案の対象（TargetEditor） ==========

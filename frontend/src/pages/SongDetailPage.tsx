@@ -17,6 +17,8 @@ import EditableField from '../components/EditableField';
 import QueueAddButton from '../components/QueueAddButton';
 import ArtistLinks from '../components/ArtistLinks';
 import PerformanceTimingDialog from '../components/PerformanceTimingDialog';
+import SongSwapDialog from '../components/SongSwapDialog';
+import { withdrawSuggestion } from '../components/usePerformanceTiming';
 import { playerBarGetCurrentTime } from '../components/youtubePlayerControl';
 import { useToast } from '../components/ui/ToastContext';
 import { useAuthStore, hasPermission, PERM } from '../store/auth';
@@ -158,6 +160,8 @@ export default function SongDetailPage() {
   const [isEditing, setIsEditing] = useState(false);
   // 開始/終了時間を直す（提案する）ダイアログの対象。null なら閉じている
   const [timingTarget, setTimingTarget] = useState<SongPerformance | null>(null);
+  // 曲の差し替え（「この曲ではない」）ダイアログの対象
+  const [swapTarget, setSwapTarget] = useState<SongPerformance | null>(null);
   // 再生バーで今かかっている歌唱（ダイアログで「再生位置を使う」を出すかの判定に使う）
   const playingTrack = usePlayerStore((s) => s.queue[s.index]);
   const [mergeTargetId, setMergeTargetId] = useState('');
@@ -547,7 +551,11 @@ export default function SongDetailPage() {
         fields: { [field]: val },
         note,
       });
-      showToast(r.message, 'success');
+      // まだ反映されていないので「元に戻す」ではなく取り下げ
+      showToast(r.message, 'success', {
+        label: '取り消す',
+        onClick: () => withdrawSuggestion(r.id, showToast),
+      });
     } catch (err) {
       showToast(`送信失敗: ${(err as Error).message}`, 'error');
       throw err;
@@ -1075,6 +1083,16 @@ export default function SongDetailPage() {
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                             </svg>
                           </button>
+                          <button
+                            onClick={() => setSwapTarget(perf)}
+                            className="inline-flex items-center justify-center w-8 h-8 rounded-full text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+                            title={canEdit ? '別の曲に差し替え' : 'この曲ではないと提案'}
+                            aria-label={canEdit ? '別の曲に差し替え' : 'この曲ではないと提案'}
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                            </svg>
+                          </button>
                           <a
                             href={perf.youtube_url}
                             target="_blank"
@@ -1148,6 +1166,17 @@ export default function SongDetailPage() {
             playingTrack?.performanceId === timingTarget.id ? playerBarGetCurrentTime() : null
           }
           onClose={() => setTimingTarget(null)}
+        />
+      )}
+
+      {swapTarget && (
+        <SongSwapDialog
+          performanceId={swapTarget.id}
+          currentSongName={swapTarget.song_name ?? song.name}
+          subtitle={swapTarget.stream_title}
+          onClose={() => setSwapTarget(null)}
+          // 差し替えると、この曲の歌唱一覧からその歌唱が消える
+          onDone={() => queryClient.invalidateQueries({ queryKey: ['song'] })}
         />
       )}
     </div>

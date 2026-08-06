@@ -46,6 +46,11 @@ import type {
   ImportReadingsResult,
   CreateSuggestionRequest,
   SuggestionListResponse,
+  SuggestionGroupListResponse,
+  BatchReviewResponse,
+  MergeSuggestionsRequest,
+  MergeSuggestionsResponse,
+  AutoApplySettings,
   SuggestionStatus,
   AIProvider,
   AIProviderInput,
@@ -638,6 +643,60 @@ export const suggestionApi = {
     return data;
   },
 
+  // 自分が出した提案（要ログイン・権限不要）。取り下げと結果の確認用。
+  listMine: async (
+    status: SuggestionStatus | '' = '',
+    page = 1,
+    limit = 20
+  ): Promise<SuggestionListResponse> => {
+    const params = new URLSearchParams({ page: String(page), limit: String(limit) });
+    if (status) params.set('status', status);
+    const { data } = await api.get(`/api/suggestions/mine?${params}`);
+    return data;
+  },
+
+  // 対象ごとにまとめた提案一覧（要 content:edit）。同じ歌唱への通報を1枚で捌くため。
+  // ページングの単位はグループ（対象）。
+  listGrouped: async (
+    status: SuggestionStatus | '' = 'pending',
+    page = 1,
+    limit = 20
+  ): Promise<SuggestionGroupListResponse> => {
+    const params = new URLSearchParams({ page: String(page), limit: String(limit), group: 'target' });
+    if (status) params.set('status', status);
+    const { data } = await api.get(`/api/suggestions?${params}`);
+    return data;
+  },
+
+  // 複数の提案をまとめて承認/却下。一部が失敗しても残りは処理され、結果は個別に返る。
+  batchReview: async (
+    ids: string[],
+    action: 'approve' | 'reject',
+    opts: { force?: boolean; note?: string } = {}
+  ): Promise<BatchReviewResponse> => {
+    const { data } = await api.post('/api/suggestions/batch', { ids, action, ...opts });
+    return data;
+  },
+
+  // 同一対象の提案を、管理者が決めた値へ統合して反映する。
+  // 「どれか1つを丸ごと採用」では表せない決着（中央値・誰も出していない値）のための操作。
+  merge: async (req: MergeSuggestionsRequest): Promise<MergeSuggestionsResponse> => {
+    const { data } = await api.post('/api/suggestions/merge', req);
+    return data;
+  },
+
+  // timing 提案の自動適用条件（要 content:edit）
+  getSettings: async (): Promise<AutoApplySettings> => {
+    const { data } = await api.get('/api/suggestions/settings');
+    return data;
+  },
+
+  // 値はサーバー側で安全な範囲に丸められる（丸めた結果が返る）
+  updateSettings: async (settings: AutoApplySettings): Promise<AutoApplySettings> => {
+    const { data } = await api.put('/api/suggestions/settings', settings);
+    return data;
+  },
+
   // 未処理提案数（バッジ用）
   count: async (): Promise<number> => {
     const { data } = await api.get('/api/suggestions/count');
@@ -653,6 +712,13 @@ export const suggestionApi = {
 
   reject: async (id: string, note = ''): Promise<{ message: string }> => {
     const { data } = await api.post(`/api/suggestions/${id}/reject`, { note });
+    return data;
+  },
+
+  // 自分が出した未処理の提案を取り下げる（content:edit なら他人の分も可）。
+  // 処理済みのものは 409、他人のものは 404。
+  withdraw: async (id: string): Promise<{ message: string }> => {
+    const { data } = await api.delete(`/api/suggestions/${id}`);
     return data;
   },
 };

@@ -88,14 +88,14 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	// HolodexService も AnalyzeHolodexSongs で正規化・拍手 end を実行する（holodex_hash キャッシュ）
 	holodexService.SetAnalysisServices(normalizationService, chatEndService)
 	batchAnalyzeService := service.NewBatchAnalyzeService(commentService, streamRepo)
-	performanceService := service.NewPerformanceService(perfRepo, songRepo, songItunesRepo, artistRepo)
+	performanceService := service.NewPerformanceService(perfRepo, songRepo, songItunesRepo, artistRepo, streamRepo)
 	itunesClient := itunes.NewClient()
 	endTimeEstimateService := service.NewEndTimeEstimateService(itunesClient)
 	authService := service.NewAuthService(authRepo)
 	readingService := service.NewReadingService(artistRepo, songRepo)
 	suggestionRepo := repository.NewSuggestionRepository(db)
-	suggestionService := service.NewSuggestionService(suggestionRepo, songService, artistService, performanceService)
 	appSettingsRepo := repository.NewAppSettingsRepository(db)
+	suggestionService := service.NewSuggestionService(suggestionRepo, appSettingsRepo, songService, artistService, performanceService)
 	driveClient := gdrive.NewClient(cfg.GoogleOAuthClientID, cfg.GoogleOAuthSecret)
 	backupService := service.NewBackupService(db, appSettingsRepo, driveClient, cfg.DatabaseURL, cfg.BackupDir, cfg.BackupDockerContainer)
 	playlistRepo := repository.NewPlaylistRepository(db, perfRepo)
@@ -237,9 +237,15 @@ func (r *Router) setupRoutes() {
 	// 修正提案：投稿は閲覧モードでも可、一覧/承認/却下は content:edit
 	r.mux.HandleFunc("POST /api/suggestions", r.handleCreateSuggestion)
 	r.mux.HandleFunc("GET /api/suggestions", r.handleListSuggestions)
+	r.mux.HandleFunc("GET /api/suggestions/mine", r.handleListMySuggestions)
 	r.mux.HandleFunc("GET /api/suggestions/count", r.handleCountSuggestions)
+	r.mux.HandleFunc("POST /api/suggestions/batch", r.handleBatchReviewSuggestions)
+	r.mux.HandleFunc("POST /api/suggestions/merge", r.handleMergeSuggestions)
+	r.mux.HandleFunc("GET /api/suggestions/settings", r.handleGetSuggestionSettings)
+	r.mux.HandleFunc("PUT /api/suggestions/settings", r.handleUpdateSuggestionSettings)
 	r.mux.HandleFunc("POST /api/suggestions/{id}/approve", r.handleApproveSuggestion)
 	r.mux.HandleFunc("POST /api/suggestions/{id}/reject", r.handleRejectSuggestion)
+	r.mux.HandleFunc("DELETE /api/suggestions/{id}", r.handleWithdrawSuggestion)
 
 	// 外部サービス連携の設定（キーの値は返さない。要 users:manage）
 	r.mux.HandleFunc("GET /api/settings/integrations", r.handleGetIntegrationSettings)
@@ -821,7 +827,8 @@ func (r *Router) handleCreateSuggestion(w http.ResponseWriter, req *http.Request
 		respondError(w, http.StatusBadRequest, "無効なリクエスト形式")
 		return
 	}
-	if len(body.Fields) == 0 {
+	// 未登録曲の追加・曲の差し替えは fields ではなく payload / song_swap で内容を渡す
+	if body.Kind != service.KindMissingSong && body.Kind != service.KindSongSwap && len(body.Fields) == 0 {
 		respondError(w, http.StatusBadRequest, "提案する変更がありません")
 		return
 	}
@@ -832,8 +839,12 @@ func (r *Router) handleCreateSuggestion(w http.ResponseWriter, req *http.Request
 	}
 	sug, err := r.suggestionService.Create(&body, actor)
 	if err != nil {
+		var invalidInput *service.ValidationError
 		switch {
-		case errors.Is(err, service.ErrInvalidTarget), errors.Is(err, service.ErrNoChange):
+		case errors.As(err, &invalidInput):
+			respondError(w, http.StatusBadRequest, err.Error())
+		case errors.Is(err, service.ErrInvalidTarget), errors.Is(err, service.ErrNoChange),
+			errors.Is(err, service.ErrInvalidTimeRange):
 			respondError(w, http.StatusBadRequest, err.Error())
 		case errors.Is(err, service.ErrTargetNotFound):
 			respondError(w, http.StatusNotFound, err.Error())
@@ -850,15 +861,149 @@ func (r *Router) handleCreateSuggestion(w http.ResponseWriter, req *http.Request
 	})
 }
 
-// handleListSuggestions は提案一覧を返す（content:edit）。?status=pending|approved|rejected で絞る。
+// handleListSuggestions は提案一覧を返す（content:edit）。
+// ?status=pending|conflict|approved|rejected で絞る。
+// ?group=target で対象ごとにまとめた形（ページングの単位も対象）で返す。
 func (r *Router) handleListSuggestions(w http.ResponseWriter, req *http.Request) {
 	status := req.URL.Query().Get("status")
 	page, _ := strconv.Atoi(req.URL.Query().Get("page"))
 	limit, _ := strconv.Atoi(req.URL.Query().Get("limit"))
 
+	if req.URL.Query().Get("group") == "target" {
+		grouped, err := r.suggestionService.ListGrouped(status, page, limit)
+		if err != nil {
+			respondError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		respondJSON(w, http.StatusOK, grouped)
+		return
+	}
+
 	result, err := r.suggestionService.List(status, page, limit)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, result)
+}
+
+// handleListMySuggestions は自分が出した提案を返す（要ログイン・権限不要）。
+// ?status= で絞る。取り下げと結果の確認のための画面用。
+func (r *Router) handleListMySuggestions(w http.ResponseWriter, req *http.Request) {
+	status := req.URL.Query().Get("status")
+	page, _ := strconv.Atoi(req.URL.Query().Get("page"))
+	limit, _ := strconv.Atoi(req.URL.Query().Get("limit"))
+
+	result, err := r.suggestionService.ListMine(currentUser(req), status, page, limit)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, result)
+}
+
+// handleBatchReviewSuggestions は複数の提案をまとめて承認/却下する（content:edit）。
+// 一部が失敗しても残りは処理し、結果を個別に返す。
+func (r *Router) handleBatchReviewSuggestions(w http.ResponseWriter, req *http.Request) {
+	var body dto.BatchReviewRequest
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		respondError(w, http.StatusBadRequest, "無効なリクエスト形式")
+		return
+	}
+	if body.Action != "approve" && body.Action != "reject" {
+		respondError(w, http.StatusBadRequest, "action は approve か reject を指定してください")
+		return
+	}
+	if len(body.IDs) == 0 {
+		respondError(w, http.StatusBadRequest, "対象の提案がありません")
+		return
+	}
+	if len(body.IDs) > 200 {
+		respondError(w, http.StatusBadRequest, "一度に処理できるのは200件までです")
+		return
+	}
+
+	ids := make([]uuid.UUID, 0, len(body.IDs))
+	for _, raw := range body.IDs {
+		id, err := uuid.Parse(raw)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, "無効な提案ID: "+raw)
+			return
+		}
+		ids = append(ids, id)
+	}
+
+	result := r.suggestionService.BatchReview(ids, body.Action, currentUser(req), body.Force, body.Note)
+	respondJSON(w, http.StatusOK, result)
+}
+
+// handleGetSuggestionSettings は timing 提案の自動適用条件を返す（content:edit）。
+func (r *Router) handleGetSuggestionSettings(w http.ResponseWriter, req *http.Request) {
+	respondJSON(w, http.StatusOK, r.suggestionService.GetAutoApplySettings())
+}
+
+// handleUpdateSuggestionSettings は自動適用条件を更新する（content:edit）。
+// 値はサービス層で安全な範囲に丸められる。
+func (r *Router) handleUpdateSuggestionSettings(w http.ResponseWriter, req *http.Request) {
+	var body service.AutoApplySettings
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		respondError(w, http.StatusBadRequest, "無効なリクエスト形式")
+		return
+	}
+	saved, err := r.suggestionService.UpdateAutoApplySettings(body)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, saved)
+}
+
+// handleWithdrawSuggestion は自分が出した未処理の提案を取り下げる（要ログイン）。
+// content:edit を持つ管理者は他人の分も引ける。他人のものは存在を伏せて 404。
+func (r *Router) handleWithdrawSuggestion(w http.ResponseWriter, req *http.Request) {
+	id, err := uuid.Parse(req.PathValue("id"))
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "無効な提案ID")
+		return
+	}
+	if err := r.suggestionService.Withdraw(id, currentUser(req)); err != nil {
+		switch {
+		case errors.Is(err, service.ErrSuggestionNotFound):
+			respondError(w, http.StatusNotFound, err.Error())
+		case errors.Is(err, service.ErrAlreadyReviewed):
+			respondError(w, http.StatusConflict, err.Error())
+		default:
+			respondError(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"message": "提案を取り下げました"})
+}
+
+// handleMergeSuggestions は同一対象の提案を管理者が決めた値へ統合して反映する（content:edit）。
+// 「どれか1つを丸ごと採用」では表せない決着（中央値・誰も出していない値）のための操作。
+func (r *Router) handleMergeSuggestions(w http.ResponseWriter, req *http.Request) {
+	var body dto.MergeSuggestionsRequest
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		respondError(w, http.StatusBadRequest, "無効なリクエスト形式")
+		return
+	}
+
+	result, err := r.suggestionService.Merge(&body, currentUser(req))
+	if err != nil {
+		var invalidInput *service.ValidationError
+		switch {
+		case errors.As(err, &invalidInput):
+			respondError(w, http.StatusBadRequest, err.Error())
+		case errors.Is(err, service.ErrInvalidTarget):
+			respondError(w, http.StatusBadRequest, err.Error())
+		case errors.Is(err, service.ErrTargetNotFound):
+			respondError(w, http.StatusNotFound, err.Error())
+		case errors.Is(err, service.ErrDuplicatePerformance):
+			respondError(w, http.StatusConflict, err.Error())
+		default:
+			respondError(w, http.StatusBadRequest, err.Error())
+		}
 		return
 	}
 	respondJSON(w, http.StatusOK, result)
@@ -2450,12 +2595,23 @@ func requiredPermission(method, path string) (perm string, needsAuth bool) {
 		return "", true
 	}
 
-	// 修正提案：投稿（POST /api/suggestions）は閲覧モードでも可（公開）。
-	// 一覧・件数・承認・却下は content:edit（管理者レビュー）。
+	// 修正提案：投稿（POST /api/suggestions）はログインのみ必要（編集権限は不要）。
+	// 匿名でも投稿できるようにしていたが、再生中のワンタップ通報を載せた結果、
+	// 誰の指摘かを追えないと信頼度の重み付けも濫用への対処もできないため要ログインにした。
+	// 取り下げ（DELETE）も同様：自分の提案を引っ込めるのに編集権限は要らない。
+	// 誰の提案を引けるかという行単位の判定は SuggestionService が行う。
+	// 一覧・件数・承認・却下・統合は content:edit（管理者レビュー）。
 	if path == "/api/suggestions" && method == http.MethodPost {
-		return "", false
+		return "", true
+	}
+	// 自分の提案の一覧は本人のものしか返らないので、編集権限は要らない。
+	if path == "/api/suggestions/mine" {
+		return "", true
 	}
 	if strings.HasPrefix(path, "/api/suggestions") {
+		if method == http.MethodDelete {
+			return "", true
+		}
 		return auth.PermContentEdit, true
 	}
 

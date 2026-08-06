@@ -477,14 +477,41 @@ export interface ImportReadingsResult {
 }
 
 // 修正提案（閲覧モードからの提案 → 管理者レビュー）
-export type SuggestionTargetType = 'song' | 'artist' | 'performance';
+export type SuggestionTargetType = 'song' | 'artist' | 'performance' | 'stream';
 // conflict … 提案後に対象が変更された状態。承認すると他人の編集を巻き戻すため保留される
 export type SuggestionStatus = 'pending' | 'approved' | 'rejected' | 'conflict';
 
+// 提案の種別
+// field        … 既存レコードのフィールド差し替え
+// perf.missing … 未登録曲の追加報告
+// perf.meta    … 歌唱の曲の差し替え（「この曲ではない」）
+export type SuggestionKind = 'field' | 'perf.missing' | 'perf.meta';
+
+// 「この歌唱は別の曲だ」という指摘の中身。
+// song_id があれば既存の曲へ、無ければ曲名から探す／作る。
+export interface SongSwapPayload {
+  song_id: string;
+  song_name: string;
+  original_artist: string;
+  current_song_name: string; // 提案時点の曲名（レビュー時の表示・衝突判定用）
+}
+
+// 「この配信のこの時点に、登録されていない曲がある」という報告の中身
+export interface MissingSongPayload {
+  stream_id: string;
+  song_name: string;
+  original_artist: string;
+  start_seconds: number;
+  end_seconds: number; // 0 = 未指定（動画の最後まで）
+}
+
 export interface CreateSuggestionRequest {
-  target_type: SuggestionTargetType;
-  target_id: string;
-  fields: Record<string, string>;
+  target_type?: SuggestionTargetType;
+  target_id?: string;
+  kind?: SuggestionKind; // 省略時は field
+  fields?: Record<string, string>;
+  payload?: MissingSongPayload; // kind = perf.missing のとき
+  song_swap?: Omit<SongSwapPayload, 'current_song_name'>; // kind = perf.meta のとき
   note?: string;
 }
 
@@ -494,14 +521,34 @@ export interface FieldConflict {
   current: string;
 }
 
+// 未登録曲の追加提案と時間が重なる既存の歌唱（メドレー等で正当に重なることもある）
+export interface OverlapInfo {
+  song_name: string;
+  start_seconds: number;
+  end_seconds: number;
+}
+
+// timing 提案の自動適用条件（管理画面から調整できる）
+export interface AutoApplySettings {
+  enabled: boolean;
+  min_votes: number;
+  max_spread_seconds: number;
+  max_delta_seconds: number;
+}
+
 export interface Suggestion {
   id: string;
   target_type: SuggestionTargetType;
   target_id: string;
+  target_key: string; // 配信の YouTube 動画 ID（UUID 対象では空）
   target_label: string;
-  kind: string; // field（編集可能フィールドの差し替え）
+  kind: SuggestionKind;
   before: Record<string, string>;
   after: Record<string, string>;
+  payload?: MissingSongPayload; // kind = perf.missing のときだけ
+  // 提案の時間帯に既存の歌唱があるとき（perf.missing のみ）。承認は止まらないが確認が要る
+  overlaps?: OverlapInfo[];
+  song_swap?: SongSwapPayload; // kind = perf.meta のときだけ
   note: string;
   status: SuggestionStatus;
   // 未処理の提案で、対象が提案後に変更されたフィールド。空でなければ承認前に確認が要る
@@ -516,6 +563,51 @@ export interface Suggestion {
 export interface SuggestionListResponse {
   suggestions: Suggestion[];
   pagination: PaginationResponse;
+}
+
+// 同一対象に集まった提案。同じ歌唱への通報を1枚のカードで捌くための単位。
+export interface SuggestionGroup {
+  target_type: SuggestionTargetType;
+  target_id: string;
+  target_key: string;
+  target_label: string;
+  current: Record<string, string>; // 対象の現在値（提案と見比べるため）
+  suggestions: Suggestion[];
+}
+
+// ページングの単位はグループ（対象）
+export interface SuggestionGroupListResponse {
+  groups: SuggestionGroup[];
+  pagination: PaginationResponse;
+}
+
+export interface BatchReviewResult {
+  id: string;
+  ok: boolean;
+  error?: string;
+  conflict?: boolean; // 対象が変更済みで止まった
+}
+
+export interface BatchReviewResponse {
+  succeeded: number;
+  failed: number;
+  results: BatchReviewResult[];
+}
+
+// 同一対象に集まった提案を、管理者が決めた値へ統合して反映する。
+// 「どれか1つを丸ごと採用」では表せない決着（中央値・誰も出していない値）のための操作。
+export interface MergeSuggestionsRequest {
+  target_type: SuggestionTargetType;
+  target_id: string;
+  fields: Record<string, string>; // 実際に反映する値
+  ids: string[]; // このグループの提案（すべて処理済みにする）
+  note?: string;
+}
+
+export interface MergeSuggestionsResponse {
+  applied: Record<string, string>;
+  approved: number; // 採用値と一致していた提案
+  rejected: number; // 別の値になった提案
 }
 
 // ========== グローバル検索 ==========
