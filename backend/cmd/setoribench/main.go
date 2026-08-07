@@ -5,20 +5,27 @@
 //
 // -mode regex    : pure deterministic path (comment.ParseComments). AI 失敗時のフォールバック。
 // -mode ai       : production と同じ 2 段階の抽出（comment.ParseCommentsWithAI, AI 失敗時は regex）。
-// -mode combined : 抽出と正規化を 1 回で行う経路（comment.ParseAndNormalizeWithAI）。
+// -mode combined : 抽出と正規化を 1 回で行う（comment.ParseAndNormalizeWithAI）。
+// -mode grouped  : 抽出＋正規化＋重複排除まで 1 回で行う実験経路
 //
-//	本機 DB の ai_providers を使う。呼び出しは高いので -cache でディスクに保存し、
-//	-struct の on/off 再実行は同じ AI 結果を使い回す。
+//	（comment.ParseNormalizeAndDedupWithAI）。コメント境界を見せ、
+//	AI に「どの行をまとめたか」を src で申告させる。
 //
-//	⚠️ キャッシュは stream ID だけをキーにしている。ai と combined で同じ -cache を
-//	指すと結果が混ざるので、モードごとに別のパスを渡すこと。
+// AI を使うモードは本機 DB の ai_providers を使う。呼び出しは高いので -cache で
+// ディスクに保存し、-struct の on/off 再実行は同じ AI 結果を使い回す。
 //
-//	2 経路の比較例：
-//	  go run ./cmd/setoribench -mode ai       -cache /tmp/bench-ai.json
-//	  go run ./cmd/setoribench -mode combined -cache /tmp/bench-combined.json
+// ⚠️ キャッシュは stream ID だけをキーにしている。モードが違えば結果も違うので、
+// モードごとに別のパスを渡すこと。
 //
-// どちらのモードでも抽出後に FilterSongsWith(structural) -> Dedup -> Validate を通し、
-// 抽出タイムスタンプを ground truth と start 近接で突き合わせて precision/recall を出す。
+//	go run ./cmd/setoribench -mode ai       -cache /tmp/bench-ai.json
+//	go run ./cmd/setoribench -mode combined -cache /tmp/bench-combined.json
+//	go run ./cmd/setoribench -mode grouped  -cache /tmp/bench-grouped.json
+//
+// 抽出後は FilterSongsWith(structural) -> Dedup -> Validate を通し、抽出タイムスタンプを
+// ground truth と start 近接で突き合わせて precision/recall を出す。
+//
+// grouped は AI 側で既に重複排除されているため、後段の DeduplicateSongs は
+// ほぼ素通りになる。両者の統合判断の差は、precision/recall と extracted 件数に表れる。
 package main
 
 import (
@@ -54,7 +61,7 @@ type fpItem struct {
 
 func main() {
 	dbURL := flag.String("db", envOr("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/setori?sslmode=disable"), "database URL")
-	mode := flag.String("mode", "regex", "extraction mode: regex | ai | combined | stored (DB の comment_songs をそのまま評価)")
+	mode := flag.String("mode", "regex", "extraction mode: regex | ai | combined | grouped | stored (DB の comment_songs をそのまま評価)")
 	structural := flag.Bool("struct", true, "apply structural non-song filter (false = keyword-only baseline)")
 	noFilter := flag.Bool("nofilter", false, "skip FilterSongs entirely (stored の as-is 評価用)")
 	limit := flag.Int("limit", 0, "limit number of streams (0 = all)")
@@ -226,13 +233,13 @@ func main() {
 }
 
 // usesAI は AI を呼ぶモードかどうか。
-func usesAI(mode string) bool { return mode == "ai" || mode == "combined" }
+func usesAI(mode string) bool { return mode == "ai" || mode == "combined" || mode == "grouped" }
 
 // extract は mode に応じて production と同じ抽出を行う。
 // ai / combined モードでは AI を呼び、失敗時は ParseComments に退避（parseComments と同じ挙動）。
 // cache があれば AI 結果を再利用し、無ければ呼び出して保存する。
 func extract(mode, sid string, comments []string, aiSvc *service.AIService, cache map[string][]comment.ParsedSong) (songs []comment.ParsedSong, usedRegexFallback bool) {
-	if mode != "ai" && mode != "combined" {
+	if !usesAI(mode) {
 		return comment.ParseComments(comments), false
 	}
 	if cache != nil {
@@ -242,12 +249,17 @@ func extract(mode, sid string, comments []string, aiSvc *service.AIService, cach
 	}
 
 	var err error
-	if mode == "combined" {
+	switch mode {
+	case "grouped":
+		// 抽出＋正規化＋重複排除を 1 回で。AI が src で申告したグループを
+		// Go 側が mergeParsedSong で畳み込む。既に重複排除済みで返る。
+		songs, err = comment.ParseNormalizeAndDedupWithAI(aiSvc, comments)
+	case "combined":
 		// 抽出と正規化を 1 回で行う経路。2 段階との差を測るために用意している。
 		// precision/recall は同じ土俵で比較できるが、この経路は NormalizedName や
 		// Tags も埋めるため、タグ付与の正しさは -struct 併用で出力を目視すること。
 		songs, err = comment.ParseAndNormalizeWithAI(aiSvc, comments)
-	} else {
+	default:
 		songs, err = comment.ParseCommentsWithAI(aiSvc, comments)
 	}
 	if err != nil {
