@@ -143,3 +143,27 @@ func TestExtractTimestampLinesGrouped(t *testing.T) {
 		}
 	})
 }
+
+// AI が要素を返したのに 1 つも使えない場合はエラーにする。
+//
+// これを成功として返すと「この配信には曲が無い」という見た目で通ってしまう。
+// 実際に 2026-08-07、応答が劣化して 10 要素すべて曲名が空になり、
+// 警告も出ないまま 0 曲として扱われた。エラーにすれば 2 段階経路へ退避できる。
+func TestParseNormalizeAndDedupWithAI_全要素が使えなければエラー(t *testing.T) {
+	// 曲名が空 & src も不正 → 1 件も組み立てられない
+	resp := `[
+  {"src":[999],"ts":"9:26","nv":"","n":"","t":[],"c":0.9},
+  {"src":[888],"ts":"20:42","nv":"","n":"","t":[],"c":0.9}
+]`
+	_, err := ParseNormalizeAndDedupWithAI(&stubChatter{response: resp}, groupedTestComments)
+	if err == nil {
+		t.Fatal("使える要素が 0 なのにエラーが返らなかった（0 曲として通ってしまう）")
+	}
+}
+
+// 空配列（＝AI が「歌唱行は無い」と判断）は正常な結果なのでエラーにしない。
+func TestParseNormalizeAndDedupWithAI_空配列は正常(t *testing.T) {
+	if _, err := ParseNormalizeAndDedupWithAI(&stubChatter{response: `[]`}, groupedTestComments); err != nil {
+		t.Errorf("空配列は正常な結果のはず: %v", err)
+	}
+}

@@ -180,7 +180,16 @@ func ParseNormalizeAndDedupWithAI(aiClient ai.Chatter, comments []string) ([]Par
 		return nil, fmt.Errorf("unmarshal AI grouped response: %w, response_preview: %s", err, preview)
 	}
 
-	return buildSongsFromGrouped(selections, lines), nil
+	songs := buildSongsFromGrouped(selections, lines)
+
+	// AI が要素を返したのに 1 つも使えるものが無い（曲名が空・src が不正など）のは、
+	// 応答が壊れている合図。ここで成功として返すと「この配信には曲が無い」という
+	// 見た目で通ってしまうため、エラーにして 2 段階経路へ退避させる。
+	if len(selections) > 0 && len(songs) == 0 {
+		return nil, fmt.Errorf("grouped AI returned %d elements but none were usable", len(selections))
+	}
+
+	return songs, nil
 }
 
 // buildGroupedMessage はコメントの区切りを見せたまま行番号を振る。

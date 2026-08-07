@@ -80,10 +80,14 @@ func (s *CommentService) AnalyzeComments(videoID string, force bool) (*dto.Analy
 	// 遠端から取り直した場合も、分析結果は実際に使ったコメント内容の hash に結び付ける。
 	rawHash = hashComments(comments)
 
-	// 2. AI hybrid 抽取（AI 判斷歌曲行 + 逐字驗證；失敗/未設定時自動退回純正則）
-	parsedSongs, extractWarning := s.parseComments(comments)
+	// 2. AI で抽出（統合経路では正規化と重複排除もここで済む）。失敗時は段階的に退避
+	parsedSongs, preNormalized, extractWarning := s.parseComments(comments)
 
 	// 3. 過濾 + 去重 + 驗證（先過濾避免非歌曲項目影響去重）
+	//
+	// 統合経路では AI が既に重複をまとめているが、DeduplicateSongs は通しておく。
+	// 開始時刻が離れていれば別の歌唱として残るので取りこぼしは増えず、
+	// AI が見落とした重複を拾う安全網として働く。
 	filterKW, keepKW, err := s.loadFilterKeywords()
 	if err != nil {
 		logger.Warnf("failed to load filter keywords, skipping filter: %v", err)
@@ -92,7 +96,7 @@ func (s *CommentService) AnalyzeComments(videoID string, force bool) (*dto.Analy
 	deduped := comment.DeduplicateSongs(filteredSongs)
 	validSongs := comment.ValidateSongs(deduped)
 
-	// 4. 轉成 CommentSong（逐字抽取結果）
+	// 4. 轉成 CommentSong（統合経路なら正規化結果も一緒に運ぶ）
 	songs := make([]dto.CommentSong, len(validSongs))
 	for i, song := range validSongs {
 		songs[i] = dto.CommentSong{
@@ -102,11 +106,26 @@ func (s *CommentService) AnalyzeComments(videoID string, force bool) (*dto.Analy
 			OriginalArtist:     song.OriginalArtist,
 			OriginalComment:    song.OriginalComment,
 			IsEndTimeEstimated: song.IsEndTimeEstimated,
+
+			NormalizedName:          song.NormalizedName,
+			NormalizedNameReading:   song.NormalizedNameReading,
+			NormalizedArtist:        song.NormalizedArtist,
+			NormalizedArtistReading: song.NormalizedArtistReading,
+			Tags:                    song.Tags,
+			Confidence:              song.Confidence,
 		}
 	}
 
-	// 5. 折り込んだ正規化（AI 正規化＋DB 照合し、結果を各曲に埋め込む）
-	aiWarning := s.normalizeInto(songs)
+	// 5. 正規化と DB 照合
+	//
+	// 統合経路では正規化が済んでいるので DB 照合だけを行う（AI を再度呼ばない）。
+	// 2 段階経路に退避した場合はここで AI 正規化を実行する。
+	var aiWarning string
+	if preNormalized {
+		s.reresolveMatches(songs)
+	} else {
+		aiWarning = s.normalizeInto(songs)
+	}
 	// 抽出の失敗は正規化の失敗より重い（曲そのものが取れていない）ので優先して伝える
 	if extractWarning != "" {
 		aiWarning = extractWarning
@@ -402,32 +421,48 @@ func (s *CommentService) loadFilterKeywords() (filterKW, keepKW []string, err er
 	return filterKW, keepKW, nil
 }
 
-// parseComments 於 edit-time 解析留言：優先用 AI hybrid（AI 選取歌曲行 + 正則抽取文字），
-// AI 成功時（含 0 曲）採用 AI 結果；僅在 AI 失敗或未設定 client 時退回純正則。
+// parseComments 於 edit-time 解析留言。3 段階で退避する：
 //
-// 第2返り値は「AI が失敗したため結果が劣化している」ことを示す文言（成功時は空）。
-// これを呼び出し側へ伝えないと、AI 障害が「この配信には曲が無い」という見た目で
+//	統合経路（抽出＋正規化＋重複排除を 1 回で）
+//	  → 2 段階（抽出のみ。正規化は呼び出し側）
+//	    → 純正則
+//
+// 返り値：
+//   - 抽出結果
+//   - preNormalized：正規化まで済んでいるか。true なら呼び出し側は AI 正規化を省き
+//     DB 照合だけを行う
+//   - warning：AI が失敗して結果が劣化していることを示す文言（成功時は空）
+//
+// warning を呼び出し側へ伝えないと、AI 障害が「この配信には曲が無い」という見た目で
 // 通ってしまい、しかもその空の結果がキャッシュに保存されて既存の分析を上書きする。
-func (s *CommentService) parseComments(comments []string) ([]comment.ParsedSong, string) {
+func (s *CommentService) parseComments(comments []string) (songs []comment.ParsedSong, preNormalized bool, warning string) {
 	if s.aiClient != nil {
-		songs, err := comment.ParseCommentsWithAI(s.aiClient, comments)
-		switch {
-		case err == nil:
-			logger.Infof("Using AI-extracted songs for analysis (%d songs)", len(songs))
-			return songs, ""
-		case errors.Is(err, comment.ErrNoTimestampLines):
+		// 第1候補：統合経路（抽出＋正規化＋重複排除を 1 回で）
+		songs, err := comment.ParseNormalizeAndDedupWithAI(s.aiClient, comments)
+		if err == nil {
+			logger.Infof("Using grouped AI extraction (%d songs)", len(songs))
+			return songs, true, ""
+		}
+		if errors.Is(err, comment.ErrNoTimestampLines) {
 			// 解析対象が無いだけで、AI の障害ではない。劣化として扱うと
 			// 毎回警告が出るうえキャッシュも書かれず、無駄に再解析し続ける。
 			logger.Infof("No timestamp lines in comments; nothing to extract")
-			return nil, ""
-		default:
-			logger.Warnf("AI comment parse failed, falling back to regex: %v", err)
-			return comment.ParseComments(comments),
-				fmt.Sprintf("AI抽出に失敗しました（%v）。正規表現のみで解析しました。", err)
+			return nil, false, ""
 		}
+		logger.Warnf("grouped AI extraction failed, falling back to 2-stage: %v", err)
+
+		// 第2候補：従来の 2 段階（抽出のみ。正規化は呼び出し側が行う）
+		songs, err = comment.ParseCommentsWithAI(s.aiClient, comments)
+		if err == nil {
+			logger.Infof("Using AI-extracted songs for analysis (%d songs)", len(songs))
+			return songs, false, ""
+		}
+		logger.Warnf("AI comment parse failed, falling back to regex: %v", err)
+		return comment.ParseComments(comments), false,
+			fmt.Sprintf("AI抽出に失敗しました（%v）。正規表現のみで解析しました。", err)
 	}
 	logger.Infof("Using regex-only comment parse (no AI client configured)")
-	return comment.ParseComments(comments), ""
+	return comment.ParseComments(comments), false, ""
 }
 
 // getComments 從 DB 讀取非空的原始留言，若無則從 YouTube/Holodex 抓取並保存。
