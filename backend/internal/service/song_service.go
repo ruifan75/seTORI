@@ -342,13 +342,29 @@ func (s *SongService) ApplyEditableFields(id uuid.UUID, fields map[string]string
 }
 
 // MergeSongs 將來源歌曲合併至目標歌曲
+//
+// 統合は「この 2 つは同じ曲だ」という人の確定した判断なので、照合の学習にも使う。
+// 統合元の表記は消える前に控えておく必要がある。
+//
+// なおここで学習するのは**楽曲の別表記だけ**で、アーティストの別名義は作らない。
+// 曲名が同じで統合されたからといって 2 人が同一人物とは限らない（カバー曲を
+// 同じ楽曲として畳んだ場合など）。楽曲の別表記はその 1 組にしか効かないので
+// 安全側だが、アーティストの別名義は全楽曲に効くため、より強い根拠を要求する。
 func (s *SongService) MergeSongs(sourceSongID, targetSongID uuid.UUID) error {
+	var source, target *models.Song
+	if s.matchService != nil {
+		source, _ = s.songRepo.FindByID(sourceSongID)
+		target, _ = s.songRepo.FindByID(targetSongID)
+	}
+
 	if err := s.songRepo.MergeSong(sourceSongID, targetSongID); err != nil {
 		return err
 	}
-	// 統合が済んだので、この 2 曲に紐づく未処理の統合候補は畳む。
-	// 残しておくと解決済みの組が一覧に出続ける。
+
 	if s.matchService != nil {
+		s.matchService.LearnFromMerge(source, target)
+		// 統合が済んだので、この 2 曲に紐づく未処理の統合候補は畳む。
+		// 残しておくと解決済みの組が一覧に出続ける。
 		if err := s.matchService.ResolveCandidatesForMergedSong(sourceSongID, targetSongID); err != nil {
 			logger.Warnf("resolve merge candidates failed (%s → %s): %v", sourceSongID, targetSongID, err)
 		}

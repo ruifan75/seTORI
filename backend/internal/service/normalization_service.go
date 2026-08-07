@@ -7,6 +7,7 @@ import (
 
 	"github.com/ruifan75/setori/internal/dto"
 	"github.com/ruifan75/setori/internal/logger"
+	"github.com/ruifan75/setori/internal/models"
 	"github.com/ruifan75/setori/internal/repository"
 	"github.com/ruifan75/setori/pkg/ai"
 )
@@ -171,7 +172,59 @@ func (s *NormalizationService) BatchAINormalization(items []dto.AINormalizationI
 		}
 	}
 
+	// 曲名は一意に一致したのにアーティストだけ食い違ったものを、まとめて AI に問う。
+	// ここで別名義（松任谷由実 = 荒井由実）が確定すれば照合しなおして拾える。
+	// 判定は肯定・否定とも永続化されるので、同じ組を二度は聞かない。
+	s.resolveAliasesAndRematch(items, suggestions)
+
 	return &dto.BatchAINormalizationResponse{Suggestions: suggestions, Warning: warning}, nil
+}
+
+// resolveAliasesAndRematch は照合しきれなかったアーティストの組を AI に判定させ、
+// 別名義が登録できたぶんだけ照合をやり直す（in-place）。
+//
+// キャッシュ命中時の再解決（ResolveMatch）からは呼ばない。あちらは AI を呼ばない
+// 約束の経路で、そこに問い合わせを混ぜると「AI を使わないはずの操作が遅くなる」。
+func (s *NormalizationService) resolveAliasesAndRematch(items []dto.AINormalizationItem, suggestions []dto.AISuggestionResult) {
+	if s.matchService == nil {
+		return
+	}
+
+	var pairs []artistPair
+	for i := range suggestions {
+		if suggestions[i].MatchedSongID != nil {
+			continue // 既に自動採用できている
+		}
+		pairs = append(pairs, collectArtistAliasPairsFromDTO(suggestions[i])...)
+	}
+	if len(pairs) == 0 {
+		return
+	}
+	if linked := s.adjudicateArtistAliases(pairs); linked == 0 {
+		return
+	}
+
+	// 別名義が増えたので、まだ結びついていない項目だけ照合しなおす
+	for i := range suggestions {
+		if suggestions[i].MatchedSongID != nil {
+			continue
+		}
+		suggestions[i].MatchCandidates = nil
+		s.matchAndPopulateSong(&suggestions[i], &items[i], suggestions[i].NormalizedName, suggestions[i].OriginalArtist)
+	}
+}
+
+// collectArtistAliasPairsFromDTO は候補（DTO）から問い合わせ対象の組を拾う。
+func collectArtistAliasPairsFromDTO(sug dto.AISuggestionResult) []artistPair {
+	cands := make([]MatchCandidate, 0, len(sug.MatchCandidates))
+	for _, c := range sug.MatchCandidates {
+		cands = append(cands, MatchCandidate{
+			Song:   models.Song{OriginalArtist: c.Artist},
+			Score:  c.Score,
+			Reason: c.Reason,
+		})
+	}
+	return collectArtistAliasPairs(sug.OriginalArtist, cands)
 }
 
 // buildBatchMessage 構築包含所有楽曲のバッチメッセージ

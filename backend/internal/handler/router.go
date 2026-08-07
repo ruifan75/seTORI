@@ -72,13 +72,14 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	authRepo := repository.NewAuthRepository(db)
 	artistRepo := repository.NewArtistRepository(db)
 	songMatchRepo := repository.NewSongMatchRepository(db)
+	aliasRepo := repository.NewAliasRepository(db)
 
 	// AI サービス：複数 provider ローテーション + failover、未設定時は GROQ_API_KEY にフォールバック
 	aiService := service.NewAIService(aiProviderRepo, cfg.GroqAPIKey)
 
 	// services を作成
 	// 楽曲の同一性判定（曲名キー主導 + アーティストで検証）。照合を使う側は全員これを通す
-	songMatchService := service.NewSongMatchService(songMatchRepo, songRepo, songItunesRepo)
+	songMatchService := service.NewSongMatchService(songMatchRepo, songRepo, songItunesRepo, aliasRepo)
 	songService := service.NewSongService(songRepo, perfRepo, songItunesRepo, artistRepo)
 	songService.SetMatchService(songMatchService)
 	artistService := service.NewArtistService(artistRepo, songRepo, aiService)
@@ -232,6 +233,13 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("GET /api/songs/merge-candidates", r.handleListMergeCandidates)
 	r.mux.HandleFunc("POST /api/songs/merge-candidates/{id}/dismiss", r.handleDismissMergeCandidate)
 	r.mux.HandleFunc("GET /api/songs/{id}/merge-candidates", r.handleGetSongMergeCandidates)
+
+	// API routes - 照合の学習層（アーティストの別名義・楽曲の別表記）
+	r.mux.HandleFunc("GET /api/aliases/artists", r.handleListArtistAliases)
+	r.mux.HandleFunc("POST /api/aliases/artists", r.handleLinkArtistAliases)
+	r.mux.HandleFunc("DELETE /api/aliases/artists/{nameKey}", r.handleUnlinkArtistAlias)
+	r.mux.HandleFunc("GET /api/aliases/songs", r.handleListSongAliases)
+	r.mux.HandleFunc("DELETE /api/aliases/songs", r.handleDeleteSongAlias)
 
 	// API routes - Streams
 	r.mux.HandleFunc("GET /api/streams", r.handleListStreams)
@@ -2666,6 +2674,12 @@ func requiredPermission(method, path string) (perm string, needsAuth bool) {
 			return "", false
 		}
 		return "", true // 作成・更新・削除はログイン必須（特定権限は不要）
+	}
+
+	// 照合の学習層は全楽曲の照合結果を左右する。AI の判定も含まれるので、
+	// 閲覧も編集もレビュー担当（content:edit）に限る。
+	if strings.HasPrefix(path, "/api/aliases") {
+		return auth.PermContentEdit, true
 	}
 
 	// 統合候補はレビュー用の作業一覧なので、修正提案のレビューと同じ権限に揃える。

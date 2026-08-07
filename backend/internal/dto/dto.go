@@ -435,6 +435,32 @@ type MergeCandidateResponse struct {
 	ExistingSong MergeCandidateSong `json:"existing_song"`
 }
 
+// ========== 照合の学習層（別名義・別表記） ==========
+
+// ArtistAliasMemberResponse は別名義グループの 1 名。
+type ArtistAliasMemberResponse struct {
+	NameKey     string `json:"name_key"`
+	DisplayName string `json:"display_name"`
+	Source      string `json:"source"` // manual | ai
+	Note        string `json:"note,omitempty"`
+}
+
+// ArtistAliasGroupResponse は同一人物としてまとめられた名前の集まり。
+type ArtistAliasGroupResponse struct {
+	GroupID string                      `json:"group_id"`
+	Members []ArtistAliasMemberResponse `json:"members"`
+}
+
+// SongAliasResponse は統合から学習した「この表記はこの曲」の 1 件。
+type SongAliasResponse struct {
+	NameKey    string `json:"name_key"`
+	ArtistKey  string `json:"artist_key"`
+	Source     string `json:"source"`
+	SongID     string `json:"song_id"`
+	SongName   string `json:"song_name"`
+	SongArtist string `json:"song_artist"`
+}
+
 // SongMatchCandidate は既存楽曲との照合候補 1 件。
 type SongMatchCandidate struct {
 	SongID  string  `json:"song_id"`

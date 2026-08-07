@@ -961,3 +961,29 @@ export interface MergeCandidate {
   new_song: MergeCandidateSong;
   existing_song: MergeCandidateSong;
 }
+
+// ========== 照合の学習層 ==========
+
+// 同一人物としてまとめられたアーティスト名義。source='ai' は AI が判定したもので、
+// 誤っていれば解除できる（解除は「別人」という判定として残る）。
+export interface ArtistAliasMember {
+  name_key: string;
+  display_name: string;
+  source: 'manual' | 'ai' | string;
+  note?: string;
+}
+
+export interface ArtistAliasGroup {
+  group_id: string;
+  members: ArtistAliasMember[];
+}
+
+// 楽曲の統合から学習した「この表記はこの曲」。
+export interface SongAlias {
+  name_key: string;
+  artist_key: string;
+  source: string;
+  song_id: string;
+  song_name: string;
+  song_artist: string;
+}

@@ -2,8 +2,11 @@ package service
 
 import (
 	"fmt"
+	"sort"
+	"sync"
 
 	"github.com/google/uuid"
+	"github.com/ruifan75/setori/internal/logger"
 	"github.com/ruifan75/setori/internal/models"
 	"github.com/ruifan75/setori/internal/repository"
 	"github.com/ruifan75/setori/pkg/songmatch"
@@ -26,14 +29,22 @@ type SongMatchService struct {
 	matchRepo  *repository.SongMatchRepository
 	songRepo   *repository.SongRepository
 	itunesRepo *repository.SongItunesRepository
+	aliasRepo  *repository.AliasRepository
+
+	// アーティストの別名義は照合のたびに要るので読み込んだまま持つ。
+	// 数百件規模で、書き込みは人の操作か AI 判定のときだけなので、
+	// 書いた側が明示的に捨てる方式にしている（TTL だと反映の遅れが読めない）。
+	aliasMu     sync.RWMutex
+	artistCanon map[string]string
 }
 
 func NewSongMatchService(
 	matchRepo *repository.SongMatchRepository,
 	songRepo *repository.SongRepository,
 	itunesRepo *repository.SongItunesRepository,
+	aliasRepo *repository.AliasRepository,
 ) *SongMatchService {
-	return &SongMatchService{matchRepo: matchRepo, songRepo: songRepo, itunesRepo: itunesRepo}
+	return &SongMatchService{matchRepo: matchRepo, songRepo: songRepo, itunesRepo: itunesRepo, aliasRepo: aliasRepo}
 }
 
 const (
@@ -57,6 +68,8 @@ const (
 	ReasonTitleMismatch  = "title_mismatch"  // 曲名キー一致 + アーティストが違う（別名義の可能性）
 	ReasonTitleAmbiguous = "title_ambiguous" // 同じ曲名キーの曲が複数あり、決め手が無い
 	ReasonFuzzy          = "fuzzy_title"     // 曲名が近いだけ
+	ReasonSongAlias      = "song_alias"      // 学習済みの別表記（過去に人が統合した組）
+	ReasonArtistAlias    = "artist_alias"    // 曲名キー一致 + アーティストが別名義として登録済み
 )
 
 // MatchCandidate は照合候補 1 件。
@@ -74,10 +87,29 @@ func (c MatchCandidate) NeedsReview() bool { return c.Score >= ReviewScore && c.
 
 // FindCandidates は確信度の高い順に候補を返す。候補が無ければ空。
 //
-// 探索の順序は「iTunes ID → 曲名キー → 曲名の近似」。
+// 探索の順序は「学習済みの別表記 → iTunes ID → 曲名キー → 曲名の近似」。
 // 曲名を先に引くのは、実測（820曲）で曲名キーの衝突がわずか 3 組しかないのに対し、
 // アーティスト表記は 12% がクレジット文字列で当てにならないため。
 func (s *SongMatchService) FindCandidates(name, artist string, itunesID *int64) ([]MatchCandidate, error) {
+	nameKey := songmatch.TitleKey(name)
+	queryArtist := songmatch.ParseArtist(artist)
+
+	// 0. 過去に人が「これは同じ曲だ」と判断した表記なら、そこで終わり。
+	//    類似度計算も AI も通さないので、使うほど速く・確実になる。
+	if s.aliasRepo != nil {
+		if songID, err := s.aliasRepo.FindSongAlias(nameKey, queryArtist.String()); err != nil {
+			logger.Warnf("song alias lookup failed: %v", err)
+		} else if songID != nil {
+			song, err := s.songRepo.FindByID(*songID)
+			if err != nil {
+				return nil, fmt.Errorf("find aliased song: %w", err)
+			}
+			if song != nil {
+				return []MatchCandidate{{Song: *song, Score: 1.0, Reason: ReasonSongAlias}}, nil
+			}
+		}
+	}
+
 	// 1. iTunes ID は人手で紐づけた最も強い証拠
 	if itunesID != nil && *itunesID > 0 {
 		song, err := s.songRepo.FindByItunesID(*itunesID)
@@ -89,8 +121,7 @@ func (s *SongMatchService) FindCandidates(name, artist string, itunesID *int64) 
 		}
 	}
 
-	nameKey := songmatch.TitleKey(name)
-	queryArtist := songmatch.ParseArtist(artist)
+	canon := s.artistAliasMap()
 
 	// 2. 曲名キーで引く
 	hits, err := s.matchRepo.FindByNameKey(nameKey)
@@ -98,7 +129,7 @@ func (s *SongMatchService) FindCandidates(name, artist string, itunesID *int64) 
 		return nil, err
 	}
 	if len(hits) > 0 {
-		return scoreHits(hits, name, artist, queryArtist), nil
+		return scoreHits(hits, name, artist, queryArtist, canon), nil
 	}
 
 	// 3. 曲名キーすら一致しないときだけ近似検索。ここは自動採用の水準には届かせない
@@ -111,7 +142,7 @@ func (s *SongMatchService) FindCandidates(name, artist string, itunesID *int64) 
 	for _, h := range similar {
 		score := 0.35
 		// アーティストまで一致するなら人に見せる価値がある
-		if rel := songmatch.CompareArtists(queryArtist, h.ArtistKey); rel >= songmatch.ArtistPrimary {
+		if rel, _ := compareArtists(queryArtist, h.ArtistKey, canon); rel >= songmatch.ArtistPrimary {
 			score = 0.65
 		}
 		out = append(out, MatchCandidate{Song: h.Song, Score: score, Reason: ReasonFuzzy})
@@ -119,8 +150,43 @@ func (s *SongMatchService) FindCandidates(name, artist string, itunesID *int64) 
 	return out, nil
 }
 
+// compareArtists は別名義を織り込んでアーティストを突き合わせる。
+// 2 つ目の戻り値は「素の表記では一致せず、別名義の登録があって初めて一致した」ことを示す。
+//
+// 素の比較を先に試すのは、判定の根拠を UI とログに正しく出すため。
+// 別名義で救われた一致はそう見えていないと、誤った別名義登録に気づけない。
+func compareArtists(a, b songmatch.ArtistKey, canon map[string]string) (songmatch.ArtistRelation, bool) {
+	direct := songmatch.CompareArtists(a, b)
+	if direct != songmatch.ArtistNone || len(canon) == 0 {
+		return direct, false
+	}
+	viaAlias := songmatch.CompareArtists(canonicalizeArtistKey(a, canon), canonicalizeArtistKey(b, canon))
+	return viaAlias, viaAlias != songmatch.ArtistNone
+}
+
+// canonicalizeArtistKey は各名前を別名義グループの代表に寄せる。
+// 「松任谷由実」と「荒井由実」が同じグループなら、どちらも同じ文字列になる。
+func canonicalizeArtistKey(k songmatch.ArtistKey, canon map[string]string) songmatch.ArtistKey {
+	out := songmatch.ArtistKey{Primary: k.Primary}
+	if c, ok := canon[k.Primary]; ok {
+		out.Primary = c
+	}
+	seen := map[string]bool{}
+	for _, t := range k.Tokens {
+		if c, ok := canon[t]; ok {
+			t = c
+		}
+		if !seen[t] {
+			seen[t] = true
+			out.Tokens = append(out.Tokens, t)
+		}
+	}
+	sort.Strings(out.Tokens)
+	return out
+}
+
 // scoreHits は曲名キーが一致した候補にアーティストで点をつける。
-func scoreHits(hits []repository.KeyedSong, name, artist string, queryArtist songmatch.ArtistKey) []MatchCandidate {
+func scoreHits(hits []repository.KeyedSong, name, artist string, queryArtist songmatch.ArtistKey, canon map[string]string) []MatchCandidate {
 	unique := len(hits) == 1
 	out := make([]MatchCandidate, 0, len(hits))
 
@@ -133,7 +199,8 @@ func scoreHits(hits []repository.KeyedSong, name, artist string, queryArtist son
 
 		var score float64
 		var reason string
-		switch songmatch.CompareArtists(queryArtist, h.ArtistKey) {
+		rel, viaAlias := compareArtists(queryArtist, h.ArtistKey, canon)
+		switch rel {
 		case songmatch.ArtistSame:
 			score, reason = 0.97, ReasonTitleArtist
 		case songmatch.ArtistPrimary:
@@ -163,6 +230,10 @@ func scoreHits(hits []repository.KeyedSong, name, artist string, queryArtist son
 				score, reason = 0.30, ReasonTitleAmbiguous
 			}
 		}
+		// 別名義の登録で救われた一致は、そうと分かる理由に差し替える
+		if viaAlias && score >= AutoMatchScore {
+			reason = ReasonArtistAlias
+		}
 		out = append(out, MatchCandidate{Song: h.Song, Score: score, Reason: reason})
 	}
 
@@ -191,6 +262,174 @@ func sortCandidates(c []MatchCandidate) {
 // RebuildKeys は照合キーを最新の規則で作り直す（起動時に呼ぶ）。
 func (s *SongMatchService) RebuildKeys() (int, error) {
 	return s.matchRepo.RebuildStale()
+}
+
+// ---------- アーティストの別名義（Layer 2） ----------
+
+// artistAliasMap は別名義の対応表を返す。初回だけ DB を読み、以後は保持する。
+// 別名義が 1 件も無い場合も「読んだ」状態にして毎回問い合わせないようにする。
+func (s *SongMatchService) artistAliasMap() map[string]string {
+	if s.aliasRepo == nil {
+		return nil
+	}
+	s.aliasMu.RLock()
+	m := s.artistCanon
+	s.aliasMu.RUnlock()
+	if m != nil {
+		return m
+	}
+
+	loaded, err := s.aliasRepo.LoadArtistAliasMap()
+	if err != nil {
+		// 別名義が引けなくても素の照合はできる。落とさずに素通しする。
+		logger.Warnf("load artist alias map failed: %v", err)
+		return nil
+	}
+	if loaded == nil {
+		loaded = map[string]string{}
+	}
+	s.aliasMu.Lock()
+	s.artistCanon = loaded
+	s.aliasMu.Unlock()
+	return loaded
+}
+
+// invalidateAliasCache は別名義を書き換えたあとに呼ぶ。
+func (s *SongMatchService) invalidateAliasCache() {
+	s.aliasMu.Lock()
+	s.artistCanon = nil
+	s.aliasMu.Unlock()
+}
+
+// LinkArtistAliases は 2 つのアーティスト表記を同一人物として登録する。
+// 表記はそのまま渡してよい（内部で照合キーへ畳む）。
+func (s *SongMatchService) LinkArtistAliases(displayA, displayB, source, note string) error {
+	keyA := songmatch.ParseArtist(displayA).Primary
+	keyB := songmatch.ParseArtist(displayB).Primary
+	if keyA == "" || keyB == "" {
+		return fmt.Errorf("アーティスト名が空です")
+	}
+	if keyA == keyB {
+		return fmt.Errorf("同じ名前どうしは登録できません")
+	}
+	if err := s.aliasRepo.LinkArtists(keyA, displayA, keyB, displayB, source, note); err != nil {
+		return err
+	}
+	// 判定履歴にも残す。ここを書かないと AI に何度も同じ組を聞いてしまう。
+	if err := s.aliasRepo.RecordCheck(keyA, keyB, true, source, note); err != nil {
+		logger.Warnf("record alias check failed: %v", err)
+	}
+	s.invalidateAliasCache()
+	logger.Infof("アーティストの別名義を登録しました: %q = %q (%s)", displayA, displayB, source)
+	return nil
+}
+
+// UnlinkArtistAlias は別名義グループから 1 名を外す（多くは AI の誤判定の取り消し）。
+//
+// 外すだけでは足りない。判定履歴を放置すると、次の解析で同じ組がまた
+// 「未判定」として AI に送られ、同じ誤りが復活する。人が外した組は
+// source=manual の否定として残し、AI の判断より優先させる。
+func (s *SongMatchService) UnlinkArtistAlias(nameKey string) error {
+	// 外す前に、同じグループの誰と切り離すことになるのかを控えておく
+	var siblings []string
+	groups, err := s.aliasRepo.ListArtistAliasGroups()
+	if err != nil {
+		logger.Warnf("list alias groups before unlink failed: %v", err)
+	} else {
+		for _, g := range groups {
+			if !containsMember(g.Members, nameKey) {
+				continue
+			}
+			for _, m := range g.Members {
+				if m.NameKey != nameKey {
+					siblings = append(siblings, m.NameKey)
+				}
+			}
+		}
+	}
+
+	if err := s.aliasRepo.UnlinkArtist(nameKey); err != nil {
+		return err
+	}
+	for _, other := range siblings {
+		if err := s.aliasRepo.RecordCheck(nameKey, other, false, "manual", "人が別名義の登録を解除"); err != nil {
+			logger.Warnf("record manual unlink verdict failed: %v", err)
+		}
+	}
+	s.invalidateAliasCache()
+	logger.Infof("アーティストの別名義を解除しました: %s（%d 組を別人として記録）", nameKey, len(siblings))
+	return nil
+}
+
+func containsMember(members []repository.ArtistAliasMember, nameKey string) bool {
+	for _, m := range members {
+		if m.NameKey == nameKey {
+			return true
+		}
+	}
+	return false
+}
+
+// ListArtistAliasGroups は別名義グループの一覧を返す。
+func (s *SongMatchService) ListArtistAliasGroups() ([]repository.ArtistAliasGroup, error) {
+	return s.aliasRepo.ListArtistAliasGroups()
+}
+
+// CheckedArtistPairs は既に判定済みの組を返す（AI への再問い合わせ抑止）。
+func (s *SongMatchService) CheckedArtistPairs(pairKeys []string) (map[string]bool, error) {
+	return s.aliasRepo.FindCheckedPairs(pairKeys)
+}
+
+// RecordArtistAliasVerdict は「同一人物ではない」も含めて判定を残す。
+func (s *SongMatchService) RecordArtistAliasVerdict(keyA, keyB string, same bool, source, note string) error {
+	return s.aliasRepo.RecordCheck(keyA, keyB, same, source, note)
+}
+
+// ---------- 楽曲の別表記（Layer 3） ----------
+
+// LearnSongAlias は「この表記はこの楽曲だ」を記録する。
+func (s *SongMatchService) LearnSongAlias(name, artist string, songID uuid.UUID, source string) error {
+	nameKey := songmatch.TitleKey(name)
+	artistKey := songmatch.ParseArtist(artist).String()
+	return s.aliasRepo.PutSongAlias(nil, nameKey, artistKey, songID, source)
+}
+
+// ListSongAliases は学習済みの別表記を返す。
+func (s *SongMatchService) ListSongAliases(limit int) ([]repository.SongAliasRow, error) {
+	return s.aliasRepo.ListSongAliases(limit)
+}
+
+// DeleteSongAlias は学習した対応を取り消す。
+func (s *SongMatchService) DeleteSongAlias(nameKey, artistKey string) error {
+	return s.aliasRepo.DeleteSongAlias(nameKey, artistKey)
+}
+
+// LearnFromMerge は楽曲の統合から別表記を学習する。
+//
+// 030 の受け皿のおかげで、照合を外した表記はそのまま新曲として登録されている。
+// つまり統合元の名前は「照合に失敗したときの生の表記」そのもので、
+// 統合はそれを「実はこの曲だった」と人が確定させる操作になっている。
+// ここを学習に使うと、次から同じ表記が来ても迷わない。
+func (s *SongMatchService) LearnFromMerge(source, target *models.Song) {
+	if s.aliasRepo == nil || source == nil || target == nil {
+		return
+	}
+	// 統合元を指していた学習済みの表記は統合先へ付け替える（曲ごと消えるため）
+	if err := s.aliasRepo.RepointSongAliases(nil, source.ID, target.ID); err != nil {
+		logger.Warnf("repoint song aliases failed: %v", err)
+	}
+
+	srcName, srcArtist := songmatch.TitleKey(source.Name), songmatch.ParseArtist(source.OriginalArtist)
+	dstName, dstArtist := songmatch.TitleKey(target.Name), songmatch.ParseArtist(target.OriginalArtist)
+	if srcName == dstName && srcArtist.String() == dstArtist.String() {
+		return // 照合キーが同じなら学ぶことは無い（元から当たる）
+	}
+	if err := s.aliasRepo.PutSongAlias(nil, srcName, srcArtist.String(), target.ID, "merge"); err != nil {
+		logger.Warnf("learn song alias failed: %v", err)
+		return
+	}
+	logger.Infof("統合から別表記を学習しました: %q / %q → %q / %q",
+		source.Name, source.OriginalArtist, target.Name, target.OriginalArtist)
 }
 
 // ---------- 統合候補 ----------

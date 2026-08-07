@@ -18,6 +18,8 @@ import type {
   SyncHolodexResponse,
   SongSuggestion,
   MergeCandidate,
+  ArtistAliasGroup,
+  SongAlias,
   AnalyzeCommentsResponse,
   BatchAnalyzeStatus,
   SuccessResponse,
@@ -192,6 +194,39 @@ export const songApi = {
 
   dismissMergeCandidate: async (id: string): Promise<{ message: string }> => {
     const { data } = await api.post(`/api/songs/merge-candidates/${id}/dismiss`);
+    return data;
+  },
+};
+
+// ========== 照合の学習層 API ==========
+//
+// アーティストの別名義（松任谷由実 = 荒井由実）と、統合から学習した楽曲の別表記。
+// どちらも照合の結果を左右するので content:edit が要る。
+
+export const aliasApi = {
+  listArtists: async (): Promise<{ groups: ArtistAliasGroup[] }> => {
+    const { data } = await api.get('/api/aliases/artists');
+    return data;
+  },
+
+  linkArtists: async (nameA: string, nameB: string, note?: string): Promise<{ message: string }> => {
+    const { data } = await api.post('/api/aliases/artists', { name_a: nameA, name_b: nameB, note });
+    return data;
+  },
+
+  unlinkArtist: async (nameKey: string): Promise<{ message: string }> => {
+    const { data } = await api.delete(`/api/aliases/artists/${encodeURIComponent(nameKey)}`);
+    return data;
+  },
+
+  listSongs: async (limit = 100): Promise<{ aliases: SongAlias[] }> => {
+    const { data } = await api.get(`/api/aliases/songs?limit=${limit}`);
+    return data;
+  },
+
+  deleteSong: async (nameKey: string, artistKey: string): Promise<{ message: string }> => {
+    const params = new URLSearchParams({ name_key: nameKey, artist_key: artistKey });
+    const { data } = await api.delete(`/api/aliases/songs?${params}`);
     return data;
   },
 };

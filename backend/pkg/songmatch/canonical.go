@@ -137,6 +137,11 @@ type ArtistKey struct {
 	Tokens []string
 }
 
+// String は照合キーとして保存・索引できる 1 本の文字列にする。
+// トークンは畳み済み（英数字と仮名漢字のみ）なので区切りに "|" を使っても衝突しない。
+// "ランカ・リー(中島愛)" も "ランカ・リー=中島愛" も同じ文字列になる。
+func (k ArtistKey) String() string { return strings.Join(k.Tokens, "|") }
+
 // ParseArtist はアーティスト表記を分解する。
 func ParseArtist(artist string) ArtistKey {
 	s := util.NormalizeUnicode(artist)
