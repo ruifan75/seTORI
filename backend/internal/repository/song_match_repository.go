@@ -34,6 +34,13 @@ type execer interface {
 // （SongRepository の Create/Update もこれを使う）。
 func upsertSongMatchKey(db execer, songID uuid.UUID, name, artist string) error {
 	ak := songmatch.ParseArtist(artist)
+	// アーティストが空だと Tokens は nil で、pq.Array(nil) は NULL になる
+	// （artist_tokens は NOT NULL）。曲名だけ分かってアーティストが不明、は
+	// コメント解析では普通に起きるので、空配列に倒しておく。
+	tokens := ak.Tokens
+	if tokens == nil {
+		tokens = []string{}
+	}
 	_, err := db.Exec(`
 		INSERT INTO song_match_keys
 			(song_id, name_key, artist_primary, artist_tokens, rules_version, src_name, src_artist, updated_at)
@@ -46,7 +53,7 @@ func upsertSongMatchKey(db execer, songID uuid.UUID, name, artist string) error 
 			src_name = EXCLUDED.src_name,
 			src_artist = EXCLUDED.src_artist,
 			updated_at = NOW()`,
-		songID, songmatch.TitleKey(name), ak.Primary, pq.Array(ak.Tokens), songmatch.RulesVersion, name, artist)
+		songID, songmatch.TitleKey(name), ak.Primary, pq.Array(tokens), songmatch.RulesVersion, name, artist)
 	if err != nil {
 		return fmt.Errorf("upsert song match key: %w", err)
 	}

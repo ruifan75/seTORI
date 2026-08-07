@@ -153,3 +153,25 @@ func trimSpace(s string) string {
 	}
 	return s
 }
+
+// アーティストが書かれていない行はコメント解析では普通に出る。
+// Tokens が nil のまま DB へ渡すと NOT NULL 制約に当たるので、
+// 空でも扱える形（空文字・空配列）になっていることを固定しておく。
+func TestParseArtist_Empty(t *testing.T) {
+	k := ParseArtist("")
+	if k.Primary != "" {
+		t.Errorf("Primary = %q, want empty", k.Primary)
+	}
+	if len(k.Tokens) != 0 {
+		t.Errorf("Tokens = %v, want empty", k.Tokens)
+	}
+	if k.String() != "" {
+		t.Errorf("String() = %q, want empty", k.String())
+	}
+	// 記号だけ、空白だけも同じ扱いになること
+	for _, s := range []string{"   ", "()", "/", "&"} {
+		if got := ParseArtist(s); len(got.Tokens) != 0 {
+			t.Errorf("ParseArtist(%q).Tokens = %v, want empty", s, got.Tokens)
+		}
+	}
+}
