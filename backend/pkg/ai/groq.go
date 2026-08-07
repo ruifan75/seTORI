@@ -3,6 +3,7 @@ package ai
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ruifan75/setori/internal/logger"
@@ -84,10 +86,18 @@ type ChatMessage struct {
 
 // ChatRequest チャットリクエスト
 type ChatRequest struct {
-	Model       string        `json:"model"`
-	Messages    []ChatMessage `json:"messages"`
-	Temperature float64       `json:"temperature"`
-	MaxTokens   int           `json:"max_tokens,omitempty"`
+	Model    string        `json:"model"`
+	Messages []ChatMessage `json:"messages"`
+
+	// 既定値しか受け付けないモデルがあるため、省略できるようポインタにしている。
+	Temperature *float64 `json:"temperature,omitempty"`
+
+	// 出力上限のパラメータ名はプロバイダー・モデルによって異なる。
+	// 従来の OpenAI 互換 API は max_tokens だが、GPT-5 系など新しめのモデルは
+	// max_completion_tokens しか受け付けず、max_tokens を送ると 400 を返す。
+	// どちらか一方だけを送る（omitempty で他方は落ちる）。
+	MaxTokens           int `json:"max_tokens,omitempty"`
+	MaxCompletionTokens int `json:"max_completion_tokens,omitempty"`
 }
 
 // ChatResponse チャットレスポンス
@@ -149,13 +159,120 @@ func estimateMaxTokens(messages []ChatMessage) int {
 	return est
 }
 
+// modelQuirks はモデルごとの「受け付けないパラメータ」を覚える。
+//
+// OpenAI 互換を名乗っていても細部は揃っておらず、対応は増減する。
+// 毎回コードを直すのではなく、400 の内容から学習して以降は最初から避ける。
+type modelQuirks struct {
+	// 出力上限を max_tokens ではなく max_completion_tokens で送る（GPT-5 系など）
+	useCompletionTokens bool
+	// temperature を送らない（既定値しか受け付けないモデル）
+	omitTemperature bool
+	// 出力枠の倍率。推論モデルは max_completion_tokens に内部推論ぶんも含むため、
+	// 「出力の長さ」から見積もった枠では足りない。実際に gpt-5.6-luna では
+	// 枠 1024 を推論だけで使い切り、本文が空のまま切れた。
+	// finish_reason=length を見たら倍にして学習する（0 は 1 と同じ扱い）。
+	outputMultiplier int
+}
+
+func (q modelQuirks) multiplier() int {
+	if q.outputMultiplier < 1 {
+		return 1
+	}
+	return q.outputMultiplier
+}
+
+// quirkCache は baseURL|model をキーに modelQuirks を保持する。
+// Client は呼び出しごとに作り直されるため、インスタンスではなくパッケージ側に持つ。
+var quirkCache sync.Map
+
+func loadQuirks(baseURL, model string) modelQuirks {
+	if v, ok := quirkCache.Load(baseURL + "|" + model); ok {
+		return v.(modelQuirks)
+	}
+	return modelQuirks{}
+}
+
+// learnQuirks は 400 の内容から回避策を学ぶ。変化があれば true を返す。
+func learnQuirks(err error, q *modelQuirks) bool {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusBadRequest {
+		return false
+	}
+	changed := false
+	if !q.useCompletionTokens && strings.Contains(apiErr.Body, "max_completion_tokens") {
+		q.useCompletionTokens = true
+		changed = true
+	}
+	// 例: "'temperature' does not support 0.1 with this model. Only the default (1) value is supported."
+	if !q.omitTemperature && strings.Contains(apiErr.Body, "'temperature'") {
+		q.omitTemperature = true
+		changed = true
+	}
+	return changed
+}
+
+// maxQuirkRetries は回避策の学習に許す再送回数。
+// 400 は 1 度に 1 つのパラメータしか指摘してこないため、非対応が複数あるときは
+// その数だけ往復が要る。現状 2 種類なので 2 で足りるが、余裕を持たせている。
+const maxQuirkRetries = 5
+
+// maxOutputMultiplier は截断を受けて枠を広げる上限（1024 の floor から最大 16 倍）。
+// 推論モデルは max_completion_tokens に内部推論ぶんも含むため、出力の長さから
+// 見積もった枠では足りないことがある。
+const maxOutputMultiplier = 16
+
 // Chat チャットリクエストを送信
+//
+// パラメータの対応がモデルによって違うため、400 で拒否されたら内容から回避策を学んで
+// 再送する。プロバイダーは 1 度に 1 つしか指摘しないので、学べる限り繰り返す。
+// 学習結果は記憶するので、この往復が発生するのはプロセス起動後の最初の 1 回だけ。
 func (c *Client) Chat(messages []ChatMessage) (*ChatResponse, error) {
+	key := c.baseURL + "|" + c.model
+	q := loadQuirks(c.baseURL, c.model)
+
+	resp, err := c.chatOnce(messages, q)
+	for i := 0; i < maxQuirkRetries; i++ {
+		switch {
+		case err != nil:
+			if !learnQuirks(err, &q) {
+				return resp, err // 学べるものが無い＝この 400 は回避策の対象外
+			}
+			logger.Infof("AI model quirk learned (model=%s, completion_tokens=%v, omit_temperature=%v), retrying",
+				c.model, q.useCompletionTokens, q.omitTemperature)
+		case isTruncated(resp) && q.multiplier() < maxOutputMultiplier:
+			// 枠が足りず途中で切れた。推論モデルでは内部推論が枠を食うため、
+			// 出力の長さから見積もった枠では届かないことがある。
+			q.outputMultiplier = q.multiplier() * 2
+			logger.Infof("AI response truncated, raising output budget x%d (model=%s)", q.outputMultiplier, c.model)
+		default:
+			return resp, err
+		}
+		quirkCache.Store(key, q)
+		resp, err = c.chatOnce(messages, q)
+	}
+	return resp, err
+}
+
+// isTruncated は出力枠を使い切って途中で切れた応答かどうか。
+func isTruncated(resp *ChatResponse) bool {
+	return resp != nil && len(resp.Choices) > 0 && resp.Choices[0].FinishReason == "length"
+}
+
+func (c *Client) chatOnce(messages []ChatMessage, q modelQuirks) (*ChatResponse, error) {
 	reqBody := ChatRequest{
-		Model:       c.model,
-		Messages:    messages,
-		Temperature: 0.1, // より一貫した結果を得るため低めの温度を使用
-		MaxTokens:   estimateMaxTokens(messages),
+		Model:    c.model,
+		Messages: messages,
+	}
+	if !q.omitTemperature {
+		t := 0.1 // より一貫した結果を得るため低めの温度を使用
+		reqBody.Temperature = &t
+	}
+	budget := estimateMaxTokens(messages) * q.multiplier()
+	if q.useCompletionTokens {
+		reqBody.MaxCompletionTokens = budget
+	} else {
+		reqBody.MaxTokens = budget
 	}
 
 	jsonBody, err := json.Marshal(reqBody)

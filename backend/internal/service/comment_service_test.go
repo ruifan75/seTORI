@@ -1,6 +1,8 @@
 package service
 
 import (
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/ruifan75/setori/pkg/comment"
@@ -16,9 +18,12 @@ func TestParseCommentsAIZeroSongsNoRegexFallback(t *testing.T) {
 	}
 
 	comments := []string{"1:00 ちゃんと靴までみました!"}
-	got := svc.parseComments(comments)
+	got, warning := svc.parseComments(comments)
 	if len(got) != 0 {
 		t.Fatalf("got %d songs, want 0 (AI said not a song; must not regex-fallback): %+v", len(got), got)
+	}
+	if warning != "" {
+		t.Errorf("AI は成功しているので警告は空のはず: %q", warning)
 	}
 
 	// regex-only would incorrectly extract a song name from the timestamp line
@@ -44,5 +49,45 @@ func TestHashStoredCommentsNormalizesJSONFormatting(t *testing.T) {
 	}
 	if compact != formatted {
 		t.Fatalf("hash differs by JSON formatting: %q != %q", compact, formatted)
+	}
+}
+
+// failingCommentAI は常に失敗する Chatter。
+type failingCommentAI struct{ err error }
+
+func (f failingCommentAI) SimpleChat(_, _ string) (string, error) { return "", f.err }
+
+// AI が失敗したとき、正規表現へ退避するだけでなく「劣化した」ことを伝えなければならない。
+//
+// これを黙って返すと、AI 障害が「この配信には曲が無い」という見た目で通り、
+// さらにその空の結果がキャッシュへ保存されて既存の分析結果を上書きしてしまう。
+// 実際に 2026-08-07、モデル差し替え時の 400 エラーでこれが起き、
+// 10 曲あった配信の comment_songs が 0 件になった。
+func TestParseCommentsReportsAIFailure(t *testing.T) {
+	svc := &CommentService{
+		aiClient: failingCommentAI{err: errors.New("status=400 unsupported parameter")},
+	}
+
+	comments := []string{"1:00 ちゃんと靴までみました!"}
+	got, warning := svc.parseComments(comments)
+
+	if warning == "" {
+		t.Fatal("AI が失敗したのに警告が空。呼び出し側が劣化に気づけない")
+	}
+	if !strings.Contains(warning, "400") {
+		t.Errorf("原因が警告に含まれていない: %q", warning)
+	}
+	// 退避自体は行われる（何も返さないよりはマシなので）
+	if len(got) != 1 {
+		t.Errorf("正規表現への退避が行われていない: %d 件", len(got))
+	}
+}
+
+// AI client が未設定の場合は「劣化」ではないので警告を出さない。
+func TestParseCommentsNoAIClientIsNotADegradation(t *testing.T) {
+	svc := &CommentService{}
+	_, warning := svc.parseComments([]string{"1:00 テスト"})
+	if warning != "" {
+		t.Errorf("AI 未設定は劣化ではないので警告不要: %q", warning)
 	}
 }

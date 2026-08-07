@@ -80,7 +80,7 @@ func (s *CommentService) AnalyzeComments(videoID string, force bool) (*dto.Analy
 	rawHash = hashComments(comments)
 
 	// 2. AI hybrid 抽取（AI 判斷歌曲行 + 逐字驗證；失敗/未設定時自動退回純正則）
-	parsedSongs := s.parseComments(comments)
+	parsedSongs, extractWarning := s.parseComments(comments)
 
 	// 3. 過濾 + 去重 + 驗證（先過濾避免非歌曲項目影響去重）
 	filterKW, keepKW, err := s.loadFilterKeywords()
@@ -106,6 +106,10 @@ func (s *CommentService) AnalyzeComments(videoID string, force bool) (*dto.Analy
 
 	// 5. 折り込んだ正規化（AI 正規化＋DB 照合し、結果を各曲に埋め込む）
 	aiWarning := s.normalizeInto(songs)
+	// 抽出の失敗は正規化の失敗より重い（曲そのものが取れていない）ので優先して伝える
+	if extractWarning != "" {
+		aiWarning = extractWarning
+	}
 
 	// 6. live chat の拍手で end を推定（start 基準でマッチ。利用不可なら据え置き）
 	if s.chatEndService != nil {
@@ -117,7 +121,17 @@ func (s *CommentService) AnalyzeComments(videoID string, force bool) (*dto.Analy
 	}
 
 	// 7. 永続化（comment_songs + 來源 hash）→ 次回からはキャッシュを直接読む
-	if rawHash != "" {
+	//
+	// AI が失敗した回は保存しない。劣化結果（正規表現のみ・読みやタグ無し）を
+	// キャッシュに載せると、既存の良い分析結果を上書きしてしまううえ、
+	// 次回以降はキャッシュ命中で AI を呼ばなくなり劣化が固定される。
+	// 保存しなければ以前の結果と hash がそのまま残り、復旧を待てる。
+	switch {
+	case rawHash == "":
+		// hash が無い（コメントが空など）ので保存対象外
+	case aiWarning != "":
+		logger.Warnf("[comment] skipping cache write for %s due to AI degradation: %s", videoID, aiWarning)
+	default:
 		if songsJSON, mErr := json.Marshal(songs); mErr == nil {
 			if err := s.streamRepo.SaveCommentSongs(videoID, songsJSON, rawHash); err != nil {
 				logger.Warnf("[comment] save comment_songs failed (%s): %v", videoID, err)
@@ -389,18 +403,23 @@ func (s *CommentService) loadFilterKeywords() (filterKW, keepKW []string, err er
 
 // parseComments 於 edit-time 解析留言：優先用 AI hybrid（AI 選取歌曲行 + 正則抽取文字），
 // AI 成功時（含 0 曲）採用 AI 結果；僅在 AI 失敗或未設定 client 時退回純正則。
-func (s *CommentService) parseComments(comments []string) []comment.ParsedSong {
+//
+// 第2返り値は「AI が失敗したため結果が劣化している」ことを示す文言（成功時は空）。
+// これを呼び出し側へ伝えないと、AI 障害が「この配信には曲が無い」という見た目で
+// 通ってしまい、しかもその空の結果がキャッシュに保存されて既存の分析を上書きする。
+func (s *CommentService) parseComments(comments []string) ([]comment.ParsedSong, string) {
 	if s.aiClient != nil {
 		songs, err := comment.ParseCommentsWithAI(s.aiClient, comments)
 		if err != nil {
 			logger.Warnf("AI comment parse failed, falling back to regex: %v", err)
-		} else {
-			logger.Infof("Using AI-extracted songs for analysis (%d songs)", len(songs))
-			return songs
+			return comment.ParseComments(comments),
+				fmt.Sprintf("AI抽出に失敗しました（%v）。正規表現のみで解析しました。", err)
 		}
+		logger.Infof("Using AI-extracted songs for analysis (%d songs)", len(songs))
+		return songs, ""
 	}
-	logger.Infof("Using regex-only comment parse (no AI client or AI failed)")
-	return comment.ParseComments(comments)
+	logger.Infof("Using regex-only comment parse (no AI client configured)")
+	return comment.ParseComments(comments), ""
 }
 
 // getComments 從 DB 讀取非空的原始留言，若無則從 YouTube/Holodex 抓取並保存。
