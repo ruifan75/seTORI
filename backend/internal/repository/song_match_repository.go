@@ -227,18 +227,123 @@ func (r *SongMatchRepository) FindSimilarByName(name string, threshold float64, 
 // RecordMergeCandidate は「新しく作った曲が既存曲と似ている」ことを記録する。
 // 同じ組が既にあれば何もしない（更新もしない：最初に気づいた時点の score を残す）。
 func (r *SongMatchRepository) RecordMergeCandidate(newSongID, existingSongID uuid.UUID, score float64, reason string) error {
+	_, err := r.recordMergeCandidate(newSongID, existingSongID, score, reason, "create")
+	return err
+}
+
+// recordMergeCandidate は候補を積む。返り値は実際に新しく積んだかどうか。
+func (r *SongMatchRepository) recordMergeCandidate(newSongID, existingSongID uuid.UUID, score float64, reason, origin string) (bool, error) {
 	if newSongID == existingSongID {
-		return nil
+		return false, nil
 	}
-	_, err := r.db.Exec(`
-		INSERT INTO song_merge_candidates (new_song_id, existing_song_id, score, reason)
-		VALUES ($1, $2, $3, $4)
+	// 逆向きに既にある組は作らない。順序は「どちらが新しいか」を表すだけで、
+	// 同じ 2 曲についての判断が 2 行になると却下しても片方が残ってしまう。
+	var exists bool
+	if err := r.db.QueryRow(`
+		SELECT EXISTS(SELECT 1 FROM song_merge_candidates
+		WHERE (new_song_id = $1 AND existing_song_id = $2)
+		   OR (new_song_id = $2 AND existing_song_id = $1))`, newSongID, existingSongID).Scan(&exists); err != nil {
+		return false, fmt.Errorf("check merge candidate: %w", err)
+	}
+	if exists {
+		return false, nil
+	}
+	res, err := r.db.Exec(`
+		INSERT INTO song_merge_candidates (new_song_id, existing_song_id, score, reason, origin)
+		VALUES ($1, $2, $3, $4, $5)
 		ON CONFLICT ON CONSTRAINT song_merge_candidates_pair_unique DO NOTHING`,
-		newSongID, existingSongID, score, reason)
+		newSongID, existingSongID, score, reason, origin)
 	if err != nil {
-		return fmt.Errorf("record merge candidate: %w", err)
+		return false, fmt.Errorf("record merge candidate: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
+// ScanDuplicateTitles は既存データを走査し、曲名キーが同じ楽曲の組を候補に積む。
+//
+// 取り込み時の検出（origin='create'）は「これから作る曲」しか見ないので、
+// 導入前から DB にあった重複は誰にも気づかれない。走査はその穴を埋める。
+// 却下済み・統合済みの組は行が残っているので蒸し返さない。
+// 返り値は新しく積んだ組数。
+func (r *SongMatchRepository) ScanDuplicateTitles() (int, error) {
+	rows, err := r.db.Query(`
+		SELECT k.name_key, k.song_id
+		FROM song_match_keys k
+		WHERE k.name_key IN (
+			SELECT name_key FROM song_match_keys GROUP BY name_key HAVING COUNT(*) > 1
+		)
+		ORDER BY k.name_key, k.song_id`)
+	if err != nil {
+		return 0, fmt.Errorf("scan duplicate titles: %w", err)
+	}
+	defer rows.Close()
+
+	groups := map[string][]uuid.UUID{}
+	var order []string
+	for rows.Next() {
+		var key string
+		var id uuid.UUID
+		if err := rows.Scan(&key, &id); err != nil {
+			return 0, fmt.Errorf("scan duplicate row: %w", err)
+		}
+		if _, ok := groups[key]; !ok {
+			order = append(order, key)
+		}
+		groups[key] = append(groups[key], id)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+
+	added := 0
+	for _, key := range order {
+		ids := groups[key]
+		for i := 0; i < len(ids); i++ {
+			for j := i + 1; j < len(ids); j++ {
+				ok, err := r.recordMergeCandidate(ids[j], ids[i], 0.5, "same_title", "scan")
+				if err != nil {
+					return added, err
+				}
+				if ok {
+					added++
+				}
+			}
+		}
+	}
+	return added, nil
+}
+
+// SetMergeVerdict は AI の見立てを候補に書き込む。統合の実行はしない。
+func (r *SongMatchRepository) SetMergeVerdict(id uuid.UUID, v MergeVerdict) error {
+	_, err := r.db.Exec(`
+		UPDATE song_merge_candidates SET
+			same_composition = $2, same_arrangement = $3, recommendation = $4,
+			role_new = NULLIF($5, ''), role_existing = NULLIF($6, ''),
+			verdict_note = NULLIF($7, ''), verdict_source = $8, verdict_at = NOW()
+		WHERE id = $1`,
+		id, v.SameComposition, v.SameArrangement, v.Recommendation,
+		v.RoleNew, v.RoleExisting, v.Note, v.Source)
+	if err != nil {
+		return fmt.Errorf("set merge verdict: %w", err)
 	}
 	return nil
+}
+
+// ListUnjudgedCandidates は未判定の候補を返す（AI に聞く対象）。
+func (r *SongMatchRepository) ListUnjudgedCandidates(limit int) ([]MergeCandidate, error) {
+	if limit <= 0 {
+		limit = 30
+	}
+	rows, err := r.db.Query(mergeCandidateSelect+`
+		WHERE c.status = 'open' AND c.verdict_at IS NULL
+		ORDER BY c.created_at
+		LIMIT $1`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list unjudged candidates: %w", err)
+	}
+	defer rows.Close()
+	return scanMergeCandidates(rows)
 }
 
 // MergeCandidate は統合候補 1 件（両側の楽曲情報つき）。
@@ -247,10 +352,29 @@ type MergeCandidate struct {
 	Score        float64
 	Reason       string
 	Status       string
+	Origin       string // create（取り込み時に気づいた） | scan（既存データの走査）
 	NewSong      models.Song
 	ExistingSong models.Song
 	PerfCountNew int
 	PerfCountOld int
+	ItunesNew    []int64
+	ItunesOld    []int64
+
+	// AI の見立て（未判定なら Verdict.At がゼロ値）
+	Verdict MergeVerdict
+}
+
+// MergeVerdict は「この 2 曲は何なのか」についての判定。
+// 統合するかどうかの決定ではない（それは人がする）。
+type MergeVerdict struct {
+	SameComposition *bool
+	SameArrangement *bool
+	Recommendation  string // merge | keep_separate
+	RoleNew         string
+	RoleExisting    string
+	Note            string
+	Source          string
+	At              sql.NullTime
 }
 
 // ListOpenMergeCandidates は未処理の統合候補を新しい順で返す。
@@ -258,36 +382,57 @@ func (r *SongMatchRepository) ListOpenMergeCandidates(limit int) ([]MergeCandida
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := r.db.Query(`
-		SELECT c.id, c.score, c.reason, c.status,
-		       n.id, n.name, n.name_reading, n.original_artist, n.original_artist_reading, n.arts, n.created_at, n.updated_at,
-		       e.id, e.name, e.name_reading, e.original_artist, e.original_artist_reading, e.arts, e.created_at, e.updated_at,
-		       (SELECT COUNT(*) FROM performances p WHERE p.song_id = n.id),
-		       (SELECT COUNT(*) FROM performances p WHERE p.song_id = e.id)
-		FROM song_merge_candidates c
-		JOIN songs n ON n.id = c.new_song_id
-		JOIN songs e ON e.id = c.existing_song_id
+	rows, err := r.db.Query(mergeCandidateSelect+`
 		WHERE c.status = 'open'
-		ORDER BY c.created_at DESC
+		ORDER BY
+			CASE c.recommendation WHEN 'merge' THEN 0 WHEN 'keep_separate' THEN 2 ELSE 1 END,
+			c.score DESC, c.created_at DESC
 		LIMIT $1`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list merge candidates: %w", err)
 	}
 	defer rows.Close()
+	return scanMergeCandidates(rows)
+}
 
+// mergeCandidateSelect は候補一覧の共通 SELECT。
+// iTunes ID を一緒に引くのは、編曲の違いを人が判断する材料
+// （収録アルバム・再生時間）をフロントが引けるようにするため。
+const mergeCandidateSelect = `
+	SELECT c.id, c.score, c.reason, c.status, c.origin,
+	       n.id, n.name, n.name_reading, n.original_artist, n.original_artist_reading, n.arts, n.created_at, n.updated_at,
+	       e.id, e.name, e.name_reading, e.original_artist, e.original_artist_reading, e.arts, e.created_at, e.updated_at,
+	       (SELECT COUNT(*) FROM performances p WHERE p.song_id = n.id),
+	       (SELECT COUNT(*) FROM performances p WHERE p.song_id = e.id),
+	       ARRAY(SELECT si.itunes_id FROM song_itunes si WHERE si.song_id = n.id ORDER BY si.is_primary DESC),
+	       ARRAY(SELECT si.itunes_id FROM song_itunes si WHERE si.song_id = e.id ORDER BY si.is_primary DESC),
+	       c.same_composition, c.same_arrangement, COALESCE(c.recommendation, ''),
+	       COALESCE(c.role_new, ''), COALESCE(c.role_existing, ''),
+	       COALESCE(c.verdict_note, ''), COALESCE(c.verdict_source, ''), c.verdict_at
+	FROM song_merge_candidates c
+	JOIN songs n ON n.id = c.new_song_id
+	JOIN songs e ON e.id = c.existing_song_id`
+
+func scanMergeCandidates(rows *sql.Rows) ([]MergeCandidate, error) {
 	var out []MergeCandidate
 	for rows.Next() {
 		var c MergeCandidate
+		var itunesNew, itunesOld pq.Int64Array
 		if err := rows.Scan(
-			&c.ID, &c.Score, &c.Reason, &c.Status,
+			&c.ID, &c.Score, &c.Reason, &c.Status, &c.Origin,
 			&c.NewSong.ID, &c.NewSong.Name, &c.NewSong.NameReading, &c.NewSong.OriginalArtist,
 			&c.NewSong.OriginalArtistReading, &c.NewSong.Arts, &c.NewSong.CreatedAt, &c.NewSong.UpdatedAt,
 			&c.ExistingSong.ID, &c.ExistingSong.Name, &c.ExistingSong.NameReading, &c.ExistingSong.OriginalArtist,
 			&c.ExistingSong.OriginalArtistReading, &c.ExistingSong.Arts, &c.ExistingSong.CreatedAt, &c.ExistingSong.UpdatedAt,
-			&c.PerfCountNew, &c.PerfCountOld,
+			&c.PerfCountNew, &c.PerfCountOld, &itunesNew, &itunesOld,
+			&c.Verdict.SameComposition, &c.Verdict.SameArrangement, &c.Verdict.Recommendation,
+			&c.Verdict.RoleNew, &c.Verdict.RoleExisting,
+			&c.Verdict.Note, &c.Verdict.Source, &c.Verdict.At,
 		); err != nil {
 			return nil, fmt.Errorf("scan merge candidate: %w", err)
 		}
+		c.ItunesNew = []int64(itunesNew)
+		c.ItunesOld = []int64(itunesOld)
 		out = append(out, c)
 	}
 	return out, rows.Err()
@@ -304,38 +449,14 @@ func (r *SongMatchRepository) CountOpenMergeCandidates() (int, error) {
 
 // FindOpenMergeCandidatesForSong は特定の楽曲に紐づく未処理候補を返す（楽曲詳細で出す用）。
 func (r *SongMatchRepository) FindOpenMergeCandidatesForSong(songID uuid.UUID) ([]MergeCandidate, error) {
-	rows, err := r.db.Query(`
-		SELECT c.id, c.score, c.reason, c.status,
-		       n.id, n.name, n.name_reading, n.original_artist, n.original_artist_reading, n.arts, n.created_at, n.updated_at,
-		       e.id, e.name, e.name_reading, e.original_artist, e.original_artist_reading, e.arts, e.created_at, e.updated_at,
-		       (SELECT COUNT(*) FROM performances p WHERE p.song_id = n.id),
-		       (SELECT COUNT(*) FROM performances p WHERE p.song_id = e.id)
-		FROM song_merge_candidates c
-		JOIN songs n ON n.id = c.new_song_id
-		JOIN songs e ON e.id = c.existing_song_id
+	rows, err := r.db.Query(mergeCandidateSelect+`
 		WHERE c.status = 'open' AND (c.new_song_id = $1 OR c.existing_song_id = $1)
 		ORDER BY c.score DESC`, songID)
 	if err != nil {
 		return nil, fmt.Errorf("find merge candidates for song: %w", err)
 	}
 	defer rows.Close()
-
-	var out []MergeCandidate
-	for rows.Next() {
-		var c MergeCandidate
-		if err := rows.Scan(
-			&c.ID, &c.Score, &c.Reason, &c.Status,
-			&c.NewSong.ID, &c.NewSong.Name, &c.NewSong.NameReading, &c.NewSong.OriginalArtist,
-			&c.NewSong.OriginalArtistReading, &c.NewSong.Arts, &c.NewSong.CreatedAt, &c.NewSong.UpdatedAt,
-			&c.ExistingSong.ID, &c.ExistingSong.Name, &c.ExistingSong.NameReading, &c.ExistingSong.OriginalArtist,
-			&c.ExistingSong.OriginalArtistReading, &c.ExistingSong.Arts, &c.ExistingSong.CreatedAt, &c.ExistingSong.UpdatedAt,
-			&c.PerfCountNew, &c.PerfCountOld,
-		); err != nil {
-			return nil, fmt.Errorf("scan merge candidate: %w", err)
-		}
-		out = append(out, c)
-	}
-	return out, rows.Err()
+	return scanMergeCandidates(rows)
 }
 
 // SetMergeCandidateStatus は候補を処理済みにする（resolved / dismissed）。

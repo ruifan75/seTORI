@@ -56,6 +56,7 @@ type Router struct {
 	oauthService         *service.OAuthService
 	settingsService      *service.SettingsService
 	songMatchService     *service.SongMatchService
+	aiService            *service.AIService
 }
 
 // NewRouter 新しいルーターを作成
@@ -160,6 +161,7 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 		oauthService:         oauthService,
 		settingsService:      settingsService,
 		songMatchService:     songMatchService,
+		aiService:            aiService,
 	}
 
 	r.setupRoutes()
@@ -232,6 +234,8 @@ func (r *Router) setupRoutes() {
 	// 照合が外れて新曲になったものの統合候補（黙って重複が増えるのを防ぐ受け皿）
 	r.mux.HandleFunc("GET /api/songs/merge-candidates", r.handleListMergeCandidates)
 	r.mux.HandleFunc("POST /api/songs/merge-candidates/{id}/dismiss", r.handleDismissMergeCandidate)
+	r.mux.HandleFunc("POST /api/songs/merge-candidates/scan", r.handleScanDuplicates)
+	r.mux.HandleFunc("POST /api/songs/merge-candidates/adjudicate", r.handleAdjudicateDuplicates)
 	r.mux.HandleFunc("GET /api/songs/{id}/merge-candidates", r.handleGetSongMergeCandidates)
 
 	// API routes - 照合の学習層（アーティストの別名義・楽曲の別表記）

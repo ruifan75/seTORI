@@ -196,6 +196,18 @@ export const songApi = {
     const { data } = await api.post(`/api/songs/merge-candidates/${id}/dismiss`);
     return data;
   },
+
+  // 既存データを走査して同名の組を候補に積む（取り込み前からある重複を拾う）
+  scanDuplicates: async (): Promise<{ added: number; message: string }> => {
+    const { data } = await api.post('/api/songs/merge-candidates/scan');
+    return data;
+  },
+
+  // 未判定の候補について AI の見立てを取る。統合は実行しない
+  adjudicateDuplicates: async (): Promise<{ judged: number; message: string }> => {
+    const { data } = await api.post('/api/songs/merge-candidates/adjudicate');
+    return data;
+  },
 };
 
 // ========== 照合の学習層 API ==========

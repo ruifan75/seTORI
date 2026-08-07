@@ -227,7 +227,12 @@ func scoreHits(hits []repository.KeyedSong, name, artist string, queryArtist son
 			if unique {
 				score, reason = 0.60, ReasonTitleMismatch
 			} else {
-				score, reason = 0.30, ReasonTitleAmbiguous
+				// 同じ曲名の曲が複数ある状態そのものが要確認。実データでは
+				// 「artist 欄の意味が違うだけの二重登録（惑星ループ）」
+				// 「編曲違いで意図的に別（翼をください）」
+				// 「そもそも同名異曲（オレンジ）」が混在していて、データからは区別できない。
+				// 以前はここを 0.30 にして黙殺していたが、それでは重複が生き延びる。
+				score, reason = 0.50, ReasonTitleAmbiguous
 			}
 		}
 		// 別名義の登録で救われた一致は、そうと分かる理由に差し替える

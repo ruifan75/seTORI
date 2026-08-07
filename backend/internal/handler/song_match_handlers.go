@@ -3,6 +3,7 @@ package handler
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -72,23 +73,67 @@ func (r *Router) handleDismissMergeCandidate(w http.ResponseWriter, req *http.Re
 func toMergeCandidateResponses(candidates []repository.MergeCandidate) []dto.MergeCandidateResponse {
 	out := make([]dto.MergeCandidateResponse, 0, len(candidates))
 	for _, c := range candidates {
-		out = append(out, dto.MergeCandidateResponse{
+		resp := dto.MergeCandidateResponse{
 			ID:           c.ID.String(),
 			Score:        c.Score,
 			Reason:       c.Reason,
-			NewSong:      toMergeCandidateSong(c.NewSong, c.PerfCountNew),
-			ExistingSong: toMergeCandidateSong(c.ExistingSong, c.PerfCountOld),
-		})
+			Origin:       c.Origin,
+			NewSong:      toMergeCandidateSong(c.NewSong, c.PerfCountNew, c.ItunesNew, c.Verdict.RoleNew),
+			ExistingSong: toMergeCandidateSong(c.ExistingSong, c.PerfCountOld, c.ItunesOld, c.Verdict.RoleExisting),
+		}
+		if c.Verdict.At.Valid {
+			resp.Verdict = &dto.MergeVerdictResponse{
+				SameComposition: c.Verdict.SameComposition,
+				SameArrangement: c.Verdict.SameArrangement,
+				Recommendation:  c.Verdict.Recommendation,
+				Note:            c.Verdict.Note,
+				Source:          c.Verdict.Source,
+				Judged:          true,
+			}
+		}
+		out = append(out, resp)
 	}
 	return out
 }
 
-func toMergeCandidateSong(s models.Song, perfCount int) dto.MergeCandidateSong {
+func toMergeCandidateSong(s models.Song, perfCount int, itunesIDs []int64, role string) dto.MergeCandidateSong {
 	return dto.MergeCandidateSong{
 		ID:               s.ID.String(),
 		Name:             s.Name,
 		OriginalArtist:   s.OriginalArtist,
 		ArtURL:           s.Arts.String,
 		PerformanceCount: perfCount,
+		ItunesIDs:        itunesIDs,
+		Role:             role,
 	}
+}
+
+// handleScanDuplicates は既存データを走査して同名の組を候補に積む（content:edit）。
+// 取り込み時の検出は「これから作る曲」しか見ないので、導入前からあった重複は
+// これを走らせないと誰にも気づかれない。
+func (r *Router) handleScanDuplicates(w http.ResponseWriter, req *http.Request) {
+	added, err := r.songMatchService.ScanDuplicates()
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{
+		"added":   added,
+		"message": fmt.Sprintf("%d 件の重複候補を追加しました", added),
+	})
+}
+
+// handleAdjudicateDuplicates は未判定の候補について AI の見立てを取る（content:edit）。
+// **統合は実行しない。**同名の組には「統合すべき」「編曲違いで分けるべき」
+// 「そもそも別の曲」が混在し、その線引きは編集方針なので人が決める。
+func (r *Router) handleAdjudicateDuplicates(w http.ResponseWriter, req *http.Request) {
+	saved, err := r.songMatchService.AdjudicateDuplicates(r.aiService, 30)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{
+		"judged":  saved,
+		"message": fmt.Sprintf("%d 件を判定しました", saved),
+	})
 }

@@ -91,6 +91,7 @@ export interface ITunesQueryResult {
   artwork_url: string;
   track_view_url: string;
   track_time_millis: number;
+  preview_url?: string;
   country: string;
 }
 
@@ -951,6 +952,18 @@ export interface MergeCandidateSong {
   original_artist: string;
   art_url?: string;
   performance_count: number;
+  itunes_ids?: number[];
+  role?: string; // AI が説明したこの曲の立ち位置
+}
+
+// AI の見立て。「統合すべきか」の決定ではなく、判断材料。
+export interface MergeVerdict {
+  same_composition?: boolean;
+  same_arrangement?: boolean;
+  recommendation?: 'merge' | 'keep_separate' | string;
+  note?: string;
+  source?: string;
+  judged: boolean;
 }
 
 // 照合が外れて新曲として登録された疑いのある組。統合して畳むためのレビュー対象。
@@ -958,8 +971,10 @@ export interface MergeCandidate {
   id: string;
   score: number;
   reason: string;
+  origin: 'create' | 'scan' | string;
   new_song: MergeCandidateSong;
   existing_song: MergeCandidateSong;
+  verdict?: MergeVerdict;
 }
 
 // ========== 照合の学習層 ==========

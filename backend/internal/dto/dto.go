@@ -417,22 +417,38 @@ type AISuggestionResult struct {
 // ========== 楽曲の統合候補 ==========
 
 // MergeCandidateSong は統合候補に出す楽曲の要約。
+// ItunesIDs は「編曲がどれだけ違うか」を人が判断するための手がかり
+// （収録アルバム・再生時間・試聴）をフロントが引くために返す。
 type MergeCandidateSong struct {
-	ID               string `json:"id"`
-	Name             string `json:"name"`
-	OriginalArtist   string `json:"original_artist"`
-	ArtURL           string `json:"art_url,omitempty"`
-	PerformanceCount int    `json:"performance_count"`
+	ID               string  `json:"id"`
+	Name             string  `json:"name"`
+	OriginalArtist   string  `json:"original_artist"`
+	ArtURL           string  `json:"art_url,omitempty"`
+	PerformanceCount int     `json:"performance_count"`
+	ItunesIDs        []int64 `json:"itunes_ids,omitempty"`
+	Role             string  `json:"role,omitempty"` // AI が説明したこの曲の立ち位置
+}
+
+// MergeVerdictResponse は AI の見立て。統合するかどうかの決定ではない。
+type MergeVerdictResponse struct {
+	SameComposition *bool  `json:"same_composition,omitempty"`
+	SameArrangement *bool  `json:"same_arrangement,omitempty"`
+	Recommendation  string `json:"recommendation,omitempty"` // merge | keep_separate
+	Note            string `json:"note,omitempty"`
+	Source          string `json:"source,omitempty"`
+	Judged          bool   `json:"judged"`
 }
 
 // MergeCandidateResponse は「新しく作られた曲が既存曲と似ている」1 件。
 // 照合が外れて新曲として登録されたものを、人が統合して畳むための入口。
 type MergeCandidateResponse struct {
-	ID           string             `json:"id"`
-	Score        float64            `json:"score"`
-	Reason       string             `json:"reason"`
-	NewSong      MergeCandidateSong `json:"new_song"`
-	ExistingSong MergeCandidateSong `json:"existing_song"`
+	ID           string                `json:"id"`
+	Score        float64               `json:"score"`
+	Reason       string                `json:"reason"`
+	Origin       string                `json:"origin"` // create | scan
+	NewSong      MergeCandidateSong    `json:"new_song"`
+	ExistingSong MergeCandidateSong    `json:"existing_song"`
+	Verdict      *MergeVerdictResponse `json:"verdict,omitempty"`
 }
 
 // ========== 照合の学習層（別名義・別表記） ==========

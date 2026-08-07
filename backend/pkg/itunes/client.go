@@ -33,6 +33,7 @@ type QueryResponse struct {
 	ArtworkURL      string `json:"artwork_url"`
 	TrackViewURL    string `json:"track_view_url"`
 	TrackTimeMillis int64  `json:"track_time_millis"`
+	PreviewURL      string `json:"preview_url"`
 	Country         string `json:"country"`
 }
 
@@ -54,6 +55,7 @@ type itunesResult struct {
 	ArtworkUrl600    string `json:"artworkUrl600"`
 	Country          string `json:"country"`
 	PrimaryGenreName string `json:"primaryGenreName"`
+	PreviewUrl       string `json:"previewUrl"`
 }
 
 // Client iTunes API 客戶端
@@ -167,6 +169,7 @@ func (c *Client) QueryByID(itunesID int64) (*QueryResponse, error) {
 		ArtworkURL:      artworkURL,
 		TrackViewURL:    r.TrackViewUrl,
 		TrackTimeMillis: r.TrackTimeMillis,
+		PreviewURL:      r.PreviewUrl,
 		Country:         r.Country,
 	}, nil
 }
