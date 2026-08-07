@@ -158,7 +158,7 @@ func ParseNormalizeAndDedupWithAI(aiClient ai.Chatter, comments []string) ([]Par
 
 	lines := extractTimestampLinesGrouped(comments)
 	if len(lines) == 0 {
-		return nil, fmt.Errorf("no timestamp lines")
+		return nil, ErrNoTimestampLines
 	}
 
 	userMessage := buildGroupedMessage(lines)

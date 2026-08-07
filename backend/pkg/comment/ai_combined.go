@@ -147,7 +147,7 @@ func ParseAndNormalizeWithAI(aiClient ai.Chatter, comments []string) ([]ParsedSo
 
 	lines := extractTimestampLines(comments)
 	if len(lines) == 0 {
-		return nil, fmt.Errorf("no timestamp lines")
+		return nil, ErrNoTimestampLines
 	}
 
 	var sb strings.Builder

@@ -91,3 +91,21 @@ func TestParseCommentsNoAIClientIsNotADegradation(t *testing.T) {
 		t.Errorf("AI 未設定は劣化ではないので警告不要: %q", warning)
 	}
 }
+
+// タイムスタンプ行が 1 つも無いのは「AI の失敗」ではなく、単に解析対象が無いだけ。
+// これを劣化として扱うと、毎回警告が出るうえキャッシュも書かれず、
+// そういう配信を何度も無駄に再解析し続けることになる。
+func TestParseCommentsNoTimestampLinesIsNotADegradation(t *testing.T) {
+	svc := &CommentService{
+		aiClient: fakeCommentAI{response: `[]`}, // ここまで到達しない
+	}
+
+	got, warning := svc.parseComments([]string{"今日も楽しかったです", "かわいい"})
+
+	if warning != "" {
+		t.Errorf("解析対象が無いだけなので警告は不要: %q", warning)
+	}
+	if len(got) != 0 {
+		t.Errorf("抽出結果は空のはず: %+v", got)
+	}
+}

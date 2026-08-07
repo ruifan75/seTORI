@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/ruifan75/setori/internal/dto"
@@ -410,13 +411,20 @@ func (s *CommentService) loadFilterKeywords() (filterKW, keepKW []string, err er
 func (s *CommentService) parseComments(comments []string) ([]comment.ParsedSong, string) {
 	if s.aiClient != nil {
 		songs, err := comment.ParseCommentsWithAI(s.aiClient, comments)
-		if err != nil {
+		switch {
+		case err == nil:
+			logger.Infof("Using AI-extracted songs for analysis (%d songs)", len(songs))
+			return songs, ""
+		case errors.Is(err, comment.ErrNoTimestampLines):
+			// 解析対象が無いだけで、AI の障害ではない。劣化として扱うと
+			// 毎回警告が出るうえキャッシュも書かれず、無駄に再解析し続ける。
+			logger.Infof("No timestamp lines in comments; nothing to extract")
+			return nil, ""
+		default:
 			logger.Warnf("AI comment parse failed, falling back to regex: %v", err)
 			return comment.ParseComments(comments),
 				fmt.Sprintf("AI抽出に失敗しました（%v）。正規表現のみで解析しました。", err)
 		}
-		logger.Infof("Using AI-extracted songs for analysis (%d songs)", len(songs))
-		return songs, ""
 	}
 	logger.Infof("Using regex-only comment parse (no AI client configured)")
 	return comment.ParseComments(comments), ""

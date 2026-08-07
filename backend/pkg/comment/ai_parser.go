@@ -2,6 +2,7 @@ package comment
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -26,6 +27,13 @@ type aiLineSelection struct {
 	Name      string          `json:"name"`   // 曲名（必須逐字出現在原始行）
 	Artist    string          `json:"artist"` // 歌手（必須逐字出現在原始行）
 }
+
+// ErrNoTimestampLines はコメントにタイムスタンプらしき行が 1 つも無かったことを示す。
+//
+// これは AI の失敗ではなく、そもそも解析対象が無いという正常な結果。
+// 呼び出し側はこれを「劣化」として扱ってはいけない（警告を出したり
+// キャッシュ書き込みを止めたりすると、毎回無駄に再解析することになる）。
+var ErrNoTimestampLines = errors.New("no timestamp lines")
 
 const commentAISystemPrompt = `あなたはYouTubeのコメントから歌枠のセットリストを抽出するアシスタントです。
 
@@ -86,7 +94,7 @@ func ParseCommentsWithAI(aiClient ai.Chatter, comments []string) ([]ParsedSong, 
 
 	lines := extractTimestampLines(comments)
 	if len(lines) == 0 {
-		return nil, fmt.Errorf("no timestamp lines")
+		return nil, ErrNoTimestampLines
 	}
 
 	userMessage := fmt.Sprintf(
