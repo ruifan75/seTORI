@@ -201,7 +201,10 @@ function TagSection({
   );
 }
 
+// model が空のものは、保存後に ▾ ボタンでプロバイダーから実際のモデル一覧を取得して選ぶ。
+// モデル ID は頻繁に増減するので、古い ID を焼き込むよりこちらの方が安全。
 const AI_PRESETS: { label: string; name: string; base_url: string; model: string }[] = [
+  { label: 'OpenAI', name: 'OpenAI', base_url: 'https://api.openai.com/v1', model: '' },
   { label: 'Groq', name: 'Groq', base_url: 'https://api.groq.com/openai/v1', model: 'llama-3.3-70b-versatile' },
   { label: 'Google Gemini', name: 'Gemini', base_url: 'https://generativelanguage.googleapis.com/v1beta/openai', model: 'gemini-2.5-flash' },
   { label: 'Cerebras', name: 'Cerebras', base_url: 'https://api.cerebras.ai/v1', model: 'llama-3.3-70b' },
