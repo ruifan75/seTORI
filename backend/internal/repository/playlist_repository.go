@@ -7,8 +7,8 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
-	"github.com/ruifan75/setori/internal/models"
 	"github.com/lib/pq"
+	"github.com/ruifan75/setori/internal/models"
 )
 
 // uuidStrings は uuid の配列を ANY($n::uuid[]) へ渡せる形へ変換する。

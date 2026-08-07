@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/ruifan75/setori/internal/models"
 	"github.com/lib/pq"
+	"github.com/ruifan75/setori/internal/models"
 )
 
 // SuggestionRepository は edit_suggestions（閲覧モードからの修正提案）を扱う。

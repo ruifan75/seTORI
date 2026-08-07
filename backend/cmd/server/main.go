@@ -6,11 +6,11 @@ import (
 	"os"
 	"time"
 
+	"github.com/joho/godotenv"
 	"github.com/ruifan75/setori/internal/config"
 	"github.com/ruifan75/setori/internal/database"
 	"github.com/ruifan75/setori/internal/handler"
 	"github.com/ruifan75/setori/internal/logger"
-	"github.com/joho/godotenv"
 )
 
 func main() {

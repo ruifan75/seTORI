@@ -5,9 +5,9 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 	"github.com/ruifan75/setori/internal/models"
 	"github.com/ruifan75/setori/pkg/util"
-	"github.com/lib/pq"
 )
 
 type SongRepository struct {

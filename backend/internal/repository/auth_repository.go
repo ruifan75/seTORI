@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/ruifan75/setori/internal/models"
 	"github.com/lib/pq"
+	"github.com/ruifan75/setori/internal/models"
 )
 
 // AuthRepository は users / roles / sessions を扱う。

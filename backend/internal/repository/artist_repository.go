@@ -6,8 +6,8 @@ import (
 	"unicode"
 
 	"github.com/google/uuid"
-	"github.com/ruifan75/setori/internal/models"
 	"github.com/lib/pq"
+	"github.com/ruifan75/setori/internal/models"
 )
 
 // ArtistRepository は artists / song_artists を扱う。
