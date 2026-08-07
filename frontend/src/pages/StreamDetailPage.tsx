@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, Link } from 'react-router-dom';
 import { streamApi, performanceApi, aiApi, songApi, singerApi, itunesApi, holodexApi, commentApi, tagApi } from '../api/client';
-import type { Singer, CreatePerformanceItem, AINormalizationItem, Song, UpdateStreamRequest, ITunesSearchResult, CommentSong, SongSuggestion } from '../api/types';
+import type { Singer, CreatePerformanceItem, AINormalizationItem, Song, UpdateStreamRequest, ITunesSearchResult, CommentSong, SongSuggestion, EndSource } from '../api/types';
 import Loading from '../components/ui/Loading';
 import Tag from '../components/ui/Tag';
 import { useToast } from '../components/ui/ToastContext';
@@ -49,7 +49,7 @@ interface EditableSong {
   endDiff?: number;
   // 來源追蹤與還原
   originalCommentEnd?: number; // 來自 comment 分析的原始明確 end（用於還原）
-  endSource?: 'comment' | 'chat' | 'holodex' | 'itunes' | 'manual';
+  endSource?: EndSource;
   // マージ追跡
   mergedFrom?: string[]; // AI 正規化後にマージされた元の曲名
   // 自由文本タグ
@@ -1167,10 +1167,13 @@ export default function StreamDetailPage() {
             trackDuration: null,
             originalName: perf.song_name,
             originalArtist: perf.original_artist,
-            // 現有資料沒有 AI 修改或估計時間的標記
+            // 現有資料沒有 AI 修改的標記
             aiNormalizedName: undefined,
             aiNormalizedArtist: undefined,
             isEndTimeEstimated: false,
+            // 保存済みの由来を読み戻す。unknown は「記録開始前」なので
+            // 由来なし扱いにして、推測し直さない（推測すると嘘の由来が付く）。
+            endSource: perf.end_source && perf.end_source !== 'unknown' ? perf.end_source : undefined,
             customTags: perf.custom_tags || [],
           }));
           setEditableSongs(songs);
@@ -1438,6 +1441,10 @@ export default function StreamDetailPage() {
       art_url: song.artUrl || undefined,
       itunes_id: song.itunesId || undefined,
       custom_tags: song.customTags.length > 0 ? song.customTags : undefined,
+      // 終了時間の由来。編集中ずっと追跡している値をそのまま送る
+      // （送らないと保存時に失われ、自動生成と人手確認の区別が付かなくなる）。
+      // 保存＝人が見たとみなすので end_confirmed は既定の true に任せる。
+      end_source: song.endSource,
     }));
     createPerformancesMutation.mutate(performances);
   };

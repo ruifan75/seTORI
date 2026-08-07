@@ -376,6 +376,8 @@ func (s *StreamService) toPerformanceResponse(perf repository.PerformanceWithDet
 		OrderIndex:     perf.OrderIndex,
 		YouTubeURL:     fmt.Sprintf("https://www.youtube.com/watch?v=%s&t=%d", perf.StreamID, perf.StartSeconds),
 		CreatedAt:      perf.CreatedAt,
+		EndSource:      perf.EndSource,
+		EndConfirmed:   perf.EndConfirmed,
 	}
 
 	if perf.Arts.Valid {

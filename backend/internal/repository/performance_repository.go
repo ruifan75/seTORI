@@ -81,7 +81,7 @@ func (r *PerformanceRepository) attachArtistReferences(performances []Performanc
 func (r *PerformanceRepository) FindByStreamID(streamID string) ([]PerformanceWithDetails, error) {
 	query := `
 		SELECT p.id, p.stream_id, p.song_id, p.start_seconds, p.end_seconds, p.order_index,
-		       p.holodex_song_id, p.custom_tags, p.created_at,
+		       p.holodex_song_id, p.custom_tags, p.created_at, p.end_source, p.end_confirmed,
 		       s.name AS song_name, s.original_artist, s.arts
 		FROM performances p
 		JOIN songs s ON p.song_id = s.id
@@ -98,7 +98,7 @@ func (r *PerformanceRepository) FindByStreamID(streamID string) ([]PerformanceWi
 	for rows.Next() {
 		var p PerformanceWithDetails
 		err := rows.Scan(&p.ID, &p.StreamID, &p.SongID, &p.StartSeconds, &p.EndSeconds,
-			&p.OrderIndex, &p.HolodexSongID, &p.CustomTags, &p.CreatedAt, &p.SongName, &p.OriginalArtist, &p.Arts)
+			&p.OrderIndex, &p.HolodexSongID, &p.CustomTags, &p.CreatedAt, &p.EndSource, &p.EndConfirmed, &p.SongName, &p.OriginalArtist, &p.Arts)
 		if err != nil {
 			return nil, fmt.Errorf("scan performance: %w", err)
 		}
@@ -145,7 +145,7 @@ func (r *PerformanceRepository) FindBySongID(songID uuid.UUID, limit, offset int
 
 	query := `
 		SELECT p.id, p.stream_id, p.song_id, p.start_seconds, p.end_seconds, p.order_index,
-		       p.holodex_song_id, p.custom_tags, p.created_at,
+		       p.holodex_song_id, p.custom_tags, p.created_at, p.end_source, p.end_confirmed,
 		       st.title AS stream_title, st.stream_date, st.thumbnail_url,
 		       s.name AS song_name, s.original_artist, s.arts
 		FROM performances p
@@ -165,7 +165,7 @@ func (r *PerformanceRepository) FindBySongID(songID uuid.UUID, limit, offset int
 	for rows.Next() {
 		var p PerformanceWithDetails
 		err := rows.Scan(&p.ID, &p.StreamID, &p.SongID, &p.StartSeconds, &p.EndSeconds,
-			&p.OrderIndex, &p.HolodexSongID, &p.CustomTags, &p.CreatedAt,
+			&p.OrderIndex, &p.HolodexSongID, &p.CustomTags, &p.CreatedAt, &p.EndSource, &p.EndConfirmed,
 			&p.StreamTitle, &p.StreamDate, &p.ThumbnailURL,
 			&p.SongName, &p.OriginalArtist, &p.Arts)
 		if err != nil {
@@ -214,7 +214,7 @@ func (r *PerformanceRepository) FindByTagID(tagID string, limit, offset int) ([]
 
 	query := `
 		SELECT p.id, p.stream_id, p.song_id, p.start_seconds, p.end_seconds, p.order_index,
-		       p.holodex_song_id, p.custom_tags, p.created_at,
+		       p.holodex_song_id, p.custom_tags, p.created_at, p.end_source, p.end_confirmed,
 		       st.title AS stream_title, st.stream_date, st.thumbnail_url,
 		       s.name AS song_name, s.original_artist, s.arts
 		FROM performances p
@@ -235,7 +235,7 @@ func (r *PerformanceRepository) FindByTagID(tagID string, limit, offset int) ([]
 	for rows.Next() {
 		var p PerformanceWithDetails
 		err := rows.Scan(&p.ID, &p.StreamID, &p.SongID, &p.StartSeconds, &p.EndSeconds,
-			&p.OrderIndex, &p.HolodexSongID, &p.CustomTags, &p.CreatedAt,
+			&p.OrderIndex, &p.HolodexSongID, &p.CustomTags, &p.CreatedAt, &p.EndSource, &p.EndConfirmed,
 			&p.StreamTitle, &p.StreamDate, &p.ThumbnailURL,
 			&p.SongName, &p.OriginalArtist, &p.Arts)
 		if err != nil {
@@ -270,12 +270,12 @@ func (r *PerformanceRepository) FindByTagID(tagID string, limit, offset int) ([]
 func (r *PerformanceRepository) Create(p *models.Performance) error {
 	p.ID = uuid.New()
 	query := `
-		INSERT INTO performances (id, stream_id, song_id, start_seconds, end_seconds, order_index, holodex_song_id, custom_tags)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO performances (id, stream_id, song_id, start_seconds, end_seconds, order_index, holodex_song_id, custom_tags, end_source, end_confirmed)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		RETURNING created_at`
 
 	err := r.db.QueryRow(query, p.ID, p.StreamID, p.SongID, p.StartSeconds, p.EndSeconds,
-		p.OrderIndex, p.HolodexSongID, p.CustomTags).Scan(&p.CreatedAt)
+		p.OrderIndex, p.HolodexSongID, p.CustomTags, normalizeEndSource(p.EndSource), p.EndConfirmed).Scan(&p.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("create performance: %w", err)
 	}
@@ -321,11 +321,13 @@ func (r *PerformanceRepository) Update(p *models.Performance) error {
 	query := `
 		UPDATE performances
 		SET stream_id = $2, song_id = $3, start_seconds = $4, end_seconds = $5,
-		    order_index = $6, holodex_song_id = $7, custom_tags = $8
+		    order_index = $6, holodex_song_id = $7, custom_tags = $8,
+		    end_source = $9, end_confirmed = $10
 		WHERE id = $1`
 
 	res, err := r.db.Exec(query, p.ID, p.StreamID, p.SongID, p.StartSeconds, p.EndSeconds,
-		p.OrderIndex, p.HolodexSongID, p.CustomTags)
+		p.OrderIndex, p.HolodexSongID, p.CustomTags,
+		normalizeEndSource(p.EndSource), p.EndConfirmed)
 	if err != nil {
 		return fmt.Errorf("update performance: %w", err)
 	}
@@ -618,9 +620,11 @@ func (r *PerformanceRepository) ReconcilePerformances(streamID string, desired [
 			_, err := tx.Exec(`
 				UPDATE performances
 				SET song_id = $2, start_seconds = $3, end_seconds = $4,
-				    order_index = $5, holodex_song_id = $6, custom_tags = $7
+				    order_index = $5, holodex_song_id = $6, custom_tags = $7,
+				    end_source = $8, end_confirmed = $9
 				WHERE id = $1`,
-				id, d.SongID, d.StartSeconds, d.EndSeconds, d.OrderIndex, d.HolodexSongID, d.CustomTags)
+				id, d.SongID, d.StartSeconds, d.EndSeconds, d.OrderIndex, d.HolodexSongID, d.CustomTags,
+				normalizeEndSource(d.EndSource), d.EndConfirmed)
 			if err != nil {
 				return nil, fmt.Errorf("update performance: %w", err)
 			}
@@ -629,9 +633,10 @@ func (r *PerformanceRepository) ReconcilePerformances(streamID string, desired [
 		}
 		newID := uuid.New()
 		_, err := tx.Exec(`
-			INSERT INTO performances (id, stream_id, song_id, start_seconds, end_seconds, order_index, holodex_song_id, custom_tags)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-			newID, streamID, d.SongID, d.StartSeconds, d.EndSeconds, d.OrderIndex, d.HolodexSongID, d.CustomTags)
+			INSERT INTO performances (id, stream_id, song_id, start_seconds, end_seconds, order_index, holodex_song_id, custom_tags, end_source, end_confirmed)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+			newID, streamID, d.SongID, d.StartSeconds, d.EndSeconds, d.OrderIndex, d.HolodexSongID, d.CustomTags,
+			normalizeEndSource(d.EndSource), d.EndConfirmed)
 		if err != nil {
 			return nil, fmt.Errorf("insert performance: %w", err)
 		}
@@ -698,7 +703,7 @@ func (r *PerformanceRepository) FindBySingerID(singerID string, limit, offset in
 
 	query := `
 		SELECT p.id, p.stream_id, p.song_id, p.start_seconds, p.end_seconds, p.order_index,
-		       p.holodex_song_id, p.custom_tags, p.created_at,
+		       p.holodex_song_id, p.custom_tags, p.created_at, p.end_source, p.end_confirmed,
 		       st.title AS stream_title, st.stream_date, st.thumbnail_url,
 		       s.name AS song_name, s.original_artist
 		FROM performances p
@@ -719,7 +724,7 @@ func (r *PerformanceRepository) FindBySingerID(singerID string, limit, offset in
 	for rows.Next() {
 		var p PerformanceWithDetails
 		err := rows.Scan(&p.ID, &p.StreamID, &p.SongID, &p.StartSeconds, &p.EndSeconds,
-			&p.OrderIndex, &p.HolodexSongID, &p.CustomTags, &p.CreatedAt,
+			&p.OrderIndex, &p.HolodexSongID, &p.CustomTags, &p.CreatedAt, &p.EndSource, &p.EndConfirmed,
 			&p.StreamTitle, &p.StreamDate, &p.ThumbnailURL,
 			&p.SongName, &p.OriginalArtist)
 		if err != nil {
@@ -757,7 +762,7 @@ func (r *PerformanceRepository) FindBySingerID(singerID string, limit, offset in
 // perfDetailSelect は配信・楽曲情報付きで歌唱を引く共通 SELECT（FindByTagID と同形）。
 const perfDetailSelect = `
 	SELECT p.id, p.stream_id, p.song_id, p.start_seconds, p.end_seconds, p.order_index,
-	       p.holodex_song_id, p.custom_tags, p.created_at,
+	       p.holodex_song_id, p.custom_tags, p.created_at, p.end_source, p.end_confirmed,
 	       st.title AS stream_title, st.stream_date, st.thumbnail_url,
 	       s.name AS song_name, s.original_artist, s.arts
 	FROM performances p
@@ -776,7 +781,7 @@ func (r *PerformanceRepository) queryPerformanceDetails(query string, args ...in
 	for rows.Next() {
 		var p PerformanceWithDetails
 		err := rows.Scan(&p.ID, &p.StreamID, &p.SongID, &p.StartSeconds, &p.EndSeconds,
-			&p.OrderIndex, &p.HolodexSongID, &p.CustomTags, &p.CreatedAt,
+			&p.OrderIndex, &p.HolodexSongID, &p.CustomTags, &p.CreatedAt, &p.EndSource, &p.EndConfirmed,
 			&p.StreamTitle, &p.StreamDate, &p.ThumbnailURL,
 			&p.SongName, &p.OriginalArtist, &p.Arts)
 		if err != nil {
@@ -832,4 +837,34 @@ func (r *PerformanceRepository) FindRandom(limit int, excludedSongIDs []string) 
 		LIMIT $1`
 
 	return r.queryPerformanceDetails(query, limit, pq.Array(excludedSongIDs))
+}
+
+// EndSource の取りうる値。migration 030 の CHECK 制約と一致させること。
+const (
+	EndSourceManual    = "manual"     // 人が編集画面で入力・変更した
+	EndSourceHolodex   = "holodex"    // Holodex 提供
+	EndSourceComment   = "comment"    // コメントに明示されていた
+	EndSourceChat      = "chat"       // live chat の拍手検出
+	EndSourceItunes    = "itunes"     // iTunes の再生時間から逆算
+	EndSourceNextStart = "next_start" // 次の曲の開始時間
+	EndSourceDefault   = "default"    // 240 秒の既定値
+	EndSourceUnknown   = "unknown"    // 由来を記録する前に作られた行
+)
+
+var validEndSources = map[string]bool{
+	EndSourceManual: true, EndSourceHolodex: true, EndSourceComment: true,
+	EndSourceChat: true, EndSourceItunes: true, EndSourceNextStart: true,
+	EndSourceDefault: true, EndSourceUnknown: true,
+}
+
+// normalizeEndSource は語彙外の値を unknown に丸める。
+//
+// DB 側の CHECK 制約に任せると、未知の値が来たときに保存そのものが失敗し、
+// 「由来が分からない」だけで済むはずの話が「歌唱記録を保存できない」になってしまう。
+// 由来はあくまで補助情報なので、ここで吸収して本体の保存を守る。
+func normalizeEndSource(s string) string {
+	if validEndSources[s] {
+		return s
+	}
+	return EndSourceUnknown
 }

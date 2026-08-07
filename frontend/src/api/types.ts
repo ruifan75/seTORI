@@ -193,6 +193,11 @@ export interface PerformanceTag {
   color: string;
 }
 
+/** 終了時間の由来（docs/DATA_COMPLETION.md）。unknown は記録開始前のデータ */
+export type EndSource =
+  | 'manual' | 'holodex' | 'comment' | 'chat'
+  | 'itunes' | 'next_start' | 'default' | 'unknown';
+
 export interface Performance {
   id: string;
   stream_id: string;
@@ -209,6 +214,10 @@ export interface Performance {
   singers: Singer[];
   youtube_url: string;
   created_at: string;
+  /** 終了時間の由来 */
+  end_source: EndSource;
+  /** 人が値を見て認めたか。由来とは独立 */
+  end_confirmed: boolean;
   // タグ検索など配信横断の一覧でのみ設定される
   stream_title?: string;
   stream_date?: string;
@@ -375,6 +384,10 @@ export interface CreatePerformanceItem {
   art_url?: string;
   itunes_id?: number; // Holodex 提供的 iTunes ID
   custom_tags?: string[];
+  /** 終了時間の由来。省略すると unknown 扱い（docs/DATA_COMPLETION.md） */
+  end_source?: EndSource;
+  /** 人が値を見て認めたか。編集画面からの保存は既定で true。自動生成は false を明示する */
+  end_confirmed?: boolean;
 }
 
 export interface CreatePerformancesRequest {

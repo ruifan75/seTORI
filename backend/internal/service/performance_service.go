@@ -79,6 +79,13 @@ func (s *PerformanceService) CreatePerformances(streamID string, items []dto.Cre
 		}
 
 		// 3. 目標状態を組み立てる（書き込みは後段の差分更新でまとめて行う）
+		// 終了時間の由来。編集画面から来たものは人が見たとみなして confirmed=true を既定にし、
+		// 一括自動作成のように人手を介さない経路は明示的に false を送ってもらう。
+		endConfirmed := true
+		if item.EndConfirmed != nil {
+			endConfirmed = *item.EndConfirmed
+		}
+
 		desired = append(desired, models.Performance{
 			StreamID:     streamID,
 			SongID:       song.ID,
@@ -86,6 +93,8 @@ func (s *PerformanceService) CreatePerformances(streamID string, items []dto.Cre
 			EndSeconds:   item.EndSeconds,
 			OrderIndex:   0, // 不再使用，改用 start_seconds 排序
 			CustomTags:   item.CustomTags,
+			EndSource:    item.EndSource,
+			EndConfirmed: endConfirmed,
 		})
 	}
 

@@ -99,6 +99,12 @@ type Performance struct {
 	HolodexSongID uuid.NullUUID  `json:"holodex_song_id"`
 	CustomTags    pq.StringArray `json:"custom_tags"`
 	CreatedAt     time.Time      `json:"created_at"`
+
+	// 終了時間の由来と確認状態（詳細は docs/DATA_COMPLETION.md）。
+	// 2 つは直交する：拍手検出が出した値を人が見て承認すれば
+	// EndSource="chat" かつ EndConfirmed=true になる。
+	EndSource    string `json:"end_source"`
+	EndConfirmed bool   `json:"end_confirmed"`
 }
 
 // PerformanceTag 演出版本標籤

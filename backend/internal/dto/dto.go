@@ -197,6 +197,10 @@ type PerformanceResponse struct {
 	Singers        []SingerResponse         `json:"singers"`
 	YouTubeURL     string                   `json:"youtube_url"`
 	CreatedAt      time.Time                `json:"created_at"`
+	// 終了時間の由来と確認状態（docs/DATA_COMPLETION.md）。
+	// 編集画面はこれを読んで endSource を復元し、保存時にそのまま送り返す。
+	EndSource    string `json:"end_source"`
+	EndConfirmed bool   `json:"end_confirmed"`
 	// タグ検索など配信横断の一覧でのみ設定される（配信詳細では省略）
 	StreamTitle  string  `json:"stream_title,omitempty"`
 	StreamDate   string  `json:"stream_date,omitempty"`
@@ -221,6 +225,10 @@ type SongPerformanceResponse struct {
 	Singers        []SingerResponse         `json:"singers"`
 	YouTubeURL     string                   `json:"youtube_url"`
 	CreatedAt      time.Time                `json:"created_at"`
+	// 終了時間の由来と確認状態（docs/DATA_COMPLETION.md）。
+	// 編集画面はこれを読んで endSource を復元し、保存時にそのまま送り返す。
+	EndSource    string `json:"end_source"`
+	EndConfirmed bool   `json:"end_confirmed"`
 }
 
 type SongPerformanceListResponse struct {
@@ -360,6 +368,14 @@ type CreatePerformanceItem struct {
 	ArtURL                *string  `json:"art_url,omitempty"`
 	ItunesID              *int64   `json:"itunes_id,omitempty"` // Holodex 提供的 iTunes ID
 	CustomTags            []string `json:"custom_tags,omitempty"`
+
+	// 終了時間の由来と確認状態（詳細は docs/DATA_COMPLETION.md）。
+	// フロントエンドは編集中ずっと endSource を追跡しているので、保存時にそれを送る。
+	// 省略された場合は unknown 扱いになる。
+	EndSource string `json:"end_source,omitempty"`
+	// 編集画面から保存されたものは人が見たとみなせるので既定で true。
+	// 一括自動作成など人手を介さない経路では明示的に false を送ること。
+	EndConfirmed *bool `json:"end_confirmed,omitempty"`
 }
 
 type CreatePerformancesRequest struct {
