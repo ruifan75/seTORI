@@ -10,10 +10,19 @@ import (
 type ParsedSong struct {
 	Start              int    `json:"start"`                 // 開始秒數
 	End                int    `json:"end"`                   // 結束秒數（0 表示未知）
-	Name               string `json:"name"`                  // 歌曲名稱
-	OriginalArtist     string `json:"original_artist"`       // 原唱藝人
+	Name               string `json:"name"`                  // 歌曲名稱（逐字：原文に現れる形のまま）
+	OriginalArtist     string `json:"original_artist"`       // 原唱藝人（逐字）
 	OriginalComment    string `json:"original_comment"`      // 原始 comment 文本
 	IsEndTimeEstimated bool   `json:"is_end_time_estimated"` // 結束時間是否為估計值
+
+	// 以下は抽出と正規化を 1 回の AI 呼び出しで行う経路（ParseAndNormalizeWithAI）でのみ埋まる。
+	// 2 段階の経路では空のままで、後段の BatchAINormalization が担当する。
+	NormalizedName          string   `json:"normalized_name,omitempty"`
+	NormalizedNameReading   string   `json:"normalized_name_reading,omitempty"`
+	NormalizedArtist        string   `json:"normalized_artist,omitempty"`
+	NormalizedArtistReading string   `json:"normalized_artist_reading,omitempty"`
+	Tags                    []string `json:"tags,omitempty"`
+	Confidence              float64  `json:"confidence,omitempty"`
 }
 
 // 時間戳正則表達式

@@ -3,11 +3,19 @@
 // Ground truth = performances (人手で確定した歌唱記録) tied to a stream.
 // Source       = comment_raw (歌枠のセトリコメント).
 //
-// -mode regex : pure deterministic path (comment.ParseComments). AI 失敗時のフォールバック。
-// -mode ai    : production と同じ抽出（comment.ParseCommentsWithAI, AI 失敗時は regex）。
+// -mode regex    : pure deterministic path (comment.ParseComments). AI 失敗時のフォールバック。
+// -mode ai       : production と同じ 2 段階の抽出（comment.ParseCommentsWithAI, AI 失敗時は regex）。
+// -mode combined : 抽出と正規化を 1 回で行う経路（comment.ParseAndNormalizeWithAI）。
 //
 //	本機 DB の ai_providers を使う。呼び出しは高いので -cache でディスクに保存し、
 //	-struct の on/off 再実行は同じ AI 結果を使い回す。
+//
+//	⚠️ キャッシュは stream ID だけをキーにしている。ai と combined で同じ -cache を
+//	指すと結果が混ざるので、モードごとに別のパスを渡すこと。
+//
+//	2 経路の比較例：
+//	  go run ./cmd/setoribench -mode ai       -cache /tmp/bench-ai.json
+//	  go run ./cmd/setoribench -mode combined -cache /tmp/bench-combined.json
 //
 // どちらのモードでも抽出後に FilterSongsWith(structural) -> Dedup -> Validate を通し、
 // 抽出タイムスタンプを ground truth と start 近接で突き合わせて precision/recall を出す。
@@ -46,7 +54,7 @@ type fpItem struct {
 
 func main() {
 	dbURL := flag.String("db", envOr("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/setori?sslmode=disable"), "database URL")
-	mode := flag.String("mode", "regex", "extraction mode: regex | ai | stored (DB の comment_songs をそのまま評価)")
+	mode := flag.String("mode", "regex", "extraction mode: regex | ai | combined | stored (DB の comment_songs をそのまま評価)")
 	structural := flag.Bool("struct", true, "apply structural non-song filter (false = keyword-only baseline)")
 	noFilter := flag.Bool("nofilter", false, "skip FilterSongs entirely (stored の as-is 評価用)")
 	limit := flag.Int("limit", 0, "limit number of streams (0 = all)")
@@ -67,7 +75,7 @@ func main() {
 
 	// AI モード用の抽出器（production と同じ AIService をそのまま使う）
 	var aiSvc *service.AIService
-	if *mode == "ai" {
+	if usesAI(*mode) {
 		aiSvc = service.NewAIService(repository.NewAIProviderRepository(db), os.Getenv("GROQ_API_KEY"))
 	}
 	cache := loadCache(*cachePath)
@@ -107,7 +115,7 @@ func main() {
 			if usedRegexFallback {
 				aiFail++
 			}
-			if *mode == "ai" {
+			if usesAI(*mode) {
 				tag := "AI"
 				if usedRegexFallback {
 					tag = "AI-FAILED->regex"
@@ -181,7 +189,7 @@ func main() {
 		fmt.Printf("recall             : %.3f\n", float64(totalTP)/float64(totalGT))
 	}
 	fmt.Printf("streams over-extracting (extract>GT): %d / %d\n", streamsOverExtract, len(streams))
-	if *mode == "ai" {
+	if usesAI(*mode) {
 		fmt.Printf("streams that fell back to regex (AI failed): %d\n", aiFail)
 	}
 
@@ -217,11 +225,14 @@ func main() {
 	}
 }
 
+// usesAI は AI を呼ぶモードかどうか。
+func usesAI(mode string) bool { return mode == "ai" || mode == "combined" }
+
 // extract は mode に応じて production と同じ抽出を行う。
-// ai モードでは ParseCommentsWithAI を使い、失敗時は ParseComments に退避（parseComments と同じ挙動）。
+// ai / combined モードでは AI を呼び、失敗時は ParseComments に退避（parseComments と同じ挙動）。
 // cache があれば AI 結果を再利用し、無ければ呼び出して保存する。
 func extract(mode, sid string, comments []string, aiSvc *service.AIService, cache map[string][]comment.ParsedSong) (songs []comment.ParsedSong, usedRegexFallback bool) {
-	if mode != "ai" {
+	if mode != "ai" && mode != "combined" {
 		return comment.ParseComments(comments), false
 	}
 	if cache != nil {
@@ -229,7 +240,16 @@ func extract(mode, sid string, comments []string, aiSvc *service.AIService, cach
 			return cached, false
 		}
 	}
-	songs, err := comment.ParseCommentsWithAI(aiSvc, comments)
+
+	var err error
+	if mode == "combined" {
+		// 抽出と正規化を 1 回で行う経路。2 段階との差を測るために用意している。
+		// precision/recall は同じ土俵で比較できるが、この経路は NormalizedName や
+		// Tags も埋めるため、タグ付与の正しさは -struct 併用で出力を目視すること。
+		songs, err = comment.ParseAndNormalizeWithAI(aiSvc, comments)
+	} else {
+		songs, err = comment.ParseCommentsWithAI(aiSvc, comments)
+	}
 	if err != nil {
 		songs = comment.ParseComments(comments)
 		usedRegexFallback = true
