@@ -7,26 +7,26 @@ import (
 
 	"github.com/ruifan75/setori/internal/dto"
 	"github.com/ruifan75/setori/internal/logger"
-	"github.com/ruifan75/setori/internal/models"
 	"github.com/ruifan75/setori/internal/repository"
 	"github.com/ruifan75/setori/pkg/ai"
 )
 
 type NormalizationService struct {
 	aiClient       ai.Chatter
-	songRepo       *repository.SongRepository
 	songItunesRepo *repository.SongItunesRepository
+	matchService   *SongMatchService
 }
 
+// 楽曲の照合そのものは SongMatchService が持つので songRepo は要らない。
 func NewNormalizationService(
 	aiClient ai.Chatter,
-	songRepo *repository.SongRepository,
 	songItunesRepo *repository.SongItunesRepository,
+	matchService *SongMatchService,
 ) *NormalizationService {
 	return &NormalizationService{
 		aiClient:       aiClient,
-		songRepo:       songRepo,
 		songItunesRepo: songItunesRepo,
+		matchService:   matchService,
 	}
 }
 
@@ -191,38 +191,53 @@ func (s *NormalizationService) buildBatchMessage(items []dto.AINormalizationItem
 	return sb.String()
 }
 
-// matchAndPopulateSong 嘗試匹配 DB 歌曲並填入資訊
-// 優先順序：iTunes ID → 歌名 + アーティスト
+// matchAndPopulateSong は既存楽曲との照合結果を result に詰める。
+//
+// 照合は SongMatchService に任せる（曲名キーで引いてアーティストで検証する）。
+// 確信度が AutoMatchScore 以上のものだけを「マッチした」として扱い、
+// それに満たないが似ているものは MatchCandidates に入れて UI に選ばせる。
+// ここで候補を握り潰すと、"ひこうき雲 / 松任谷由実" のような別名義の曲が
+// 「DB に無い曲」として新規登録され、近似重複が増えていく。
 func (s *NormalizationService) matchAndPopulateSong(result *dto.AISuggestionResult, item *dto.AINormalizationItem, normalizedName, normalizedArtist string) {
-	var matchedSong *models.Song
-	var matchReason string
-
-	// 1. 優先使用 iTunes ID 配對
-	if item.ItunesID != nil && *item.ItunesID > 0 {
-		song, err := s.songRepo.FindByItunesID(*item.ItunesID)
-		if err == nil && song != nil {
-			matchedSong = song
-			matchReason = "itunes_id"
-		}
-	}
-
-	// 2. 使用歌名 + 藝人配對
-	if matchedSong == nil {
-		song, err := s.songRepo.FindByNameAndArtist(normalizedName, normalizedArtist)
-		if err == nil && song != nil {
-			matchedSong = song
-			matchReason = "name"
-		}
-	}
-
-	if matchedSong == nil {
+	if s.matchService == nil {
 		return
 	}
+	cands, err := s.matchService.FindCandidates(normalizedName, normalizedArtist, item.ItunesID)
+	if err != nil {
+		logger.Warnf("song match failed (%s / %s): %v", normalizedName, normalizedArtist, err)
+		return
+	}
+	if len(cands) == 0 {
+		return
+	}
+
+	// 自動採用の水準に届かないものは候補として返すだけにする
+	for _, c := range cands {
+		if c.Score < ReviewScore {
+			continue
+		}
+		result.MatchCandidates = append(result.MatchCandidates, dto.SongMatchCandidate{
+			SongID:  c.Song.ID.String(),
+			Name:    c.Song.Name,
+			Artist:  c.Song.OriginalArtist,
+			Score:   c.Score,
+			Reason:  c.Reason,
+			ArtURL:  c.Song.Arts.String,
+			IsMatch: c.Auto(),
+		})
+	}
+
+	best := cands[0]
+	if !best.Auto() {
+		return
+	}
+	matchedSong := &best.Song
 
 	// 填入匹配結果
 	songID := matchedSong.ID.String()
 	result.MatchedSongID = &songID
-	result.MatchReason = matchReason
+	result.MatchReason = best.Reason
+	result.MatchScore = best.Score
 	result.MatchedSongName = &matchedSong.Name
 	result.MatchedSongArtist = &matchedSong.OriginalArtist
 	if matchedSong.NameReading.Valid {

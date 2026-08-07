@@ -126,6 +126,10 @@ func (r *ArtistRepository) Rename(id uuid.UUID, newName string) error {
 		WHERE id IN (SELECT song_id FROM song_artists WHERE artist_id = $1)`, id, newName); err != nil {
 		return fmt.Errorf("update songs artist text: %w", err)
 	}
+	// 表示テキストが変わったので照合キーも追随させる
+	if err := refreshSongMatchKeysByArtist(tx, id); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
@@ -196,6 +200,10 @@ func (r *ArtistRepository) MergeArtists(sourceID, targetID uuid.UUID) error {
 		WHERE id IN (SELECT song_id FROM song_artists WHERE artist_id = $1)`,
 		sourceID, target.Name, target.NameReading); err != nil {
 		return fmt.Errorf("update songs artist text: %w", err)
+	}
+	// 表示テキストが変わったので照合キーも追随させる（付け替え前なので source で引ける）
+	if err := refreshSongMatchKeysByArtist(tx, sourceID); err != nil {
+		return err
 	}
 
 	// 3. マッピングを付け替え、source を削除

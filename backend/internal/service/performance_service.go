@@ -19,6 +19,7 @@ type PerformanceService struct {
 	songItunesRepo *repository.SongItunesRepository
 	artistRepo     *repository.ArtistRepository
 	streamRepo     *repository.StreamRepository
+	matchService   *SongMatchService
 }
 
 func NewPerformanceService(
@@ -27,6 +28,7 @@ func NewPerformanceService(
 	songItunesRepo *repository.SongItunesRepository,
 	artistRepo *repository.ArtistRepository,
 	streamRepo *repository.StreamRepository,
+	matchService *SongMatchService,
 ) *PerformanceService {
 	return &PerformanceService{
 		perfRepo:       perfRepo,
@@ -34,6 +36,7 @@ func NewPerformanceService(
 		songItunesRepo: songItunesRepo,
 		artistRepo:     artistRepo,
 		streamRepo:     streamRepo,
+		matchService:   matchService,
 	}
 }
 
@@ -111,34 +114,32 @@ func (s *PerformanceService) CreatePerformances(streamID string, items []dto.Cre
 }
 
 // findOrCreateSong 尋找或建立歌曲
-// 優先順序：iTunes ID -> 歌名 + 藝人 -> 建立新歌曲
+//
+// 照合は SongMatchService（曲名キー主導）に任せ、確信度で 3 通りに分ける。
+//
+//	自動採用の水準  → 既存曲に結びつける
+//	似ているが未満  → 新曲を作る。ただし黙って作らず統合候補として記録する
+//	似ていない      → 新曲を作る
+//
+// 真ん中の扱いがこの関数の肝。以前は「照合できなければ新曲」しかなかったので、
+// 表記ゆれで外すたびに近似重複（"少女レイ / みきとP feat. 初音ミク" のような）が
+// 静かに増え、次からはもっと当たらなくなるという悪循環になっていた。
+// ここで記録しておけば、既存の統合機能で人が畳める。
+//
 // 返回：歌曲, 是否為新建立的, 錯誤
 func (s *PerformanceService) findOrCreateSong(item dto.CreatePerformanceItem) (*models.Song, bool, error) {
-	// 1. 優先使用 iTunes ID 配對
-	if item.ItunesID != nil && *item.ItunesID > 0 {
-		song, err := s.songRepo.FindByItunesID(*item.ItunesID)
+	var candidates []MatchCandidate
+	if s.matchService != nil {
+		var err error
+		candidates, err = s.matchService.FindCandidates(item.Name, item.OriginalArtist, item.ItunesID)
 		if err != nil {
-			return nil, false, fmt.Errorf("find by itunes id: %w", err)
-		}
-		if song != nil {
-			// 歌曲已存在，檢查是否需要補上封面圖
-			if (!song.Arts.Valid || song.Arts.String == "") && item.ArtURL != nil && *item.ArtURL != "" {
-				song.Arts = sql.NullString{String: *item.ArtURL, Valid: true}
-				if err := s.songRepo.Update(song); err != nil {
-					return nil, false, fmt.Errorf("update song arts: %w", err)
-				}
-			}
-			return song, false, nil
+			return nil, false, fmt.Errorf("find song: %w", err)
 		}
 	}
 
-	// 2. 使用歌名和藝人配對
-	song, err := s.songRepo.FindByNameAndArtist(item.Name, item.OriginalArtist)
-	if err != nil {
-		return nil, false, fmt.Errorf("find song: %w", err)
-	}
-
-	if song != nil {
+	// 1. 自動採用できる候補があればそれを使う
+	if len(candidates) > 0 && candidates[0].Auto() {
+		song := &candidates[0].Song
 		// 歌曲已存在，檢查是否需要補上封面圖
 		if (!song.Arts.Valid || song.Arts.String == "") && item.ArtURL != nil && *item.ArtURL != "" {
 			song.Arts = sql.NullString{String: *item.ArtURL, Valid: true}
@@ -149,8 +150,8 @@ func (s *PerformanceService) findOrCreateSong(item dto.CreatePerformanceItem) (*
 		return song, false, nil
 	}
 
-	// 3. 建立新歌曲
-	song = &models.Song{
+	// 2. 建立新歌曲
+	song := &models.Song{
 		Name:           item.Name,
 		OriginalArtist: item.OriginalArtist,
 	}
@@ -173,7 +174,31 @@ func (s *PerformanceService) findOrCreateSong(item dto.CreatePerformanceItem) (*
 		logger.Warnf("sync song artist mapping failed (song: %s): %v", song.ID, err)
 	}
 
+	// 3. 似た既存曲があったなら統合候補として残す。
+	// 曲の登録自体は止めない（配信の編集を人質に取らない）が、
+	// 見えないところで重複が積もるのは防ぐ。
+	s.recordMergeCandidates(song, candidates)
+
 	return song, true, nil
+}
+
+// recordMergeCandidates は新規作成した曲について、自動採用に届かなかったが
+// 十分似ている既存曲を統合候補に記録する。失敗しても本筋は止めない。
+func (s *PerformanceService) recordMergeCandidates(newSong *models.Song, candidates []MatchCandidate) {
+	if s.matchService == nil {
+		return
+	}
+	for _, c := range candidates {
+		if !c.NeedsReview() {
+			continue
+		}
+		if err := s.matchService.RecordMergeCandidate(newSong.ID, c.Song.ID, c.Score, c.Reason); err != nil {
+			logger.Warnf("record merge candidate failed (%s ↔ %s): %v", newSong.ID, c.Song.ID, err)
+			continue
+		}
+		logger.Infof("新規登録した楽曲が既存曲に似ています。統合候補として記録しました: %q / %q ↔ %q / %q (score=%.2f, %s)",
+			newSong.Name, newSong.OriginalArtist, c.Song.Name, c.Song.OriginalArtist, c.Score, c.Reason)
+	}
 }
 
 // ========== 単件更新（修正提案の反映・プレイヤーからの微調整の受け口） ==========

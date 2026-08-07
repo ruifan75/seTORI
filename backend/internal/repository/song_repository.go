@@ -165,6 +165,11 @@ func (r *SongRepository) Create(s *models.Song) error {
 	if err != nil {
 		return fmt.Errorf("create song: %w", err)
 	}
+	// 照合キーは楽曲と同時に作る。サービス層に任せると呼び忘れた経路のぶんだけ
+	// 「検索に出てこない曲」が生まれるので、ここで面倒を見る。
+	if err := upsertSongMatchKey(r.db, s.ID, s.Name, s.OriginalArtist); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -181,6 +186,9 @@ func (r *SongRepository) Update(s *models.Song) error {
 		s.OriginalArtistReading, s.Arts).Scan(&s.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("update song: %w", err)
+	}
+	if err := upsertSongMatchKey(r.db, s.ID, s.Name, s.OriginalArtist); err != nil {
+		return err
 	}
 	return nil
 }

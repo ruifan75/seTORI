@@ -55,6 +55,7 @@ type Router struct {
 	playlistService      *service.PlaylistService
 	oauthService         *service.OAuthService
 	settingsService      *service.SettingsService
+	songMatchService     *service.SongMatchService
 }
 
 // NewRouter 新しいルーターを作成
@@ -70,25 +71,29 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	aiProviderRepo := repository.NewAIProviderRepository(db)
 	authRepo := repository.NewAuthRepository(db)
 	artistRepo := repository.NewArtistRepository(db)
+	songMatchRepo := repository.NewSongMatchRepository(db)
 
 	// AI サービス：複数 provider ローテーション + failover、未設定時は GROQ_API_KEY にフォールバック
 	aiService := service.NewAIService(aiProviderRepo, cfg.GroqAPIKey)
 
 	// services を作成
+	// 楽曲の同一性判定（曲名キー主導 + アーティストで検証）。照合を使う側は全員これを通す
+	songMatchService := service.NewSongMatchService(songMatchRepo, songRepo, songItunesRepo)
 	songService := service.NewSongService(songRepo, perfRepo, songItunesRepo, artistRepo)
+	songService.SetMatchService(songMatchService)
 	artistService := service.NewArtistService(artistRepo, songRepo, aiService)
 	streamService := service.NewStreamService(streamRepo, perfRepo)
 	singerService := service.NewSingerService(singerRepo, streamRepo, perfRepo)
 	holodexService := service.NewHolodexService(cfg.HolodexAPIKey, cfg.YouTubeAPIKey, cfg.GroqAPIKey, streamRepo, singerRepo, cfg.HolodexEditorToken)
 	holodexService.SetRepositoriesWithSongItunes(perfRepo, songRepo, songItunesRepo) // SyncSetoriToHolodex に必要な repositories を提供
-	normalizationService := service.NewNormalizationService(aiService, songRepo, songItunesRepo)
+	normalizationService := service.NewNormalizationService(aiService, songItunesRepo, songMatchService)
 	chatEndService := service.NewChatEndService(streamRepo, "", "")
 	// CommentService は分析時に正規化・拍手 end を内部で実行する（抽出→正規化→end→キャッシュ）
 	commentService := service.NewCommentService(holodexService, streamRepo, filterKeywordRepo, aiService, normalizationService, chatEndService)
 	// HolodexService も AnalyzeHolodexSongs で正規化・拍手 end を実行する（holodex_hash キャッシュ）
 	holodexService.SetAnalysisServices(normalizationService, chatEndService)
 	batchAnalyzeService := service.NewBatchAnalyzeService(commentService, streamRepo)
-	performanceService := service.NewPerformanceService(perfRepo, songRepo, songItunesRepo, artistRepo, streamRepo)
+	performanceService := service.NewPerformanceService(perfRepo, songRepo, songItunesRepo, artistRepo, streamRepo, songMatchService)
 	itunesClient := itunes.NewClient()
 	endTimeEstimateService := service.NewEndTimeEstimateService(itunesClient)
 	authService := service.NewAuthService(authRepo)
@@ -153,6 +158,7 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 		playlistService:      playlistService,
 		oauthService:         oauthService,
 		settingsService:      settingsService,
+		songMatchService:     songMatchService,
 	}
 
 	r.setupRoutes()
@@ -167,6 +173,11 @@ func (r *Router) AuthService() *service.AuthService {
 // BackupService は main.go での自動バックアップスケジューラ起動に使う。
 func (r *Router) BackupService() *service.BackupService {
 	return r.backupService
+}
+
+// SongMatchService は main.go での照合キー再構築に使う。
+func (r *Router) SongMatchService() *service.SongMatchService {
+	return r.songMatchService
 }
 
 func (r *Router) setupRoutes() {
@@ -217,6 +228,10 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("PUT /api/songs/{id}", r.handleUpdateSong)
 	r.mux.HandleFunc("DELETE /api/songs/{id}", r.handleDeleteSong)
 	r.mux.HandleFunc("POST /api/songs/{id}/merge", r.handleMergeSong)
+	// 照合が外れて新曲になったものの統合候補（黙って重複が増えるのを防ぐ受け皿）
+	r.mux.HandleFunc("GET /api/songs/merge-candidates", r.handleListMergeCandidates)
+	r.mux.HandleFunc("POST /api/songs/merge-candidates/{id}/dismiss", r.handleDismissMergeCandidate)
+	r.mux.HandleFunc("GET /api/songs/{id}/merge-candidates", r.handleGetSongMergeCandidates)
 
 	// API routes - Streams
 	r.mux.HandleFunc("GET /api/streams", r.handleListStreams)
@@ -2651,6 +2666,12 @@ func requiredPermission(method, path string) (perm string, needsAuth bool) {
 			return "", false
 		}
 		return "", true // 作成・更新・削除はログイン必須（特定権限は不要）
+	}
+
+	// 統合候補はレビュー用の作業一覧なので、修正提案のレビューと同じ権限に揃える。
+	// 楽曲詳細に出す個別の候補（/api/songs/{id}/merge-candidates）は閲覧のまま。
+	if path == "/api/songs/merge-candidates" {
+		return auth.PermContentEdit, true
 	}
 
 	// 管理系リソースはメソッドを問わず専用権限が必要

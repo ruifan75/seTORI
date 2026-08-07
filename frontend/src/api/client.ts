@@ -17,6 +17,7 @@ import type {
   SyncHolodexRequest,
   SyncHolodexResponse,
   SongSuggestion,
+  MergeCandidate,
   AnalyzeCommentsResponse,
   BatchAnalyzeStatus,
   SuccessResponse,
@@ -175,6 +176,22 @@ export const songApi = {
 
   merge: async (sourceSongId: string, targetSongId: string): Promise<{ message: string; source_id: string; target_id: string; target_song: Song }> => {
     const { data } = await api.post(`/api/songs/${sourceSongId}/merge`, { target_song_id: targetSongId });
+    return data;
+  },
+
+  // 照合が外れて新曲として登録された疑いのある組。統合して畳むためのレビュー用。
+  mergeCandidates: async (limit = 50): Promise<{ candidates: MergeCandidate[]; total: number }> => {
+    const { data } = await api.get(`/api/songs/merge-candidates?limit=${limit}`);
+    return data;
+  },
+
+  mergeCandidatesForSong: async (songId: string): Promise<{ candidates: MergeCandidate[] }> => {
+    const { data } = await api.get(`/api/songs/${songId}/merge-candidates`);
+    return data;
+  },
+
+  dismissMergeCandidate: async (id: string): Promise<{ message: string }> => {
+    const { data } = await api.post(`/api/songs/merge-candidates/${id}/dismiss`);
     return data;
   },
 };

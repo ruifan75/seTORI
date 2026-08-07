@@ -192,6 +192,15 @@ export default function SongDetailPage() {
     enabled: !!id,
   });
 
+  // この曲と重複している疑いのある曲。取り込み時に照合しきれず別々に登録されたもの。
+  // 気づける場所に出しておかないと、重複したまま両方に歌唱が溜まっていく。
+  const { data: mergeCandidateData } = useQuery({
+    queryKey: ['song', id, 'merge-candidates'],
+    queryFn: () => songApi.mergeCandidatesForSong(id!),
+    enabled: !!id,
+  });
+  const mergeCandidates = mergeCandidateData?.candidates ?? [];
+
   const updateMutation = useMutation({
     mutationFn: (data: UpdateSongRequest) => songApi.update(id!, data),
     onSuccess: () => {
@@ -976,6 +985,42 @@ export default function SongDetailPage() {
           </div>
         </div>
       </div>
+
+      {/* 重複の疑いがある曲。統合はこの曲の編集パネル（統合先を検索）から行う */}
+      {mergeCandidates.length > 0 && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 p-4">
+          <h2 className="mb-1 font-bold text-amber-900">同じ曲かもしれない楽曲があります</h2>
+          <p className="mb-3 text-sm text-amber-800">
+            取り込み時に照合しきれず、別々に登録された可能性があります。同じ曲なら統合してください。
+          </p>
+          <ul className="space-y-2">
+            {mergeCandidates.map((c) => {
+              const other = c.new_song.id === id ? c.existing_song : c.new_song;
+              return (
+                <li key={c.id} className="flex flex-wrap items-center gap-2 text-sm">
+                  <Link to={`/songs/${other.id}`} className="font-medium text-blue-700 hover:underline">
+                    {other.name} / {other.original_artist || '（アーティスト未記入）'}
+                  </Link>
+                  <span className="text-amber-700">歌唱 {other.performance_count} 件</span>
+                  {canEdit && (
+                    <button
+                      onClick={() => {
+                        setIsEditing(true);
+                        setMergeTargetId(other.id);
+                        setMergeTargetQuery(`${other.name} / ${other.original_artist}`);
+                      }}
+                      className="rounded border border-amber-400 px-2 py-0.5 text-xs text-amber-900 hover:bg-amber-100"
+                      title="この曲を統合先に設定して編集パネルを開く"
+                    >
+                      統合先に設定
+                    </button>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
 
       {/* Performances List */}
       <div>

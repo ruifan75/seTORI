@@ -17,7 +17,13 @@ type SongService struct {
 	perfRepo       *repository.PerformanceRepository
 	songItunesRepo *repository.SongItunesRepository
 	artistRepo     *repository.ArtistRepository
+	matchService   *SongMatchService
 }
+
+// SetMatchService は照合サービスを注入する。
+// SongMatchService 側が SongService を必要としないので循環はしないが、
+// 生成順の都合でコンストラクタ引数ではなく後入れにしている。
+func (s *SongService) SetMatchService(m *SongMatchService) { s.matchService = m }
 
 func NewSongService(
 	songRepo *repository.SongRepository,
@@ -337,7 +343,17 @@ func (s *SongService) ApplyEditableFields(id uuid.UUID, fields map[string]string
 
 // MergeSongs 將來源歌曲合併至目標歌曲
 func (s *SongService) MergeSongs(sourceSongID, targetSongID uuid.UUID) error {
-	return s.songRepo.MergeSong(sourceSongID, targetSongID)
+	if err := s.songRepo.MergeSong(sourceSongID, targetSongID); err != nil {
+		return err
+	}
+	// 統合が済んだので、この 2 曲に紐づく未処理の統合候補は畳む。
+	// 残しておくと解決済みの組が一覧に出続ける。
+	if s.matchService != nil {
+		if err := s.matchService.ResolveCandidatesForMergedSong(sourceSongID, targetSongID); err != nil {
+			logger.Warnf("resolve merge candidates failed (%s → %s): %v", sourceSongID, targetSongID, err)
+		}
+	}
+	return nil
 }
 
 // SearchSimilar 搜尋相似歌曲（用於 AI 正規化建議）

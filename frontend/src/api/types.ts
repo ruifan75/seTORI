@@ -303,6 +303,8 @@ export interface CommentSong {
   matched_song_artist_reading?: string;
   matched_song_art_url?: string;
   matched_song_itunes_id?: number;
+  // 自動採用に届かなかった照合候補（別名義・同名異曲など）。UI で人に選ばせる
+  match_candidates?: SongMatchCandidate[];
 }
 
 export interface AnalyzeCommentsResponse {
@@ -353,6 +355,8 @@ export interface SongSuggestion {
   matched_song_artist_reading?: string;
   matched_song_art_url?: string;
   matched_song_itunes_id?: number;
+  // 自動採用に届かなかった照合候補（別名義・同名異曲など）。UI で人に選ばせる
+  match_candidates?: SongMatchCandidate[];
 }
 
 export interface LoadHolodexSongsResponse {
@@ -409,12 +413,15 @@ export interface AISuggestionResult {
   reasoning: string;
   matched_song_id?: string;
   match_reason?: string;
+  match_score?: number;
   matched_song_name?: string;
   matched_song_name_reading?: string;
   matched_song_artist?: string;
   matched_song_artist_reading?: string;
   matched_song_art_url?: string;
   matched_song_itunes_id?: number;
+  // 自動採用に届かなかった照合候補（別名義・同名異曲など）。UI で人に選ばせる
+  match_candidates?: SongMatchCandidate[];
 }
 
 export interface BatchAINormalizationResponse {
@@ -922,4 +929,35 @@ export interface UpdateIntegrationSettingsRequest {
   clear?: string[];
   google_drive_client_id?: string;
   google_signin_client_id?: string;
+}
+
+// ========== 楽曲の照合・統合候補 ==========
+
+// 既存楽曲との照合候補。score >= 0.85 が自動採用（is_match）、
+// それ未満は「似ているが決められない」ので人に選ばせる。
+export interface SongMatchCandidate {
+  song_id: string;
+  name: string;
+  artist: string;
+  score: number;
+  reason: string;
+  art_url?: string;
+  is_match: boolean;
+}
+
+export interface MergeCandidateSong {
+  id: string;
+  name: string;
+  original_artist: string;
+  art_url?: string;
+  performance_count: number;
+}
+
+// 照合が外れて新曲として登録された疑いのある組。統合して畳むためのレビュー対象。
+export interface MergeCandidate {
+  id: string;
+  score: number;
+  reason: string;
+  new_song: MergeCandidateSong;
+  existing_song: MergeCandidateSong;
 }

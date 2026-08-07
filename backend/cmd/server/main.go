@@ -47,6 +47,16 @@ func main() {
 	// ルーターを設定
 	router := handler.NewRouter(db, cfg)
 
+	// 楽曲の照合キーを最新の規則で作り直す。
+	// キーの無い曲（導入直後・リストア直後）、songmatch.RulesVersion を上げたとき、
+	// 別経路で曲名やアーティストが書き換わったときに、ここで追随する。
+	if n, err := router.SongMatchService().RebuildKeys(); err != nil {
+		logger.Errorf("楽曲照合キーの再構築に失敗しました: %v", err)
+		os.Exit(1)
+	} else if n > 0 {
+		logger.Infof("楽曲照合キーを再構築しました: %d 件", n)
+	}
+
 	// 初期管理者アカウントをブートストラップ（ユーザーが 0 件のときのみ作成）
 	if err := router.AuthService().EnsureBootstrapAdmin(cfg.BootstrapAdminUser, cfg.BootstrapAdminPass); err != nil {
 		logger.Errorf("初期管理者の作成に失敗しました: %v", err)
