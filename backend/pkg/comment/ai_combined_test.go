@@ -27,12 +27,14 @@ var combinedTestLines = []string{
 	"00:00:00 開演",
 }
 
+// 短縮キー形式。4行目は歌唱行ではないので l / s / ts の3キーだけ返す想定
+// （出力トークンを抑えるためプロンプトでそう指示している）。
 func combinedResponse() string {
 	return `[
-  {"line":1,"is_song":true,"start_ts":"01:38:15","end_ts":"","name_verbatim":"幾億光年","artist_verbatim":"Omoinotake","normalized_name":"幾億光年","normalized_name_reading":"いくおくこうねん","normalized_artist":"Omoinotake","normalized_artist_reading":"おもいのたけ","tags":["piano"],"confidence":0.9},
-  {"line":2,"is_song":true,"start_ts":"01:46:35","end_ts":"","name_verbatim":"愛・おぼえていますか","artist_verbatim":"","normalized_name":"愛・おぼえていますか","normalized_name_reading":"あいおぼえていますか","normalized_artist":"","normalized_artist_reading":"","tags":["acappella"],"confidence":0.9},
-  {"line":3,"is_song":true,"start_ts":"01:31:37","end_ts":"","name_verbatim":"ファタール","artist_verbatim":"","normalized_name":"ファタール","normalized_name_reading":"ふぁたーる","normalized_artist":"","normalized_artist_reading":"","tags":[],"confidence":0.8},
-  {"line":4,"is_song":false,"start_ts":"00:00:00","end_ts":"","name_verbatim":"","artist_verbatim":"","normalized_name":"","normalized_name_reading":"","normalized_artist":"","normalized_artist_reading":"","tags":[],"confidence":0.0}
+  {"l":1,"s":true,"ts":"01:38:15","te":"","nv":"幾億光年","av":"Omoinotake","n":"幾億光年","nr":"いくおくこうねん","a":"Omoinotake","ar":"おもいのたけ","t":["piano"],"c":0.9},
+  {"l":2,"s":true,"ts":"01:46:35","te":"","nv":"愛・おぼえていますか","av":"","n":"愛・おぼえていますか","nr":"あいおぼえていますか","a":"","ar":"","t":["acappella"],"c":0.9},
+  {"l":3,"s":true,"ts":"01:31:37","te":"","nv":"ファタール","av":"","n":"ファタール","nr":"ふぁたーる","a":"","ar":"","t":[],"c":0.8},
+  {"l":4,"s":false,"ts":"00:00:00"}
 ]`
 }
 
@@ -98,7 +100,7 @@ func TestParseAndNormalizeWithAI_逐字検証(t *testing.T) {
 	// AI が原文に存在しない名前を返した場合、逐字フィールドは採用されない。
 	// 正規化フィールドは意図的に原文と異なるため、この検証の対象外。
 	resp := `[
-  {"line":1,"is_song":true,"start_ts":"01:38:15","end_ts":"","name_verbatim":"存在しない曲名","artist_verbatim":"","normalized_name":"幾億光年","normalized_name_reading":"","normalized_artist":"","normalized_artist_reading":"","tags":[],"confidence":0.9}
+  {"l":1,"s":true,"ts":"01:38:15","te":"","nv":"存在しない曲名","av":"","n":"幾億光年","nr":"","a":"","ar":"","t":[],"c":0.9}
 ]`
 	stub := &stubChatter{response: resp}
 	songs, err := ParseAndNormalizeWithAI(stub, combinedTestLines[:1])
