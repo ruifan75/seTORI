@@ -1,12 +1,16 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -23,6 +27,9 @@ type ChatEndService struct {
 	streamRepo *repository.StreamRepository
 	ytdlp      string
 	cacheDir   string
+
+	mu         sync.RWMutex
+	cookieData string // cookies.txt の中身（管理画面の設定 / YTDLP_COOKIES_FILE 由来）
 }
 
 func NewChatEndService(streamRepo *repository.StreamRepository, ytdlpPath, cacheDir string) *ChatEndService {
@@ -32,23 +39,84 @@ func NewChatEndService(streamRepo *repository.StreamRepository, ytdlpPath, cache
 	if cacheDir == "" {
 		cacheDir = "data/chat_cache"
 	}
+	// yt-dlp が無いと全配信が「live chat 不可用」になる。配信ごとの警告からは
+	// 「その配信にチャットが無い」のか「そもそも実行できていない」のか読み取れないので、
+	// 起動時に一度だけ切り分けて残す。
+	if _, err := exec.LookPath(ytdlpPath); err != nil {
+		logger.Warnf("[chatend] yt-dlp が見つかりません (%s): 拍手による end 推定は全配信でスキップされます。"+
+			"インストールしてください（本番イメージは backend/Dockerfile に同梱）", ytdlpPath)
+	}
 	return &ChatEndService{streamRepo: streamRepo, ytdlp: ytdlpPath, cacheDir: cacheDir}
+}
+
+// SetCookies は管理画面で設定された cookies.txt の中身を差し替える（再起動なしで効く）。
+func (s *ChatEndService) SetCookies(data string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cookieData = strings.TrimSpace(data)
+}
+
+// prepareCookies は yt-dlp に渡す cookie ファイルを用意し、後始末の関数を返す。
+// 設定は中身で持っているので毎回一時ファイルへ書き出す。yt-dlp は終了時に
+// cookie をファイルへ書き戻すため、共有の実ファイルを直接渡すと
+// 読み取り専用マウントや Backfill の並列実行で壊れる。未設定なら空文字を返す。
+func (s *ChatEndService) prepareCookies() (string, func()) {
+	noop := func() {}
+
+	s.mu.RLock()
+	data := s.cookieData
+	s.mu.RUnlock()
+
+	if data == "" {
+		return "", noop
+	}
+
+	tmp, err := os.CreateTemp("", "setori-cookies-*.txt")
+	if err != nil {
+		logger.Warnf("[chatend] cookie の一時ファイルを作れません: %v", err)
+		return "", noop
+	}
+	name := tmp.Name()
+	if _, err := tmp.WriteString(data + "\n"); err != nil {
+		tmp.Close()
+		os.Remove(name)
+		logger.Warnf("[chatend] cookie の書き出しに失敗しました: %v", err)
+		return "", noop
+	}
+	tmp.Close()
+	return name, func() { os.Remove(name) }
+}
+
+// HasCookies は cookie が設定されているかを返す（失敗時の案内を出し分けるため）。
+func (s *ChatEndService) HasCookies() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.cookieData != ""
+}
+
+// AnalyzeResult は AnalyzeStream の結果（UI に何が起きたかを伝えるため）。
+type AnalyzeResult struct {
+	Total   int `json:"total"`   // 対象になった曲数
+	Filled  int `json:"filled"`  // end が空だったので拍手 end で埋めた曲数
+	Changed int `json:"changed"` // 実際に書き換わった曲数（ChatEnd の記録だけの曲も含む）
 }
 
 // AnalyzeStream 下載 live chat → 偵測拍手結束時間 → 更新 comment_songs 的 end。
 // 以 comment_songs 既有的 start 為輸入，找出每首歌的曲末拍手作為 end。
-func (s *ChatEndService) AnalyzeStream(videoID string) error {
+func (s *ChatEndService) AnalyzeStream(videoID string) (AnalyzeResult, error) {
+	var res AnalyzeResult
+
 	stream, err := s.streamRepo.FindByID(videoID)
 	if err != nil {
-		return fmt.Errorf("find stream: %w", err)
+		return res, fmt.Errorf("find stream: %w", err)
 	}
 	if stream == nil || len(stream.CommentSongs) == 0 {
-		return nil
+		return res, nil
 	}
 
 	var songs []dto.CommentSong
 	if err := json.Unmarshal(stream.CommentSongs, &songs); err != nil || len(songs) == 0 {
-		return nil
+		return res, nil
 	}
 
 	var duration int
@@ -56,22 +124,26 @@ func (s *ChatEndService) AnalyzeStream(videoID string) error {
 		duration = int(stream.DurationSeconds.Int32)
 	}
 
-	songs, updated := s.DetectEndsForSongs(videoID, duration, songs)
-	if updated == 0 {
-		return nil
+	songs, filled, changed := s.DetectEndsForSongs(videoID, duration, songs)
+	res = AnalyzeResult{Total: len(songs), Filled: filled, Changed: changed}
+	// 既に end があった曲でも ChatEnd / EndDiff は保存する。値そのものは変えないが、
+	// コメントの end と拍手の end がずれている曲を UI で拾えるようにするため
+	// （filled だけを保存条件にしていた頃は、この差分が毎回捨てられていた）。
+	if changed == 0 {
+		return res, nil
 	}
 
 	raw, err := json.Marshal(songs)
 	if err != nil {
-		return fmt.Errorf("marshal comment songs: %w", err)
+		return res, fmt.Errorf("marshal comment songs: %w", err)
 	}
 	raw = util.SanitizeJSONB(raw)
 	stream.CommentSongs = raw
 	if err := s.streamRepo.Update(stream); err != nil {
-		return fmt.Errorf("update stream: %w", err)
+		return res, fmt.Errorf("update stream: %w", err)
 	}
-	logger.Infof("[chatend] %s: %d/%d 曲の拍手終了を取得", videoID, updated, len(songs))
-	return nil
+	logger.Infof("[chatend] %s: %d/%d 曲の拍手終了を取得（%d 曲を更新）", videoID, filled, len(songs), changed)
+	return res, nil
 }
 
 // DetectEnds 用 live chat 拍手為給定的 start 秒數偵測曲末 end，回傳 start→end 對應。
@@ -110,16 +182,20 @@ func (s *ChatEndService) DetectEnds(videoID string, durationSeconds int, starts 
 // - 如果原本就有 explicit end（comment 提供的 range 時間），則保留它，並把 chat 偵測值放到 ChatEnd。
 // - 只有原本沒有 explicit end 時，才使用 chat 偵測的值。
 // - 同時計算 EndDiff，方便前端在差異大時提醒使用者檢查。
-func (s *ChatEndService) DetectEndsForSongs(videoID string, durationSeconds int, songs []dto.CommentSong) ([]dto.CommentSong, int) {
+//
+// 回傳値は (songs, filled, changed)。filled は end を埋めた曲数、
+// changed は ChatEnd/EndDiff だけの記録も含めた「実際に書き換わった」曲数で、
+// 呼び出し側が保存の要否を判断するのに使う。
+func (s *ChatEndService) DetectEndsForSongs(videoID string, durationSeconds int, songs []dto.CommentSong) ([]dto.CommentSong, int, int) {
 	if len(songs) == 0 {
-		return songs, 0
+		return songs, 0, 0
 	}
 	starts := make([]int, len(songs))
 	for i, sg := range songs {
 		starts[i] = sg.Start
 	}
 	endByStart := s.DetectEnds(videoID, durationSeconds, starts)
-	updated := 0
+	filled, changed := 0, 0
 
 	for i := range songs {
 		chatEnd, hasChat := endByStart[songs[i].Start]
@@ -131,18 +207,23 @@ func (s *ChatEndService) DetectEndsForSongs(videoID string, durationSeconds int,
 
 		if hasExplicitEnd {
 			// 保留 comment 的 explicit end，只記錄 chat 建議值
+			diff := abs(songs[i].End - chatEnd)
+			if songs[i].ChatEnd != chatEnd || songs[i].EndDiff != diff {
+				changed++ // 同じ値なら書き戻さない（再実行しても無駄な UPDATE を出さない）
+			}
 			songs[i].ChatEnd = chatEnd
-			songs[i].EndDiff = abs(songs[i].End - chatEnd)
+			songs[i].EndDiff = diff
 			// 不改 End 和 IsEndTimeEstimated
 		} else {
 			// 原本沒有明確 end，用 chat 的
 			songs[i].End = chatEnd
 			songs[i].IsEndTimeEstimated = false
 			songs[i].ChatEnd = chatEnd // 讓前端知道這是 chat 值
-			updated++
+			filled++
+			changed++
 		}
 	}
-	return songs, updated
+	return songs, filled, changed
 }
 
 func abs(x int) int {
@@ -150,15 +231,6 @@ func abs(x int) int {
 		return -x
 	}
 	return x
-}
-
-// AnalyzeStreamAsync 在背景跑 AnalyzeStream（sync 時呼叫，不擋主流程）。
-func (s *ChatEndService) AnalyzeStreamAsync(videoID string) {
-	go func() {
-		if err := s.AnalyzeStream(videoID); err != nil {
-			logger.Warnf("[chatend] analyze error (%s): %v", videoID, err)
-		}
-	}()
 }
 
 // Backfill 對所有有 comment_songs 的歌回跑拍手 end 偵測（bounded concurrency）。
@@ -183,7 +255,7 @@ func (s *ChatEndService) Backfill(concurrency int) {
 		go func(id string) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			if err := s.AnalyzeStream(id); err != nil {
+			if _, err := s.AnalyzeStream(id); err != nil {
 				logger.Warnf("[chatend] backfill %s: %v", id, err)
 			}
 			if n := atomic.AddInt64(&done, 1); n%10 == 0 || int(n) == len(ids) {
@@ -206,19 +278,78 @@ func (s *ChatEndService) fetchLiveChat(videoID string) (string, error) {
 		return chat, nil
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, s.ytdlp,
+	args := []string{
 		"--skip-download", "--write-subs", "--sub-langs", "live_chat",
 		"--socket-timeout", "30",
-		"-o", base+".%(ext)s",
-		"https://www.youtube.com/watch?v="+videoID)
-	_ = cmd.Run() // 失敗就靠下面檢查檔案
+		"-o", base + ".%(ext)s",
+	}
+	// cookie があれば渡す。YouTube に BOT 判定されている環境ではこれが無いと落ちる。
+	if cookiePath, cleanup := s.prepareCookies(); cookiePath != "" {
+		defer cleanup()
+		args = append(args, "--cookies", cookiePath)
+	}
+	args = append(args, "https://www.youtube.com/watch?v="+videoID)
 
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, s.ytdlp, args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	runErr := cmd.Run()
+
+	// 警告だけで終了コードが非 0 になることがあるので、まずファイルの有無で判断する。
 	if _, err := os.Stat(chat); err == nil {
 		return chat, nil
 	}
-	return "", fmt.Errorf("no live chat available for %s", videoID)
+
+	// ここから先は失敗の理由を残す。yt-dlp 未インストール・BOT 判定・単に
+	// チャットが無い配信は対処が全く違うのに、以前はどれも同じ文言になっていた。
+	switch {
+	// PATH 上の名前なら ErrNotFound、絶対パスなら fs.ErrNotExist で返る
+	case errors.Is(runErr, exec.ErrNotFound), errors.Is(runErr, fs.ErrNotExist):
+		return "", fmt.Errorf("yt-dlp が実行できません (%s): 未インストールの可能性があります", s.ytdlp)
+	case ctx.Err() != nil:
+		return "", fmt.Errorf("yt-dlp がタイムアウトしました（3分）")
+	case isBotCheck(stderr.String()):
+		// 全配信で一様に起きるので、原因と対処をここで名指ししておく
+		if s.HasCookies() {
+			return "", fmt.Errorf("YouTube に BOT 判定されました: 設定済みの cookie が失効している可能性があります（管理→設定で入れ直してください）")
+		}
+		return "", fmt.Errorf("YouTube に BOT 判定されました: 管理→設定の「YouTube cookie」に cookies.txt を登録してください")
+	case runErr != nil:
+		return "", fmt.Errorf("yt-dlp 失敗 (%v): %s", runErr, ytdlpErrorLine(stderr.String()))
+	}
+	return "", fmt.Errorf("この配信に live chat replay がありません")
+}
+
+// isBotCheck は yt-dlp の出力が YouTube の BOT 判定かどうかを見る。
+func isBotCheck(stderr string) bool {
+	return strings.Contains(stderr, "Sign in to confirm you") ||
+		strings.Contains(stderr, "confirm you’re not a bot") ||
+		strings.Contains(stderr, "confirm you're not a bot")
+}
+
+// ytdlpErrorLine は stderr から原因の行だけを取り出す（ログを 1 行に収めるため）。
+func ytdlpErrorLine(stderr string) string {
+	line := ""
+	for _, l := range strings.Split(stderr, "\n") {
+		l = strings.TrimSpace(l)
+		if l == "" {
+			continue
+		}
+		if strings.HasPrefix(l, "ERROR:") {
+			line = l // ERROR 行があればそれを優先（最後のものを採る）
+		} else if line == "" {
+			line = l
+		}
+	}
+	if line == "" {
+		return "(stderr なし)"
+	}
+	if len(line) > 300 {
+		line = line[:300] + "…"
+	}
+	return line
 }
 
 // EstimateEnds は任意の開始秒数リストに対する拍手 end 推定を返す（編集ページの単曲追加用）。

@@ -55,7 +55,8 @@
   - `GET /youtube/v3/channels?part=snippet&id=` または `forHandle=` — チャンネル情報を取得（アバターは high → medium → default 優先）。
 - **用途**：一般動画コメントは YouTube を優先し、未設定・取得失敗・空の場合に Holodex へ fallback する。編集ページの手動同期は YouTube のみを使用し、Holodex へ fallback しない。空の `comment_raw` は有効な永続キャッシュと見なさず、次回アクセス時に再取得する。チャンネル/歌手同期では YouTube 高解像度アバターを優先し、Holodex 未登録チャンネルの追加にも利用する。
 - **呼び出しトリガー**：`POST /api/sync/holodex`、`POST /api/sync/holodex/video/{id}`、`GET /api/streams/{id}/comments`、`POST /api/streams/{id}/comments/sync-youtube`（YouTube 限定の手動同期）、`POST /api/streams/{id}/comments/analyze`、`POST /api/singers`。
-- **制限**：デフォルトでプロジェクトあたり 10,000 units/日。`commentThreads.list` と `channels.list` は 1 request あたり 1 unit（コメントは 100 件ごとに 1 request）。取得するのはトップレベルコメントのみで、live chat replay は従来どおり yt-dlp を使用する。
+- **制限**：デフォルトでプロジェクトあたり 10,000 units/日。`commentThreads.list` と `channels.list` は 1 request あたり 1 unit（コメントは 100 件ごとに 1 request）。取得するのはトップレベルコメントのみで、live chat replay は従来どおり yt-dlp を使用する
+（拍手による終了時間の推定。BOT 判定を避けるための cookie 設定は `docs/DATA_COMPLETION.md`）。
 
 ## 5. iTunes Search / Lookup API（key 不要）
 

@@ -1056,6 +1056,27 @@ export default function StreamDetailPage() {
     }
   };
 
+  // live chat の拍手から end だけを取り直す（AI は呼ばない）。
+  // 一括プレ分析はキャッシュ命中だと拍手 end を飛ばすので、後から埋めるのはこの経路。
+  const chatEndMutation = useMutation({
+    mutationFn: () => commentApi.analyzeChatEnds(id!),
+    onSuccess: (res) => {
+      // comment_songs が書き換わっているので、タイムラインの元データを読み直す
+      queryClient.invalidateQueries({ queryKey: ['stream', id] });
+      if (res.total === 0) {
+        showToast('分析済みの曲がありません（先に「全部読み込む」を実行してください）', 'info');
+      } else if (res.changed === 0) {
+        showToast('拍手からは新しい終了時間を取得できませんでした', 'info');
+      } else if (res.filled === 0) {
+        // 全曲すでに終了時間があった場合。値は変えず、拍手の位置だけ記録している
+        showToast(`${res.changed}曲で拍手の位置を記録しました（既存の終了時間は変更なし）`, 'success');
+      } else {
+        showToast(`${res.filled}/${res.total}曲の終了時間を拍手から取得しました`, 'success');
+      }
+    },
+    onError: (err: Error) => showToast(`拍手解析に失敗しました: ${err.message}`, 'error'),
+  });
+
   // 提案リストから1曲だけ編集リストへ追加（開始秒順に挿入し、ハイライトしてスクロール）
   const addSingleSong = (newSong: EditableSong) => {
     setEditableSongs((prev) => [...prev, newSong].sort((a, b) => a.start - b.start));
@@ -1731,6 +1752,28 @@ export default function StreamDetailPage() {
                         className="px-3 py-1.5 text-sm bg-white text-gray-600 border border-gray-300 font-medium rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
                       >
                         再分析
+                      </button>
+                      <button
+                        onClick={() => chatEndMutation.mutate()}
+                        disabled={chatEndMutation.isPending || commentAnalyzeLoading}
+                        title="live chat の拍手から終了時間だけを取り直します（AI は使いません。live chat のダウンロードで数十秒かかることがあります）"
+                        className="px-2 py-1.5 text-sm bg-white text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
+                      >
+                        {chatEndMutation.isPending ? (
+                          <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                          </svg>
+                        ) : (
+                          /* 拍手＝手のアイコン */
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="M7 11V6a1.5 1.5 0 013 0v4m0-4.5a1.5 1.5 0 013 0V10m0-3.5a1.5 1.5 0 013 0V13m0-2.5a1.5 1.5 0 013 0V15a6 6 0 01-6 6h-2a6 6 0 01-5.2-3L4 14.5a1.5 1.5 0 012.6-1.5L7 14"
+                            />
+                          </svg>
+                        )}
                       </button>
                     </div>
                     {commentTimelineSongs.length === 0 ? (

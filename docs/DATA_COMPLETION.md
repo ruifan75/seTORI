@@ -64,6 +64,27 @@ for i := range songs {
 > `videoID.live_chat.json` としてファイルキャッシュ）。歌枠の live chat は数十 MB に
 > なることがあり、**大量の配信を一括処理するときは AI 解析より重くなりうる**。
 
+#### 取得に失敗するとき
+
+`[chatend] ... live chat 不可用` のログは原因を名指しする。よくあるのは 3 つ：
+
+| ログ | 原因 | 対処 |
+|------|------|------|
+| `yt-dlp が実行できません` | 未インストール | 本番イメージには同梱済み（`backend/Dockerfile`）。手元なら `brew install yt-dlp` |
+| `YouTube に BOT 判定されました` | IP 単位で弾かれている | 管理→設定の「YouTube cookie」に cookies.txt を貼る |
+| `この配信に live chat replay がありません` | 本当にチャットが無い配信 | 対処不要 |
+
+cookie は DB 上で暗号化して保存され、再起動なしで反映される。ファイルで渡したい場合は
+`YTDLP_COOKIES_FILE` に置き場所を書く（起動時に一度だけ読む）。
+
+#### あとから end だけ埋める
+
+一括プレ分析は comment_raw の hash キャッシュに命中すると拍手検出まで飛ばすので、
+「AI 分析は済んでいるが end が無い」配信が残る。埋め直しは AI を呼ばない専用の経路を使う：
+
+- 編集画面のコメントタブの拍手アイコン（1配信）
+- `POST /api/chat-ends/backfill?concurrency=3`（comment_songs を持つ全配信）
+
 ### `is_end_time_estimated` の意味に注意
 
 このフラグは「推定かどうか」ではなく **「信頼できる終了時間が無い」** を表す。

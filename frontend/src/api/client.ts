@@ -375,6 +375,16 @@ export const commentApi = {
     const { data } = await api.post(`/api/streams/${videoId}/chat-end-estimate`, { starts });
     return data;
   },
+
+  // 分析済みの曲に対して live chat の拍手から end だけを取り直す（AI は呼ばない）。
+  // 一括プレ分析はキャッシュ命中だと拍手 end を飛ばすので、その取りこぼしを埋める用。
+  // live chat のダウンロードを伴うため、初回は数十秒〜数分かかることがある。
+  analyzeChatEnds: async (
+    videoId: string,
+  ): Promise<{ id: string; total: number; filled: number; changed: number }> => {
+    const { data } = await api.post(`/api/streams/${videoId}/analyze-chat-ends`);
+    return data;
+  },
 };
 
 // ========== 一括プレ分析 API ==========

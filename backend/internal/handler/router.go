@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -91,7 +92,7 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	holodexService := service.NewHolodexService(cfg.HolodexAPIKey, cfg.YouTubeAPIKey, cfg.GroqAPIKey, streamRepo, singerRepo, cfg.HolodexEditorToken)
 	holodexService.SetRepositoriesWithSongItunes(perfRepo, songRepo, songItunesRepo) // SyncSetoriToHolodex に必要な repositories を提供
 	normalizationService := service.NewNormalizationService(aiService, songItunesRepo, songMatchService)
-	chatEndService := service.NewChatEndService(streamRepo, "", "")
+	chatEndService := service.NewChatEndService(streamRepo, cfg.YtdlpPath, "")
 	// CommentService は分析時に正規化・拍手 end を内部で実行する（抽出→正規化→end→キャッシュ）
 	commentService := service.NewCommentService(holodexService, streamRepo, filterKeywordRepo, aiService, normalizationService, chatEndService)
 	// HolodexService も AnalyzeHolodexSongs で正規化・拍手 end を実行する（holodex_hash キャッシュ）
@@ -126,12 +127,14 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 		cfg.HolodexAPIKey, cfg.HolodexEditorToken, cfg.YouTubeAPIKey, cfg.GroqAPIKey,
 		cfg.GoogleOAuthClientID, cfg.GoogleOAuthSecret,
 		cfg.GoogleSigninClientID, cfg.GoogleSigninSecret,
+		readCookieFile(cfg.YtdlpCookiesFile),
 	)
 	settingsService.OnChange(func(s service.IntegrationSettings) {
 		holodexService.ApplyKeys(s.HolodexAPIKey, s.YouTubeAPIKey, s.HolodexEditorToken)
 		aiService.SetFallbackKey(s.GroqAPIKey)
 		driveClient.SetCredentials(s.GoogleDriveClientID, s.GoogleDriveSecret)
 		googleProvider.SetCredentials(s.GoogleSigninClientID, s.GoogleSigninSecret)
+		chatEndService.SetCookies(s.YtdlpCookies)
 	})
 	if err := settingsService.Load(); err != nil {
 		logger.Errorf("連携設定の読み込みに失敗しました: %v", err)
@@ -1980,18 +1983,31 @@ func (r *Router) handleEstimateChatEnds(w http.ResponseWriter, req *http.Request
 	respondJSON(w, http.StatusOK, map[string]interface{}{"ends": ends})
 }
 
-// handleAnalyzeChatEnds 手動觸發：用 live chat 拍手偵測該歌回各首歌的 end（背景執行）
+// handleAnalyzeChatEnds 手動觸發：用 live chat 拍手偵測該歌回各首歌的 end。
+//
+// AI を一切呼ばず、既存の comment_songs の start だけを入力に end を取り直す。
+// 一括プレ分析はキャッシュ命中だと拍手 end まで飛ばすので、
+// 「AI 分析は済んでいるが end だけ入っていない」配信を後から埋めるのがこの経路。
+//
+// 同期で応答する：画面から押すボタンなので、結果を見せずに 202 を返しても
+// 何が起きたか分からない。live chat のダウンロードは初回で数十秒〜数分かかるが、
+// 2回目以降はローカルキャッシュに当たるので速い。
 func (r *Router) handleAnalyzeChatEnds(w http.ResponseWriter, req *http.Request) {
 	videoID := req.PathValue("id")
 	if videoID == "" {
 		respondError(w, http.StatusBadRequest, "無効な動画ID")
 		return
 	}
-	// 下載 live chat 可能要數十秒～數分鐘，背景跑、立即回 202
-	r.chatEndService.AnalyzeStreamAsync(videoID)
-	respondJSON(w, http.StatusAccepted, map[string]string{
-		"message": "拍手解析を開始しました（バックグラウンド処理）",
+	res, err := r.chatEndService.AnalyzeStream(videoID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]interface{}{
 		"id":      videoID,
+		"total":   res.Total,
+		"filled":  res.Filled,
+		"changed": res.Changed,
 	})
 }
 
@@ -2725,6 +2741,22 @@ func requiredPermission(method, path string) (perm string, needsAuth bool) {
 }
 
 // ========== Helper Functions ==========
+
+// readCookieFile は YTDLP_COOKIES_FILE で指定された cookies.txt を読む。
+// 中身を設定サービスの env フォールバックとして渡すため、ここで一度だけ読む
+// （＝ファイルを差し替えたら再起動が要る。管理画面から入れれば即時反映される）。
+func readCookieFile(path string) string {
+	if path == "" {
+		return ""
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		logger.Warnf("YTDLP_COOKIES_FILE を読めません (%s): %v", path, err)
+		return ""
+	}
+	logger.Infof("YTDLP_COOKIES_FILE を読み込みました: %s", path)
+	return string(b)
+}
 
 // respondJSON 回傳 JSON 回應
 func respondJSON(w http.ResponseWriter, status int, data interface{}) {

@@ -31,6 +31,12 @@ type Config struct {
 	// 認証後に戻すフロントエンドの URL
 	FrontendBaseURL string
 
+	// live chat（拍手による歌唱 end 推定）を落とす yt-dlp まわり。
+	// cookie は管理画面からも設定でき、そちらが優先される。ここはファイルで
+	// 渡したい運用（Docker のマウントなど）のための入口。
+	YtdlpPath        string
+	YtdlpCookiesFile string
+
 	// 管理画面から保存する API キー類を DB 上で暗号化するための鍵。
 	// DB のバックアップは Google Drive へ自動アップロードされるため、
 	// 鍵だけは DB に置かず環境変数で持つ（鍵が無ければ機密の保存を拒否する）。
@@ -60,6 +66,9 @@ func Load() (*Config, error) {
 		GoogleSigninSecret:   getEnv("GOOGLE_SIGNIN_CLIENT_SECRET", ""),
 		OAuthRedirectBaseURL: getEnv("OAUTH_REDIRECT_BASE_URL", "http://localhost:8080"),
 		FrontendBaseURL:      getEnv("FRONTEND_BASE_URL", "http://localhost:5173"),
+
+		YtdlpPath:        getEnv("YTDLP_PATH", ""),
+		YtdlpCookiesFile: getEnv("YTDLP_COOKIES_FILE", ""),
 
 		SettingsEncryptionKey: getEnv("SETTINGS_ENCRYPTION_KEY", ""),
 	}

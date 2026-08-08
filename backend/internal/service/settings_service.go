@@ -30,6 +30,9 @@ type IntegrationSettings struct {
 	// ログイン用（ウェブアプリケーション型クライアント）
 	GoogleSigninClientID string `json:"google_signin_client_id"`
 	GoogleSigninSecret   string `json:"google_signin_secret"`
+	// live chat 取得（拍手による歌唱 end 推定）で yt-dlp に渡す cookies.txt の中身。
+	// YouTube に BOT 判定される環境ではこれが無いと live chat を落とせない。
+	YtdlpCookies string `json:"ytdlp_cookies"`
 }
 
 // secretFields は暗号化して保存し、API では末尾4桁のヒントしか返さない項目。
@@ -41,6 +44,7 @@ func (s *IntegrationSettings) secretFields() map[string]*string {
 		"groq_api_key":         &s.GroqAPIKey,
 		"google_drive_secret":  &s.GoogleDriveSecret,
 		"google_signin_secret": &s.GoogleSigninSecret,
+		"ytdlp_cookies":        &s.YtdlpCookies,
 	}
 }
 
@@ -54,6 +58,7 @@ type envFallback struct {
 	GoogleDriveSecret    string
 	GoogleSigninClientID string
 	GoogleSigninSecret   string
+	YtdlpCookies         string
 }
 
 // SettingsService は連携設定の読み書きと、変更の即時反映を担う。
@@ -72,6 +77,7 @@ func NewSettingsService(
 	cipher *secrets.Cipher,
 	holodexKey, holodexEditorToken, youtubeKey, groqKey string,
 	driveClientID, driveSecret, signinClientID, signinSecret string,
+	ytdlpCookies string,
 ) *SettingsService {
 	return &SettingsService{
 		repo:   repo,
@@ -85,6 +91,7 @@ func NewSettingsService(
 			GoogleDriveSecret:    driveSecret,
 			GoogleSigninClientID: signinClientID,
 			GoogleSigninSecret:   signinSecret,
+			YtdlpCookies:         ytdlpCookies,
 		},
 	}
 }
@@ -163,6 +170,7 @@ func (s *SettingsService) applyEnvFallback(v IntegrationSettings) IntegrationSet
 	fallback(&v.GoogleDriveSecret, s.env.GoogleDriveSecret)
 	fallback(&v.GoogleSigninClientID, s.env.GoogleSigninClientID)
 	fallback(&v.GoogleSigninSecret, s.env.GoogleSigninSecret)
+	fallback(&v.YtdlpCookies, s.env.YtdlpCookies)
 	return v
 }
 

@@ -6,13 +6,22 @@ import Loading from '../../components/ui/Loading';
 import { useToast } from '../../components/ui/ToastContext';
 
 // 機密項目の定義。key はバックエンドの項目名と一致させる。
-const SECRET_FIELDS: { key: string; label: string; help?: string }[] = [
+// multiline の項目は textarea で出す（1行 input に複数行を貼ると改行が落ちるため）。
+const SECRET_FIELDS: { key: string; label: string; help?: string; multiline?: boolean }[] = [
   { key: 'holodex_api_key', label: 'Holodex API キー' },
   { key: 'holodex_editor_token', label: 'Holodex 編集トークン', help: 'seTORI から Holodex へセットリストを書き戻すのに使います' },
   { key: 'youtube_api_key', label: 'YouTube API キー' },
   { key: 'groq_api_key', label: 'Groq API キー（後備）', help: 'AIプロバイダーを1つも登録していないときだけ使われます' },
   { key: 'google_drive_secret', label: 'Google Drive クライアントシークレット', help: 'バックアップの自動アップロード用（TV と限定入力デバイス型）' },
   { key: 'google_signin_secret', label: 'Google ログイン クライアントシークレット', help: 'Google でのログイン用（ウェブアプリケーション型）' },
+  {
+    key: 'ytdlp_cookies',
+    label: 'YouTube cookie（cookies.txt）',
+    help: '拍手から歌唱の終了時間を推定するとき、live chat の取得に使います。'
+      + 'これが無いと YouTube に BOT 判定されて取得できないことがあります。'
+      + 'ブラウザ拡張で書き出した Netscape 形式のファイルの中身をそのまま貼ってください',
+    multiline: true,
+  },
 ];
 
 const PLAIN_FIELDS: { key: 'google_drive_client_id' | 'google_signin_client_id'; label: string }[] = [
@@ -120,15 +129,27 @@ export default function IntegrationSettingsSection() {
                 <label className="block text-sm font-medium text-gray-700">{f.label}</label>
                 {f.help && <p className="text-xs text-gray-400">{f.help}</p>}
               </div>
-              <input
-                type="password"
-                autoComplete="new-password"
-                value={inputs[f.key] ?? ''}
-                onChange={(e) => setInputs((p) => ({ ...p, [f.key]: e.target.value }))}
-                disabled={!data?.encryption_enabled}
-                placeholder={status?.configured ? '変更する場合のみ入力' : '未設定'}
-                className="flex-1 min-w-[12rem] px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent disabled:bg-gray-50"
-              />
+              {f.multiline ? (
+                <textarea
+                  rows={4}
+                  spellCheck={false}
+                  value={inputs[f.key] ?? ''}
+                  onChange={(e) => setInputs((p) => ({ ...p, [f.key]: e.target.value }))}
+                  disabled={!data?.encryption_enabled}
+                  placeholder={status?.configured ? '変更する場合のみ貼り付け' : '# Netscape HTTP Cookie File ...'}
+                  className="flex-1 min-w-[12rem] px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent disabled:bg-gray-50 font-mono text-xs"
+                />
+              ) : (
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  value={inputs[f.key] ?? ''}
+                  onChange={(e) => setInputs((p) => ({ ...p, [f.key]: e.target.value }))}
+                  disabled={!data?.encryption_enabled}
+                  placeholder={status?.configured ? '変更する場合のみ入力' : '未設定'}
+                  className="flex-1 min-w-[12rem] px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent disabled:bg-gray-50"
+                />
+              )}
               <StatusBadge status={status} />
               {status?.configured && !status.from_env && (
                 <button

@@ -137,7 +137,7 @@ func (s *CommentService) AnalyzeComments(videoID string, force bool) (*dto.Analy
 		if stream.DurationSeconds.Valid {
 			duration = int(stream.DurationSeconds.Int32)
 		}
-		songs, _ = s.chatEndService.DetectEndsForSongs(videoID, duration, songs)
+		songs, _, _ = s.chatEndService.DetectEndsForSongs(videoID, duration, songs)
 	}
 
 	// 7. 永続化（comment_songs + 來源 hash）→ 次回からはキャッシュを直接読む
