@@ -175,7 +175,12 @@ func (s *NormalizationService) BatchAINormalization(items []dto.AINormalizationI
 	// 曲名は一意に一致したのにアーティストだけ食い違ったものを、まとめて AI に問う。
 	// ここで別名義（松任谷由実 = 荒井由実）が確定すれば照合しなおして拾える。
 	// 判定は肯定・否定とも永続化されるので、同じ組を二度は聞かない。
-	s.resolveAliasesAndRematch(items, suggestions)
+	//
+	// warning が付いているときは AI 呼び出し自体が失敗しているので試さない。
+	// 同じ理由で必ず失敗する 2 回目を投げても、待ち時間が延びるだけ。
+	if warning == "" {
+		s.resolveAliasesAndRematch(items, suggestions)
+	}
 
 	return &dto.BatchAINormalizationResponse{Suggestions: suggestions, Warning: warning}, nil
 }
@@ -183,8 +188,12 @@ func (s *NormalizationService) BatchAINormalization(items []dto.AINormalizationI
 // resolveAliasesAndRematch は照合しきれなかったアーティストの組を AI に判定させ、
 // 別名義が登録できたぶんだけ照合をやり直す（in-place）。
 //
-// キャッシュ命中時の再解決（ResolveMatch）からは呼ばない。あちらは AI を呼ばない
-// 約束の経路で、そこに問い合わせを混ぜると「AI を使わないはずの操作が遅くなる」。
+// 呼ばない場所が 2 つある。
+//   - キャッシュ命中時の再解決（ResolveMatch）… AI を呼ばない約束の経路
+//   - 正規化の AI 呼び出しが失敗したとき … 2 回目も同じ理由で失敗する
+//
+// どちらの場合も照合結果は規則ベースのまま残る。別名義が増えないだけで、
+// 決着しなかった組は統合候補として人に回る。
 func (s *NormalizationService) resolveAliasesAndRematch(items []dto.AINormalizationItem, suggestions []dto.AISuggestionResult) {
 	if s.matchService == nil {
 		return
