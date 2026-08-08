@@ -20,6 +20,7 @@ import ArtistDetailPage from './pages/ArtistDetailPage';
 import SearchPage from './pages/SearchPage';
 import PlaylistsPage from './pages/PlaylistsPage';
 import MySuggestionsPage from './pages/MySuggestionsPage';
+import MyAccountPage from './pages/MyAccountPage';
 import PlaylistDetailPage from './pages/PlaylistDetailPage';
 import SyncPage from './pages/admin/SyncPage';
 import SettingsPage from './pages/admin/SettingsPage';
@@ -74,6 +75,11 @@ function App() {
               <Route
                 path="my/suggestions"
                 element={<RequirePermission><MySuggestionsPage /></RequirePermission>}
+              />
+              {/* 外部アカウント連携の追加・解除（要ログイン。権限は不要） */}
+              <Route
+                path="my/account"
+                element={<RequirePermission><MyAccountPage /></RequirePermission>}
               />
               <Route
                 path="admin/sync"

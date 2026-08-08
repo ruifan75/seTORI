@@ -106,7 +106,14 @@ export default function LoginPage() {
                 {providers.includes('google') && (
                   <button
                     type="button"
-                    onClick={() => startOAuth('google')}
+                    onClick={() => {
+                      // startOAuth は URL の取得に失敗し得るようになったので握り潰さない
+                      // （黙って何も起きないと、押しても無反応にしか見えない）
+                      setError(null);
+                      startOAuth('google').catch((err) =>
+                        setError(err instanceof Error ? err.message : 'Google への接続に失敗しました'),
+                      );
+                    }}
                     className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
                   >
                     <svg className="w-5 h-5" viewBox="0 0 24 24" aria-hidden="true">

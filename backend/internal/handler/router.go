@@ -197,7 +197,7 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("GET /api/auth/oauth/providers", r.handleListOAuthProviders)
 	r.mux.HandleFunc("GET /api/auth/oauth/identities", r.handleListMyIdentities)
 	r.mux.HandleFunc("POST /api/auth/oauth/exchange", r.handleOAuthExchange)
-	r.mux.HandleFunc("GET /api/auth/oauth/{provider}/start", r.handleOAuthStart)
+	r.mux.HandleFunc("POST /api/auth/oauth/{provider}/start", r.handleOAuthStart)
 	r.mux.HandleFunc("GET /api/auth/oauth/{provider}/callback", r.handleOAuthCallback)
 	r.mux.HandleFunc("DELETE /api/auth/oauth/{provider}", r.handleUnlinkOAuth)
 

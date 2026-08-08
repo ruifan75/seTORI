@@ -41,8 +41,13 @@ func (r *Router) handleListOAuthProviders(w http.ResponseWriter, _ *http.Request
 	respondJSON(w, http.StatusOK, map[string][]string{"providers": providers})
 }
 
-// GET /api/auth/oauth/{provider}/start — 認可画面へリダイレクト
-// ログイン中に呼ぶと「既存アカウントへの連携追加」として扱う。
+// POST /api/auth/oauth/{provider}/start — 認可画面の URL を返す
+//
+// ログイン中に呼ぶと「既存アカウントへの連携追加」として扱う。その判定は
+// currentUser(req) ＝ Authorization ヘッダー頼りなので、**リダイレクトではなく
+// URL を JSON で返す**必要がある。ブラウザの全ページ遷移ではヘッダーを付けられず、
+// 連携追加のつもりが必ず新規ログインになってしまうため（フロントは受け取った
+// URL へ自分で遷移する）。
 func (r *Router) handleOAuthStart(w http.ResponseWriter, req *http.Request) {
 	provider := req.PathValue("provider")
 
@@ -57,7 +62,7 @@ func (r *Router) handleOAuthStart(w http.ResponseWriter, req *http.Request) {
 		respondError(w, oauthErrStatus(err), err.Error())
 		return
 	}
-	http.Redirect(w, req, authURL, http.StatusFound)
+	respondJSON(w, http.StatusOK, map[string]string{"auth_url": authURL})
 }
 
 // GET /api/auth/oauth/{provider}/callback — プロバイダーからの戻り先

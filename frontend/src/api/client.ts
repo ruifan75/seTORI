@@ -890,9 +890,16 @@ export const authApi = {
   },
 };
 
-/** 認可画面へは axios ではなくブラウザ遷移で入る（サーバーが 302 を返すため） */
-export function startOAuth(provider: string) {
-  window.location.href = `${API_BASE_URL}/api/auth/oauth/${provider}/start`;
+/**
+ * 認可画面へ入る。ログイン中に呼べば「既存アカウントへの連携追加」になる。
+ *
+ * 必ず axios 経由で URL を取ってから遷移すること。トークンは localStorage にあり
+ * axios のインターセプタで付くので、ここでブラウザの全ページ遷移をしてしまうと
+ * Authorization ヘッダーが飛ばず、サーバー側が常に「新規ログイン」と解釈する。
+ */
+export async function startOAuth(provider: string): Promise<void> {
+  const { data } = await api.post(`/api/auth/oauth/${provider}/start`);
+  window.location.href = data.auth_url;
 }
 
 // ========== ユーザー管理 API（要 users:manage） ==========
