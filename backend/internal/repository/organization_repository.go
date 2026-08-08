@@ -19,11 +19,11 @@ func NewOrganizationRepository(db *sql.DB) *OrganizationRepository {
 	return &OrganizationRepository{db: db}
 }
 
-const organizationColumns = `key, display_name, sort_order, created_at, updated_at`
+const organizationColumns = `key, display_name, sort_order, is_unaffiliated, created_at, updated_at`
 
 func scanOrganization(row interface{ Scan(...any) error }) (models.Organization, error) {
 	var o models.Organization
-	err := row.Scan(&o.Key, &o.DisplayName, &o.SortOrder, &o.CreatedAt, &o.UpdatedAt)
+	err := row.Scan(&o.Key, &o.DisplayName, &o.SortOrder, &o.IsUnaffiliated, &o.CreatedAt, &o.UpdatedAt)
 	return o, err
 }
 
@@ -87,11 +87,11 @@ func (r *OrganizationRepository) EnsureExists(key string) error {
 // key が既にあれば ErrOrganizationExists 相当として重複を呼び出し側へ伝える。
 func (r *OrganizationRepository) Create(o *models.Organization) (bool, error) {
 	err := r.db.QueryRow(`
-		INSERT INTO organizations (key, display_name, sort_order)
-		VALUES ($1, $2, $3)
+		INSERT INTO organizations (key, display_name, sort_order, is_unaffiliated)
+		VALUES ($1, $2, $3, $4)
 		ON CONFLICT (key) DO NOTHING
 		RETURNING created_at, updated_at`,
-		o.Key, o.DisplayName, o.SortOrder).Scan(&o.CreatedAt, &o.UpdatedAt)
+		o.Key, o.DisplayName, o.SortOrder, o.IsUnaffiliated).Scan(&o.CreatedAt, &o.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return false, nil // 既に同じ key がある
 	}
@@ -106,10 +106,10 @@ func (r *OrganizationRepository) Create(o *models.Organization) (bool, error) {
 func (r *OrganizationRepository) Update(o *models.Organization) (*models.Organization, error) {
 	updated, err := scanOrganization(r.db.QueryRow(`
 		UPDATE organizations
-		SET display_name = $2, sort_order = $3, updated_at = NOW()
+		SET display_name = $2, sort_order = $3, is_unaffiliated = $4, updated_at = NOW()
 		WHERE key = $1
 		RETURNING `+organizationColumns,
-		o.Key, o.DisplayName, o.SortOrder))
+		o.Key, o.DisplayName, o.SortOrder, o.IsUnaffiliated))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -139,11 +139,13 @@ func (r *OrganizationRepository) Delete(key string) (deleted bool, inUse bool, e
 
 // CountSingers は事務所に所属するチャンネル数を返す（管理画面の表示・削除前の確認用）。
 func (r *OrganizationRepository) CountSingers() (map[string]int, error) {
+	// 実効値（override 優先）で数える。override でしか参照されていない事務所を
+	// 「未使用」と誤判定すると、削除で FK に弾かれて理由が分からなくなる。
 	rows, err := r.db.Query(`
-		SELECT organization, COUNT(*)
+		SELECT COALESCE(organization_override, organization) AS org, COUNT(*)
 		FROM singers
-		WHERE organization IS NOT NULL
-		GROUP BY organization`)
+		WHERE COALESCE(organization_override, organization) IS NOT NULL
+		GROUP BY 1`)
 	if err != nil {
 		return nil, fmt.Errorf("count singers by organization: %w", err)
 	}

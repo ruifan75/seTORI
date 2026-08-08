@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { organizationApi } from '../../api/client';
-import type { Organization } from '../../api/types';
+import type { Organization, UpdateOrganizationRequest } from '../../api/types';
 import Loading from '../../components/ui/Loading';
 import { useToast } from '../../components/ui/ToastContext';
 
@@ -15,9 +15,9 @@ export default function OrganizationsPage() {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const [editingKey, setEditingKey] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState({ display_name: '', sort_order: 0 });
+  const [editForm, setEditForm] = useState({ display_name: '', sort_order: 0, is_unaffiliated: false });
   const [showAdd, setShowAdd] = useState(false);
-  const [addForm, setAddForm] = useState({ key: '', display_name: '', sort_order: 0 });
+  const [addForm, setAddForm] = useState({ key: '', display_name: '', sort_order: 0, is_unaffiliated: false });
 
   const { data, isLoading } = useQuery({
     queryKey: ['organizations'],
@@ -33,7 +33,7 @@ export default function OrganizationsPage() {
   };
 
   const updateMutation = useMutation({
-    mutationFn: ({ key, ...req }: { key: string; display_name: string; sort_order: number }) =>
+    mutationFn: ({ key, ...req }: { key: string } & UpdateOrganizationRequest) =>
       organizationApi.update(key, req),
     onSuccess: () => {
       invalidate();
@@ -48,7 +48,7 @@ export default function OrganizationsPage() {
     onSuccess: () => {
       invalidate();
       setShowAdd(false);
-      setAddForm({ key: '', display_name: '', sort_order: 0 });
+      setAddForm({ key: '', display_name: '', sort_order: 0, is_unaffiliated: false });
       showToast('事務所を追加しました', 'success');
     },
     onError: (err: Error) => showToast(err.message, 'error'),
@@ -66,7 +66,11 @@ export default function OrganizationsPage() {
 
   const startEdit = (org: Organization) => {
     setEditingKey(org.key);
-    setEditForm({ display_name: org.display_name, sort_order: org.sort_order });
+    setEditForm({
+      display_name: org.display_name,
+      sort_order: org.sort_order,
+      is_unaffiliated: org.is_unaffiliated,
+    });
   };
 
   const organizations = data?.organizations ?? [];
@@ -103,6 +107,7 @@ export default function OrganizationsPage() {
                 <th className="px-4 py-3 font-medium">表示名</th>
                 <th className="px-4 py-3 font-medium">キー（取り込み時の値）</th>
                 <th className="px-4 py-3 font-medium w-24">並び順</th>
+                <th className="px-4 py-3 font-medium w-32">所属なし扱い</th>
                 <th className="px-4 py-3 font-medium w-28">チャンネル</th>
                 <th className="px-4 py-3 font-medium w-24"></th>
               </tr>
@@ -149,6 +154,24 @@ export default function OrganizationsPage() {
                         />
                       ) : (
                         <span className="text-gray-500">{org.sort_order}</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-2">
+                      {/* Holodex の Independents のように「事務所名ではなく無所属を意味する」分類。
+                          立てると一覧では所属なしの組にまとまり、バッジも出なくなる */}
+                      {editing ? (
+                        <input
+                          type="checkbox"
+                          checked={editForm.is_unaffiliated}
+                          onChange={(e) =>
+                            setEditForm((prev) => ({ ...prev, is_unaffiliated: e.target.checked }))
+                          }
+                          className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                        />
+                      ) : org.is_unaffiliated ? (
+                        <span className="text-xs text-gray-600">所属なしに含める</span>
+                      ) : (
+                        <span className="text-gray-300">—</span>
                       )}
                     </td>
                     <td className="px-4 py-2 text-gray-500">{org.singer_count}</td>
@@ -271,6 +294,23 @@ export default function OrganizationsPage() {
                 />
                 <p className="mt-1 text-xs text-gray-500">小さいほど先。同じなら表示名順。</p>
               </div>
+              <label className="flex items-start gap-2">
+                <input
+                  type="checkbox"
+                  checked={addForm.is_unaffiliated}
+                  onChange={(e) =>
+                    setAddForm((prev) => ({ ...prev, is_unaffiliated: e.target.checked }))
+                  }
+                  className="mt-0.5 w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                />
+                <span className="text-sm text-gray-700">
+                  「所属なし」を意味する分類
+                  <span className="block text-xs text-gray-500">
+                    事務所名ではなく無所属を表すもの（Holodex の Independents など）。
+                    一覧では所属なしの組にまとめ、バッジを出しません。
+                  </span>
+                </span>
+              </label>
 
               <div className="flex justify-end gap-3">
                 <button

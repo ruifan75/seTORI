@@ -83,14 +83,18 @@ type SingerResponse struct {
 	Name        string  `json:"name"`
 	EnglishName *string `json:"english_name,omitempty"`
 	PhotoURL    *string `json:"photo_url,omitempty"`
-	// Organization は organizations.key（取り込み時の生の値）。画面に出すのは OrganizationName。
-	Organization     *string   `json:"organization,omitempty"`
-	OrganizationName *string   `json:"organization_name,omitempty"`
-	MetadataSource   string    `json:"metadata_source"`
-	CanEditMetadata  bool      `json:"can_edit_metadata"`
-	IsHidden         bool      `json:"is_hidden"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	// Organization は実効値の organizations.key（手動指定があればそれ、無ければ Holodex の値）。
+	// 画面に出すのは OrganizationName で、「所属なし」を意味する分類のときは空になる。
+	Organization     *string `json:"organization,omitempty"`
+	OrganizationName *string `json:"organization_name,omitempty"`
+	// 以下は編集画面用。手動指定の有無と、Holodex が何と言っているかを見せるため。
+	OrganizationOverride *string   `json:"organization_override,omitempty"`
+	OrganizationHolodex  *string   `json:"organization_holodex,omitempty"`
+	MetadataSource       string    `json:"metadata_source"`
+	CanEditMetadata      bool      `json:"can_edit_metadata"`
+	IsHidden             bool      `json:"is_hidden"`
+	CreatedAt            time.Time `json:"created_at"`
+	UpdatedAt            time.Time `json:"updated_at"`
 }
 
 type SingerListResponse struct {
@@ -110,12 +114,13 @@ type SingerGroupResponse struct {
 // ========== 事務所 ==========
 
 type OrganizationResponse struct {
-	Key         string    `json:"key"`
-	DisplayName string    `json:"display_name"`
-	SortOrder   int       `json:"sort_order"`
-	SingerCount int       `json:"singer_count"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	Key            string    `json:"key"`
+	DisplayName    string    `json:"display_name"`
+	SortOrder      int       `json:"sort_order"`
+	IsUnaffiliated bool      `json:"is_unaffiliated"`
+	SingerCount    int       `json:"singer_count"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 type OrganizationListResponse struct {
@@ -125,16 +130,26 @@ type OrganizationListResponse struct {
 // CreateOrganizationRequest は Holodex に無い事務所を手で足すときのもの。
 // Key を省略すると DisplayName をそのまま Key にする。
 type CreateOrganizationRequest struct {
-	Key         string `json:"key"`
-	DisplayName string `json:"display_name"`
-	SortOrder   int    `json:"sort_order"`
+	Key            string `json:"key"`
+	DisplayName    string `json:"display_name"`
+	SortOrder      int    `json:"sort_order"`
+	IsUnaffiliated bool   `json:"is_unaffiliated"`
 }
 
 // UpdateOrganizationRequest は表示名と並び順のみ。
 // key は取り込み時の値なので変更できない（変えると Holodex からの取り込みと結びつかなくなる）。
 type UpdateOrganizationRequest struct {
-	DisplayName string `json:"display_name"`
-	SortOrder   int    `json:"sort_order"`
+	DisplayName    string `json:"display_name"`
+	SortOrder      int    `json:"sort_order"`
+	IsUnaffiliated bool   `json:"is_unaffiliated"`
+}
+
+// UpdateSingerOrganizationRequest は Holodex の分類の手動上書き。
+// 空文字（または省略）で上書きを解除し、Holodex の値に戻す。
+// メタデータ更新（UpdateSingerRequest）と分けているのは、これが Holodex の
+// メタデータではなく seTORI 側の判断で、Holodex 管理チャンネルでも設定できる必要があるため。
+type UpdateSingerOrganizationRequest struct {
+	Organization string `json:"organization"`
 }
 
 // SingerGroupListResponse は事務所別のチャンネル一覧。
@@ -178,11 +193,12 @@ type CreateSingerResponse struct {
 	Name    string `json:"name"`
 }
 
+// UpdateSingerRequest は Holodex 管理でないチャンネルのメタデータ更新。
+// 事務所は含まない（UpdateSingerOrganizationRequest が唯一の窓口）。
 type UpdateSingerRequest struct {
-	Name         string  `json:"name"`
-	EnglishName  *string `json:"english_name,omitempty"`
-	PhotoURL     *string `json:"photo_url,omitempty"`
-	Organization *string `json:"organization,omitempty"`
+	Name        string  `json:"name"`
+	EnglishName *string `json:"english_name,omitempty"`
+	PhotoURL    *string `json:"photo_url,omitempty"`
 }
 
 // ========== 歌枠 ==========

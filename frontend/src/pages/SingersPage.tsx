@@ -323,9 +323,11 @@ function SingerCard({
             <p className="text-sm text-gray-500 truncate">{singer.english_name}</p>
           )}
           <div className="flex flex-wrap items-center gap-1 mt-1">
-            {singer.organization && (
+            {/* 「所属なし」を意味する分類（Independents など）は organization_name が空で、
+                バッジも出ない。見出しが「所属なし」なのにバッジは別名、という矛盾を避けるため */}
+            {singer.organization_name && (
               <span className="inline-block px-2 py-0.5 bg-purple-100 text-purple-700 text-xs rounded-full">
-                {singer.organization_name || singer.organization}
+                {singer.organization_name}
               </span>
             )}
             {singer.is_hidden && (

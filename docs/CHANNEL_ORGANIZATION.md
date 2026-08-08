@@ -92,8 +92,8 @@ Holodex が今まで見たことのない org を返したとき、
 **「知らない事務所だから取り込まない」は選ばない。** `song_merge_candidates` と同じ態度で、
 人の確認が要るものは残しておくが、登録そのものは止めない。表示名は後から直せる。
 
-実装は `SingerRepository.ensureOrganization` で、`Create` / `Update` / `Upsert` /
-`UpdateManualMetadata` の 4 つの書き込みメソッドの先頭で呼ぶ。
+実装は `SingerRepository.ensureOrganization` で、事務所を書きうる 4 経路
+（`Create` / `Update` / `Upsert` / `SetOrganizationOverride`）の先頭で呼ぶ。
 **service 層ではなく repository 側に置いてある**のは意図的で、呼び忘れた場合の
 壊れ方が悪いから ── ローカルでも CI でも通ってしまい、Holodex が新しい org を
 返した日に本番で初めて FK 違反で落ちる。書き込みと同じ場所に置けば忘れようがない。
@@ -104,6 +104,59 @@ FK が実際に効いていることは確認済み：
 UPDATE singers SET organization='BrandNewAgency' WHERE id=(SELECT id FROM singers LIMIT 1);
 ERROR:  insert or update on table "singers" violates foreign key constraint "singers_organization_fkey"
 ```
+
+### Holodex の分類を上書きする（`organization_override`）
+
+Holodex の分類が誤っていると思ったとき用。**`organization` は触らず、別列に自分の判断を書く。**
+読むときは `COALESCE(organization_override, organization)`。
+
+なぜ上書きが要るか：`Upsert` は `organization = EXCLUDED.organization` なので、
+`singers.organization` を直接直しても同期で戻る。しかも戻るのはチャンネル同期のときだけでなく、
+**mention 経由でも起きる**（`holodex_service.go` の mentions ループ）。
+無関係な歌枠を同期した拍子に静かに戻るので、原因を突き止めるのがとても難しい。
+
+`is_hidden` のように同期対象から外す手もあるが、ここでは誤り。
+**事務所の所属は実際に変わる**（転籍・卒業・事務所の統廃合）ので、凍結すると
+Holodex が正しく更新しても永久に受け取れなくなる。2 列に分ければ、
+同期は今後も Holodex の最新を運び続け、上書きを外した瞬間にそれが反映される。
+
+形は `end_source` / `end_confirmed` と同じ。外部が言っていることと人が決めたことは
+直交する事実なので、1 列に潰さない。
+
+書き込み口は**意図的に 2 つだけ**に保っている。
+
+| 列 | 書く人 |
+|---|---|
+| `organization` | Holodex 同期だけ（外部の事実） |
+| `organization_override` | `PUT /api/singers/{id}/organization` だけ（こちらの判断） |
+
+そのため `UpdateManualMetadata`（チャンネル情報の編集モーダル）は
+**organization を書かない**。同じ列を 2 経路が別の意味で更新すると、
+「同期で戻る値」と「戻らない値」が混ざって追えなくなる。
+
+画面では上書き中に「（手動）」と出す。Holodex と違う値が出ている理由が分からないと、
+同期が壊れているのか人が変えたのか判別できないため。
+
+### 「所属なし」を意味する分類（`is_unaffiliated`）
+
+Holodex は個人勢を org `Independents` で返す。これは事務所名ではなく
+「事務所に所属していない」という意味なので、`organization` が NULL のものと
+同じ組に見せたい（そうしないと同じ意味の組が 2 つ並ぶ）。
+
+ただし 2 つは**別の事実**である。
+
+| 状態 | 意味 |
+|---|---|
+| `organization IS NULL` | 所属の情報が無い（YouTube 経由で入ったチャンネルなど） |
+| `Independents` | Holodex が「無所属」と明示している |
+
+なので値は潰さず、`organizations.is_unaffiliated` を立てて**表示のときだけ束ねる**。
+バッジも出さない（見出しが「所属なし」なのにバッジは別名、という矛盾を避ける）。
+
+**チャンネル単位の override ではなく事務所側の旗にしたのが要点。**
+これは分類そのものに対する判断なので、override だと該当 58 件を手で直したうえ、
+新しく増えるたびに直す必要がある。旗なら 1 度で済み、Holodex が後から実在の事務所へ
+変えたチャンネルは自動的にこの組から外れる。
 
 ### 削除は RESTRICT
 
@@ -162,6 +215,7 @@ UPDATE singers SET organization = 'ReAcT' WHERE organization = 'Re:AcT';
 | GET | `/api/singers?group=organization` | 公開 | 事務所別。**ページングなし**（グループを跨ぐページ送りは意味を成さない） |
 | GET | `/api/singers?include_hidden=true` | `content:edit` で有効 | 権限が無ければ黙って無視 |
 | PUT | `/api/singers/{id}/visibility` | `content:edit` | メタデータ更新と分離（Holodex 管理チャンネルでも切り替えられる必要があるため） |
+| PUT | `/api/singers/{id}/organization` | `content:edit` | Holodex の分類の上書き。空文字で解除。同じ理由でメタデータ更新と分離 |
 | GET | `/api/organizations` | 公開 | 一覧の見出しと編集画面の選択肢に要る |
 | POST | `/api/organizations` | `content:edit` | key 省略時は display_name を key にする |
 | PUT | `/api/organizations/{key}` | `content:edit` | 表示名と並び順のみ。**key は変更不可** |
@@ -188,6 +242,9 @@ UPDATE singers SET organization = 'ReAcT' WHERE organization = 'Re:AcT';
 
 ## 残っているもの
 
+- **上書きの一覧が無い。** どのチャンネルを手動で直したかは 1 件ずつ開かないと分からない。
+  `organization_override IS NOT NULL` を管理画面に出せば、Holodex 側が正しくなった分を
+  まとめて外せる
 - **`sort_order` の UI が数値入力のまま。** 事務所が増えたらドラッグで並べ替えたい。
   今は 17 件なので数値で足りている
 - **2 つの key を同じ事務所に寄せられない。** 事務所が改名して Holodex 側の org も

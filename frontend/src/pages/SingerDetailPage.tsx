@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { singerApi, holodexApi, organizationApi } from '../api/client';
+import type { Organization } from '../api/types';
 import { useAuthStore, hasPermission, PERM } from '../store/auth';
 import { usePlayerStore, performanceToTrack } from '../store/player';
 import Loading from '../components/ui/Loading';
@@ -64,7 +65,6 @@ export default function SingerDetailPage() {
     name: '',
     english_name: '',
     photo_url: '',
-    organization: '',
   });
   // Filter states - デフォルトでは非表示を除外
   // フィルタも URL に保持（processed のデフォルトは all、hidden のデフォルトは false=非表示を除く）
@@ -155,7 +155,6 @@ export default function SingerDetailPage() {
       name: editForm.name,
       english_name: editForm.english_name,
       photo_url: editForm.photo_url,
-      organization: editForm.organization,
     }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['singer', id] });
@@ -171,7 +170,6 @@ export default function SingerDetailPage() {
       name: singer.name,
       english_name: singer.english_name || '',
       photo_url: singer.photo_url || '',
-      organization: singer.organization || '',
     });
     setShowEditModal(true);
   };
@@ -232,11 +230,14 @@ export default function SingerDetailPage() {
               <p className="text-gray-500 mt-1">{singer.english_name}</p>
             )}
             <div className="flex flex-wrap items-center gap-2 mt-2">
-              {singer.organization && (
+              {/* 「所属なし」を意味する分類（Independents など）は organization_name が空になり、
+                  バッジも出ない。見出しが「所属なし」なのにバッジは別名、という矛盾を避けるため */}
+              {singer.organization_name && (
                 <span className="inline-block px-3 py-1 bg-purple-100 text-purple-700 text-sm rounded-full">
-                  {singer.organization_name || singer.organization}
+                  {singer.organization_name}
                 </span>
               )}
+              {canEdit && <OrganizationPicker singer={singer} organizations={organizations} />}
               {/* 非表示でもこのページは誰でも開けるので、閲覧者にも状態を見せる */}
               {singer.is_hidden && (
                 <span
@@ -351,34 +352,8 @@ export default function SingerDetailPage() {
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                 />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  所属
-                </label>
-                {/* 自由入力をやめて既存の事務所から選ぶ。表記ゆれはここから生まれていたため。
-                    新しい事務所は管理→事務所で追加する（無い場合の導線も下に出す）。 */}
-                <select
-                  value={editForm.organization}
-                  onChange={(e) => setEditForm((prev) => ({ ...prev, organization: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                >
-                  <option value="">所属なし</option>
-                  {organizations.map((org) => (
-                    <option key={org.key} value={org.key}>
-                      {org.display_name}
-                    </option>
-                  ))}
-                </select>
-                {canEdit && (
-                  <p className="mt-1 text-xs text-gray-500">
-                    一覧に無い事務所は{' '}
-                    <Link to="/admin/organizations" className="text-indigo-600 hover:underline">
-                      管理→事務所
-                    </Link>{' '}
-                    から追加できます
-                  </p>
-                )}
-              </div>
+              {/* 所属はこのモーダルには無い。Holodex 管理チャンネルでも変えられる必要があるので
+                  ヘッダー側の独立した操作（上書き）にしてある。 */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Photo URL
@@ -718,5 +693,89 @@ export default function SingerDetailPage() {
         </div>
       )}
     </div>
+  );
+}
+
+// OrganizationPicker は事務所の手動上書き。
+//
+// Holodex 同期は singers.organization を毎回上書きするので、分類を直しても残らなかった。
+// ここで書くのは organization_override のほうで、Holodex の値は触らない
+// （＝「Holodex に戻す」を選べば最新の同期結果に戻る）。
+// メタデータ編集モーダルの外に置いてあるのは、あちらが Holodex 管理チャンネルでは
+// 開けない一方、この上書きはどのチャンネルでも要るため。
+function OrganizationPicker({
+  singer,
+  organizations,
+}: {
+  singer: { id: string; organization?: string; organization_override?: string; organization_holodex?: string };
+  organizations: Organization[];
+}) {
+  const queryClient = useQueryClient();
+  const { showToast } = useToast();
+  const [open, setOpen] = useState(false);
+
+  const mutation = useMutation({
+    mutationFn: (organization: string) => singerApi.setOrganization(singer.id, organization),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['singer', singer.id] });
+      queryClient.invalidateQueries({ queryKey: ['singers'] });
+      setOpen(false);
+      showToast('所属を更新しました', 'success');
+    },
+    onError: (err: Error) => showToast(err.message, 'error'),
+  });
+
+  const holodexName = singer.organization_holodex
+    ? organizations.find((o) => o.key === singer.organization_holodex)?.display_name ??
+      singer.organization_holodex
+    : '所属なし';
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        title="所属を変更する（Holodex の分類を上書き）"
+        aria-label="所属を変更する"
+        className="inline-flex items-center gap-1 px-2 py-1 text-xs text-gray-500 border border-dashed border-gray-300 rounded-full hover:text-indigo-600 hover:border-indigo-300"
+      >
+        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
+        </svg>
+        所属
+        {/* 上書き中であることは常に見えるようにする。Holodex と違う値が出ている理由が
+            分からないと、同期がおかしいのか人が変えたのか判別できない */}
+        {singer.organization_override && <span className="text-amber-600">（手動）</span>}
+      </button>
+    );
+  }
+
+  return (
+    <span className="inline-flex items-center gap-2">
+      <select
+        autoFocus
+        defaultValue={singer.organization_override ?? ''}
+        onChange={(e) => mutation.mutate(e.target.value)}
+        disabled={mutation.isPending}
+        className="px-2 py-1 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+      >
+        <option value="">Holodex に従う（{holodexName}）</option>
+        {organizations.map((org) => (
+          <option key={org.key} value={org.key}>
+            {org.display_name}
+            {org.is_unaffiliated ? '（所属なし扱い）' : ''}
+          </option>
+        ))}
+      </select>
+      <button
+        onClick={() => setOpen(false)}
+        title="キャンセル"
+        aria-label="キャンセル"
+        className="p-1 text-gray-400 hover:text-gray-700"
+      >
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      </button>
+    </span>
   );
 }

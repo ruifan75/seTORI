@@ -56,7 +56,7 @@ func (s *OrganizationService) Create(req *dto.CreateOrganizationRequest) (*dto.O
 		key = display
 	}
 
-	org := &models.Organization{Key: key, DisplayName: display, SortOrder: req.SortOrder}
+	org := &models.Organization{Key: key, DisplayName: display, SortOrder: req.SortOrder, IsUnaffiliated: req.IsUnaffiliated}
 	created, err := s.orgRepo.Create(org)
 	if err != nil {
 		return nil, fmt.Errorf("create organization: %w", err)
@@ -78,6 +78,7 @@ func (s *OrganizationService) Update(key string, req *dto.UpdateOrganizationRequ
 
 	updated, err := s.orgRepo.Update(&models.Organization{
 		Key: key, DisplayName: display, SortOrder: req.SortOrder,
+		IsUnaffiliated: req.IsUnaffiliated,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("update organization: %w", err)
@@ -111,11 +112,12 @@ func (s *OrganizationService) EnsureExists(key string) error {
 
 func toOrganizationResponse(o models.Organization, singerCount int) dto.OrganizationResponse {
 	return dto.OrganizationResponse{
-		Key:         o.Key,
-		DisplayName: o.DisplayName,
-		SortOrder:   o.SortOrder,
-		SingerCount: singerCount,
-		CreatedAt:   o.CreatedAt,
-		UpdatedAt:   o.UpdatedAt,
+		Key:            o.Key,
+		DisplayName:    o.DisplayName,
+		SortOrder:      o.SortOrder,
+		IsUnaffiliated: o.IsUnaffiliated,
+		SingerCount:    singerCount,
+		CreatedAt:      o.CreatedAt,
+		UpdatedAt:      o.UpdatedAt,
 	}
 }

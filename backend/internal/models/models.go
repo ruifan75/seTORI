@@ -10,27 +10,43 @@ import (
 
 // Singer 歌手/VTuber
 type Singer struct {
-	ID               string         `json:"id"`                // YouTube Channel ID
-	Name             string         `json:"name"`              // 表示名
-	EnglishName      sql.NullString `json:"english_name"`      // 英語名
-	PhotoURL         sql.NullString `json:"photo_url"`         // アバター URL
-	Organization     sql.NullString `json:"organization"`      // 所属組織（organizations.key＝取り込み時の生の値）
-	OrganizationName sql.NullString `json:"organization_name"` // 事務所の表示名（organizations.display_name）
-	MetadataSource   string         `json:"metadata_source"`   // holodex / youtube
-	IsHidden         bool           `json:"is_hidden"`         // チャンネル一覧から外す（詳細ページは閲覧可）
-	CreatedAt        time.Time      `json:"created_at"`
-	UpdatedAt        time.Time      `json:"updated_at"`
+	ID          string         `json:"id"`           // YouTube Channel ID
+	Name        string         `json:"name"`         // 表示名
+	EnglishName sql.NullString `json:"english_name"` // 英語名
+	PhotoURL    sql.NullString `json:"photo_url"`    // アバター URL
+	// 事務所は「Holodex の意見」と「こちらの判断」を分けて持つ。表示に使うのは
+	// OrganizationOverride を優先した実効値（EffectiveOrganization）。
+	Organization         sql.NullString `json:"organization"`              // Holodex が返した所属（同期のたびに更新される）
+	OrganizationOverride sql.NullString `json:"organization_override"`     // 手動指定。NULL なら Organization を使う
+	OrganizationName     sql.NullString `json:"organization_name"`         // 実効値の表示名（organizations.display_name）
+	OrganizationUnaffil  bool           `json:"organization_unaffiliated"` // 実効値が「所属なし」を意味する分類か
+	MetadataSource       string         `json:"metadata_source"`           // holodex / youtube
+	IsHidden             bool           `json:"is_hidden"`                 // チャンネル一覧から外す（詳細ページは閲覧可）
+	CreatedAt            time.Time      `json:"created_at"`
+	UpdatedAt            time.Time      `json:"updated_at"`
 }
 
 // Organization 事務所。
 // Key は取り込み時の生の値（Holodex の org）で、画面に出すのは DisplayName。
 // 分けてあるので、表示を直しても取り込み時の値は壊れない。
 type Organization struct {
-	Key         string    `json:"key"`
-	DisplayName string    `json:"display_name"`
-	SortOrder   int       `json:"sort_order"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	Key         string `json:"key"`
+	DisplayName string `json:"display_name"`
+	SortOrder   int    `json:"sort_order"`
+	// IsUnaffiliated は「所属なし」を意味する分類（Holodex の Independents など）。
+	// 一覧では所属が無いチャンネルと同じ組にまとめ、バッジも出さない。
+	IsUnaffiliated bool      `json:"is_unaffiliated"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+// EffectiveOrganization は表示・グループ分けに使う事務所キーを返す。
+// 手動指定があればそれを、無ければ Holodex の値を使う。
+func (s Singer) EffectiveOrganization() sql.NullString {
+	if s.OrganizationOverride.Valid && s.OrganizationOverride.String != "" {
+		return s.OrganizationOverride
+	}
+	return s.Organization
 }
 
 // Song 楽曲 Master

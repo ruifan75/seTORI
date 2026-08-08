@@ -347,6 +347,13 @@ export const singerApi = {
     return data;
   },
 
+  // Holodex の事務所分類の手動上書き（空文字で解除して Holodex の値に戻す）。
+  // Holodex 管理チャンネルでも設定できる（seTORI 側の判断であってメタデータではないため）
+  setOrganization: async (id: string, organization: string): Promise<{ id: string; organization: string }> => {
+    const { data } = await api.put(`/api/singers/${id}/organization`, { organization });
+    return data;
+  },
+
   // チャンネル一覧での表示/非表示（Holodex 管理チャンネルでも切り替えられる）
   setHidden: async (id: string, isHidden: boolean): Promise<{ id: string; is_hidden: boolean }> => {
     const { data } = await api.put(`/api/singers/${id}/visibility`, { is_hidden: isHidden });

@@ -102,9 +102,14 @@ export interface Singer {
   name: string;
   english_name?: string;
   photo_url?: string;
-  /** organizations.key（取り込み時の生の値）。画面に出すのは organization_name のほう */
+  /** 実効値の organizations.key（override があればそれ、無ければ Holodex の値） */
   organization?: string;
+  /** 実効値の表示名。「所属なし」を意味する分類のときは空（バッジを出さない） */
   organization_name?: string;
+  /** 手動指定。あれば Holodex の分類を上書きしている */
+  organization_override?: string;
+  /** Holodex が返している分類（同期のたびに更新される） */
+  organization_holodex?: string;
   metadata_source: string;
   can_edit_metadata: boolean;
   is_hidden: boolean; // チャンネル一覧から外す（詳細ページは非表示でも閲覧可）
@@ -119,6 +124,8 @@ export interface Organization {
   key: string;
   display_name: string;
   sort_order: number;
+  /** 「所属なし」を意味する分類（Holodex の Independents など） */
+  is_unaffiliated: boolean;
   singer_count: number;
   created_at: string;
   updated_at: string;
@@ -132,11 +139,13 @@ export interface CreateOrganizationRequest {
   key?: string;
   display_name: string;
   sort_order?: number;
+  is_unaffiliated?: boolean;
 }
 
 export interface UpdateOrganizationRequest {
   display_name: string;
   sort_order: number;
+  is_unaffiliated: boolean;
 }
 
 export interface SingerListResponse {
@@ -181,11 +190,11 @@ export interface CreateSingerResponse {
   name: string;
 }
 
+// 事務所は含まない（singerApi.setOrganization が唯一の窓口）
 export interface UpdateSingerRequest {
   name: string;
   english_name?: string;
   photo_url?: string;
-  organization?: string;
 }
 
 // ========== 歌枠 ==========

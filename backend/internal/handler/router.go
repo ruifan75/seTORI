@@ -316,6 +316,7 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("POST /api/singers", r.handleCreateSinger)
 	r.mux.HandleFunc("PUT /api/singers/{id}", r.handleUpdateSinger)
 	r.mux.HandleFunc("PUT /api/singers/{id}/visibility", r.handleUpdateSingerVisibility)
+	r.mux.HandleFunc("PUT /api/singers/{id}/organization", r.handleUpdateSingerOrganization)
 
 	// 事務所（取り込み時の key と表示名を分けて持つ）
 	r.mux.HandleFunc("GET /api/organizations", r.handleListOrganizations)
@@ -1544,6 +1545,36 @@ func (r *Router) handleUpdateSingerVisibility(w http.ResponseWriter, req *http.R
 
 	logger.Infof("singer %s visibility updated (is_hidden=%v)", id, body.IsHidden)
 	respondJSON(w, http.StatusOK, map[string]any{"id": id, "is_hidden": body.IsHidden})
+}
+
+// handleUpdateSingerOrganization は Holodex の分類を手動で上書きする（content:edit）。
+// 空文字で上書きを解除し、Holodex の値に戻る。Holodex 管理チャンネルでも設定できる
+// （これは Holodex のメタデータではなく seTORI 側の判断のため）。
+func (r *Router) handleUpdateSingerOrganization(w http.ResponseWriter, req *http.Request) {
+	id := req.PathValue("id")
+	if id == "" {
+		respondError(w, http.StatusBadRequest, "チャンネルIDは必須です")
+		return
+	}
+
+	var body dto.UpdateSingerOrganizationRequest
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		respondError(w, http.StatusBadRequest, "無効なリクエスト形式")
+		return
+	}
+
+	found, err := r.singerService.SetOrganizationOverride(id, body.Organization)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !found {
+		respondError(w, http.StatusNotFound, "チャンネルが見つかりません")
+		return
+	}
+
+	logger.Infof("singer %s organization override set to %q", id, body.Organization)
+	respondJSON(w, http.StatusOK, map[string]any{"id": id, "organization": body.Organization})
 }
 
 func (r *Router) handleSearchSingers(w http.ResponseWriter, req *http.Request) {

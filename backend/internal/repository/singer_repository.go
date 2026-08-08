@@ -16,22 +16,28 @@ func NewSingerRepository(db *sql.DB) *SingerRepository {
 	return &SingerRepository{db: db}
 }
 
+// effectiveOrg は表示・グループ分けに使う事務所キーの SQL 式。
+// 手動指定（organization_override）があればそれ、無ければ Holodex の値。
+const effectiveOrg = `COALESCE(s.organization_override, s.organization)`
+
 // singerColumns は演唱者の全カラム（SELECT と scanSinger で対にして使う）。
-// organization は取り込み時の生の値（＝organizations.key）で、画面に出す名前は
-// organizations.display_name。両方返すので、呼び出し側は必ず singerFrom で組み立てる。
-const singerColumns = `s.id, s.name, s.english_name, s.photo_url, s.organization,
-	o.display_name, s.metadata_source, s.is_hidden, s.created_at, s.updated_at`
+// organization は Holodex の値、organization_override は手動指定で、
+// JOIN しているのは実効値のほう。呼び出し側は必ず singerFrom で組み立てる。
+const singerColumns = `s.id, s.name, s.english_name, s.photo_url,
+	s.organization, s.organization_override, o.display_name,
+	COALESCE(o.is_unaffiliated, FALSE),
+	s.metadata_source, s.is_hidden, s.created_at, s.updated_at`
 
 // singerFrom は singers と organizations を結んだ FROM 句。
 // 事務所は任意なので LEFT JOIN（所属なしのチャンネルを落とさない）。
-const singerFrom = `FROM singers s LEFT JOIN organizations o ON s.organization = o.key`
+const singerFrom = `FROM singers s LEFT JOIN organizations o ON ` + effectiveOrg + ` = o.key`
 
 // scanSinger は singerColumns の並びで1行読む。
 func scanSinger(row interface{ Scan(...any) error }) (models.Singer, error) {
 	var s models.Singer
 	err := row.Scan(&s.ID, &s.Name, &s.EnglishName, &s.PhotoURL,
-		&s.Organization, &s.OrganizationName, &s.MetadataSource, &s.IsHidden,
-		&s.CreatedAt, &s.UpdatedAt)
+		&s.Organization, &s.OrganizationOverride, &s.OrganizationName, &s.OrganizationUnaffil,
+		&s.MetadataSource, &s.IsHidden, &s.CreatedAt, &s.UpdatedAt)
 	return s, err
 }
 
@@ -87,11 +93,17 @@ func (r *SingerRepository) FindAll(limit, offset int, sort, dir string, includeH
 // organizationGroupOrder は事務所グループの並び順を返す。
 // 所属なしは常に最後で、それ以外は organizations.sort_order → 表示名の五十音順。
 // key の文字列順にしないのは、表示名を直しても並びが変わらないと直感に反するため。
+//
+// 「所属なし」には 2 種類が入る：事務所が未設定のものと、Holodex の Independents の
+// ように無所属を意味する分類（is_unaffiliated）。別の事実だが同じ組に見せる。
 func organizationGroupOrder(dir string) string {
-	return `CASE WHEN s.organization IS NULL THEN 1 ELSE 0 END ASC,
+	return unaffiliatedLast + ` ASC,
 		o.sort_order ` + dir + `,
 		` + nameSortOrderDir("o.display_name", "''", dir)
 }
+
+// unaffiliatedLast は「所属なし扱いなら 1、それ以外は 0」を返す式（並び替え用）。
+const unaffiliatedLast = `CASE WHEN ` + effectiveOrg + ` IS NULL OR COALESCE(o.is_unaffiliated, FALSE) THEN 1 ELSE 0 END`
 
 // FindAllGrouped は事務所別表示用に全件を「事務所 → 名前（五十音）」順で返す。
 // グループを跨ぐページ送りは意味を成さないため、ここではページングしない。
@@ -102,6 +114,8 @@ func (r *SingerRepository) FindAllGrouped(includeHidden bool) ([]models.Singer, 
 		` + singerFrom + hiddenClause(includeHidden, "WHERE") + `
 		ORDER BY ` + organizationGroupOrder("ASC") + `,
 			` + nameSortOrder("s.name", "''")
+	// 所属なし扱いの組は複数の key（NULL と Independents など）が混ざるが、
+	// 上の並びで最後にまとまるので、service 側で 1 つの組に束ねられる。
 
 	rows, err := r.db.Query(query)
 	if err != nil {
@@ -134,6 +148,32 @@ func (r *SingerRepository) SetHidden(id string, hidden bool) (bool, error) {
 	affected, err := res.RowsAffected()
 	if err != nil {
 		return false, fmt.Errorf("set singer hidden: %w", err)
+	}
+	return affected > 0, nil
+}
+
+// SetOrganizationOverride は Holodex の分類を手動で上書きする（空文字なら上書きを解除）。
+//
+// Holodex の値（organization）は触らない。同期は今後もそちらを更新し続けるので、
+// 上書きを外せば最新の Holodex 分類に戻る。メタデータの更新経路と分けているのは、
+// これが Holodex のメタデータではなく seTORI 側の判断であり、
+// Holodex 管理チャンネルでも設定できる必要があるため。
+// 戻り値は対象が存在したか。
+func (r *SingerRepository) SetOrganizationOverride(id, org string) (bool, error) {
+	override := sql.NullString{String: org, Valid: strings.TrimSpace(org) != ""}
+	if err := r.ensureOrganization(override); err != nil {
+		return false, err
+	}
+
+	res, err := r.db.Exec(
+		"UPDATE singers SET organization_override = $2, updated_at = NOW() WHERE id = $1",
+		id, override)
+	if err != nil {
+		return false, fmt.Errorf("set organization override: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("set organization override: %w", err)
 	}
 	return affected > 0, nil
 }
@@ -249,17 +289,21 @@ func (r *SingerRepository) Upsert(s *models.Singer) error {
 }
 
 // UpdateManualMetadata updates user-editable metadata without changing the source.
+// organization は**意図的に触らない**。事務所の書き込み口は 2 つだけに保つ：
+//
+//	organization          … Holodex 同期だけが書く（外部の事実）
+//	organization_override … SetOrganizationOverride だけが書く（こちらの判断）
+//
+// ここからも書けるようにすると、同じ列を 2 経路が別の意味で更新することになり、
+// 「同期で戻る値」と「戻らない値」が混ざって追えなくなる。
 func (r *SingerRepository) UpdateManualMetadata(s *models.Singer) error {
-	if err := r.ensureOrganization(s.Organization); err != nil {
-		return err
-	}
 	query := `
 		UPDATE singers
-		SET name = $2, english_name = $3, photo_url = $4, organization = $5, updated_at = NOW()
+		SET name = $2, english_name = $3, photo_url = $4, updated_at = NOW()
 		WHERE id = $1
 		RETURNING created_at, updated_at`
 
-	err := r.db.QueryRow(query, s.ID, s.Name, s.EnglishName, s.PhotoURL, s.Organization).
+	err := r.db.QueryRow(query, s.ID, s.Name, s.EnglishName, s.PhotoURL).
 		Scan(&s.CreatedAt, &s.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("update singer metadata: %w", err)
@@ -342,7 +386,7 @@ func (r *SingerRepository) FindByOrganization(org string) ([]models.Singer, erro
 	query := `
 		SELECT ` + singerColumns + `
 		` + singerFrom + `
-		WHERE s.organization = $1
+		WHERE ` + effectiveOrg + ` = $1
 		ORDER BY s.name ASC`
 
 	rows, err := r.db.Query(query, org)

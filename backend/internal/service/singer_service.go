@@ -73,11 +73,16 @@ func (s *SingerService) GetGrouped(includeHidden bool) (*dto.SingerGroupListResp
 
 	// SQL 側で「事務所 → 名前」順に並んでいるので、隣接する同じ事務所をまとめるだけでよい。
 	// 束ねる鍵は key（表示名は重複しうるし、直された瞬間にグループが割れるため）。
+	//
+	// 「所属なし」だけは複数の key が 1 つの組になる：事務所が未設定のもの（NULL）と、
+	// Holodex の Independents のように無所属を意味する分類（is_unaffiliated）。
+	// 別の事実なので値は潰さないが、見る側にとっては同じ「事務所に属さない人たち」なので
+	// 空文字の組にまとめる。SQL 側で末尾に固めてあるので隣接判定のままで足りる。
 	groups := []dto.SingerGroupResponse{}
 	for _, singer := range singers {
 		org, display := "", ""
-		if singer.Organization.Valid {
-			org = strings.TrimSpace(singer.Organization.String)
+		if eff := singer.EffectiveOrganization(); eff.Valid && !singer.OrganizationUnaffil {
+			org = strings.TrimSpace(eff.String)
 			display = org // organizations に行が無い場合の保険
 			if singer.OrganizationName.Valid {
 				display = singer.OrganizationName.String
@@ -91,6 +96,17 @@ func (s *SingerService) GetGrouped(includeHidden bool) (*dto.SingerGroupListResp
 	}
 
 	return &dto.SingerGroupListResponse{Groups: groups, Total: len(singers)}, nil
+}
+
+// SetOrganizationOverride は Holodex の分類を手動で上書きする（空文字で解除）。
+// Holodex の値は残るので、解除すれば最新の同期結果に戻る。
+// 見つからなければ (false, nil) を返す。
+func (s *SingerService) SetOrganizationOverride(id, org string) (bool, error) {
+	found, err := s.singerRepo.SetOrganizationOverride(id, org)
+	if err != nil {
+		return false, fmt.Errorf("set organization override: %w", err)
+	}
+	return found, nil
 }
 
 // SetHidden はチャンネル一覧での表示/非表示を切り替える。
@@ -169,8 +185,7 @@ func (s *SingerService) UpdateManualMetadata(id string, req *dto.UpdateSingerReq
 	singer.Name = name
 	singer.EnglishName = nullableTrimmedString(req.EnglishName)
 	singer.PhotoURL = nullableTrimmedString(req.PhotoURL)
-	// 事務所は organizations の key。未知の値なら書き込み時に自動で作られる。
-	singer.Organization = nullableTrimmedString(req.Organization)
+	// 事務所はここでは扱わない。PUT /api/singers/{id}/organization（上書き）が唯一の窓口。
 
 	if err := s.singerRepo.UpdateManualMetadata(singer); err != nil {
 		return nil, fmt.Errorf("update singer metadata: %w", err)
@@ -277,13 +292,25 @@ func (s *SingerService) toSingerResponse(singer models.Singer) dto.SingerRespons
 		resp.PhotoURL = &singer.PhotoURL.String
 	}
 	if singer.Organization.Valid {
-		resp.Organization = &singer.Organization.String
-		// 表示名は organizations 側。取り込み直後などで行が無い場合は key を出す
-		// （空欄にすると「所属なし」に見えてしまうため）。
-		if singer.OrganizationName.Valid {
-			resp.OrganizationName = &singer.OrganizationName.String
-		} else {
-			resp.OrganizationName = &singer.Organization.String
+		resp.OrganizationHolodex = &singer.Organization.String
+	}
+	if singer.OrganizationOverride.Valid {
+		resp.OrganizationOverride = &singer.OrganizationOverride.String
+	}
+
+	if eff := singer.EffectiveOrganization(); eff.Valid {
+		key := eff.String
+		resp.Organization = &key
+		// 「所属なし」を意味する分類（Independents など）は事務所名として出さない。
+		// バッジに出すと、見出しが「所属なし」なのにバッジは別名という矛盾になる。
+		if !singer.OrganizationUnaffil {
+			// 表示名は organizations 側。取り込み直後などで行が無い場合は key を出す
+			// （空欄にすると「所属なし」に見えてしまうため）。
+			name := key
+			if singer.OrganizationName.Valid {
+				name = singer.OrganizationName.String
+			}
+			resp.OrganizationName = &name
 		}
 	}
 
