@@ -49,14 +49,16 @@ type Router struct {
 	artistService        *service.ArtistService
 	batchAnalyzeService  *service.BatchAnalyzeService
 	authService          *service.AuthService
-	readingService       *service.ReadingService
-	suggestionService    *service.SuggestionService
-	backupService        *service.BackupService
-	playlistService      *service.PlaylistService
-	oauthService         *service.OAuthService
-	settingsService      *service.SettingsService
-	songMatchService     *service.SongMatchService
-	aiService            *service.AIService
+	// ログイン試行の絞り込み（総当たりと bcrypt による CPU 消費を止める）
+	loginLimiter      *loginLimiter
+	readingService    *service.ReadingService
+	suggestionService *service.SuggestionService
+	backupService     *service.BackupService
+	playlistService   *service.PlaylistService
+	oauthService      *service.OAuthService
+	settingsService   *service.SettingsService
+	songMatchService  *service.SongMatchService
+	aiService         *service.AIService
 }
 
 // NewRouter 新しいルーターを作成
@@ -154,6 +156,7 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 		artistService:        artistService,
 		batchAnalyzeService:  batchAnalyzeService,
 		authService:          authService,
+		loginLimiter:         newLoginLimiter(),
 		readingService:       readingService,
 		suggestionService:    suggestionService,
 		backupService:        backupService,

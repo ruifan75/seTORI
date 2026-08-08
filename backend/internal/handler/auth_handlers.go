@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"strings"
@@ -73,16 +74,30 @@ func (r *Router) handleLogin(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	// 総当たりと bcrypt による CPU 消費を止める。判定はパスワード検証より前に置く
+	// ——ロック中の相手にハッシュ計算をさせない（それ自体が攻撃の目的になり得る）。
+	// 鍵は生 IP ではなく clientHint（IP のハッシュ）で、匿名投稿の数え方と揃える。
+	ipKey := clientHint(req)
+	userKey := strings.ToLower(strings.TrimSpace(body.Username))
+	if ok, remain := r.loginLimiter.allow(ipKey, userKey); !ok {
+		respondError(w, http.StatusTooManyRequests,
+			fmt.Sprintf("試行が多すぎます。%d 分ほど待ってからやり直してください", int(remain.Minutes())+1))
+		return
+	}
+
 	token, user, err := r.authService.Login(body.Username, body.Password)
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidCredentials) || errors.Is(err, service.ErrUserInactive) {
+			r.loginLimiter.recordFailure(ipKey, userKey)
 			respondError(w, http.StatusUnauthorized, err.Error())
 			return
 		}
+		// サーバー側の不具合は利用者の失敗ではないので数えない。
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
+	r.loginLimiter.recordSuccess(ipKey, userKey)
 	logger.Infof("user %q logged in", user.Username)
 	respondJSON(w, http.StatusOK, map[string]any{
 		"token": token,

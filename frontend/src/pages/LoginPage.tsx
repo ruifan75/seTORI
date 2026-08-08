@@ -15,11 +15,17 @@ export default function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
 
   // 設定済みの連携先だけボタンを出す（未設定の provider を押させない）
-  const { data: providers = [] } = useQuery({
+  const { data: providers = [], isPending: providersPending } = useQuery({
     queryKey: ['oauth', 'providers'],
     queryFn: authApi.oauthProviders,
     staleTime: Infinity,
   });
+
+  // 連携先が 1 つも無ければパスワードが唯一の入口なので、畳まず最初から出す。
+  // 取得中も出しておく（後から畳むと、入力中に消えることになる）。
+  const [passwordFormOpened, setPasswordFormOpened] = useState(false);
+  const showPasswordForm = passwordFormOpened || providersPending || providers.length === 0;
+  const setShowPasswordForm = setPasswordFormOpened;
 
   // ログイン前にアクセスしようとしていたページへ戻る（無ければトップ）
   const from = (location.state as { from?: string } | null)?.from ?? '/';
@@ -57,6 +63,12 @@ export default function LoginPage() {
             編集にはログインが必要です。閲覧はログインなしで可能です。
           </p>
 
+          {/* 連携先があるときは、そちらを主な入口にする。
+              一般の利用者は Google で入るので、パスワード欄を出しっぱなしにすると
+              管理者用の入口を常時見せることになる（自動化された総当たりの的にもなる）。
+              ただし畳むだけで、消しはしない：Google 側が使えなくなったときの
+              入口が無くなると管理者が自分のサイトに入れなくなる。 */}
+          {showPasswordForm && (
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">ユーザー名</label>
@@ -94,14 +106,25 @@ export default function LoginPage() {
               {submitting ? 'ログイン中...' : 'ログイン'}
             </button>
           </form>
+          )}
+
+          {/* 連携が未設定なら（ローカル開発など）パスワードが唯一の入口なので、
+              エラーはフォーム内に出る。畳んでいる間はここで出す。 */}
+          {!showPasswordForm && error && (
+            <div className="mb-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+              {error}
+            </div>
+          )}
 
           {providers.length > 0 && (
             <>
-              <div className="flex items-center gap-3 my-5">
-                <span className="flex-1 h-px bg-gray-200" />
-                <span className="text-xs text-gray-400">または</span>
-                <span className="flex-1 h-px bg-gray-200" />
-              </div>
+              {showPasswordForm && (
+                <div className="flex items-center gap-3 my-5">
+                  <span className="flex-1 h-px bg-gray-200" />
+                  <span className="text-xs text-gray-400">または</span>
+                  <span className="flex-1 h-px bg-gray-200" />
+                </div>
+              )}
               <div className="space-y-2">
                 {providers.includes('google') && (
                   <button
@@ -129,6 +152,18 @@ export default function LoginPage() {
               <p className="mt-3 text-xs text-gray-400 text-center">
                 初めての場合はアカウントが自動で作成されます
               </p>
+
+              {!showPasswordForm && (
+                <p className="mt-5 text-center">
+                  <button
+                    type="button"
+                    onClick={() => setShowPasswordForm(true)}
+                    className="text-xs text-gray-400 hover:text-gray-600 underline underline-offset-2"
+                  >
+                    パスワードでログイン
+                  </button>
+                </p>
+              )}
             </>
           )}
         </div>
