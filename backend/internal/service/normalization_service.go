@@ -14,19 +14,20 @@ import (
 
 type NormalizationService struct {
 	aiClient       ai.Chatter
-	songRepo       *repository.SongRepository
 	songItunesRepo *repository.SongItunesRepository
+	matchService   *SongMatchService
 }
 
+// 楽曲の照合そのものは SongMatchService が持つので songRepo は要らない。
 func NewNormalizationService(
 	aiClient ai.Chatter,
-	songRepo *repository.SongRepository,
 	songItunesRepo *repository.SongItunesRepository,
+	matchService *SongMatchService,
 ) *NormalizationService {
 	return &NormalizationService{
 		aiClient:       aiClient,
-		songRepo:       songRepo,
 		songItunesRepo: songItunesRepo,
+		matchService:   matchService,
 	}
 }
 
@@ -171,7 +172,68 @@ func (s *NormalizationService) BatchAINormalization(items []dto.AINormalizationI
 		}
 	}
 
+	// 曲名は一意に一致したのにアーティストだけ食い違ったものを、まとめて AI に問う。
+	// ここで別名義（松任谷由実 = 荒井由実）が確定すれば照合しなおして拾える。
+	// 判定は肯定・否定とも永続化されるので、同じ組を二度は聞かない。
+	//
+	// warning が付いているときは AI 呼び出し自体が失敗しているので試さない。
+	// 同じ理由で必ず失敗する 2 回目を投げても、待ち時間が延びるだけ。
+	if warning == "" {
+		s.resolveAliasesAndRematch(items, suggestions)
+	}
+
 	return &dto.BatchAINormalizationResponse{Suggestions: suggestions, Warning: warning}, nil
+}
+
+// resolveAliasesAndRematch は照合しきれなかったアーティストの組を AI に判定させ、
+// 別名義が登録できたぶんだけ照合をやり直す（in-place）。
+//
+// 呼ばない場所が 2 つある。
+//   - キャッシュ命中時の再解決（ResolveMatch）… AI を呼ばない約束の経路
+//   - 正規化の AI 呼び出しが失敗したとき … 2 回目も同じ理由で失敗する
+//
+// どちらの場合も照合結果は規則ベースのまま残る。別名義が増えないだけで、
+// 決着しなかった組は統合候補として人に回る。
+func (s *NormalizationService) resolveAliasesAndRematch(items []dto.AINormalizationItem, suggestions []dto.AISuggestionResult) {
+	if s.matchService == nil {
+		return
+	}
+
+	var pairs []artistPair
+	for i := range suggestions {
+		if suggestions[i].MatchedSongID != nil {
+			continue // 既に自動採用できている
+		}
+		pairs = append(pairs, collectArtistAliasPairsFromDTO(suggestions[i])...)
+	}
+	if len(pairs) == 0 {
+		return
+	}
+	if linked := s.adjudicateArtistAliases(pairs); linked == 0 {
+		return
+	}
+
+	// 別名義が増えたので、まだ結びついていない項目だけ照合しなおす
+	for i := range suggestions {
+		if suggestions[i].MatchedSongID != nil {
+			continue
+		}
+		suggestions[i].MatchCandidates = nil
+		s.matchAndPopulateSong(&suggestions[i], &items[i], suggestions[i].NormalizedName, suggestions[i].OriginalArtist)
+	}
+}
+
+// collectArtistAliasPairsFromDTO は候補（DTO）から問い合わせ対象の組を拾う。
+func collectArtistAliasPairsFromDTO(sug dto.AISuggestionResult) []artistPair {
+	cands := make([]MatchCandidate, 0, len(sug.MatchCandidates))
+	for _, c := range sug.MatchCandidates {
+		cands = append(cands, MatchCandidate{
+			Song:   models.Song{OriginalArtist: c.Artist},
+			Score:  c.Score,
+			Reason: c.Reason,
+		})
+	}
+	return collectArtistAliasPairs(sug.OriginalArtist, cands)
 }
 
 // buildBatchMessage 構築包含所有楽曲のバッチメッセージ
@@ -191,38 +253,53 @@ func (s *NormalizationService) buildBatchMessage(items []dto.AINormalizationItem
 	return sb.String()
 }
 
-// matchAndPopulateSong 嘗試匹配 DB 歌曲並填入資訊
-// 優先順序：iTunes ID → 歌名 + アーティスト
+// matchAndPopulateSong は既存楽曲との照合結果を result に詰める。
+//
+// 照合は SongMatchService に任せる（曲名キーで引いてアーティストで検証する）。
+// 確信度が AutoMatchScore 以上のものだけを「マッチした」として扱い、
+// それに満たないが似ているものは MatchCandidates に入れて UI に選ばせる。
+// ここで候補を握り潰すと、"ひこうき雲 / 松任谷由実" のような別名義の曲が
+// 「DB に無い曲」として新規登録され、近似重複が増えていく。
 func (s *NormalizationService) matchAndPopulateSong(result *dto.AISuggestionResult, item *dto.AINormalizationItem, normalizedName, normalizedArtist string) {
-	var matchedSong *models.Song
-	var matchReason string
-
-	// 1. 優先使用 iTunes ID 配對
-	if item.ItunesID != nil && *item.ItunesID > 0 {
-		song, err := s.songRepo.FindByItunesID(*item.ItunesID)
-		if err == nil && song != nil {
-			matchedSong = song
-			matchReason = "itunes_id"
-		}
-	}
-
-	// 2. 使用歌名 + 藝人配對
-	if matchedSong == nil {
-		song, err := s.songRepo.FindByNameAndArtist(normalizedName, normalizedArtist)
-		if err == nil && song != nil {
-			matchedSong = song
-			matchReason = "name"
-		}
-	}
-
-	if matchedSong == nil {
+	if s.matchService == nil {
 		return
 	}
+	cands, err := s.matchService.FindCandidates(normalizedName, normalizedArtist, item.ItunesID)
+	if err != nil {
+		logger.Warnf("song match failed (%s / %s): %v", normalizedName, normalizedArtist, err)
+		return
+	}
+	if len(cands) == 0 {
+		return
+	}
+
+	// 自動採用の水準に届かないものは候補として返すだけにする
+	for _, c := range cands {
+		if c.Score < ReviewScore {
+			continue
+		}
+		result.MatchCandidates = append(result.MatchCandidates, dto.SongMatchCandidate{
+			SongID:  c.Song.ID.String(),
+			Name:    c.Song.Name,
+			Artist:  c.Song.OriginalArtist,
+			Score:   c.Score,
+			Reason:  c.Reason,
+			ArtURL:  c.Song.Arts.String,
+			IsMatch: c.Auto(),
+		})
+	}
+
+	best := cands[0]
+	if !best.Auto() {
+		return
+	}
+	matchedSong := &best.Song
 
 	// 填入匹配結果
 	songID := matchedSong.ID.String()
 	result.MatchedSongID = &songID
-	result.MatchReason = matchReason
+	result.MatchReason = best.Reason
+	result.MatchScore = best.Score
 	result.MatchedSongName = &matchedSong.Name
 	result.MatchedSongArtist = &matchedSong.OriginalArtist
 	if matchedSong.NameReading.Valid {

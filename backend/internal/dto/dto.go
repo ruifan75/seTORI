@@ -285,6 +285,8 @@ type CommentSong struct {
 	MatchedSongArtistReading *string `json:"matched_song_artist_reading,omitempty"`
 	MatchedSongArtURL        *string `json:"matched_song_art_url,omitempty"`
 	MatchedSongItunesID      *int64  `json:"matched_song_itunes_id,omitempty"`
+	// 自動採用に届かなかった照合候補（別名義・同名異曲など。UI で選ばせる）
+	MatchCandidates []SongMatchCandidate `json:"match_candidates,omitempty"`
 }
 
 type AnalyzeCommentsResponse struct {
@@ -344,6 +346,8 @@ type SongSuggestion struct {
 	MatchedSongArtistReading *string `json:"matched_song_artist_reading,omitempty"`
 	MatchedSongArtURL        *string `json:"matched_song_art_url,omitempty"`
 	MatchedSongItunesID      *int64  `json:"matched_song_itunes_id,omitempty"`
+	// 自動採用に届かなかった照合候補（CommentSong と対称）
+	MatchCandidates []SongMatchCandidate `json:"match_candidates,omitempty"`
 }
 
 // 載入 Holodex 歌曲的回應
@@ -412,7 +416,8 @@ type AISuggestionResult struct {
 	Confidence            float64  `json:"confidence"`
 	Reasoning             string   `json:"reasoning"`
 	MatchedSongID         *string  `json:"matched_song_id,omitempty"` // 如果匹配到現有歌曲
-	MatchReason           string   `json:"match_reason,omitempty"`    // 匹配原因（name, itunes_id）
+	MatchReason           string   `json:"match_reason,omitempty"`    // 匹配原因（title_primary, itunes_id …）
+	MatchScore            float64  `json:"match_score,omitempty"`     // 確信度 0.0〜1.0
 	// DB 歌曲資訊（匹配到時回傳）
 	MatchedSongName          *string `json:"matched_song_name,omitempty"`
 	MatchedSongNameReading   *string `json:"matched_song_name_reading,omitempty"`
@@ -420,6 +425,83 @@ type AISuggestionResult struct {
 	MatchedSongArtistReading *string `json:"matched_song_artist_reading,omitempty"`
 	MatchedSongArtURL        *string `json:"matched_song_art_url,omitempty"`
 	MatchedSongItunesID      *int64  `json:"matched_song_itunes_id,omitempty"`
+	// MatchCandidates は「似ているが自動採用の水準に届かなかった」既存楽曲。
+	// 別名義（松任谷由実 / 荒井由実）や同名異曲がここに出る。UI で人に選ばせる。
+	MatchCandidates []SongMatchCandidate `json:"match_candidates,omitempty"`
+}
+
+// ========== 楽曲の統合候補 ==========
+
+// MergeCandidateSong は統合候補に出す楽曲の要約。
+// ItunesIDs は「編曲がどれだけ違うか」を人が判断するための手がかり
+// （収録アルバム・再生時間・試聴）をフロントが引くために返す。
+type MergeCandidateSong struct {
+	ID               string  `json:"id"`
+	Name             string  `json:"name"`
+	OriginalArtist   string  `json:"original_artist"`
+	ArtURL           string  `json:"art_url,omitempty"`
+	PerformanceCount int     `json:"performance_count"`
+	ItunesIDs        []int64 `json:"itunes_ids,omitempty"`
+	Role             string  `json:"role,omitempty"` // AI が説明したこの曲の立ち位置
+}
+
+// MergeVerdictResponse は AI の見立て。統合するかどうかの決定ではない。
+type MergeVerdictResponse struct {
+	SameComposition *bool  `json:"same_composition,omitempty"`
+	SameArrangement *bool  `json:"same_arrangement,omitempty"`
+	Recommendation  string `json:"recommendation,omitempty"` // merge | keep_separate
+	Note            string `json:"note,omitempty"`
+	Source          string `json:"source,omitempty"`
+	Judged          bool   `json:"judged"`
+}
+
+// MergeCandidateResponse は「新しく作られた曲が既存曲と似ている」1 件。
+// 照合が外れて新曲として登録されたものを、人が統合して畳むための入口。
+type MergeCandidateResponse struct {
+	ID           string                `json:"id"`
+	Score        float64               `json:"score"`
+	Reason       string                `json:"reason"`
+	Origin       string                `json:"origin"` // create | scan
+	NewSong      MergeCandidateSong    `json:"new_song"`
+	ExistingSong MergeCandidateSong    `json:"existing_song"`
+	Verdict      *MergeVerdictResponse `json:"verdict,omitempty"`
+}
+
+// ========== 照合の学習層（別名義・別表記） ==========
+
+// ArtistAliasMemberResponse は別名義グループの 1 名。
+type ArtistAliasMemberResponse struct {
+	NameKey     string `json:"name_key"`
+	DisplayName string `json:"display_name"`
+	Source      string `json:"source"` // manual | ai
+	Note        string `json:"note,omitempty"`
+}
+
+// ArtistAliasGroupResponse は同一人物としてまとめられた名前の集まり。
+type ArtistAliasGroupResponse struct {
+	GroupID string                      `json:"group_id"`
+	Members []ArtistAliasMemberResponse `json:"members"`
+}
+
+// SongAliasResponse は統合から学習した「この表記はこの曲」の 1 件。
+type SongAliasResponse struct {
+	NameKey    string `json:"name_key"`
+	ArtistKey  string `json:"artist_key"`
+	Source     string `json:"source"`
+	SongID     string `json:"song_id"`
+	SongName   string `json:"song_name"`
+	SongArtist string `json:"song_artist"`
+}
+
+// SongMatchCandidate は既存楽曲との照合候補 1 件。
+type SongMatchCandidate struct {
+	SongID  string  `json:"song_id"`
+	Name    string  `json:"name"`
+	Artist  string  `json:"artist"`
+	Score   float64 `json:"score"`
+	Reason  string  `json:"reason"`
+	ArtURL  string  `json:"art_url,omitempty"`
+	IsMatch bool    `json:"is_match"` // 自動採用された候補か
 }
 
 // 批量 AI 正規化回應

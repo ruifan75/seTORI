@@ -17,6 +17,9 @@ import type {
   SyncHolodexRequest,
   SyncHolodexResponse,
   SongSuggestion,
+  MergeCandidate,
+  ArtistAliasGroup,
+  SongAlias,
   AnalyzeCommentsResponse,
   BatchAnalyzeStatus,
   SuccessResponse,
@@ -175,6 +178,67 @@ export const songApi = {
 
   merge: async (sourceSongId: string, targetSongId: string): Promise<{ message: string; source_id: string; target_id: string; target_song: Song }> => {
     const { data } = await api.post(`/api/songs/${sourceSongId}/merge`, { target_song_id: targetSongId });
+    return data;
+  },
+
+  // 照合が外れて新曲として登録された疑いのある組。統合して畳むためのレビュー用。
+  mergeCandidates: async (limit = 50): Promise<{ candidates: MergeCandidate[]; total: number }> => {
+    const { data } = await api.get(`/api/songs/merge-candidates?limit=${limit}`);
+    return data;
+  },
+
+  mergeCandidatesForSong: async (songId: string): Promise<{ candidates: MergeCandidate[] }> => {
+    const { data } = await api.get(`/api/songs/${songId}/merge-candidates`);
+    return data;
+  },
+
+  dismissMergeCandidate: async (id: string): Promise<{ message: string }> => {
+    const { data } = await api.post(`/api/songs/merge-candidates/${id}/dismiss`);
+    return data;
+  },
+
+  // 既存データを走査して同名の組を候補に積む（取り込み前からある重複を拾う）
+  scanDuplicates: async (): Promise<{ added: number; message: string }> => {
+    const { data } = await api.post('/api/songs/merge-candidates/scan');
+    return data;
+  },
+
+  // 未判定の候補について AI の見立てを取る。統合は実行しない
+  adjudicateDuplicates: async (): Promise<{ judged: number; message: string }> => {
+    const { data } = await api.post('/api/songs/merge-candidates/adjudicate');
+    return data;
+  },
+};
+
+// ========== 照合の学習層 API ==========
+//
+// アーティストの別名義（松任谷由実 = 荒井由実）と、統合から学習した楽曲の別表記。
+// どちらも照合の結果を左右するので content:edit が要る。
+
+export const aliasApi = {
+  listArtists: async (): Promise<{ groups: ArtistAliasGroup[] }> => {
+    const { data } = await api.get('/api/aliases/artists');
+    return data;
+  },
+
+  linkArtists: async (nameA: string, nameB: string, note?: string): Promise<{ message: string }> => {
+    const { data } = await api.post('/api/aliases/artists', { name_a: nameA, name_b: nameB, note });
+    return data;
+  },
+
+  unlinkArtist: async (nameKey: string): Promise<{ message: string }> => {
+    const { data } = await api.delete(`/api/aliases/artists/${encodeURIComponent(nameKey)}`);
+    return data;
+  },
+
+  listSongs: async (limit = 100): Promise<{ aliases: SongAlias[] }> => {
+    const { data } = await api.get(`/api/aliases/songs?limit=${limit}`);
+    return data;
+  },
+
+  deleteSong: async (nameKey: string, artistKey: string): Promise<{ message: string }> => {
+    const params = new URLSearchParams({ name_key: nameKey, artist_key: artistKey });
+    const { data } = await api.delete(`/api/aliases/songs?${params}`);
     return data;
   },
 };

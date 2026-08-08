@@ -91,6 +91,7 @@ export interface ITunesQueryResult {
   artwork_url: string;
   track_view_url: string;
   track_time_millis: number;
+  preview_url?: string;
   country: string;
 }
 
@@ -312,6 +313,8 @@ export interface CommentSong {
   matched_song_artist_reading?: string;
   matched_song_art_url?: string;
   matched_song_itunes_id?: number;
+  // 自動採用に届かなかった照合候補（別名義・同名異曲など）。UI で人に選ばせる
+  match_candidates?: SongMatchCandidate[];
 }
 
 export interface AnalyzeCommentsResponse {
@@ -362,6 +365,8 @@ export interface SongSuggestion {
   matched_song_artist_reading?: string;
   matched_song_art_url?: string;
   matched_song_itunes_id?: number;
+  // 自動採用に届かなかった照合候補（別名義・同名異曲など）。UI で人に選ばせる
+  match_candidates?: SongMatchCandidate[];
 }
 
 export interface LoadHolodexSongsResponse {
@@ -422,12 +427,15 @@ export interface AISuggestionResult {
   reasoning: string;
   matched_song_id?: string;
   match_reason?: string;
+  match_score?: number;
   matched_song_name?: string;
   matched_song_name_reading?: string;
   matched_song_artist?: string;
   matched_song_artist_reading?: string;
   matched_song_art_url?: string;
   matched_song_itunes_id?: number;
+  // 自動採用に届かなかった照合候補（別名義・同名異曲など）。UI で人に選ばせる
+  match_candidates?: SongMatchCandidate[];
 }
 
 export interface BatchAINormalizationResponse {
@@ -935,4 +943,75 @@ export interface UpdateIntegrationSettingsRequest {
   clear?: string[];
   google_drive_client_id?: string;
   google_signin_client_id?: string;
+}
+
+// ========== 楽曲の照合・統合候補 ==========
+
+// 既存楽曲との照合候補。score >= 0.85 が自動採用（is_match）、
+// それ未満は「似ているが決められない」ので人に選ばせる。
+export interface SongMatchCandidate {
+  song_id: string;
+  name: string;
+  artist: string;
+  score: number;
+  reason: string;
+  art_url?: string;
+  is_match: boolean;
+}
+
+export interface MergeCandidateSong {
+  id: string;
+  name: string;
+  original_artist: string;
+  art_url?: string;
+  performance_count: number;
+  itunes_ids?: number[];
+  role?: string; // AI が説明したこの曲の立ち位置
+}
+
+// AI の見立て。「統合すべきか」の決定ではなく、判断材料。
+export interface MergeVerdict {
+  same_composition?: boolean;
+  same_arrangement?: boolean;
+  recommendation?: 'merge' | 'keep_separate' | string;
+  note?: string;
+  source?: string;
+  judged: boolean;
+}
+
+// 照合が外れて新曲として登録された疑いのある組。統合して畳むためのレビュー対象。
+export interface MergeCandidate {
+  id: string;
+  score: number;
+  reason: string;
+  origin: 'create' | 'scan' | string;
+  new_song: MergeCandidateSong;
+  existing_song: MergeCandidateSong;
+  verdict?: MergeVerdict;
+}
+
+// ========== 照合の学習層 ==========
+
+// 同一人物としてまとめられたアーティスト名義。source='ai' は AI が判定したもので、
+// 誤っていれば解除できる（解除は「別人」という判定として残る）。
+export interface ArtistAliasMember {
+  name_key: string;
+  display_name: string;
+  source: 'manual' | 'ai' | string;
+  note?: string;
+}
+
+export interface ArtistAliasGroup {
+  group_id: string;
+  members: ArtistAliasMember[];
+}
+
+// 楽曲の統合から学習した「この表記はこの曲」。
+export interface SongAlias {
+  name_key: string;
+  artist_key: string;
+  source: string;
+  song_id: string;
+  song_name: string;
+  song_artist: string;
 }
