@@ -78,6 +78,7 @@ import type {
   DriveDeviceAuth,
   DriveStatus,
   DriveFile,
+  BuildVersion,
 } from './types';
 
 const DEFAULT_API_BASE_URL =
@@ -791,6 +792,15 @@ export const suggestionApi = {
 };
 
 // ========== グローバル検索 API ==========
+
+export const versionApi = {
+  // 稼働中のバックエンドのビルド。フロント側は自分の値を埋め込みで持つので、
+  // 突き合わせてデプロイの取りこぼし（片方だけ入れ替わった状態）を検出する。
+  get: async (): Promise<BuildVersion> => {
+    const { data } = await api.get('/api/version');
+    return data;
+  },
+};
 
 export const searchApi = {
   global: async (q: string, limit = 5): Promise<GlobalSearchResponse> => {

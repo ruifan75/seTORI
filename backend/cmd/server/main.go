@@ -13,7 +13,16 @@ import (
 	"github.com/ruifan75/setori/internal/logger"
 )
 
+// ビルド時に -ldflags で埋める（deploy/deploy.sh → compose の build args 経由）。
+// 埋めなければ "dev" のままで、ローカルの go run はこの値になる。
+var (
+	commit  = "dev"
+	builtAt = ""
+)
+
 func main() {
+	handler.SetBuildInfo(commit, builtAt)
+
 	// .env ファイルを読み込み
 	if err := godotenv.Load(); err != nil {
 		logger.Warnf("警告: .env ファイルの読み込みに失敗しました: %v", err)

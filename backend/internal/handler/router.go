@@ -186,6 +186,7 @@ func (r *Router) SongMatchService() *service.SongMatchService {
 func (r *Router) setupRoutes() {
 	// Health check
 	r.mux.HandleFunc("GET /health", r.handleHealth)
+	r.mux.HandleFunc("GET /api/version", r.handleVersion)
 
 	// 認証
 	r.mux.HandleFunc("POST /api/auth/login", r.handleLogin)
@@ -2616,7 +2617,7 @@ func requiredPermission(method, path string) (perm string, needsAuth bool) {
 
 	// 公開・認証のみ（特定権限不要）のエンドポイント
 	switch path {
-	case "/health", "/api/auth/login":
+	case "/health", "/api/version", "/api/auth/login":
 		return "", false
 	case "/api/auth/logout", "/api/auth/me":
 		return "", true

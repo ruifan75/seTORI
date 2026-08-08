@@ -1015,3 +1015,10 @@ export interface SongAlias {
   song_name: string;
   song_artist: string;
 }
+
+// 稼働中のビルド（GET /api/version）。commit はデプロイ時の短縮ハッシュ、
+// built_at は UTC の ISO 文字列。埋め込まれていなければ 'dev' / 空文字。
+export interface BuildVersion {
+  commit: string;
+  built_at: string;
+}

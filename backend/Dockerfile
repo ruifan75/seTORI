@@ -9,8 +9,15 @@ RUN go mod download
 
 COPY . .
 
+# 稼働中のバージョンを埋め込む（/api/version と管理画面が返す）。
+# イメージに .git は入らないので、値は外から build args で渡す（deploy/deploy.sh）。
+ARG GIT_COMMIT=dev
+ARG BUILD_TIME=
+
 # lib/pq は純 Go なので CGO 不要。静的バイナリにして実行イメージを軽くする
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/server ./cmd/server
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath \
+    -ldflags="-s -w -X main.commit=${GIT_COMMIT} -X main.builtAt=${BUILD_TIME}" \
+    -o /out/server ./cmd/server
 
 # ===== 実行 =====
 FROM alpine:3.21

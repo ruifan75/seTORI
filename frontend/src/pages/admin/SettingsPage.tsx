@@ -4,6 +4,7 @@ import { filterKeywordApi, tagApi, tagRuleApi, aiProviderApi } from '../../api/c
 import { useToast } from '../../components/ui/ToastContext';
 import { useAuthStore, hasPermission, PERM } from '../../store/auth';
 import IntegrationSettingsSection from './IntegrationSettingsSection';
+import BuildVersion from '../../components/BuildVersion';
 import type { FilterKeyword, StreamTag, PerformanceTag, TagKeywordRule, AIProvider, AIProviderInput, AIModelInfo } from '../../api/types';
 
 function KeywordSection({
@@ -793,7 +794,10 @@ export default function SettingsPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-3xl font-bold text-gray-900">設定</h1>
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h1 className="text-3xl font-bold text-gray-900">設定</h1>
+        <BuildVersion />
+      </div>
 
       {/* 外部サービス連携（要 users:manage） */}
       {canManageIntegrations && (
