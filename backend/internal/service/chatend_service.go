@@ -281,6 +281,12 @@ func (s *ChatEndService) fetchLiveChat(videoID string) (string, error) {
 	args := []string{
 		"--skip-download", "--write-subs", "--sub-langs", "live_chat",
 		"--socket-timeout", "30",
+		// 映像フォーマットは 1 つも要らない（欲しいのは live_chat の字幕だけ）。
+		// これが無いと、フォーマット一覧が空だったときに yt-dlp は
+		// 「Requested format is not available」で字幕を書く前に止まる。
+		// 新しい yt-dlp は YouTube の抽出に JS ランタイムを要求するようになり、
+		// ランタイムの無い環境（本番の alpine イメージ）では実際に空になる。
+		"--ignore-no-formats-error",
 		"-o", base + ".%(ext)s",
 	}
 	// cookie があれば渡す。YouTube に BOT 判定されている環境ではこれが無いと落ちる。

@@ -77,6 +77,12 @@ for i := range songs {
 cookie は DB 上で暗号化して保存され、再起動なしで反映される。ファイルで渡したい場合は
 `YTDLP_COOKIES_FILE` に置き場所を書く（起動時に一度だけ読む）。
 
+> 新しい yt-dlp は YouTube の署名解決に JS ランタイム（deno）を要求する。本番の alpine
+> イメージには無いので、映像フォーマットは 1 つも取れない。字幕だけが欲しいので
+> `--ignore-no-formats-error` を渡して先へ進めている。**deno を入れる必要は無い**
+> （live chat は innertube のチャット API 経由で、署名を通らない）。
+> このフラグが無いと、字幕を選び終えた直後に「Requested format is not available」で落ちる。
+
 #### あとから end だけ埋める
 
 一括プレ分析は comment_raw の hash キャッシュに命中すると拍手検出まで飛ばすので、
