@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
-import { singerApi, holodexApi } from '../api/client';
+import { singerApi, holodexApi, organizationApi } from '../api/client';
 import { useAuthStore, hasPermission, PERM } from '../store/auth';
 import { usePlayerStore, performanceToTrack } from '../store/player';
 import Loading from '../components/ui/Loading';
@@ -10,6 +10,8 @@ import Tag from '../components/ui/Tag';
 import ArtistLinks from '../components/ArtistLinks';
 import QueueAddButton from '../components/QueueAddButton';
 import { SortableTh, type SortDir, type SortState } from '../components/ui/Sort';
+import { useToast } from '../components/ui/ToastContext';
+import VisibilityIcon from '../components/ui/VisibilityIcon';
 
 type TabType = 'streams' | 'performances';
 type ProcessedFilter = 'all' | 'true' | 'false';
@@ -18,6 +20,7 @@ type HiddenFilter = 'all' | 'true' | 'false';
 export default function SingerDetailPage() {
   const { id } = useParams<{ id: string }>();
   const queryClient = useQueryClient();
+  const { showToast } = useToast();
   const authUser = useAuthStore((s) => s.user);
   const canEdit = hasPermission(authUser, PERM.CONTENT_EDIT);
   const canSync = hasPermission(authUser, PERM.SYNC_RUN);
@@ -79,6 +82,15 @@ export default function SingerDetailPage() {
     enabled: !!id,
   });
 
+  // 編集フォームの所属プルダウン用。編集できる人だけ引く。
+  const { data: orgList } = useQuery({
+    queryKey: ['organizations'],
+    queryFn: organizationApi.list,
+    enabled: canEdit,
+    staleTime: 5 * 60 * 1000,
+  });
+  const organizations = orgList?.organizations ?? [];
+
   // Streams
   const { data: streams, isLoading: streamsLoading } = useQuery({
     queryKey: ['singerStreams', id, streamPage, processedFilter, hiddenFilter],
@@ -122,6 +134,20 @@ export default function SingerDetailPage() {
       queryClient.invalidateQueries({ queryKey: ['singer', id] });
       queryClient.invalidateQueries({ queryKey: ['singerStreams', id] });
     },
+  });
+
+  // チャンネル一覧での表示/非表示。非表示にしてもこのページ自体は誰でも開ける。
+  const visibilityMutation = useMutation({
+    mutationFn: (isHidden: boolean) => singerApi.setHidden(id!, isHidden),
+    onSuccess: (_, isHidden) => {
+      queryClient.invalidateQueries({ queryKey: ['singer', id] });
+      queryClient.invalidateQueries({ queryKey: ['singers'] });
+      showToast(
+        isHidden ? 'チャンネル一覧から非表示にしました' : 'チャンネル一覧に表示しました',
+        'success'
+      );
+    },
+    onError: (err: Error) => showToast(err.message, 'error'),
   });
 
   const updateMutation = useMutation({
@@ -205,11 +231,23 @@ export default function SingerDetailPage() {
             {singer.english_name && (
               <p className="text-gray-500 mt-1">{singer.english_name}</p>
             )}
-            {singer.organization && (
-              <span className="inline-block mt-2 px-3 py-1 bg-purple-100 text-purple-700 text-sm rounded-full">
-                {singer.organization}
-              </span>
-            )}
+            <div className="flex flex-wrap items-center gap-2 mt-2">
+              {singer.organization && (
+                <span className="inline-block px-3 py-1 bg-purple-100 text-purple-700 text-sm rounded-full">
+                  {singer.organization_name || singer.organization}
+                </span>
+              )}
+              {/* 非表示でもこのページは誰でも開けるので、閲覧者にも状態を見せる */}
+              {singer.is_hidden && (
+                <span
+                  className="inline-flex items-center gap-1 px-3 py-1 bg-gray-200 text-gray-600 text-sm rounded-full"
+                  title="チャンネル一覧には表示されません（このページは閲覧できます）"
+                >
+                  <VisibilityIcon hidden className="w-4 h-4" />
+                  一覧で非表示
+                </span>
+              )}
+            </div>
             <div className="flex gap-4 mt-4 text-sm text-gray-600">
               <div>
                 <span className="font-medium text-gray-900">{singer.stream_count}</span> 歌枠
@@ -220,6 +258,18 @@ export default function SingerDetailPage() {
             </div>
           </div>
           <div className="flex flex-wrap gap-3 w-full sm:w-auto">
+            {/* Holodex 管理チャンネルでも切り替えられる（メタデータではなく seTORI 側の都合なので） */}
+            {canEdit && (
+              <button
+                onClick={() => visibilityMutation.mutate(!singer.is_hidden)}
+                disabled={visibilityMutation.isPending}
+                title={singer.is_hidden ? 'チャンネル一覧に表示する' : 'チャンネル一覧から非表示にする'}
+                aria-label={singer.is_hidden ? 'チャンネル一覧に表示する' : 'チャンネル一覧から非表示にする'}
+                className="px-3 py-2 bg-white border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50 hover:text-gray-900 transition-colors disabled:opacity-50"
+              >
+                <VisibilityIcon hidden={singer.is_hidden} className="w-5 h-5" />
+              </button>
+            )}
             {singer.can_edit_metadata && canEdit && (
               <button
                 onClick={openEditModal}
@@ -305,13 +355,29 @@ export default function SingerDetailPage() {
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   所属
                 </label>
-                <input
-                  type="text"
+                {/* 自由入力をやめて既存の事務所から選ぶ。表記ゆれはここから生まれていたため。
+                    新しい事務所は管理→事務所で追加する（無い場合の導線も下に出す）。 */}
+                <select
                   value={editForm.organization}
                   onChange={(e) => setEditForm((prev) => ({ ...prev, organization: e.target.value }))}
-                  placeholder="Independents"
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                />
+                >
+                  <option value="">所属なし</option>
+                  {organizations.map((org) => (
+                    <option key={org.key} value={org.key}>
+                      {org.display_name}
+                    </option>
+                  ))}
+                </select>
+                {canEdit && (
+                  <p className="mt-1 text-xs text-gray-500">
+                    一覧に無い事務所は{' '}
+                    <Link to="/admin/organizations" className="text-indigo-600 hover:underline">
+                      管理→事務所
+                    </Link>{' '}
+                    から追加できます
+                  </p>
+                )}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">

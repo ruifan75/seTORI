@@ -32,6 +32,17 @@ func currentUser(req *http.Request) *models.User {
 	return nil
 }
 
+// userHasPermission は現在のユーザーが権限を持つかを返す（未ログインなら false）。
+// エンドポイントの可否は authorize が先に判定するので、ここは「同じ端点でも
+// 権限によって返す内容を変える」ための判定に使う（例：非表示チャンネルを一覧に含めるか）。
+func userHasPermission(req *http.Request, perm string) bool {
+	user := currentUser(req)
+	if user == nil {
+		return false
+	}
+	return auth.HasPermission(user.Permissions, perm)
+}
+
 // clientHint は匿名リクエストの同一性の手がかりを返す（IP の SHA-256 先頭16桁）。
 // 生 IP は保存しないが、同じ相手からの連投は数えられる、という妥協点。
 // リバースプロキシ下では X-Forwarded-For の先頭を使う。

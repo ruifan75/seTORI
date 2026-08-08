@@ -35,11 +35,11 @@ func NewSingerService(
 	}
 }
 
-// GetAll 取得所有演唱者
-func (s *SingerService) GetAll(page, limit int, sort, dir string) (*dto.SingerListResponse, error) {
+// GetAll 取得所有演唱者。includeHidden は content:edit を持つ場合のみ true を渡す。
+func (s *SingerService) GetAll(page, limit int, sort, dir string, includeHidden bool) (*dto.SingerListResponse, error) {
 	offset := (page - 1) * limit
 
-	singers, total, err := s.singerRepo.FindAll(limit, offset, sort, dir)
+	singers, total, err := s.singerRepo.FindAll(limit, offset, sort, dir, includeHidden)
 	if err != nil {
 		return nil, fmt.Errorf("get singers: %w", err)
 	}
@@ -61,6 +61,46 @@ func (s *SingerService) GetAll(page, limit int, sort, dir string) (*dto.SingerLi
 			TotalPages: totalPages,
 		},
 	}, nil
+}
+
+// GetGrouped は事務所別のチャンネル一覧を返す（ページングなし）。
+// 所属なしのチャンネルは最後の「所属なし」グループにまとめる。
+func (s *SingerService) GetGrouped(includeHidden bool) (*dto.SingerGroupListResponse, error) {
+	singers, err := s.singerRepo.FindAllGrouped(includeHidden)
+	if err != nil {
+		return nil, fmt.Errorf("get singers grouped: %w", err)
+	}
+
+	// SQL 側で「事務所 → 名前」順に並んでいるので、隣接する同じ事務所をまとめるだけでよい。
+	// 束ねる鍵は key（表示名は重複しうるし、直された瞬間にグループが割れるため）。
+	groups := []dto.SingerGroupResponse{}
+	for _, singer := range singers {
+		org, display := "", ""
+		if singer.Organization.Valid {
+			org = strings.TrimSpace(singer.Organization.String)
+			display = org // organizations に行が無い場合の保険
+			if singer.OrganizationName.Valid {
+				display = singer.OrganizationName.String
+			}
+		}
+		if len(groups) == 0 || groups[len(groups)-1].Organization != org {
+			groups = append(groups, dto.SingerGroupResponse{Organization: org, DisplayName: display})
+		}
+		last := &groups[len(groups)-1]
+		last.Singers = append(last.Singers, s.toSingerResponse(singer))
+	}
+
+	return &dto.SingerGroupListResponse{Groups: groups, Total: len(singers)}, nil
+}
+
+// SetHidden はチャンネル一覧での表示/非表示を切り替える。
+// 見つからなければ (false, nil) を返す。
+func (s *SingerService) SetHidden(id string, hidden bool) (bool, error) {
+	found, err := s.singerRepo.SetHidden(id, hidden)
+	if err != nil {
+		return false, fmt.Errorf("set singer hidden: %w", err)
+	}
+	return found, nil
 }
 
 // Search 搜尋演唱者
@@ -129,6 +169,7 @@ func (s *SingerService) UpdateManualMetadata(id string, req *dto.UpdateSingerReq
 	singer.Name = name
 	singer.EnglishName = nullableTrimmedString(req.EnglishName)
 	singer.PhotoURL = nullableTrimmedString(req.PhotoURL)
+	// 事務所は organizations の key。未知の値なら書き込み時に自動で作られる。
 	singer.Organization = nullableTrimmedString(req.Organization)
 
 	if err := s.singerRepo.UpdateManualMetadata(singer); err != nil {
@@ -220,6 +261,7 @@ func (s *SingerService) toSingerResponse(singer models.Singer) dto.SingerRespons
 		Name:            singer.Name,
 		MetadataSource:  singer.MetadataSource,
 		CanEditMetadata: singer.MetadataSource != "holodex",
+		IsHidden:        singer.IsHidden,
 		CreatedAt:       singer.CreatedAt,
 		UpdatedAt:       singer.UpdatedAt,
 	}
@@ -236,6 +278,13 @@ func (s *SingerService) toSingerResponse(singer models.Singer) dto.SingerRespons
 	}
 	if singer.Organization.Valid {
 		resp.Organization = &singer.Organization.String
+		// 表示名は organizations 側。取り込み直後などで行が無い場合は key を出す
+		// （空欄にすると「所属なし」に見えてしまうため）。
+		if singer.OrganizationName.Valid {
+			resp.OrganizationName = &singer.OrganizationName.String
+		} else {
+			resp.OrganizationName = &singer.Organization.String
+		}
 	}
 
 	return resp

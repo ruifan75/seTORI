@@ -10,6 +10,11 @@ import type {
   UpdateStreamRequest,
   Singer,
   SingerListResponse,
+  SingerGroupListResponse,
+  Organization,
+  OrganizationListResponse,
+  CreateOrganizationRequest,
+  UpdateOrganizationRequest,
   SingerDetailResponse,
   SingerPerformanceListResponse,
   CreateSingerResponse,
@@ -274,10 +279,26 @@ export const streamApi = {
 // ========== 演唱者 API ==========
 
 export const singerApi = {
-  list: async (page = 1, limit = 20, sort?: string, dir?: string): Promise<SingerListResponse> => {
+  // includeHidden は content:edit を持つ場合のみ有効（無ければサーバー側で無視される）
+  list: async (
+    page = 1,
+    limit = 20,
+    sort?: string,
+    dir?: string,
+    includeHidden = false
+  ): Promise<SingerListResponse> => {
     const params = new URLSearchParams({ page: String(page), limit: String(limit) });
     if (sort) params.set('sort', sort);
     if (dir) params.set('dir', dir);
+    if (includeHidden) params.set('include_hidden', 'true');
+    const { data } = await api.get(`/api/singers?${params}`);
+    return data;
+  },
+
+  // 事務所別（ページングなし）
+  listGrouped: async (includeHidden = false): Promise<SingerGroupListResponse> => {
+    const params = new URLSearchParams({ group: 'organization' });
+    if (includeHidden) params.set('include_hidden', 'true');
     const { data } = await api.get(`/api/singers?${params}`);
     return data;
   },
@@ -323,6 +344,37 @@ export const singerApi = {
 
   update: async (id: string, req: UpdateSingerRequest): Promise<Singer> => {
     const { data } = await api.put(`/api/singers/${id}`, req);
+    return data;
+  },
+
+  // チャンネル一覧での表示/非表示（Holodex 管理チャンネルでも切り替えられる）
+  setHidden: async (id: string, isHidden: boolean): Promise<{ id: string; is_hidden: boolean }> => {
+    const { data } = await api.put(`/api/singers/${id}/visibility`, { is_hidden: isHidden });
+    return data;
+  },
+};
+
+// ========== 事務所 API ==========
+// key は取り込み時の値なので変更できない。編集できるのは表示名と並び順のみ。
+
+export const organizationApi = {
+  list: async (): Promise<OrganizationListResponse> => {
+    const { data } = await api.get('/api/organizations');
+    return data;
+  },
+
+  create: async (req: CreateOrganizationRequest): Promise<Organization> => {
+    const { data } = await api.post('/api/organizations', req);
+    return data;
+  },
+
+  update: async (key: string, req: UpdateOrganizationRequest): Promise<Organization> => {
+    const { data } = await api.put(`/api/organizations/${encodeURIComponent(key)}`, req);
+    return data;
+  },
+
+  remove: async (key: string): Promise<{ key: string }> => {
+    const { data } = await api.delete(`/api/organizations/${encodeURIComponent(key)}`);
     return data;
   },
 };

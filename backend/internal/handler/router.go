@@ -60,6 +60,7 @@ type Router struct {
 	settingsService   *service.SettingsService
 	songMatchService  *service.SongMatchService
 	aiService         *service.AIService
+	orgService        *service.OrganizationService
 }
 
 // NewRouter 新しいルーターを作成
@@ -77,6 +78,7 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	artistRepo := repository.NewArtistRepository(db)
 	songMatchRepo := repository.NewSongMatchRepository(db)
 	aliasRepo := repository.NewAliasRepository(db)
+	orgRepo := repository.NewOrganizationRepository(db)
 
 	// AI サービス：複数 provider ローテーション + failover、未設定時は GROQ_API_KEY にフォールバック
 	aiService := service.NewAIService(aiProviderRepo, cfg.GroqAPIKey)
@@ -89,6 +91,7 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	artistService := service.NewArtistService(artistRepo, songRepo, aiService)
 	streamService := service.NewStreamService(streamRepo, perfRepo)
 	singerService := service.NewSingerService(singerRepo, streamRepo, perfRepo)
+	orgService := service.NewOrganizationService(orgRepo)
 	holodexService := service.NewHolodexService(cfg.HolodexAPIKey, cfg.YouTubeAPIKey, cfg.GroqAPIKey, streamRepo, singerRepo, cfg.HolodexEditorToken)
 	holodexService.SetRepositoriesWithSongItunes(perfRepo, songRepo, songItunesRepo) // SyncSetoriToHolodex に必要な repositories を提供
 	normalizationService := service.NewNormalizationService(aiService, songItunesRepo, songMatchService)
@@ -168,6 +171,7 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 		settingsService:      settingsService,
 		songMatchService:     songMatchService,
 		aiService:            aiService,
+		orgService:           orgService,
 	}
 
 	r.setupRoutes()
@@ -311,6 +315,13 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("GET /api/singers/{id}/performances", r.handleGetSingerPerformances)
 	r.mux.HandleFunc("POST /api/singers", r.handleCreateSinger)
 	r.mux.HandleFunc("PUT /api/singers/{id}", r.handleUpdateSinger)
+	r.mux.HandleFunc("PUT /api/singers/{id}/visibility", r.handleUpdateSingerVisibility)
+
+	// 事務所（取り込み時の key と表示名を分けて持つ）
+	r.mux.HandleFunc("GET /api/organizations", r.handleListOrganizations)
+	r.mux.HandleFunc("POST /api/organizations", r.handleCreateOrganization)
+	r.mux.HandleFunc("PUT /api/organizations/{key}", r.handleUpdateOrganization)
+	r.mux.HandleFunc("DELETE /api/organizations/{key}", r.handleDeleteOrganization)
 
 	// Holodex sync
 	r.mux.HandleFunc("POST /api/sync/holodex", r.handleSyncHolodex)
@@ -1481,13 +1492,58 @@ func (r *Router) handleListSingers(w http.ResponseWriter, req *http.Request) {
 		limit = 20
 	}
 
-	result, err := r.singerService.GetAll(page, limit, sort, dir)
+	// 非表示チャンネルは既定で一覧から外す。include_hidden=true を出せるのは
+	// content:edit を持つレビュー担当だけ（無い場合は黙って無視する）。
+	includeHidden := req.URL.Query().Get("include_hidden") == "true" &&
+		userHasPermission(req, auth.PermContentEdit)
+
+	// group=organization は事務所別（ページングなし）。
+	if req.URL.Query().Get("group") == "organization" {
+		grouped, err := r.singerService.GetGrouped(includeHidden)
+		if err != nil {
+			respondError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		respondJSON(w, http.StatusOK, grouped)
+		return
+	}
+
+	result, err := r.singerService.GetAll(page, limit, sort, dir, includeHidden)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	respondJSON(w, http.StatusOK, result)
+}
+
+// handleUpdateSingerVisibility はチャンネルの非表示を切り替える（content:edit）。
+// 非表示にしてもチャンネルページ自体は誰でも開ける。隠すのは一覧に載る場所だけ。
+func (r *Router) handleUpdateSingerVisibility(w http.ResponseWriter, req *http.Request) {
+	id := req.PathValue("id")
+	if id == "" {
+		respondError(w, http.StatusBadRequest, "チャンネルIDは必須です")
+		return
+	}
+
+	var body dto.UpdateSingerVisibilityRequest
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		respondError(w, http.StatusBadRequest, "無効なリクエスト形式")
+		return
+	}
+
+	found, err := r.singerService.SetHidden(id, body.IsHidden)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !found {
+		respondError(w, http.StatusNotFound, "チャンネルが見つかりません")
+		return
+	}
+
+	logger.Infof("singer %s visibility updated (is_hidden=%v)", id, body.IsHidden)
+	respondJSON(w, http.StatusOK, map[string]any{"id": id, "is_hidden": body.IsHidden})
 }
 
 func (r *Router) handleSearchSingers(w http.ResponseWriter, req *http.Request) {

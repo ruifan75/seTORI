@@ -79,20 +79,77 @@ type UpdateSongRequest struct {
 // ========== 歌手 ==========
 
 type SingerResponse struct {
-	ID              string    `json:"id"`
-	Name            string    `json:"name"`
-	EnglishName     *string   `json:"english_name,omitempty"`
-	PhotoURL        *string   `json:"photo_url,omitempty"`
-	Organization    *string   `json:"organization,omitempty"`
-	MetadataSource  string    `json:"metadata_source"`
-	CanEditMetadata bool      `json:"can_edit_metadata"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	ID          string  `json:"id"`
+	Name        string  `json:"name"`
+	EnglishName *string `json:"english_name,omitempty"`
+	PhotoURL    *string `json:"photo_url,omitempty"`
+	// Organization は organizations.key（取り込み時の生の値）。画面に出すのは OrganizationName。
+	Organization     *string   `json:"organization,omitempty"`
+	OrganizationName *string   `json:"organization_name,omitempty"`
+	MetadataSource   string    `json:"metadata_source"`
+	CanEditMetadata  bool      `json:"can_edit_metadata"`
+	IsHidden         bool      `json:"is_hidden"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 type SingerListResponse struct {
 	Singers    []SingerResponse   `json:"singers"`
 	Pagination PaginationResponse `json:"pagination"`
+}
+
+// SingerGroupResponse は事務所ごとにまとめたチャンネル。
+// Organization が空文字の組は「所属なし（個人勢）」を表し、一覧では最後に置く。
+// DisplayName は見出しに出す名前（所属なしの組では空）。
+type SingerGroupResponse struct {
+	Organization string           `json:"organization"`
+	DisplayName  string           `json:"display_name"`
+	Singers      []SingerResponse `json:"singers"`
+}
+
+// ========== 事務所 ==========
+
+type OrganizationResponse struct {
+	Key         string    `json:"key"`
+	DisplayName string    `json:"display_name"`
+	SortOrder   int       `json:"sort_order"`
+	SingerCount int       `json:"singer_count"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type OrganizationListResponse struct {
+	Organizations []OrganizationResponse `json:"organizations"`
+}
+
+// CreateOrganizationRequest は Holodex に無い事務所を手で足すときのもの。
+// Key を省略すると DisplayName をそのまま Key にする。
+type CreateOrganizationRequest struct {
+	Key         string `json:"key"`
+	DisplayName string `json:"display_name"`
+	SortOrder   int    `json:"sort_order"`
+}
+
+// UpdateOrganizationRequest は表示名と並び順のみ。
+// key は取り込み時の値なので変更できない（変えると Holodex からの取り込みと結びつかなくなる）。
+type UpdateOrganizationRequest struct {
+	DisplayName string `json:"display_name"`
+	SortOrder   int    `json:"sort_order"`
+}
+
+// SingerGroupListResponse は事務所別のチャンネル一覧。
+// グループを跨いだページ送りは意味を成さないので、ページングせず全件返す。
+type SingerGroupListResponse struct {
+	Groups []SingerGroupResponse `json:"groups"`
+	Total  int                   `json:"total"`
+}
+
+// UpdateSingerVisibilityRequest はチャンネルの非表示切り替え。
+// 名前などのメタデータ更新（UpdateSingerRequest）と分けているのは、
+// メタデータは Holodex 管理チャンネルでは編集できない一方、
+// 非表示は seTORI 側の都合なのでどのチャンネルでも切り替えられるため。
+type UpdateSingerVisibilityRequest struct {
+	IsHidden bool `json:"is_hidden"`
 }
 
 type SingerDetailResponse struct {

@@ -37,10 +37,12 @@ export default function SyncPage() {
   const { showToast } = useToast();
   const queryClient = useQueryClient();
 
-  // チャンネル選択用の歌手一覧（名前順）
+  // チャンネル選択用の歌手一覧（名前順）。
+  // 一覧で非表示にしたチャンネルも同期対象には出す（隠したいのは一覧の場所だけで、
+  // 配信の取り込みまで止めたいわけではないため）。
   const { data: singerList } = useQuery({
     queryKey: ['singers-for-batch'],
-    queryFn: () => singerApi.list(1, 300, 'name', 'asc'),
+    queryFn: () => singerApi.list(1, 300, 'name', 'asc', true),
     staleTime: 5 * 60 * 1000,
   });
   const singers = singerList?.singers ?? [];

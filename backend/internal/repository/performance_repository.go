@@ -454,8 +454,9 @@ func (r *PerformanceRepository) SetTags(performanceID uuid.UUID, tagIDs []string
 // GetSingers 取得演出的所有演唱者
 func (r *PerformanceRepository) GetSingers(performanceID uuid.UUID) ([]models.Singer, error) {
 	query := `
-		SELECT s.id, s.name, s.english_name, s.photo_url, s.organization, s.metadata_source, s.created_at, s.updated_at
+		SELECT s.id, s.name, s.english_name, s.photo_url, s.organization, o.display_name, s.metadata_source, s.created_at, s.updated_at
 		FROM singers s
+		LEFT JOIN organizations o ON s.organization = o.key
 		JOIN performance_singers ps ON s.id = ps.singer_id
 		WHERE ps.performance_id = $1`
 
@@ -468,7 +469,7 @@ func (r *PerformanceRepository) GetSingers(performanceID uuid.UUID) ([]models.Si
 	var singers []models.Singer
 	for rows.Next() {
 		var s models.Singer
-		err := rows.Scan(&s.ID, &s.Name, &s.EnglishName, &s.PhotoURL, &s.Organization, &s.MetadataSource, &s.CreatedAt, &s.UpdatedAt)
+		err := rows.Scan(&s.ID, &s.Name, &s.EnglishName, &s.PhotoURL, &s.Organization, &s.OrganizationName, &s.MetadataSource, &s.CreatedAt, &s.UpdatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("scan singer: %w", err)
 		}

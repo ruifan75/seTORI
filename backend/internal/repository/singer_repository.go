@@ -3,6 +3,7 @@ package repository
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 
 	"github.com/ruifan75/setori/internal/models"
 )
@@ -15,23 +16,53 @@ func NewSingerRepository(db *sql.DB) *SingerRepository {
 	return &SingerRepository{db: db}
 }
 
-// FindAll 取得所有演唱者
-func (r *SingerRepository) FindAll(limit, offset int, sort, dir string) ([]models.Singer, int, error) {
+// singerColumns は演唱者の全カラム（SELECT と scanSinger で対にして使う）。
+// organization は取り込み時の生の値（＝organizations.key）で、画面に出す名前は
+// organizations.display_name。両方返すので、呼び出し側は必ず singerFrom で組み立てる。
+const singerColumns = `s.id, s.name, s.english_name, s.photo_url, s.organization,
+	o.display_name, s.metadata_source, s.is_hidden, s.created_at, s.updated_at`
+
+// singerFrom は singers と organizations を結んだ FROM 句。
+// 事務所は任意なので LEFT JOIN（所属なしのチャンネルを落とさない）。
+const singerFrom = `FROM singers s LEFT JOIN organizations o ON s.organization = o.key`
+
+// scanSinger は singerColumns の並びで1行読む。
+func scanSinger(row interface{ Scan(...any) error }) (models.Singer, error) {
+	var s models.Singer
+	err := row.Scan(&s.ID, &s.Name, &s.EnglishName, &s.PhotoURL,
+		&s.Organization, &s.OrganizationName, &s.MetadataSource, &s.IsHidden,
+		&s.CreatedAt, &s.UpdatedAt)
+	return s, err
+}
+
+// hiddenClause は非表示チャンネルを除く WHERE 句を返す（includeHidden なら空）。
+func hiddenClause(includeHidden bool, keyword string) string {
+	if includeHidden {
+		return ""
+	}
+	return " " + keyword + " s.is_hidden = FALSE"
+}
+
+// FindAll 取得所有演唱者。includeHidden=false なら非表示チャンネルを除く。
+func (r *SingerRepository) FindAll(limit, offset int, sort, dir string, includeHidden bool) ([]models.Singer, int, error) {
+	where := hiddenClause(includeHidden, "WHERE")
+
 	var total int
-	err := r.db.QueryRow("SELECT COUNT(*) FROM singers").Scan(&total)
+	err := r.db.QueryRow("SELECT COUNT(*) FROM singers s" + where).Scan(&total)
 	if err != nil {
 		return nil, 0, fmt.Errorf("count singers: %w", err)
 	}
 
 	// 既定は名前の五十音順。"organization" 指定で事務所順（名前を第2キー）。
-	order := nameSortOrderDir("name", "''", dir)
+	// 事務所は表示名と並び順で並べる（key の文字列順ではない）。所属なしは最後。
+	order := nameSortOrderDir("s.name", "''", dir)
 	if sort == "organization" {
-		order = "organization " + normDir(dir) + ", name ASC"
+		order = organizationGroupOrder(normDir(dir)) + ", " + nameSortOrder("s.name", "''")
 	}
 
 	query := `
-		SELECT id, name, english_name, photo_url, organization, metadata_source, created_at, updated_at
-		FROM singers
+		SELECT ` + singerColumns + `
+		` + singerFrom + where + `
 		ORDER BY ` + order + `
 		LIMIT $1 OFFSET $2`
 
@@ -43,9 +74,7 @@ func (r *SingerRepository) FindAll(limit, offset int, sort, dir string) ([]model
 
 	var singers []models.Singer
 	for rows.Next() {
-		var s models.Singer
-		err := rows.Scan(&s.ID, &s.Name, &s.EnglishName, &s.PhotoURL,
-			&s.Organization, &s.MetadataSource, &s.CreatedAt, &s.UpdatedAt)
+		s, err := scanSinger(rows)
 		if err != nil {
 			return nil, 0, fmt.Errorf("scan singer: %w", err)
 		}
@@ -55,16 +84,67 @@ func (r *SingerRepository) FindAll(limit, offset int, sort, dir string) ([]model
 	return singers, total, nil
 }
 
+// organizationGroupOrder は事務所グループの並び順を返す。
+// 所属なしは常に最後で、それ以外は organizations.sort_order → 表示名の五十音順。
+// key の文字列順にしないのは、表示名を直しても並びが変わらないと直感に反するため。
+func organizationGroupOrder(dir string) string {
+	return `CASE WHEN s.organization IS NULL THEN 1 ELSE 0 END ASC,
+		o.sort_order ` + dir + `,
+		` + nameSortOrderDir("o.display_name", "''", dir)
+}
+
+// FindAllGrouped は事務所別表示用に全件を「事務所 → 名前（五十音）」順で返す。
+// グループを跨ぐページ送りは意味を成さないため、ここではページングしない。
+// 所属なし（NULL）は最後にまとめる。
+func (r *SingerRepository) FindAllGrouped(includeHidden bool) ([]models.Singer, error) {
+	query := `
+		SELECT ` + singerColumns + `
+		` + singerFrom + hiddenClause(includeHidden, "WHERE") + `
+		ORDER BY ` + organizationGroupOrder("ASC") + `,
+			` + nameSortOrder("s.name", "''")
+
+	rows, err := r.db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("query singers grouped: %w", err)
+	}
+	defer rows.Close()
+
+	var singers []models.Singer
+	for rows.Next() {
+		s, err := scanSinger(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan singer: %w", err)
+		}
+		singers = append(singers, s)
+	}
+
+	return singers, nil
+}
+
+// SetHidden はチャンネル一覧での表示/非表示を切り替える。
+// メタデータの更新経路（Update / UpdateManualMetadata）と分けているのは、
+// Holodex 管理チャンネルでもこのフラグだけは切り替えられる必要があるため。
+// 戻り値は対象が存在したか。
+func (r *SingerRepository) SetHidden(id string, hidden bool) (bool, error) {
+	res, err := r.db.Exec(
+		"UPDATE singers SET is_hidden = $2, updated_at = NOW() WHERE id = $1", id, hidden)
+	if err != nil {
+		return false, fmt.Errorf("set singer hidden: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("set singer hidden: %w", err)
+	}
+	return affected > 0, nil
+}
+
 // FindByID 根據 Channel ID 取得演唱者
 func (r *SingerRepository) FindByID(id string) (*models.Singer, error) {
 	query := `
-		SELECT id, name, english_name, photo_url, organization, metadata_source, created_at, updated_at
-		FROM singers WHERE id = $1`
+		SELECT ` + singerColumns + `
+		` + singerFrom + ` WHERE s.id = $1`
 
-	var s models.Singer
-	err := r.db.QueryRow(query, id).Scan(
-		&s.ID, &s.Name, &s.EnglishName, &s.PhotoURL,
-		&s.Organization, &s.MetadataSource, &s.CreatedAt, &s.UpdatedAt)
+	s, err := scanSinger(r.db.QueryRow(query, id))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -74,8 +154,35 @@ func (r *SingerRepository) FindByID(id string) (*models.Singer, error) {
 	return &s, nil
 }
 
+// ensureOrganization は書き込み前に事務所の行を用意する。
+//
+// singers.organization は organizations への FK なので、Holodex が今まで見たことのない
+// org を返した瞬間に取り込みが FK 違反で落ちる。それを避けるため、書き込み経路の入口で
+// 必ず通す。表示名は key と同じもので作っておき、あとから管理画面で直す
+// （「知らない事務所だから取り込まない」は選ばない ─ 登録は止めず、人の確認は後で受ける）。
+//
+// 呼び出し側で忘れると本番で初めて落ちる種類の不具合なので、
+// service ではなくこのリポジトリの書き込みメソッド側に置いてある。
+func (r *SingerRepository) ensureOrganization(org sql.NullString) error {
+	key := strings.TrimSpace(org.String)
+	if !org.Valid || key == "" {
+		return nil
+	}
+	_, err := r.db.Exec(`
+		INSERT INTO organizations (key, display_name)
+		VALUES ($1, $1)
+		ON CONFLICT (key) DO NOTHING`, key)
+	if err != nil {
+		return fmt.Errorf("ensure organization %q: %w", key, err)
+	}
+	return nil
+}
+
 // Create 建立新演唱者
 func (r *SingerRepository) Create(s *models.Singer) error {
+	if err := r.ensureOrganization(s.Organization); err != nil {
+		return err
+	}
 	query := `
 		INSERT INTO singers (id, name, english_name, photo_url, organization, metadata_source)
 		VALUES ($1, $2, $3, $4, $5, $6)
@@ -93,6 +200,9 @@ func (r *SingerRepository) Create(s *models.Singer) error {
 
 // Update 更新演唱者
 func (r *SingerRepository) Update(s *models.Singer) error {
+	if err := r.ensureOrganization(s.Organization); err != nil {
+		return err
+	}
 	query := `
 		UPDATE singers
 		SET name = $2, english_name = $3, photo_url = $4, organization = $5, metadata_source = $6, updated_at = NOW()
@@ -109,8 +219,13 @@ func (r *SingerRepository) Update(s *models.Singer) error {
 	return nil
 }
 
-// Upsert 建立或更新演唱者（用於 Holodex 同步）
+// Upsert 建立或更新演唱者（用於 Holodex 同步）。
+// is_hidden は意図的に触らない：同期は繰り返し走るので、ここで書き戻すと
+// 手動で非表示にしたチャンネルが次の同期で一覧に戻ってしまう。
 func (r *SingerRepository) Upsert(s *models.Singer) error {
+	if err := r.ensureOrganization(s.Organization); err != nil {
+		return err
+	}
 	query := `
 		INSERT INTO singers (id, name, english_name, photo_url, organization, metadata_source)
 		VALUES ($1, $2, $3, $4, $5, $6)
@@ -135,6 +250,9 @@ func (r *SingerRepository) Upsert(s *models.Singer) error {
 
 // UpdateManualMetadata updates user-editable metadata without changing the source.
 func (r *SingerRepository) UpdateManualMetadata(s *models.Singer) error {
+	if err := r.ensureOrganization(s.Organization); err != nil {
+		return err
+	}
 	query := `
 		UPDATE singers
 		SET name = $2, english_name = $3, photo_url = $4, organization = $5, updated_at = NOW()
@@ -189,13 +307,15 @@ func (r *SingerRepository) GetPerformanceCount(singerID string) (int, error) {
 	return count, nil
 }
 
-// Search 搜尋演唱者
+// Search 搜尋演唱者。
+// 非表示チャンネルも返す：名前で探すのは「そのチャンネルを見に行く」意図の操作で、
+// 詳細ページ自体は非表示でも開けるため、ここで隠すと辿り着く手段だけを塞ぐことになる。
 func (r *SingerRepository) Search(query string, limit int) ([]models.Singer, error) {
 	sqlQuery := `
-		SELECT id, name, english_name, photo_url, organization, metadata_source, created_at, updated_at
-		FROM singers
-		WHERE name ILIKE $1 OR english_name ILIKE $1
-		ORDER BY name ASC
+		SELECT ` + singerColumns + `
+		` + singerFrom + `
+		WHERE s.name ILIKE $1 OR s.english_name ILIKE $1
+		ORDER BY s.name ASC
 		LIMIT $2`
 
 	searchPattern := "%" + query + "%"
@@ -207,9 +327,7 @@ func (r *SingerRepository) Search(query string, limit int) ([]models.Singer, err
 
 	var singers []models.Singer
 	for rows.Next() {
-		var s models.Singer
-		err := rows.Scan(&s.ID, &s.Name, &s.EnglishName, &s.PhotoURL,
-			&s.Organization, &s.MetadataSource, &s.CreatedAt, &s.UpdatedAt)
+		s, err := scanSinger(rows)
 		if err != nil {
 			return nil, fmt.Errorf("scan singer: %w", err)
 		}
@@ -222,10 +340,10 @@ func (r *SingerRepository) Search(query string, limit int) ([]models.Singer, err
 // FindByOrganization 根據組織取得演唱者
 func (r *SingerRepository) FindByOrganization(org string) ([]models.Singer, error) {
 	query := `
-		SELECT id, name, english_name, photo_url, organization, metadata_source, created_at, updated_at
-		FROM singers
-		WHERE organization = $1
-		ORDER BY name ASC`
+		SELECT ` + singerColumns + `
+		` + singerFrom + `
+		WHERE s.organization = $1
+		ORDER BY s.name ASC`
 
 	rows, err := r.db.Query(query, org)
 	if err != nil {
@@ -235,9 +353,7 @@ func (r *SingerRepository) FindByOrganization(org string) ([]models.Singer, erro
 
 	var singers []models.Singer
 	for rows.Next() {
-		var s models.Singer
-		err := rows.Scan(&s.ID, &s.Name, &s.EnglishName, &s.PhotoURL,
-			&s.Organization, &s.MetadataSource, &s.CreatedAt, &s.UpdatedAt)
+		s, err := scanSinger(rows)
 		if err != nil {
 			return nil, fmt.Errorf("scan singer: %w", err)
 		}

@@ -102,16 +102,58 @@ export interface Singer {
   name: string;
   english_name?: string;
   photo_url?: string;
+  /** organizations.key（取り込み時の生の値）。画面に出すのは organization_name のほう */
   organization?: string;
+  organization_name?: string;
   metadata_source: string;
   can_edit_metadata: boolean;
+  is_hidden: boolean; // チャンネル一覧から外す（詳細ページは非表示でも閲覧可）
   created_at: string;
   updated_at: string;
+}
+
+// ========== 事務所 ==========
+
+// key は取り込み時の生の値（Holodex の org）、display_name が画面に出る名前。
+export interface Organization {
+  key: string;
+  display_name: string;
+  sort_order: number;
+  singer_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OrganizationListResponse {
+  organizations: Organization[];
+}
+
+export interface CreateOrganizationRequest {
+  key?: string;
+  display_name: string;
+  sort_order?: number;
+}
+
+export interface UpdateOrganizationRequest {
+  display_name: string;
+  sort_order: number;
 }
 
 export interface SingerListResponse {
   singers: Singer[];
   pagination: PaginationResponse;
+}
+
+// 事務所別のチャンネル一覧。organization が空文字の組は「所属なし」。
+export interface SingerGroup {
+  organization: string;
+  display_name: string;
+  singers: Singer[];
+}
+
+export interface SingerGroupListResponse {
+  groups: SingerGroup[];
+  total: number;
 }
 
 export interface SingerDetailResponse extends Singer {

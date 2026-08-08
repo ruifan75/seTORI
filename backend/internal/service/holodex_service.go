@@ -258,8 +258,8 @@ func (s *HolodexService) singerFromHolodexChannel(channel *holodex.Channel) *mod
 	if photoURL != "" {
 		singer.PhotoURL = sql.NullString{String: photoURL, Valid: true}
 	}
-	if channel.Org != "" {
-		singer.Organization = sql.NullString{String: channel.Org, Valid: true}
+	if org := strings.TrimSpace(channel.Org); org != "" {
+		singer.Organization = sql.NullString{String: org, Valid: true}
 	}
 
 	return singer
@@ -478,8 +478,8 @@ func (s *HolodexService) syncVideo(video holodex.Video, channelID string, forceU
 		if mentionPhoto != "" {
 			singer.PhotoURL = sql.NullString{String: mentionPhoto, Valid: true}
 		}
-		if mention.Org != "" {
-			singer.Organization = sql.NullString{String: mention.Org, Valid: true}
+		if org := strings.TrimSpace(mention.Org); org != "" {
+			singer.Organization = sql.NullString{String: org, Valid: true}
 		}
 		s.singerRepo.Upsert(singer)
 
@@ -541,8 +541,8 @@ func (s *HolodexService) SyncVideo(videoID string) (*dto.SyncHolodexResponse, er
 		if channelPhoto != "" {
 			singer.PhotoURL = sql.NullString{String: channelPhoto, Valid: true}
 		}
-		if video.Channel.Org != "" {
-			singer.Organization = sql.NullString{String: video.Channel.Org, Valid: true}
+		if org := strings.TrimSpace(video.Channel.Org); org != "" {
+			singer.Organization = sql.NullString{String: org, Valid: true}
 		}
 		s.singerRepo.Upsert(singer)
 	}
@@ -593,8 +593,8 @@ func (s *HolodexService) LoadHolodexSongs(videoID string) (*dto.LoadHolodexSongs
 		if video.Channel.Photo != "" {
 			channelOwner.PhotoURL = &video.Channel.Photo
 		}
-		if video.Channel.Org != "" {
-			channelOwner.Organization = &video.Channel.Org
+		if org := strings.TrimSpace(video.Channel.Org); org != "" {
+			channelOwner.Organization = &org
 		}
 	}
 
@@ -625,8 +625,8 @@ func (s *HolodexService) LoadHolodexSongs(videoID string) (*dto.LoadHolodexSongs
 		if mention.Photo != "" {
 			participant.PhotoURL = &mention.Photo
 		}
-		if mention.Org != "" {
-			participant.Organization = &mention.Org
+		if org := strings.TrimSpace(mention.Org); org != "" {
+			participant.Organization = &org
 		}
 		participants = append(participants, participant)
 		allSingerIDs = append(allSingerIDs, mention.ID)

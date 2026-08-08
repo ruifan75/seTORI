@@ -2,14 +2,22 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router-dom';
 import { singerApi } from '../api/client';
+import type { Singer } from '../api/types';
 import Loading from '../components/ui/Loading';
 import Pagination from '../components/ui/Pagination';
 import { SortControl, type SortDir, type SortState } from '../components/ui/Sort';
+import { useToast } from '../components/ui/ToastContext';
+import VisibilityIcon from '../components/ui/VisibilityIcon';
 import { useAuthStore, hasPermission, PERM } from '../store/auth';
+
+type ViewMode = 'group' | 'list';
 
 export default function SingersPage() {
   const queryClient = useQueryClient();
+  const { showToast } = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
+  // 既定は事務所別。名前順で通しで見たいときだけ一覧に切り替える。
+  const view: ViewMode = searchParams.get('view') === 'list' ? 'list' : 'group';
   const page = parseInt(searchParams.get('page') || '1');
   const sort = searchParams.get('sort') || 'name';
   const dir: SortDir = searchParams.get('dir') === 'desc' ? 'desc' : 'asc';
@@ -17,24 +25,46 @@ export default function SingersPage() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [channelInput, setChannelInput] = useState('');
 
-  const { data, isLoading } = useQuery({
-    queryKey: ['singers', page, sort, dir],
-    queryFn: () => singerApi.list(page, 20, sort, dir),
+  // 非表示チャンネルは閲覧者には出さない。権限があるときだけ一覧に含めて印を付ける。
+  const includeHidden = canEdit;
+
+  const groupedQuery = useQuery({
+    queryKey: ['singers', 'grouped', includeHidden],
+    queryFn: () => singerApi.listGrouped(includeHidden),
+    enabled: view === 'group',
   });
 
-  const buildParams = (next: { page?: number; sort?: string; dir?: SortDir }) => {
+  const listQuery = useQuery({
+    queryKey: ['singers', page, sort, dir, includeHidden],
+    queryFn: () => singerApi.list(page, 20, sort, dir, includeHidden),
+    enabled: view === 'list',
+  });
+
+  const isLoading = view === 'group' ? groupedQuery.isLoading : listQuery.isLoading;
+  const total = view === 'group' ? groupedQuery.data?.total : listQuery.data?.pagination.total;
+
+  const buildParams = (next: { view?: ViewMode; page?: number; sort?: string; dir?: SortDir }) => {
     const params: Record<string, string> = {};
+    const v = next.view ?? view;
     const p = next.page ?? page;
     const so = next.sort ?? sort;
     const d = next.dir ?? dir;
-    if (p > 1) params.page = String(p);
-    if (so !== 'name') params.sort = so;
-    if (d !== 'asc') params.dir = d;
+    if (v !== 'group') params.view = v;
+    // ページ・並び替えは一覧表示だけの概念なので、事務所別では URL に残さない
+    if (v === 'list') {
+      if (p > 1) params.page = String(p);
+      if (so !== 'name') params.sort = so;
+      if (d !== 'asc') params.dir = d;
+    }
     return params;
   };
 
   const handleSort = (next: SortState) => {
     setSearchParams(buildParams({ sort: next.sort, dir: next.dir, page: 1 }));
+  };
+
+  const handlePageChange = (newPage: number) => {
+    setSearchParams(buildParams({ page: newPage }));
   };
 
   const syncMutation = useMutation({
@@ -46,9 +76,18 @@ export default function SingersPage() {
     },
   });
 
-  const handlePageChange = (newPage: number) => {
-    setSearchParams(buildParams({ page: newPage }));
-  };
+  const visibilityMutation = useMutation({
+    mutationFn: ({ id, isHidden }: { id: string; isHidden: boolean }) =>
+      singerApi.setHidden(id, isHidden),
+    onSuccess: (_, { isHidden }) => {
+      queryClient.invalidateQueries({ queryKey: ['singers'] });
+      showToast(
+        isHidden ? 'チャンネルを一覧から非表示にしました' : 'チャンネルを一覧に表示しました',
+        'success'
+      );
+    },
+    onError: (err: Error) => showToast(err.message, 'error'),
+  });
 
   const handleAddSinger = (e: React.FormEvent) => {
     e.preventDefault();
@@ -70,6 +109,18 @@ export default function SingersPage() {
 
     syncMutation.mutate(channelValue);
   };
+
+  const renderCard = (singer: Singer) => (
+    <SingerCard
+      key={singer.id}
+      singer={singer}
+      canEdit={canEdit}
+      onToggleHidden={() =>
+        visibilityMutation.mutate({ id: singer.id, isHidden: !singer.is_hidden })
+      }
+      toggling={visibilityMutation.isPending && visibilityMutation.variables?.id === singer.id}
+    />
+  );
 
   return (
     <div className="space-y-6">
@@ -93,75 +144,80 @@ export default function SingersPage() {
         <Loading />
       ) : (
         <>
-          {data?.pagination.total === 0 ? (
+          {total === 0 ? (
             <div className="text-center py-12 text-gray-500">
               チャンネルがありません。右上のボタンから追加してください。
             </div>
           ) : (
             <>
-              <div className="flex items-center justify-between gap-3">
-                <div className="text-sm text-gray-500">
-                  {data?.pagination.total}件のチャンネル
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div className="text-sm text-gray-500">{total}件のチャンネル</div>
+                <div className="flex items-center gap-3">
+                  {view === 'list' && (
+                    <SortControl
+                      options={[
+                        { value: 'name', label: '名前', firstDir: 'asc' },
+                        { value: 'organization', label: '事務所', firstDir: 'asc' },
+                      ]}
+                      sort={sort}
+                      dir={dir}
+                      onSort={handleSort}
+                    />
+                  )}
+                  {/* 表示切替：事務所別（既定） / 名前順の通し一覧 */}
+                  <div className="flex rounded-lg border border-gray-300 overflow-hidden text-sm">
+                    <button
+                      onClick={() => setSearchParams(buildParams({ view: 'group' }))}
+                      title="事務所別に表示"
+                      className={`px-3 py-1.5 ${
+                        view === 'group' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
+                      }`}
+                    >
+                      事務所別
+                    </button>
+                    <button
+                      onClick={() => setSearchParams(buildParams({ view: 'list' }))}
+                      title="全チャンネルを通しで表示"
+                      className={`px-3 py-1.5 border-l border-gray-300 ${
+                        view === 'list' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
+                      }`}
+                    >
+                      一覧
+                    </button>
+                  </div>
                 </div>
-                <SortControl
-                  options={[
-                    { value: 'name', label: '名前', firstDir: 'asc' },
-                    { value: 'organization', label: '事務所', firstDir: 'asc' },
-                  ]}
-                  sort={sort}
-                  dir={dir}
-                  onSort={handleSort}
-                />
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {data?.singers.map((singer) => (
-                  <Link
-                    key={singer.id}
-                    to={`/singers/${singer.id}`}
-                    className="bg-white rounded-lg shadow-sm border p-4 hover:shadow-md transition-shadow flex items-center gap-4"
-                  >
-                    {singer.photo_url ? (
-                      <img
-                        src={singer.photo_url}
-                        alt={singer.name}
-                        className="w-16 h-16 rounded-full object-cover"
-                        onError={(e) => {
-                          e.currentTarget.onerror = null;
-                          e.currentTarget.src = `https://holodex.net/statics/channelImg/${singer.id}/50.png`;
-                        }}
-                      />
-                    ) : (
-                      <div className="w-16 h-16 rounded-full bg-gray-200 flex items-center justify-center">
-                        <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                        </svg>
+              {view === 'group' ? (
+                <div className="space-y-8">
+                  {groupedQuery.data?.groups.map((group) => (
+                    <section key={group.organization || '__none__'} className="space-y-3">
+                      <div className="flex items-baseline gap-2 border-b border-gray-200 pb-2">
+                        <h2 className="text-lg font-semibold text-gray-900">
+                          {group.display_name || group.organization || '所属なし'}
+                        </h2>
+                        <span className="text-sm text-gray-500">{group.singers.length}</span>
                       </div>
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <h3 className="font-medium text-gray-900 truncate">{singer.name}</h3>
-                      {singer.english_name && (
-                        <p className="text-sm text-gray-500 truncate">{singer.english_name}</p>
-                      )}
-                      {singer.organization && (
-                        <span className="inline-block mt-1 px-2 py-0.5 bg-purple-100 text-purple-700 text-xs rounded-full">
-                          {singer.organization}
-                        </span>
-                      )}
-                    </div>
-                    <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                    </svg>
-                  </Link>
-                ))}
-              </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {group.singers.map(renderCard)}
+                      </div>
+                    </section>
+                  ))}
+                </div>
+              ) : (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {listQuery.data?.singers.map(renderCard)}
+                  </div>
 
-              {data && (
-                <Pagination
-                  page={page}
-                  totalPages={data.pagination.total_pages}
-                  onPageChange={handlePageChange}
-                />
+                  {listQuery.data && (
+                    <Pagination
+                      page={page}
+                      totalPages={listQuery.data.pagination.total_pages}
+                      onPageChange={handlePageChange}
+                    />
+                  )}
+                </>
               )}
             </>
           )}
@@ -222,3 +278,80 @@ export default function SingersPage() {
     </div>
   );
 }
+
+// SingerCard は一覧のカード1枚。非表示チャンネルは content:edit を持つ利用者にだけ
+// 薄く表示され、カード上のアイコンから表示/非表示を切り替えられる。
+function SingerCard({
+  singer,
+  canEdit,
+  onToggleHidden,
+  toggling,
+}: {
+  singer: Singer;
+  canEdit: boolean;
+  onToggleHidden: () => void;
+  toggling: boolean;
+}) {
+  return (
+    <div className="relative">
+      <Link
+        to={`/singers/${singer.id}`}
+        className={`bg-white rounded-lg shadow-sm border p-4 hover:shadow-md transition-shadow flex items-center gap-4 ${
+          singer.is_hidden ? 'opacity-60' : ''
+        }`}
+      >
+        {singer.photo_url ? (
+          <img
+            src={singer.photo_url}
+            alt={singer.name}
+            className="w-16 h-16 rounded-full object-cover"
+            onError={(e) => {
+              e.currentTarget.onerror = null;
+              e.currentTarget.src = `https://holodex.net/statics/channelImg/${singer.id}/50.png`;
+            }}
+          />
+        ) : (
+          <div className="w-16 h-16 rounded-full bg-gray-200 flex items-center justify-center">
+            <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+            </svg>
+          </div>
+        )}
+        <div className="flex-1 min-w-0">
+          <h3 className="font-medium text-gray-900 truncate">{singer.name}</h3>
+          {singer.english_name && (
+            <p className="text-sm text-gray-500 truncate">{singer.english_name}</p>
+          )}
+          <div className="flex flex-wrap items-center gap-1 mt-1">
+            {singer.organization && (
+              <span className="inline-block px-2 py-0.5 bg-purple-100 text-purple-700 text-xs rounded-full">
+                {singer.organization_name || singer.organization}
+              </span>
+            )}
+            {singer.is_hidden && (
+              <span className="inline-block px-2 py-0.5 bg-gray-200 text-gray-600 text-xs rounded-full">
+                非表示
+              </span>
+            )}
+          </div>
+        </div>
+        <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+        </svg>
+      </Link>
+
+      {canEdit && (
+        <button
+          onClick={onToggleHidden}
+          disabled={toggling}
+          title={singer.is_hidden ? '一覧に表示する' : '一覧から非表示にする'}
+          aria-label={singer.is_hidden ? '一覧に表示する' : '一覧から非表示にする'}
+          className="absolute top-2 right-2 p-1.5 rounded-full bg-white/90 border border-gray-200 text-gray-400 hover:text-gray-700 hover:border-gray-300 disabled:opacity-50"
+        >
+          <VisibilityIcon hidden={singer.is_hidden} />
+        </button>
+      )}
+    </div>
+  );
+}
+
