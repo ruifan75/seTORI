@@ -206,12 +206,35 @@ func (r *AuthRepository) TouchLastLogin(id uuid.UUID) error {
 }
 
 // DeleteUser はユーザーを削除する（セッションは ON DELETE CASCADE）。
+// DeleteUser は利用者を削除する。
+//
+// 提案そのものは残す（`created_by` は FK の ON DELETE SET NULL で外れ、
+// 匿名の提案と同じ扱いになる）。「誰の指摘が通ったか」の履歴を残す設計なので、
+// 提案ごと消してしまうとレビューの経緯が欠ける。
+//
+// ただし表示用に非正規化してある `created_by_name` は NOT NULL なので
+// **FK では落ちず、名前だけが残ってしまう**。この名前は Google 連携から
+// 入ってくる本名であることが多く、残ると「アカウントを消した」と言えない。
+// 同じ理由で `client_hint`（IP のハッシュ）も落とす。
+//
+// ⚠️ 削除してしまうと `created_by` から対象行を辿れなくなるため、
+// **必ず削除より先に**消すこと。片方だけ適用されないようトランザクションにする。
 func (r *AuthRepository) DeleteUser(id uuid.UUID) error {
-	_, err := r.db.Exec("DELETE FROM users WHERE id=$1", id)
+	tx, err := r.db.Begin()
 	if err != nil {
 		return fmt.Errorf("delete user: %w", err)
 	}
-	return nil
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(
+		"UPDATE edit_suggestions SET created_by_name='', client_hint='' WHERE created_by=$1", id,
+	); err != nil {
+		return fmt.Errorf("delete user (scrub suggestions): %w", err)
+	}
+	if _, err := tx.Exec("DELETE FROM users WHERE id=$1", id); err != nil {
+		return fmt.Errorf("delete user: %w", err)
+	}
+	return tx.Commit()
 }
 
 // ========== roles ==========
