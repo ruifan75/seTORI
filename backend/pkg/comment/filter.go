@@ -99,7 +99,67 @@ func isStructurallyNonSong(song ParsedSong) bool {
 		return true
 	}
 
+	// 5. 全体が丸括弧で囲まれている → 実況の合いの手（例: (ここの揺れだいすき)）。
+	if wrappedInParens(name) {
+		return true
+	}
+
+	// 6. 末尾以外に句点がある → 文が 2 つ以上ある＝地の文。
+	//    末尾の句点は落とさない。『らしく。』のように句点で終わる曲名は実在する。
+	if hasInnerPeriod(name) {
+		return true
+	}
+
+	// 7. 見出しの名詞化語尾で終わる → セトリではなく配信の目次
+	//    （例: ぱんt警察の件 / 着せ替え大狂いの巻 / 10万人達成の瞬間）。
+	if endsWithHeadingSuffix(name) {
+		return true
+	}
+
 	return false
+}
+
+// 曲名として長さで落とす閾値を下げてはいけない。実在曲は 30 文字に達する
+// （`One more time, One more chance`、`Crazy Party Night 〜ぱんぷきんの逆襲〜`）。
+// 同じ理由で「読点を含む」「よ/ね/わ で終わる」「です/ます で終わる」も採れない
+// ── `琥珀色の街、上海蟹の朝`、`死ぬのがいいわ`、`恋?で愛?で暴君です!` がすべて実在曲で、
+// 本番 819 曲に対して測ると巻き添えが出る。下の規則は巻き添え 0 件を確認したものだけ。
+
+// wrappedInParens は文字列全体が丸括弧で囲まれているか。
+func wrappedInParens(s string) bool {
+	return (strings.HasPrefix(s, "(") && strings.HasSuffix(s, ")")) ||
+		(strings.HasPrefix(s, "（") && strings.HasSuffix(s, "）"))
+}
+
+// hasInnerPeriod は末尾以外の位置に句点があるか。
+func hasInnerPeriod(s string) bool {
+	s = trimSentenceEnd(s)
+	if s == "" {
+		return false
+	}
+	r := []rune(s)
+	return strings.ContainsRune(string(r[:len(r)-1]), '。')
+}
+
+// headingSuffixes は「〜という出来事」を指す名詞化語尾。曲名には使われない。
+//
+// `の話` だけは将来 実在曲とぶつかりうる（本番 819 曲では 0 件）。
+// 巻き添えが出たらここから外すこと。
+var headingSuffixes = []string{"の件", "の話", "の巻", "の瞬間", "の経緯", "旨"}
+
+func endsWithHeadingSuffix(s string) bool {
+	s = trimSentenceEnd(s)
+	for _, suf := range headingSuffixes {
+		if strings.HasSuffix(s, suf) {
+			return true
+		}
+	}
+	return false
+}
+
+// trimSentenceEnd は末尾の感嘆符・疑問符・空白を落とす（`〜の件!` を `〜の件` として見る）。
+func trimSentenceEnd(s string) string {
+	return strings.TrimRight(s, "!！?？ 　")
 }
 
 // hasWordChar 判斷字串是否含有至少一個「単語文字」（字母或数字）。

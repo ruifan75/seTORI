@@ -69,3 +69,50 @@ func TestFilterSongsStructuralNonSong(t *testing.T) {
 		})
 	}
 }
+
+// TestFilterSongsHeadingLikeNonSong は「配信の目次」を落とす規則と、
+// **それに似ているが実在する曲名は落とさない**ことを固定する。
+//
+// 落とす側の由来は本番の未照合 1299 件（アーティスト欄が空のもの）、
+// 残す側の由来は本番の songs 819 件。この 2 つを突き合わせて、
+// 巻き添えが 0 件だった規則だけを採用している。
+//
+// ここが緩むと「曲を取りこぼす」方向に壊れる。雑音が 1 行増えるのは目に見えるが、
+// 曲が 1 行消えるのは誰も気づかないので、こちらの方が高くつく。
+func TestFilterSongsHeadingLikeNonSong(t *testing.T) {
+	tests := []struct {
+		name     string
+		song     ParsedSong
+		filtered bool
+	}{
+		// --- 落とす：配信の目次 ---
+		{"〜の件", ParsedSong{Name: "ぱんt警察の件"}, true},
+		{"〜の話", ParsedSong{Name: "石油王の船盛特典の話"}, true},
+		{"〜の巻", ParsedSong{Name: "着せ替え大狂いの巻"}, true},
+		{"〜の瞬間", ParsedSong{Name: "10万人達成の瞬間"}, true},
+		{"〜の経緯", ParsedSong{Name: "歌枠リレー開催の経緯"}, true},
+		{"〜旨", ParsedSong{Name: "ぱんt警察をやめろとは思っていない旨"}, true},
+		{"末尾の感嘆符は無視して判定", ParsedSong{Name: "10万人達成の瞬間!"}, true},
+		{"全体が丸括弧", ParsedSong{Name: "(ここの揺れだいすき)"}, true},
+		{"全体が全角丸括弧", ParsedSong{Name: "（芳澤SHOWTIME 正妻やん）"}, true},
+		{"末尾以外に句点がある", ParsedSong{Name: "食べてるもの紹介。お母さんが盛り付けてくれた"}, true},
+
+		// --- 残す：実在する曲名 ---
+		{"句点で終わる曲名", ParsedSong{Name: "らしく。", OriginalArtist: "稀羽すう"}, false},
+		{"読点を含む曲名", ParsedSong{Name: "琥珀色の街、上海蟹の朝", OriginalArtist: "くるり"}, false},
+		{"終助詞で終わる曲名", ParsedSong{Name: "死ぬのがいいわ", OriginalArtist: "藤井風"}, false},
+		{"です で終わる曲名", ParsedSong{Name: "恋?で愛?で暴君です!"}, false},
+		{"30文字の曲名", ParsedSong{Name: "One more time, One more chance"}, false},
+		{"括弧付きのバージョン表記", ParsedSong{Name: "Starry night (instrumental)"}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := FilterSongs([]ParsedSong{tt.song}, nil, nil)
+			removed := len(got) == 0
+			if removed != tt.filtered {
+				t.Fatalf("FilterSongs removed=%v, want filtered=%v (name=%q)", removed, tt.filtered, tt.song.Name)
+			}
+		})
+	}
+}
