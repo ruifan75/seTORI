@@ -1,12 +1,17 @@
 # 外部 API 用途一覧
 
-> デプロイモデル：**案 A — シングルテナント、運用者の key をすべて使用**。
-> 危険/課金が発生する操作は `API_AUTH_TOKEN` 認証の後ろにロックしてください（最終セクション参照）。
-> 本ドキュメントは 2026-07-18 時点のコードに基づきます。
+> デプロイモデル：**シングルテナント、運用者の key をすべて使用**。
+> 課金や書き込みが発生する操作は RBAC の権限で保護されています（最終セクション参照）。
+> 本ドキュメントは 2026-08-09 時点のコードに基づきます。
+>
+> ⚠️ **key の置き場所は `.env` ではなく DB です。** `管理 → 設定 → 外部サービス連携`
+> から登録すると `app_settings` に AES-256-GCM で暗号化して保存され、再起動なしで
+> 各クライアントへ反映されます。下表の環境変数は**未設定時のフォールバック**でしかなく、
+> 本番では使っていません（`internal/service/settings_service.go`）。
 
 ## 概要
 
-| API | 環境変数 | 方向 | 主な用途 | 課金 / 制限 | 運用時の注意（案 A） |
+| API | 環境変数（フォールバック） | 方向 | 主な用途 | 課金 / 制限 | 運用時の注意 |
 |-----|----------|:---:|----------|------------|----------------------|
 | Holodex（読） | `HOLODEX_API_KEY` | 読 | チャンネル/動画/セットリスト、コメント fallback | 無料、~80 req/2min | 🟡 共有可（rate limit 依存） |
 | Holodex Editor | `HOLODEX_EDITOR_TOKEN` | **書** | seTORI セットリストを Holodex にアップロード | あなたの Holodex アカウントに紐づく | 🔴 **管理者限定必須** |
@@ -69,13 +74,24 @@
 
 ---
 
-## 案 A 運用時のチェックリスト（推奨）
+## 課金・書き込みが発生するルートの保護
 
-以下の「課金が発生 / あなた名義で書き込みが発生する」ルートを `API_AUTH_TOKEN`（実装済みの Bearer ゲート）の後ろに置き、管理者のみに開放してください：
+**すでに RBAC で保護されています。** 以前あった `API_AUTH_TOKEN`（非 GET を
+まとめて Bearer トークンで塞ぐ方式）と `authorized()` ミドルウェアは廃止され、
+DB セッション + `roles.permissions` に置き換わりました。判定は
+`internal/handler/router.go` の `requiredPermission` 一箇所にあります。
 
-- 🔴 `POST /api/sync/holodex/to-holodex/{id}`（Holodex 書き込み）
-- 🔴 `POST /api/ai/normalize`（Groq 課金）
-- 🔴 `POST /api/streams/{id}/comments/analyze`（Groq 課金 — コメント hybrid 解析）
-- 🟡（任意）`POST /api/sync/holodex`、`POST /api/sync/holodex/video/{id}`（Holodex/YouTube クォータ消費）
+| ルート | 何が起きるか | 必要な権限 |
+|---|---|---|
+| `POST /api/sync/holodex/to-holodex/{id}` | **あなたの Holodex アカウント名義**で書き込み | `sync:run` |
+| `POST /api/sync/holodex`、`.../video/{id}` | Holodex / YouTube のクォータを消費 | `sync:run` |
+| `POST /api/ai/normalize` | AI プロバイダーの課金 | `content:edit` |
+| `POST /api/streams/{id}/comments/analyze` | AI プロバイダーの課金 | `content:edit` |
+| `/api/ai-providers/*` | API キーの登録・変更 | `ai:manage` |
+| `/api/backups/*` | ダウンロード（GET）含む全操作 | `backup:manage` |
 
-> 現在の `authorized()` ミドルウェアは「すべての非 GET リクエスト」にトークンを要求します（`API_AUTH_TOKEN` 設定後有効）。したがって上記の POST エンドポイントはデフォルトで保護されます。以降で「公開読み取り + 管理者書き込み」以外のより細かい権限（一部 POST を公開、一部を管理者限定など）を行いたい場合は、ミドルウェアにホワイトリストを追加してください。
+方針は「読み取りは基本公開、書き込みはログイン + 権限、管理系リソースは
+読み取りも専用権限」。匿名で通るのは閲覧と、限定公開プレイリストの共有リンクだけです。
+
+> ⚠️ 新しいロールに権限を配るときは `sync:run` に注意してください。
+> Holodex への書き込みは**運用者本人の名義**で残り、取り消せません。

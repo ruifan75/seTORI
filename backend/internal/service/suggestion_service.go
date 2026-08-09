@@ -1049,7 +1049,7 @@ func (s *SuggestionService) Reject(id uuid.UUID, reviewer *models.User, note str
 
 func reviewerID(u *models.User) *uuid.UUID {
 	if u == nil || u.ID == uuid.Nil {
-		return nil // API_AUTH_TOKEN 経由の疑似管理者は DB 上のユーザーではない
+		return nil // 呼び出し元が DB 上のユーザーでない場合（廃止済みの経路の名残）
 	}
 	return &u.ID
 }
