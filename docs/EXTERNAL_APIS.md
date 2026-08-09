@@ -41,7 +41,27 @@
 - **コード位置**：`internal/service/holodex_service.go` の `SyncSetoriToHolodex`。
 - **動作**：各 performance に対して `PUT https://holodex.net/api/v2/songs` を発行。`Authorization: Bearer <editor_token>` と `Origin: https://holodex.net` を付与し、楽曲（iTunes メタデータ含む）を Holodex にアップロード。既存曲と照合して重複を避ける。
 - **呼び出しトリガー**：`POST /api/sync/holodex/to-holodex/{id}`
-- **⚠️ リスク**：**あなたの Holodex アカウント**で書き込みを行います。すべてのアップロードがあなた名義になります → 公開環境では管理者限定にしてください。未設定またはプレースホルダー文字列の場合はエラーを返して実行しません。
+- **🔴 これは Holodex が公開している API ではありません。**
+  `PUT /api/v2/songs` は Holodex のウェブ UI が内部で叩いている経路で、
+  仕様が公表されているものではありません。リクエストに
+  `Origin: https://holodex.net` を付けているのがその証拠で、
+  ブラウザからの操作に見せかけて呼んでいます。したがって：
+  - **予告なく変わる・消える。** 動かなくなっても直す手段はこちら側にありません
+  - **Holodex 側の規約に反する可能性があります。** 咎められた場合に
+    「知らなかった」は通りません
+  - **アカウントが制限される可能性があります。** 書き込みは
+    `HOLODEX_EDITOR_TOKEN` の持ち主、つまり**運用者本人の名義**で残ります
+  - サポートも rate limit の保証もありません
+
+- **⚠️ 運用方針**：**管理者だけが使う機能**として扱ってください。
+  そして**仕組みと上のリスクを理解しないうちは実行しないでください**。
+  seTORI 側から取り消す手段はありません（Holodex 上で個別に直すことになります）。
+  未設定またはプレースホルダー文字列の場合はエラーを返して実行しません。
+
+- ⚠️ **権限の粒度に注意**：現在 `POST /api/sync/holodex/to-holodex/{id}` は
+  読み取り側の同期と同じ `sync:run` で通ります。つまり「Holodex から取り込む」
+  権限を誰かに渡すと、この書き込みも一緒に渡ることになります。
+  管理者以外に `sync:run` を配るなら、先に権限を分けること（TODO 35）。
 
 ## 3. Groq API（LLM） — `GROQ_API_KEY`
 
