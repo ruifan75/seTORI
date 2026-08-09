@@ -43,16 +43,42 @@ func userHasPermission(req *http.Request, perm string) bool {
 	return auth.HasPermission(user.Permissions, perm)
 }
 
+// clientIP は訪問者の IP を返す。取れなければ空文字。
+//
+// 由来を1か所に集める：ログイン試行の絞り込みと匿名投稿の数え上げが両方これに
+// 依存していて、間違えると「効いているつもりで効いていない」形で壊れるため。
+//
+// 優先順位：
+//  1. CF-Connecting-IP … Cloudflare が必ず上書きする単一値。プロキシ経由なら常にこれが正しい
+//  2. X-Forwarded-For の先頭 … Cloudflare を挟まない構成（原站直結・他の CDN）向け
+//  3. RemoteAddr … プロキシが無いローカル開発
+//
+// ⚠️ 2 と 3 の間には信頼の断絶がある。ヘッダーは送信側が自由に詐称できるので、
+// これらが信用できるのは「原站に直接到達できない」ことが前提。
+// つまり VPS のファイアウォールで 80/443 を Cloudflare の網段だけに絞ること
+// （TODO 30）とセットで初めて成立する。片方だけでは絞り込みは回避できてしまう。
+//
+// 実際、Cloudflare を挟んだ直後は X-Forwarded-For の先頭が安定せず、
+// ログインの絞り込みが 8 連続失敗でも発火しない状態になっていた。
+func clientIP(req *http.Request) string {
+	if cf := strings.TrimSpace(req.Header.Get("CF-Connecting-IP")); cf != "" {
+		return cf
+	}
+	if xff := req.Header.Get("X-Forwarded-For"); xff != "" {
+		if first := strings.TrimSpace(strings.Split(xff, ",")[0]); first != "" {
+			return first
+		}
+	}
+	if host, _, err := net.SplitHostPort(req.RemoteAddr); err == nil {
+		return host
+	}
+	return req.RemoteAddr
+}
+
 // clientHint は匿名リクエストの同一性の手がかりを返す（IP の SHA-256 先頭16桁）。
 // 生 IP は保存しないが、同じ相手からの連投は数えられる、という妥協点。
-// リバースプロキシ下では X-Forwarded-For の先頭を使う。
 func clientHint(req *http.Request) string {
-	ip := req.RemoteAddr
-	if xff := req.Header.Get("X-Forwarded-For"); xff != "" {
-		ip = strings.TrimSpace(strings.Split(xff, ",")[0])
-	} else if host, _, err := net.SplitHostPort(ip); err == nil {
-		ip = host
-	}
+	ip := clientIP(req)
 	if ip == "" {
 		return ""
 	}

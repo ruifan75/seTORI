@@ -27,3 +27,8 @@ Thumbs.db
 
 # Claude Code のローカル作業ファイル
 /.claude/
+
+# Cloudflare Origin CA の証明書と秘密鍵（本番機に手で置く。git には絶対に入れない）
+deploy/certs/
+*.key
+*.pem
