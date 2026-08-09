@@ -1,7 +1,8 @@
 name: CI
 
-# デプロイはしない。壊れたものが main に入るのを防ぐための検査だけ。
-# 本番への反映は VPS 上で `git pull && docker compose up -d --build`（deploy/README.md 参照）。
+# 検査に加えて、main への push では本番用イメージを GHCR へ発行する。
+# VPS 側は pull するだけ（`deploy/deploy.sh`）。1GB の本番機で
+# `npm ci && vite build` を回さずに済ませるのが主目的。
 on:
   push:
     branches: [main]
@@ -79,17 +80,46 @@ jobs:
   images:
     name: Docker images
     runs-on: ubuntu-latest
-    # 本番と同じ手順でイメージが組めることの確認。レジストリへは push しない
+    # 検査を通っていないものを発行しない
+    needs: [backend, frontend]
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v7
 
       - uses: docker/setup-buildx-action@v4
 
+      - name: メタデータ（イメージに埋めるバージョンと、発行するかどうか）
+        id: meta
+        run: |
+          echo "commit=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          echo "built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "push=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "push=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # PR では組めることの確認だけで、発行はしない。
+      # login-action を使わないのは、バージョン固定を1つ減らすため。
+      - name: GHCR へログイン
+        if: steps.meta.outputs.push == 'true'
+        run: echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin
+
+      # ⚠️ イメージ名はハードコードする。リポジトリ名 seTORI には大文字が含まれ、
+      # GHCR は大文字を受け付けないため ${{ github.repository }} は使えない。
       - name: Build backend image
         uses: docker/build-push-action@v7
         with:
           context: ./backend
-          push: false
+          push: ${{ steps.meta.outputs.push == 'true' }}
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/setori-backend:${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/setori-backend:main
+          build-args: |
+            GIT_COMMIT=${{ steps.meta.outputs.commit }}
+            BUILD_TIME=${{ steps.meta.outputs.built_at }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -97,6 +127,12 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: ./frontend
-          push: false
+          push: ${{ steps.meta.outputs.push == 'true' }}
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/setori-frontend:${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/setori-frontend:main
+          build-args: |
+            GIT_COMMIT=${{ steps.meta.outputs.commit }}
+            BUILD_TIME=${{ steps.meta.outputs.built_at }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
