@@ -350,6 +350,7 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("POST /api/streams/{id}/comments/analyze", r.handleAnalyzeComments)
 	r.mux.HandleFunc("POST /api/comments/backfill", r.handleBackfillCommentSongs)
 	r.mux.HandleFunc("POST /api/comments/backfill-hashes", r.handleBackfillCommentSongsHashes)
+	r.mux.HandleFunc("POST /api/comments/backfill-matches", r.handleBackfillMatches)
 	r.mux.HandleFunc("POST /api/streams/{id}/analyze-chat-ends", r.handleAnalyzeChatEnds)
 	r.mux.HandleFunc("POST /api/streams/{id}/chat-end-estimate", r.handleEstimateChatEnds)
 	r.mux.HandleFunc("POST /api/chat-ends/backfill", r.handleBackfillChatEnds)
@@ -2171,6 +2172,22 @@ func (r *Router) handleDeleteFilterKeyword(w http.ResponseWriter, req *http.Requ
 }
 
 // handleBackfillCommentSongs 補填所有有 comment_raw 但沒有 comment_songs 的 stream
+// handleBackfillMatches は保存済みの解析結果に対して DB 照合だけをやり直す。
+// AI を呼ばないので費用はかからない（曲が増えたあと・照合を直したあとに回す）。
+func (r *Router) handleBackfillMatches(w http.ResponseWriter, req *http.Request) {
+	res, err := r.commentService.BackfillMatches()
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{
+		"message": fmt.Sprintf("%d件を走査し、%d件の照合を更新しました", res.Scanned, res.Changed),
+		"scanned": res.Scanned,
+		"changed": res.Changed,
+		"songs":   res.Songs,
+	})
+}
+
 func (r *Router) handleBackfillCommentSongs(w http.ResponseWriter, req *http.Request) {
 	count, err := r.commentService.BackfillCommentSongs()
 	if err != nil {
