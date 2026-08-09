@@ -139,11 +139,24 @@ func (s *NormalizationService) BatchAINormalization(items []dto.AINormalizationI
 	suggestions := make([]dto.AISuggestionResult, len(items))
 	for i, item := range items {
 		if aiSugg, ok := suggestionMap[i]; ok {
+			// AI が項目を返しても曲名が空のことがある。そのまま使うと空文字で
+			// 照合しにいって必ず外れるので、抽出時の名前へ落とす。
+			// AI が項目自体を返さなかった場合（下の else）は元から同じことをしている。
+			// キャッシュ命中時の再解決（CommentService.reresolveMatches）も同様。
+			normalizedName := aiSugg.NormalizedName
+			if strings.TrimSpace(normalizedName) == "" {
+				normalizedName = item.Name
+			}
+			artist := aiSugg.OriginalArtist
+			if strings.TrimSpace(artist) == "" {
+				artist = item.OriginalArtist
+			}
+
 			suggestions[i] = dto.AISuggestionResult{
 				Index:                 i,
-				NormalizedName:        aiSugg.NormalizedName,
+				NormalizedName:        normalizedName,
 				NormalizedNameReading: aiSugg.NormalizedNameReading,
-				OriginalArtist:        aiSugg.OriginalArtist,
+				OriginalArtist:        artist,
 				OriginalArtistReading: aiSugg.OriginalArtistReading,
 				Tags:                  aiSugg.Tags,
 				Confidence:            aiSugg.Confidence,
@@ -151,7 +164,7 @@ func (s *NormalizationService) BatchAINormalization(items []dto.AINormalizationI
 			}
 
 			// 既存楽曲とのマッチを試行（iTunes ID 優先 → 歌名 + アーティスト）
-			s.matchAndPopulateSong(&suggestions[i], &item, aiSugg.NormalizedName, aiSugg.OriginalArtist)
+			s.matchAndPopulateSong(&suggestions[i], &item, normalizedName, artist)
 		} else {
 			// AI がこの項目を返さなかった、または失敗した場合は元データを使用
 

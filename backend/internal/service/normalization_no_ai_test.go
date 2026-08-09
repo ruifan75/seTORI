@@ -150,3 +150,50 @@ func TestCollectPairs_IsPureAndAIFree(t *testing.T) {
 		t.Errorf("pair = %+v", pairs[0])
 	}
 }
+
+// AI が項目を返しても曲名が空のことがある。そのまま信じると空文字で照合しにいき、
+// 必ず外れる ── 本番の実測で、照合できなかった 2262 件のうち 1876 件（82.9%）が
+// この状態だった（照合できた 4910 件では 0 件）。空なら抽出時の名前へ落とすこと。
+func TestBatchAINormalization_EmptyNormalizedNameFallsBackToRaw(t *testing.T) {
+	// AI は項目を返すが normalized_name が空。artist も空にして両方を確かめる。
+	ai := &countingAI{response: `{"suggestions":[{"index":0,"normalized_name":"","original_artist":"","confidence":0.95}]}`}
+	svc := &NormalizationService{aiClient: ai}
+
+	resp, err := svc.BatchAINormalization([]dto.AINormalizationItem{
+		{Name: "A Whole New World", OriginalArtist: "アラジン"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.Suggestions) != 1 {
+		t.Fatalf("got %d suggestions, want 1", len(resp.Suggestions))
+	}
+
+	got := resp.Suggestions[0]
+	if got.NormalizedName != "A Whole New World" {
+		t.Errorf("NormalizedName = %q, want 抽出時の %q（空を素通しすると照合が必ず外れる）",
+			got.NormalizedName, "A Whole New World")
+	}
+	if got.OriginalArtist != "アラジン" {
+		t.Errorf("OriginalArtist = %q, want 抽出時の %q", got.OriginalArtist, "アラジン")
+	}
+}
+
+// AI が正しく正規化した場合は、その結果を尊重する（上の fallback で潰さないこと）。
+func TestBatchAINormalization_KeepsAINormalizedName(t *testing.T) {
+	ai := &countingAI{response: `{"suggestions":[{"index":0,"normalized_name":"ひこうき雲","original_artist":"松任谷由実","confidence":0.9}]}`}
+	svc := &NormalizationService{aiClient: ai}
+
+	resp, err := svc.BatchAINormalization([]dto.AINormalizationItem{
+		{Name: "ひこうき雲(cover)", OriginalArtist: "荒井由実"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Suggestions[0].NormalizedName != "ひこうき雲" {
+		t.Errorf("NormalizedName = %q, want AI の結果 %q", resp.Suggestions[0].NormalizedName, "ひこうき雲")
+	}
+	if resp.Suggestions[0].OriginalArtist != "松任谷由実" {
+		t.Errorf("OriginalArtist = %q, want AI の結果 %q", resp.Suggestions[0].OriginalArtist, "松任谷由実")
+	}
+}
