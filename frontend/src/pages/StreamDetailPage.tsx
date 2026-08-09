@@ -16,6 +16,7 @@ import QueueAddButton from '../components/QueueAddButton';
 import RawCommentsPanel from '../components/RawCommentsPanel';
 import ArtistLinks from '../components/ArtistLinks';
 import { extractRawCommentTimestamps } from '../utils/rawCommentTimestamps';
+import { matchReasonLabel } from '../utils/matchReason';
 
 
 // 編集可能な配信情報
@@ -1098,6 +1099,22 @@ export default function StreamDetailPage() {
     addSingleSong(await commentSongToEditableSong(song, `comment-add-${Date.now()}`, getDefaultSingerIds()));
   };
 
+  // 自動採用に届かなかった候補（0.50〜0.85）を人が確定させる。
+  //
+  // ここは「アーティストが書かれていないので曲名だけでは決めきれない」
+  // 「feat. や CV 名の表記が違う」といった、文字列では原理的に決まらない組が来る。
+  // 確定は別表記として学習されるので、同じ表記は次から自動で当たる。
+  const confirmMatchMutation = useMutation({
+    mutationFn: ({ index, name, songId }: { index: number; name: string; songId: string }) =>
+      commentApi.confirmMatch(id!, index, name, songId),
+    onSuccess: (updated) => {
+      // comment_songs が書き換わっているのでタイムラインの元データを読み直す
+      queryClient.invalidateQueries({ queryKey: ['stream', id] });
+      showToast(`「${updated.matched_song_name}」に結びつけました（次から自動で当たります）`, 'success');
+    },
+    onError: (err: Error) => showToast(`確定に失敗しました: ${err.message}`, 'error'),
+  });
+
   // 生コメントタブ：タイムスタンプ行から1曲追加。chat 拍手で終了時間を推定してから挿入する
   const addFromRawComment = async ({ start, name, artist }: { start: number; name: string; artist: string }) => {
     let end = 0;
@@ -1783,8 +1800,8 @@ export default function StreamDetailPage() {
                     ) : (
                       <div className="space-y-0.5">
                         {commentTimelineSongs.map((song, i) => (
+                          <div key={i}>
                           <div
-                            key={i}
                             onClick={() => addCommentSongToList(song)}
                             className="flex items-baseline gap-2 px-2 py-1.5 rounded hover:bg-indigo-50 cursor-pointer group text-sm"
                             title="クリックで追加"
@@ -1819,8 +1836,42 @@ export default function StreamDetailPage() {
                             <span className="min-w-0 flex-1 truncate">
                               <span className="text-gray-900 font-medium">{song.name}</span>
                               {song.original_artist && <span className="text-gray-500"> / {song.original_artist}</span>}
+                              {song.matched_song_id && song.matched_song_name && (
+                                <span className="ml-1 text-xs text-emerald-600" title="DB の楽曲に照合済み">
+                                  → {song.matched_song_name}
+                                </span>
+                              )}
                             </span>
                             <span className="shrink-0 text-gray-300 group-hover:text-indigo-600 transition-colors">＋</span>
+                          </div>
+
+                          {/*
+                            照合が決めきれなかった候補。songmatch が 0.50〜0.85 で返したもので、
+                            「アーティストが書かれていないので曲名だけでは決めきれない」
+                            「feat. や CV 名の表記が違う」といった、文字列では決まらない組が来る。
+                            自動採用させると同名異曲（オレンジ）を巻き込むので、人が選ぶ。
+                          */}
+                          {canEdit && !song.matched_song_id && (song.match_candidates?.length ?? 0) > 0 && (
+                            <div className="ml-2 mb-1 flex flex-wrap items-center gap-1 pl-14">
+                              <span className="shrink-0 text-[11px] text-gray-400">候補</span>
+                              {song.match_candidates!.map((c) => (
+                                <button
+                                  key={c.song_id}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    confirmMatchMutation.mutate({ index: i, name: song.name, songId: c.song_id });
+                                  }}
+                                  disabled={confirmMatchMutation.isPending}
+                                  title={`${matchReasonLabel(c.reason)}（確信度 ${Math.round(c.score * 100)}%）\nこれに決めると、同じ表記は次から自動で当たります`}
+                                  className="max-w-full truncate rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs text-amber-900 transition-colors hover:border-amber-400 hover:bg-amber-100 disabled:opacity-50"
+                                >
+                                  {c.name}
+                                  {c.artist && <span className="text-amber-700/70"> / {c.artist}</span>}
+                                  <span className="ml-1 text-amber-600/60">{Math.round(c.score * 100)}%</span>
+                                </button>
+                              ))}
+                            </div>
+                          )}
                           </div>
                         ))}
                       </div>

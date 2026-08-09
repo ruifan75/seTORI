@@ -392,6 +392,13 @@ func (s *SongMatchService) RecordArtistAliasVerdict(keyA, keyB string, same bool
 
 // ---------- 楽曲の別表記（Layer 3） ----------
 
+// FindSong は照合先の楽曲を1件引く。
+// 人が候補を確定させる操作で「その曲がまだ在るか」を確かめるために要る
+// （消えた曲を指す別表記を学習すると、次の照合が毎回 FK 違反で落ちる）。
+func (s *SongMatchService) FindSong(id uuid.UUID) (*models.Song, error) {
+	return s.songRepo.FindByID(id)
+}
+
 // LearnSongAlias は「この表記はこの楽曲だ」を記録する。
 func (s *SongMatchService) LearnSongAlias(name, artist string, songID uuid.UUID, source string) error {
 	nameKey := songmatch.TitleKey(name)

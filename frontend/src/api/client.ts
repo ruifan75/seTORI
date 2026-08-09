@@ -26,6 +26,7 @@ import type {
   ArtistAliasGroup,
   SongAlias,
   AnalyzeCommentsResponse,
+  CommentSong,
   BatchAnalyzeStatus,
   SuccessResponse,
   LoadHolodexSongsResponse,
@@ -442,6 +443,23 @@ export const commentApi = {
     videoId: string,
   ): Promise<{ id: string; total: number; filled: number; changed: number }> => {
     const { data } = await api.post(`/api/streams/${videoId}/analyze-chat-ends`);
+    return data;
+  },
+
+  // 自動採用に届かなかった候補を人が確定させる（AI は呼ばない）。
+  // 確定は別表記として学習されるので、同じ表記は次から迷わない。
+  // name は画面に出ていた曲名で、保存する行がズレていないかの確認に使う。
+  confirmMatch: async (
+    videoId: string,
+    index: number,
+    name: string,
+    songId: string,
+  ): Promise<CommentSong> => {
+    const { data } = await api.post(`/api/streams/${videoId}/comment-songs/match`, {
+      index,
+      name,
+      song_id: songId,
+    });
     return data;
   },
 };

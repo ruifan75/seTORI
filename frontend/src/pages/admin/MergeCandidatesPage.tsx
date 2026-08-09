@@ -4,6 +4,7 @@ import { songApi, itunesApi } from '../../api/client';
 import type { MergeCandidate, MergeCandidateSong } from '../../api/types';
 import Loading from '../../components/ui/Loading';
 import { useToast } from '../../components/ui/ToastContext';
+import { matchReasonLabel } from '../../utils/matchReason';
 
 // 楽曲の重複候補レビュー。
 //
@@ -18,14 +19,6 @@ import { useToast } from '../../components/ui/ToastContext';
 // 「どれだけ違えば分けるべきか」は編集方針であってデータから導けない。
 // そこで AI には事実（同じ作曲か・編曲は同系統か）だけを答えさせ、
 // 統合するかどうかは人が決める。統合は破壊的なので自動実行はしない。
-
-const REASON_LABELS: Record<string, string> = {
-  same_title: '曲名が同じ',
-  title_mismatch: '曲名は一致・アーティストが違う（別名義の可能性）',
-  title_ambiguous: '同じ曲名の曲が複数ある',
-  title_only: '曲名は一致・アーティスト未記入',
-  fuzzy_title: '曲名が似ている',
-};
 
 function fmtDuration(ms?: number) {
   if (!ms) return null;
@@ -227,7 +220,7 @@ export default function MergeCandidatesPage() {
               <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
                 <VerdictBanner c={c} />
                 <span className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800">
-                  {REASON_LABELS[c.reason] ?? c.reason}
+                  {matchReasonLabel(c.reason)}
                 </span>
                 {c.origin === 'scan' && (
                   <span className="text-xs text-gray-400">既存データの走査で検出</span>

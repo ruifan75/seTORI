@@ -97,7 +97,7 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	normalizationService := service.NewNormalizationService(aiService, songItunesRepo, songMatchService)
 	chatEndService := service.NewChatEndService(streamRepo, cfg.YtdlpPath, "")
 	// CommentService は分析時に正規化・拍手 end を内部で実行する（抽出→正規化→end→キャッシュ）
-	commentService := service.NewCommentService(holodexService, streamRepo, filterKeywordRepo, aiService, normalizationService, chatEndService)
+	commentService := service.NewCommentService(holodexService, streamRepo, filterKeywordRepo, aiService, normalizationService, chatEndService, songMatchService)
 	// HolodexService も AnalyzeHolodexSongs で正規化・拍手 end を実行する（holodex_hash キャッシュ）
 	holodexService.SetAnalysisServices(normalizationService, chatEndService)
 	batchAnalyzeService := service.NewBatchAnalyzeService(commentService, streamRepo)
@@ -351,6 +351,7 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("POST /api/comments/backfill", r.handleBackfillCommentSongs)
 	r.mux.HandleFunc("POST /api/comments/backfill-hashes", r.handleBackfillCommentSongsHashes)
 	r.mux.HandleFunc("POST /api/comments/backfill-matches", r.handleBackfillMatches)
+	r.mux.HandleFunc("POST /api/streams/{id}/comment-songs/match", r.handleConfirmCommentSongMatch)
 	r.mux.HandleFunc("POST /api/streams/{id}/analyze-chat-ends", r.handleAnalyzeChatEnds)
 	r.mux.HandleFunc("POST /api/streams/{id}/chat-end-estimate", r.handleEstimateChatEnds)
 	r.mux.HandleFunc("POST /api/chat-ends/backfill", r.handleBackfillChatEnds)
@@ -2186,6 +2187,47 @@ func (r *Router) handleBackfillMatches(w http.ResponseWriter, req *http.Request)
 		"changed": res.Changed,
 		"songs":   res.Songs,
 	})
+}
+
+// handleConfirmCommentSongMatch は解析結果の1行に対して、人が選んだ候補を確定させる（content:edit）。
+//
+// 確定は別表記の学習として残る（/admin/aliases から取り消せる）。AI は呼ばない。
+func (r *Router) handleConfirmCommentSongMatch(w http.ResponseWriter, req *http.Request) {
+	videoID := req.PathValue("id")
+	if videoID == "" {
+		respondError(w, http.StatusBadRequest, "無効な動画ID")
+		return
+	}
+	var body struct {
+		Index  int    `json:"index"`
+		Name   string `json:"name"` // 画面に出ていた曲名（行のズレ検出用）
+		SongID string `json:"song_id"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		respondError(w, http.StatusBadRequest, "リクエストの形式が正しくありません")
+		return
+	}
+	songID, err := uuid.Parse(body.SongID)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "無効な楽曲ID")
+		return
+	}
+
+	song, err := r.commentService.ConfirmCommentSongMatch(videoID, body.Index, body.Name, songID)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrCommentSongNotFound), errors.Is(err, service.ErrMatchSongNotFound):
+			respondError(w, http.StatusNotFound, err.Error())
+		case errors.Is(err, service.ErrCommentSongChanged):
+			respondError(w, http.StatusConflict, err.Error())
+		case errors.Is(err, service.ErrUnlearnableName):
+			respondError(w, http.StatusBadRequest, err.Error())
+		default:
+			respondError(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+	respondJSON(w, http.StatusOK, song)
 }
 
 func (r *Router) handleBackfillCommentSongs(w http.ResponseWriter, req *http.Request) {

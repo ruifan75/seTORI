@@ -6,13 +6,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
+	"github.com/google/uuid"
 	"github.com/ruifan75/setori/internal/dto"
 	"github.com/ruifan75/setori/internal/logger"
 	"github.com/ruifan75/setori/internal/models"
 	"github.com/ruifan75/setori/internal/repository"
 	"github.com/ruifan75/setori/pkg/ai"
 	"github.com/ruifan75/setori/pkg/comment"
+	"github.com/ruifan75/setori/pkg/songmatch"
 	"github.com/ruifan75/setori/pkg/util"
 )
 
@@ -23,6 +26,9 @@ type CommentService struct {
 	aiClient             ai.Chatter // 留言 AI hybrid 解析用（多 provider 輪替）
 	normalizationService *NormalizationService
 	chatEndService       *ChatEndService
+	// 候補の確定（人の判断）を別表記として学習させるために要る。
+	// 照合そのものは normalizationService 経由で足りるが、書き込みはこちら。
+	matchService *SongMatchService
 }
 
 func NewCommentService(
@@ -32,6 +38,7 @@ func NewCommentService(
 	aiClient ai.Chatter,
 	normalizationService *NormalizationService,
 	chatEndService *ChatEndService,
+	matchService *SongMatchService,
 ) *CommentService {
 	return &CommentService{
 		holodexService:       holodexService,
@@ -40,7 +47,91 @@ func NewCommentService(
 		aiClient:             aiClient,
 		normalizationService: normalizationService,
 		chatEndService:       chatEndService,
+		matchService:         matchService,
 	}
+}
+
+var (
+	ErrCommentSongNotFound = errors.New("指定された解析結果が見つかりません")
+	ErrCommentSongChanged  = errors.New("解析結果が変わっています。画面を再読み込みしてください")
+	ErrMatchSongNotFound   = errors.New("指定された楽曲が見つかりません")
+	ErrUnlearnableName     = errors.New("この曲名からは照合キーを作れないため確定できません")
+)
+
+// ConfirmCommentSongMatch は「この表記はこの曲だ」という人の判断を確定させる。
+//
+// songmatch が 0.50〜0.85 で返す候補は、文字列だけでは決められないもの
+// （アーティスト不明の title_only、feat./CV 表記ゆれの title_mismatch、別名義）で、
+// 自動採用させると同名異曲を巻き込む。人が選んだ結果をここで受ける。
+//
+// 確定は matched_song_* を直接書かず、**別表記として学習してから照合をやり直す**。
+// こうすると学習が効いていることがその場で検証でき、同じ表記が他の配信に出てきても
+// （backfill-matches を回せば）同じ答えになる。直接書くと、この 1 行だけが直って
+// 次に同じ表記が来たらまた人が選ぶことになる。
+//
+// index と一緒に expectName を受け取るのは、画面が見ていた行と保存する行が
+// 同じであることを確かめるため（再分析で並びが変わりうる）。
+func (s *CommentService) ConfirmCommentSongMatch(videoID string, index int, expectName string, songID uuid.UUID) (*dto.CommentSong, error) {
+	if s.matchService == nil || s.normalizationService == nil {
+		return nil, fmt.Errorf("照合サービスが未設定です")
+	}
+
+	stream, err := s.streamRepo.FindByID(videoID)
+	if err != nil {
+		return nil, fmt.Errorf("find stream: %w", err)
+	}
+	if stream == nil || len(stream.CommentSongs) == 0 {
+		return nil, ErrCommentSongNotFound
+	}
+	var songs []dto.CommentSong
+	if err := json.Unmarshal(stream.CommentSongs, &songs); err != nil {
+		return nil, fmt.Errorf("parse comment songs: %w", err)
+	}
+	if index < 0 || index >= len(songs) {
+		return nil, ErrCommentSongNotFound
+	}
+	if expectName != "" && songs[index].Name != expectName {
+		return nil, ErrCommentSongChanged
+	}
+
+	song, err := s.matchService.FindSong(songID)
+	if err != nil {
+		return nil, fmt.Errorf("find song: %w", err)
+	}
+	if song == nil {
+		return nil, ErrMatchSongNotFound
+	}
+
+	// 学習と照合で同じ入力を使う（片方だけ抽出名に落ちると鍵がずれて当たらない）
+	name, artist := matchInputs(songs[index])
+	if songmatch.TitleKey(name) == "" {
+		return nil, ErrUnlearnableName
+	}
+	if err := s.matchService.LearnSongAlias(name, artist, songID, "comment"); err != nil {
+		return nil, fmt.Errorf("learn song alias: %w", err)
+	}
+
+	// 学習が効いていれば、この行は song_alias（確信度 1.00）で song に結びつく。
+	// 同じ表記の他の行もここで一緒に直る。
+	s.reresolveMatches(songs)
+	got := songs[index].MatchedSongID
+	if got == nil || *got != songID.String() {
+		return nil, fmt.Errorf("別表記を学習しましたが照合に反映されませんでした（%q / %q）", name, artist)
+	}
+
+	b, err := json.Marshal(songs)
+	if err != nil {
+		return nil, fmt.Errorf("marshal comment songs: %w", err)
+	}
+	// hash は据え置く。抽出元のコメントは変えていないので、
+	// ここを書き換えると次回の解析がキャッシュを外して AI を呼んでしまう。
+	hash, _ := s.streamRepo.GetCommentSongsHash(videoID)
+	if err := s.streamRepo.SaveCommentSongs(videoID, b, hash.String); err != nil {
+		return nil, fmt.Errorf("save comment songs: %w", err)
+	}
+	logger.Infof("[comment] 照合を確定しました %s[%d]: %q / %q → %q / %q",
+		videoID, index, name, artist, song.Name, song.OriginalArtist)
+	return &songs[index], nil
 }
 
 // AnalyzeComments 從留言分析歌曲：AI 抽取 → 正規化＋DB 照合 → live chat 拍手 end → 存 DB。
@@ -180,14 +271,47 @@ func strPtrEq(a, b *string) bool {
 	return *a == *b
 }
 
+// matchInputs は照合に渡す名称を返す。正規化結果が無い古いデータは抽出名に落とす。
+//
+// 分析時に AI が空の曲名を返した行がこれに当たる（a0973fb 以前）。落とし先が無いと
+// 空文字で照合して必ず外れる。確定操作もここと同じ入力で別表記を学習しないと、
+// 学習した鍵と次回の照合の鍵がずれて当たらなくなる。
+func matchInputs(s dto.CommentSong) (name, artist string) {
+	name, artist = s.NormalizedName, s.NormalizedArtist
+	if name == "" {
+		name = s.Name
+	}
+	if artist == "" {
+		artist = s.OriginalArtist
+	}
+	return name, artist
+}
+
+// candidateSig は候補列の同一性を短い文字列にする。曲 ID と点数だけ見れば、
+// 「候補が増えた」「点数が動いた」はどちらも拾える。
+func candidateSig(cands []dto.SongMatchCandidate) string {
+	if len(cands) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for _, c := range cands {
+		fmt.Fprintf(&b, "%s:%.2f;", c.SongID, c.Score)
+	}
+	return b.String()
+}
+
 // reresolveMatches は AI を呼ばず、正規化済みの名称で DB 照合だけをやり直し、
 // matched_song_* を現在の DB 状態に更新する（キャッシュ命中時に呼ぶ）。
-// 正規化名が無い古いデータは抽出名にフォールバックする。
+//
+// 自動採用に届かなかった候補（match_candidates）も一緒に書き戻す。
+// これが無いと、songmatch が「似ているので人に見せろ」と付けた候補が
+// 保存の段階で毎回捨てられ、編集画面には「照合できませんでした」としか出ない。
+// 実測では本番の未照合 2220 件のうち 203 件がこの候補を持っていた。
 //
 // 変化があったかを返す。呼び出し側はこれを見て保存するかを決める ── 保存しないと
 // 直った照合が応答にしか乗らず、DB は古いまま据え置かれる。
-// 判定に ID と曲名を使うのは、「別の曲に付け替わった」と「曲名が改名された」の
-// どちらも拾いたいため。
+// 判定に ID・曲名・候補列を使うのは、「別の曲に付け替わった」「曲名が改名された」
+// 「候補だけ増えた」のいずれも拾いたいため。
 func (s *CommentService) reresolveMatches(songs []dto.CommentSong) bool {
 	if s.normalizationService == nil {
 		return false
@@ -195,14 +319,9 @@ func (s *CommentService) reresolveMatches(songs []dto.CommentSong) bool {
 	changed := false
 	for i := range songs {
 		beforeID, beforeName := songs[i].MatchedSongID, songs[i].MatchedSongName
-		name := songs[i].NormalizedName
-		if name == "" {
-			name = songs[i].Name
-		}
-		artist := songs[i].NormalizedArtist
-		if artist == "" {
-			artist = songs[i].OriginalArtist
-		}
+		beforeCands := candidateSig(songs[i].MatchCandidates)
+
+		name, artist := matchInputs(songs[i])
 		m := s.normalizationService.ResolveMatch(name, artist)
 		songs[i].MatchedSongID = m.MatchedSongID
 		songs[i].MatchedSongName = m.MatchedSongName
@@ -211,8 +330,11 @@ func (s *CommentService) reresolveMatches(songs []dto.CommentSong) bool {
 		songs[i].MatchedSongArtistReading = m.MatchedSongArtistReading
 		songs[i].MatchedSongArtURL = m.MatchedSongArtURL
 		songs[i].MatchedSongItunesID = m.MatchedSongItunesID
+		songs[i].MatchCandidates = m.MatchCandidates
 
-		if !strPtrEq(beforeID, songs[i].MatchedSongID) || !strPtrEq(beforeName, songs[i].MatchedSongName) {
+		if !strPtrEq(beforeID, songs[i].MatchedSongID) ||
+			!strPtrEq(beforeName, songs[i].MatchedSongName) ||
+			candidateSig(songs[i].MatchCandidates) != beforeCands {
 			changed = true
 		}
 	}
@@ -256,6 +378,8 @@ func (s *CommentService) normalizeInto(songs []dto.CommentSong) string {
 		songs[sug.Index].MatchedSongArtistReading = sug.MatchedSongArtistReading
 		songs[sug.Index].MatchedSongArtURL = sug.MatchedSongArtURL
 		songs[sug.Index].MatchedSongItunesID = sug.MatchedSongItunesID
+		// 自動採用に届かなかった候補も持ち越す（編集画面で人に選ばせるため）
+		songs[sug.Index].MatchCandidates = sug.MatchCandidates
 	}
 	// BatchAINormalization の Warning（AI 呼び出し失敗・応答解析失敗）をそのまま伝える
 	return resp.Warning
