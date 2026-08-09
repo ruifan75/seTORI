@@ -37,6 +37,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/google/uuid"
 	_ "github.com/lib/pq"
 
 	"github.com/ruifan75/setori/internal/repository"
@@ -47,8 +48,10 @@ import (
 const matchThreshold = 20 // 秒: 抽出 start が GT start とこの範囲内なら「一致」とみなす
 
 type gtSong struct {
-	start int
-	name  string
+	start  int
+	name   string
+	artist string
+	songID uuid.UUID // 照合の正解。performances が指している楽曲
 }
 
 type fpItem struct {
@@ -69,6 +72,9 @@ func main() {
 	showFP := flag.Int("fp", 40, "how many top false-positive names to print")
 	fpDump := flag.String("fpdump", "", "dump false positives to JSON")
 	tpDump := flag.String("tpdump", "", "dump true positives to JSON")
+	evalMatching := flag.Bool("match", true, "evaluate song matching (抽出した曲名が正しい楽曲に結びつくか)")
+	noAlias := flag.Bool("noalias", false, "disable the learning layers (song_aliases / artist_aliases) to measure their contribution")
+	badMatchDump := flag.String("baddump", "", "dump false matches / missed matches to JSON")
 	flag.Parse()
 
 	db, err := sql.Open("postgres", *dbURL)
@@ -96,16 +102,34 @@ func main() {
 	}
 	fmt.Printf("streams with performances + comment_raw: %d\n\n", len(streams))
 
+	// 照合の評価器。照合キーは起動時に作り直される想定なので、ここでも揃えておく
+	// （古い規則のキーのまま測ると、直したはずの改善が数字に出ない）。
+	var matchSvc *service.SongMatchService
+	if *evalMatching {
+		matchSvc = newMatchService(db, !*noAlias)
+		if n, err := matchSvc.RebuildKeys(); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: 照合キーの再構築に失敗: %v\n", err)
+		} else if n > 0 {
+			fmt.Printf("照合キーを %d 件作り直しました\n", n)
+		}
+		if *noAlias {
+			fmt.Println("学習層（song_aliases / artist_aliases）を無効にして測ります")
+		}
+	}
+
 	var (
 		totalGT, totalExtract, totalTP, totalFP, totalFN int
 		aiFail                                           int
 		fpNames                                          = map[string]int{}
 		fpItems, tpItems                                 []fpItem
 		streamsOverExtract                               int
+		matchAll                                         = newMatchEval()
+		matchNonVerbatim                                 = newMatchEval()
+		badMatches                                       []matchOutcome
 	)
 
 	for idx, sid := range streams {
-		gt := loadGroundTruth(db, sid)
+		gt := loadGroundTruthWithIDs(db, sid)
 		comments := loadComments(db, sid)
 		if len(gt) == 0 || len(comments) == 0 {
 			continue
@@ -156,6 +180,23 @@ func main() {
 				gtUsed[mi] = true
 				tp++
 				tpItems = append(tpItems, item)
+
+				// 照合の評価は「抽出が当たった曲」だけを対象にする。
+				// 抽出を外した曲まで混ぜると、照合の成績が抽出の成績に汚染される。
+				if matchSvc != nil {
+					o := evalMatch(matchSvc, sid, ex, gt[mi])
+					matchAll.add(o)
+					// DB の表記と抽出の表記が逐字で同じ組は、その曲がこのコメントから
+					// 作られた（＝当たって当然）可能性が高い。主指標からは外す。
+					if !isVerbatim(o) {
+						matchNonVerbatim.add(o)
+					}
+					// 誤採用（黙って壊れる）と候補なし（新規登録される）を書き出す。
+					// 人手に回るものは誤りが残らないので対象外。
+					if (o.tier == tierAuto && !o.Correct) || o.tier == tierNone {
+						badMatches = append(badMatches, o)
+					}
+				}
 			} else {
 				fp++
 				fpNames[normalizeFPName(ex.Name)]++
@@ -222,9 +263,20 @@ func main() {
 		fmt.Printf("%4d  %s\n", k.n, k.name)
 	}
 
+	if matchSvc != nil {
+		matchNonVerbatim.print("MATCHING（主指標：DB 表記と抽出表記が食い違う組）")
+		matchAll.print("MATCHING（参考：逐字一致の組を含む全件）")
+		fmt.Println("\n※ 主指標から逐字一致を外すのは、GT の楽曲の一部がそのコメント自身から")
+		fmt.Println("   findOrCreateSong で作られており、当たって当然の組が数字を押し上げるため。")
+	}
+
 	if *fpDump != "" {
 		dumpJSON(*fpDump, fpItems)
 		fmt.Printf("\nwrote %d FP items to %s\n", len(fpItems), *fpDump)
+	}
+	if *badMatchDump != "" {
+		dumpJSON(*badMatchDump, badMatches)
+		fmt.Printf("wrote %d bad-match items to %s\n", len(badMatches), *badMatchDump)
 	}
 	if *tpDump != "" {
 		dumpJSON(*tpDump, tpItems)
@@ -380,47 +432,36 @@ func loadStreams(db *sql.DB) []string {
 	return out
 }
 
-func loadGroundTruth(db *sql.DB, sid string) []gtSong {
-	rows, err := db.Query(`
-		SELECT p.start_seconds, so.name
-		FROM performances p JOIN songs so ON so.id = p.song_id
-		WHERE p.stream_id = $1 ORDER BY p.start_seconds`, sid)
-	if err != nil {
-		fatal(err)
-	}
-	defer rows.Close()
-	var out []gtSong
-	for rows.Next() {
-		var g gtSong
-		rows.Scan(&g.start, &g.name)
-		out = append(out, g)
-	}
-	return out
-}
-
 // loadStoredSongs は DB に保存済みの comment_songs（過去に AI 分析した結果）を
 // ParsedSong として読み出す。再分析せず「実際にユーザーが見ている出力」をそのまま評価する。
+//
+// 正規化結果も一緒に読む。照合は正規化後の名称で行われるので、ここを落とすと
+// ベンチだけが抽出したままの表記で照合し、本番より悪い数字が出る。
 func loadStoredSongs(db *sql.DB, sid string) []comment.ParsedSong {
 	var raw []byte
 	if err := db.QueryRow(`SELECT comment_songs FROM streams WHERE id = $1`, sid).Scan(&raw); err != nil {
 		return nil
 	}
 	var rows []struct {
-		Start           int    `json:"start"`
-		End             int    `json:"end"`
-		Name            string `json:"name"`
-		OriginalArtist  string `json:"original_artist"`
-		OriginalComment string `json:"original_comment"`
+		Start            int    `json:"start"`
+		End              int    `json:"end"`
+		Name             string `json:"name"`
+		OriginalArtist   string `json:"original_artist"`
+		OriginalComment  string `json:"original_comment"`
+		NormalizedName   string `json:"normalized_name"`
+		NormalizedArtist string `json:"normalized_artist"`
 	}
 	json.Unmarshal(raw, &rows)
 	out := make([]comment.ParsedSong, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, comment.ParsedSong{
-			Start:           r.Start,
-			End:             r.End,
-			Name:            r.Name,
-			OriginalArtist:  r.OriginalArtist,
-			OriginalComment: r.OriginalComment,
+			Start:            r.Start,
+			End:              r.End,
+			Name:             r.Name,
+			OriginalArtist:   r.OriginalArtist,
+			OriginalComment:  r.OriginalComment,
+			NormalizedName:   r.NormalizedName,
+			NormalizedArtist: r.NormalizedArtist,
 		})
 	}
 	return out
