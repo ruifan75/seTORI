@@ -408,6 +408,40 @@ func (s *BackupService) LocalPath(name string) (string, error) {
 	return path, nil
 }
 
+// UploadExistingToDrive は既にあるローカルバックアップを Drive へ送る。
+//
+// 作成時の自動アップロードだけでは、次のものが永久にローカル止まりになる：
+//   - Drive 連携より前に作ったもの
+//   - `DriveUpload` を無効にしていた間に作ったもの
+//   - **アップロードが失敗したもの**（作成自体は成功しているので再試行の口が無い。
+//     一時的な通信エラーやトークン失効で、気付かないまま手元にしか無い状態になる）
+//   - リストア前の安全バックアップ（作成時は意図的にローカルのみ）
+//
+// 同名のファイルが Drive にあっても弾かない。重複より「送れないこと」のほうが困る。
+func (s *BackupService) UploadExistingToDrive(name string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	path, err := s.LocalPath(name)
+	if err != nil {
+		return err
+	}
+	if !s.DriveConnected() {
+		return fmt.Errorf("Google Drive と連携していません")
+	}
+
+	settings := s.GetSettings()
+	if err := s.uploadToDrive(&settings, path, name); err != nil {
+		return err
+	}
+	// uploadToDrive がフォルダ ID を作り直している場合があるので取り込む。
+	if err := s.saveSettings(settings); err != nil {
+		logger.Warnf("backup settings save (after manual upload): %v", err)
+	}
+	logger.Infof("backup uploaded to drive (manual): %s", name)
+	return nil
+}
+
 // DeleteLocal はローカルバックアップを削除する。
 func (s *BackupService) DeleteLocal(name string) error {
 	s.mu.Lock()

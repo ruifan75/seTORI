@@ -402,6 +402,7 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("POST /api/backups/restore-upload", r.handleRestoreUpload)
 	r.mux.HandleFunc("GET /api/backups/{name}/download", r.handleDownloadBackup)
 	r.mux.HandleFunc("POST /api/backups/{name}/restore", r.handleRestoreBackup)
+	r.mux.HandleFunc("POST /api/backups/{name}/upload-drive", r.handleUploadBackupToDrive)
 	r.mux.HandleFunc("DELETE /api/backups/{name}", r.handleDeleteBackup)
 
 	// Google Drive 連携（要 backup:manage）

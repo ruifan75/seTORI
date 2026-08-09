@@ -1066,6 +1066,13 @@ export const backupApi = {
     return data;
   },
 
+  // 既存のローカルバックアップを Drive へ送る。作成時のアップロードが失敗したものや、
+  // 連携前・自動アップロード無効時に作ったものを後から救うための口。
+  uploadToDrive: async (name: string): Promise<{ message: string }> => {
+    const { data } = await api.post(`/api/backups/${encodeURIComponent(name)}/upload-drive`);
+    return data;
+  },
+
   restoreUpload: async (file: File): Promise<{ message: string }> => {
     const form = new FormData();
     form.append('file', file);

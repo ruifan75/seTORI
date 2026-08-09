@@ -66,6 +66,17 @@ func (r *Router) handleDownloadBackup(w http.ResponseWriter, req *http.Request) 
 	http.ServeFile(w, req, path)
 }
 
+// handleUploadBackupToDrive は既存のローカルバックアップを Drive へ送る。
+// 作成時のアップロードが失敗したもの・連携前に作ったものを救うための口。
+func (r *Router) handleUploadBackupToDrive(w http.ResponseWriter, req *http.Request) {
+	name := req.PathValue("name")
+	if err := r.backupService.UploadExistingToDrive(name); err != nil {
+		respondError(w, http.StatusBadRequest, fmt.Sprintf("Drive へのアップロード失敗: %v", err))
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"message": "Google Drive へアップロードしました"})
+}
+
 // handleDeleteBackup はローカルバックアップを削除する。
 func (r *Router) handleDeleteBackup(w http.ResponseWriter, req *http.Request) {
 	if err := r.backupService.DeleteLocal(req.PathValue("name")); err != nil {

@@ -53,6 +53,15 @@ function TrashIcon() {
   );
 }
 
+function CloudUploadIcon() {
+  return (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M7 16a4 4 0 01-.88-7.9 5 5 0 019.78-1.63A4.5 4.5 0 0117 16h-1" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 12v9m0-9l-3 3m3-3l3 3" />
+    </svg>
+  );
+}
+
 function CloudIcon({ className = 'w-5 h-5' }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -449,6 +458,17 @@ export default function BackupPage() {
     onError: (err: Error) => showToast(`削除エラー: ${err.message}`, 'error'),
   });
 
+  // 作成時のアップロードが失敗したもの・連携前に作ったものを後から送るための操作。
+  // 失敗しても作成自体は成功しているので、これが無いと手元にしか残らない。
+  const uploadDriveMutation = useMutation({
+    mutationFn: backupApi.uploadToDrive,
+    onSuccess: (r) => {
+      showToast(r.message, 'success');
+      invalidateStatus();
+    },
+    onError: (err: Error) => showToast(err.message, 'error'),
+  });
+
   const handleDownload = async (name: string) => {
     try {
       const blob = await backupApi.downloadBlob(name);
@@ -551,6 +571,16 @@ export default function BackupPage() {
                 <span className="text-gray-400 shrink-0">{formatBytes(b.size)}</span>
                 <span className="text-gray-400 shrink-0 hidden sm:inline">{formatDate(b.modified_at)}</span>
                 <span className="flex-1" />
+                {status?.gdrive?.connected && (
+                  <button
+                    onClick={() => uploadDriveMutation.mutate(b.name)}
+                    disabled={uploadDriveMutation.isPending}
+                    className="p-1.5 text-sky-600 hover:bg-sky-50 rounded disabled:opacity-50"
+                    title="Google Drive へアップロード"
+                  >
+                    <CloudUploadIcon />
+                  </button>
+                )}
                 <button
                   onClick={() => handleDownload(b.name)}
                   className="p-1.5 text-indigo-600 hover:bg-indigo-50 rounded"
