@@ -338,8 +338,6 @@ func MatchInputs(rawName, rawArtist, normName, normArtist string) (name, artist 
 	return name, artist
 }
 
-
-
 // normalizeInto 對 songs 跑 AI 正規化＋DB 照合，把結果填回每首 song（in-place）。
 // AI が失敗して抽出のみになった場合は warning 文字列を返す（成功時は空）。
 func (s *CommentService) normalizeInto(songs []dto.CommentSong) string {
@@ -516,7 +514,6 @@ type HashBackfillResult struct {
 // comment_raw は不変なので AI は一切呼ばない。安全のため、保存済み hash が
 // 旧アルゴリズム（生bytes sha）と一致する場合のみ正規化 hash へ差し替える。
 // 既に正規化済み・hash 未設定・未知形式のものは触らない（冪等・再実行安全）。
-
 
 func (s *CommentService) BackfillCommentSongsHashes() (HashBackfillResult, error) {
 	rows, err := s.streamRepo.FindCommentHashRows()

@@ -875,7 +875,6 @@ func (s *HolodexService) AnalyzeHolodexSongs(videoID string, force bool) ([]dto.
 	return songs, nil
 }
 
-
 // normalizeHolodexInto SongSuggestion に AI 正規化＋DB 照合結果を埋め込む（in-place）。
 func (s *HolodexService) normalizeHolodexInto(songs []dto.SongSuggestion) {
 	if s.normalizationService == nil || len(songs) == 0 {
