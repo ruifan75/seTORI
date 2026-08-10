@@ -387,9 +387,12 @@ func (s *NormalizationService) matchAndPopulateSong(result *dto.AISuggestionResu
 // マッチ結果（matched_song_*）を埋めた AISuggestionResult を返す。
 // キャッシュ命中時に、凍結された古いマッチ（曲が後から追加された等）を現在の DB 状態へ
 // 再解決するために使う。マッチ無しなら matched_song_* は空のまま。
-func (s *NormalizationService) ResolveMatch(normalizedName, normalizedArtist string) dto.AISuggestionResult {
+// itunesID は分かっていれば渡すこと（Holodex は曲ごとに持っている）。
+// **最も強い証拠**なので、落とすと曲名が食い違う曲を取り逃す
+// （`深昏睡／Deep Coma` と `深昏睡 (Deep coma)` は曲名キーが一致しない）。
+func (s *NormalizationService) ResolveMatch(normalizedName, normalizedArtist string, itunesID *int64) dto.AISuggestionResult {
 	var res dto.AISuggestionResult
-	item := dto.AINormalizationItem{Name: normalizedName, OriginalArtist: normalizedArtist}
+	item := dto.AINormalizationItem{Name: normalizedName, OriginalArtist: normalizedArtist, ItunesID: itunesID}
 	s.matchAndPopulateSong(&res, &item, normalizedName, normalizedArtist)
 	return res
 }

@@ -464,6 +464,9 @@ type SongSuggestion struct {
 	MatchedSongItunesID      *int64  `json:"matched_song_itunes_id,omitempty"`
 	// 自動採用に届かなかった照合候補（CommentSong と対称）
 	MatchCandidates []SongMatchCandidate `json:"match_candidates,omitempty"`
+	// Changes は「抽出したままの値が、どの処理でどう変わったか」の履歴。
+	// 保存しない（照合は読み取り時に計算する）。
+	Changes []FieldChange `json:"changes,omitempty"`
 }
 
 // 載入 Holodex 歌曲的回應

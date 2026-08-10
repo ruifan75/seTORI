@@ -181,7 +181,7 @@ func evalMatch(ns *service.NormalizationService, sid string, p comment.ParsedSon
 		tier: tierNone, Tier: "none",
 	}
 
-	res := ns.ResolveMatch(name, artist)
+	res := ns.ResolveMatch(name, artist, nil) // コメント経路に iTunes ID は無い
 	want := gt.songID.String()
 	for _, c := range res.MatchCandidates {
 		if c.SongID == want {

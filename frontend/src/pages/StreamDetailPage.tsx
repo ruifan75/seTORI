@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, Link } from 'react-router-dom';
 import { streamApi, performanceApi, aiApi, songApi, singerApi, itunesApi, holodexApi, commentApi, tagApi } from '../api/client';
-import type { Singer, CreatePerformanceItem, AINormalizationItem, Song, UpdateStreamRequest, ITunesSearchResult, CommentSong, SongSuggestion, EndSource } from '../api/types';
+import type { Singer, CreatePerformanceItem, AINormalizationItem, Song, UpdateStreamRequest, ITunesSearchResult, CommentSong, SongSuggestion, EndSource, FieldChange } from '../api/types';
 import Loading from '../components/ui/Loading';
 import Tag from '../components/ui/Tag';
 import { useToast } from '../components/ui/ToastContext';
@@ -15,6 +15,7 @@ import TimestampTweaker from '../components/TimestampTweaker';
 import QueueAddButton from '../components/QueueAddButton';
 import RawCommentsPanel from '../components/RawCommentsPanel';
 import ArtistLinks from '../components/ArtistLinks';
+import FieldProvenance from '../components/FieldProvenance';
 import { extractRawCommentTimestamps } from '../utils/rawCommentTimestamps';
 import { matchReasonLabel } from '../utils/matchReason';
 
@@ -43,6 +44,9 @@ interface EditableSong {
   // AI 正規化追跡
   aiNormalizedName?: string; // AI 変更前の名称（変更された場合）
   aiNormalizedArtist?: string; // AI 変更前のアーティスト（変更された場合）
+  // 「抽出したままの値が、どの処理でどう変わったか」。AI 正規化と DB 照合を区別して出す。
+  // aiNormalized* は 1 段しか表せず、どちらの仕業かも分からないので、表示はこちらを使う。
+  changes?: FieldChange[];
   // 時間推定マーク
   isEndTimeEstimated?: boolean; // 終了時間が推定値かどうか
   // Chat 拍手偵測參考值（當與 comment explicit end 差異大時提醒）
@@ -943,6 +947,7 @@ export default function StreamDetailPage() {
       originalArtist: finalArtist,
       aiNormalizedName: finalName !== song.name ? song.name : undefined,
       aiNormalizedArtist: finalArtist !== song.original_artist ? song.original_artist : undefined,
+      changes: song.changes,
       isEndTimeEstimated: false,
       chatEnd: song.chat_end,
       endDiff: song.end_diff,
@@ -989,6 +994,7 @@ export default function StreamDetailPage() {
       originalArtist: finalArtist,
       aiNormalizedName: finalName !== song.name ? song.name : undefined,
       aiNormalizedArtist: finalArtist !== song.original_artist ? song.original_artist : undefined,
+      changes: song.changes,
       isEndTimeEstimated: song.is_end_time_estimated,
       chatEnd: song.chat_end,
       endDiff: song.end_diff,
@@ -2375,15 +2381,17 @@ export default function StreamDetailPage() {
                           placeholder="楽曲名を入力して検索"
                           showToast={showToast}
                         />
-                        {/* AI 正規化差異顯示 */}
-                        {song.aiNormalizedName && (
+                        {/* 由来（元の値 → どの処理 → 今の値）。changes が無い古い経路は従来表示 */}
+                        {song.changes?.length ? (
+                          <FieldProvenance changes={song.changes} field="name" />
+                        ) : song.aiNormalizedName ? (
                           <div className="mt-1 text-sm">
                             <span className="text-gray-500">AI修正:</span>{' '}
                             <span className="line-through text-gray-400">{song.aiNormalizedName}</span>
                             {' → '}
                             <span className="text-blue-600 font-medium">{song.name}</span>
                           </div>
-                        )}
+                        ) : null}
                         {/* 合併元顯示 */}
                         {song.mergedFrom && song.mergedFrom.length > 0 && (
                           <div className="mt-1 text-sm">
@@ -2405,15 +2413,17 @@ export default function StreamDetailPage() {
                           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                           placeholder="アーティスト名を入力"
                         />
-                        {/* AI 正規化差異顯示 */}
-                        {song.aiNormalizedArtist && (
+                        {/* 由来（元の値 → どの処理 → 今の値）。changes が無い古い経路は従来表示 */}
+                        {song.changes?.length ? (
+                          <FieldProvenance changes={song.changes} field="artist" />
+                        ) : song.aiNormalizedArtist ? (
                           <div className="mt-1 text-sm">
                             <span className="text-gray-500">AI修正:</span>{' '}
                             <span className="line-through text-gray-400">{song.aiNormalizedArtist}</span>
                             {' → '}
                             <span className="text-blue-600 font-medium">{song.artist}</span>
                           </div>
-                        )}
+                        ) : null}
                       </div>
 
                       {/* Start Time */}

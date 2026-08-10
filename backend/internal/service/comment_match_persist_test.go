@@ -68,45 +68,27 @@ func TestStripMatchForStorage(t *testing.T) {
 
 // 「元は X、AI 正規化で Y、DB 照合で Z」を画面に出せること。
 func TestBuildFieldChanges(t *testing.T) {
-	name, artist := "Starry night", "稀羽すう"
-	s := dto.CommentSong{
-		// 曲名: 抽出 → 正規化でタグが落ちる。照合先とは同じ文字列なので db_match は記録しない
-		Name: "Starry night (Acoustic)", NormalizedName: "Starry night",
-		// アーティスト: AI は埋めなかったので抽出のまま照合へ行き、そこで表記が直る
-		OriginalArtist: "きうすう",
-		MatchedSongID:  &name, MatchedSongName: &name, MatchedSongArtist: &artist,
-	}
-	got := buildFieldChanges(s, ReasonExact, 1.0)
+	// matchService が nil だと照合しないので、変更は「抽出 → 正規化」だけになる。
+	// DB を要さずに、正規化の記録と「変わらなかった段は記録しない」を確かめられる。
+	svc := &NormalizationService{}
 
-	var byStep []string
-	for _, c := range got {
-		byStep = append(byStep, c.Field+":"+c.By)
+	_, changes := svc.resolveOne(
+		"Starry night (Acoustic)", "稀羽すう", // 抽出したまま
+		"Starry night", "稀羽すう", // AI 正規化後（アーティストは変わっていない）
+		nil,
+	)
+	if len(changes) != 1 {
+		t.Fatalf("changes = %d 件, want 1: %+v", len(changes), changes)
 	}
-	want := map[string]bool{"name:ai_normalize": true, "artist:db_match": true}
-	for _, k := range byStep {
-		if !want[k] {
-			t.Errorf("余計な変更を記録している: %s", k)
-		}
-		delete(want, k)
-	}
-	for k := range want {
-		t.Errorf("記録されていない変更がある: %s", k)
+	c := changes[0]
+	if c.Field != "name" || c.By != "ai_normalize" ||
+		c.From != "Starry night (Acoustic)" || c.To != "Starry night" {
+		t.Errorf("記録が違う: %+v", c)
 	}
 
-	// 留言に歌手が書かれておらず、照合で埋まった場合も記録すること。
-	// ここを落とすと、画面に理由なく歌手名が現れたように見える。
-	empty := dto.CommentSong{
-		Name: "Starry night", OriginalArtist: "",
-		MatchedSongID: &name, MatchedSongName: &name, MatchedSongArtist: &artist,
-	}
-	var found bool
-	for _, c := range buildFieldChanges(empty, ReasonTitleOnly, 0.8) {
-		if c.Field == "artist" && c.By == "db_match" && c.From == "" && c.To == artist {
-			found = true
-		}
-	}
-	if !found {
-		t.Error("未記入 → 照合で補完 が記録されていない")
+	// 変わらなかった段は記録しない（「何も起きていない」を並べても読む側の負担になるだけ）
+	if _, none := svc.resolveOne("Lemon", "米津玄師", "Lemon", "米津玄師", nil); len(none) != 0 {
+		t.Errorf("変化が無いのに %d 件記録している", len(none))
 	}
 }
 

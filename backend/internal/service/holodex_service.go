@@ -781,7 +781,8 @@ func (s *HolodexService) AnalyzeHolodexSongs(videoID string, force bool) ([]dto.
 		if cachedHash.Valid && cachedHash.String == holodexHash && len(cached) > 0 {
 			var songs []dto.SongSuggestion
 			if err := json.Unmarshal(cached, &songs); err == nil && len(songs) > 0 {
-				s.reresolveMatches(songs) // DB 照合だけ最新化（AI なし。凍結された古いマッチを補正）
+				// 照合は保存していないので、今の DB に対して計算して返す
+				s.normalizationService.ResolveSuggestionsForDisplay(songs)
 				s.attachChatComparison(stream, songs)
 				return songs, nil
 			}
@@ -818,8 +819,14 @@ func (s *HolodexService) AnalyzeHolodexSongs(videoID string, force bool) ([]dto.
 		}
 	}
 
-	// 2. 正規化（AI 正規化＋DB 照合）を折り込む
+	// 2. 正規化（AI）を折り込む
 	s.normalizeHolodexInto(songs)
+
+	// 3. 照合はキャッシュ命中時と同じ関数で当て直す。
+	//    normalizeHolodexInto は BatchAINormalization 経由で照合も埋めるが、
+	//    そちらは変更履歴（changes）を作らない。2 つの経路で違うものを返さないよう、
+	//    照合は必ずここを通す（数ミリ秒なので二度引く分は問題にならない）。
+	s.normalizationService.ResolveSuggestionsForDisplay(songs)
 
 	// 3. 拍手 end：明示 end が無い曲は補完。明示 end がある曲も chat 値を検出し、
 	//    ChatEnd/EndDiff として付与する（Holodex 側の誤りをユーザーが確認できるように）。
@@ -856,8 +863,9 @@ func (s *HolodexService) AnalyzeHolodexSongs(videoID string, force bool) ([]dto.
 	}
 
 	// 5. 永続化（holodex_songs_normalized + holodex_hash）→ 次回はキャッシュを直接読む
+	//    照合の結果は保存しない（読み取り時に計算する。コメント経路と同じ約束）
 	if holodexHash != "" {
-		if b, mErr := json.Marshal(songs); mErr == nil {
+		if b, mErr := json.Marshal(stripMatchFromSuggestions(songs)); mErr == nil {
 			if err := s.streamRepo.SaveHolodexSongs(videoID, b, holodexHash); err != nil {
 				logger.Warnf("[holodex] save normalized songs failed (%s): %v", videoID, err)
 			}
@@ -867,31 +875,6 @@ func (s *HolodexService) AnalyzeHolodexSongs(videoID string, force bool) ([]dto.
 	return songs, nil
 }
 
-// reresolveMatches は AI を呼ばず、正規化済みの名称で DB 照合だけをやり直し、
-// matched_song_* を現在の DB 状態に更新する（キャッシュ命中時に呼ぶ。CommentService と対称）。
-func (s *HolodexService) reresolveMatches(songs []dto.SongSuggestion) {
-	if s.normalizationService == nil {
-		return
-	}
-	for i := range songs {
-		name := songs[i].NormalizedName
-		if name == "" {
-			name = songs[i].Name
-		}
-		artist := songs[i].NormalizedArtist
-		if artist == "" {
-			artist = songs[i].OriginalArtist
-		}
-		m := s.normalizationService.ResolveMatch(name, artist)
-		songs[i].MatchedSongID = m.MatchedSongID
-		songs[i].MatchedSongName = m.MatchedSongName
-		songs[i].MatchedSongNameReading = m.MatchedSongNameReading
-		songs[i].MatchedSongArtist = m.MatchedSongArtist
-		songs[i].MatchedSongArtistReading = m.MatchedSongArtistReading
-		songs[i].MatchedSongArtURL = m.MatchedSongArtURL
-		songs[i].MatchedSongItunesID = m.MatchedSongItunesID
-	}
-}
 
 // normalizeHolodexInto SongSuggestion に AI 正規化＋DB 照合結果を埋め込む（in-place）。
 func (s *HolodexService) normalizeHolodexInto(songs []dto.SongSuggestion) {
