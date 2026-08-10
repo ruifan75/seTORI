@@ -15,11 +15,28 @@
 // ディスクに保存し、-struct の on/off 再実行は同じ AI 結果を使い回す。
 //
 // ⚠️ キャッシュは stream ID だけをキーにしている。モードが違えば結果も違うので、
-// モードごとに別のパスを渡すこと。
+// モードごとに別のパスを渡すこと。プロンプトを変えて測り直すときも同じで、
+// 前の版の結果を読むと「変えたのに何も変わらない」ように見える。
 //
 //	go run ./cmd/setoribench -mode ai       -cache /tmp/bench-ai.json
 //	go run ./cmd/setoribench -mode combined -cache /tmp/bench-combined.json
 //	go run ./cmd/setoribench -mode grouped  -cache /tmp/bench-grouped.json
+//
+// # 照合の評価（-match、既定 on）
+//
+// 抽出が当てた曲だけを対象に、DB のどの楽曲に結びついたかを測る。詳細は match.go。
+//
+// # 非曲の雑音を測る（-ids / -nogt / -extractdump）
+//
+// 非曲の見出し（開会式・提供・ここすき等）は **performances が登録されていない
+// 雑談配信に偏っている**ため、GT ベースの precision/recall では測れない。
+// 対象を名指しして、抽出された中身をそのまま書き出して数える。
+//
+//	go run ./cmd/setoribench -mode grouped -ids noisy.txt -nogt \
+//	    -cache /tmp/noise.json -extractdump /tmp/noise-extract.json
+//
+// 抽出のルールやプロンプトを変えるときは **雑音（-ids）と取りこぼし（GT）の両方**を
+// 見ること。厳しくすれば雑音は減るが曲まで落ちる。片方だけ見ると改悪に気づけない。
 //
 // 抽出後は FilterSongsWith(structural) -> Dedup -> Validate を通し、抽出タイムスタンプを
 // ground truth と start 近接で突き合わせて precision/recall を出す。
@@ -72,6 +89,9 @@ func main() {
 	showFP := flag.Int("fp", 40, "how many top false-positive names to print")
 	fpDump := flag.String("fpdump", "", "dump false positives to JSON")
 	tpDump := flag.String("tpdump", "", "dump true positives to JSON")
+	idsFile := flag.String("ids", "", "file with stream IDs (one per line) to evaluate instead of all GT streams")
+	noGT := flag.Bool("nogt", false, "evaluate streams that have no performances (雑音の計測用。precision/recall は出ない)")
+	extractDump := flag.String("extractdump", "", "dump every extracted item (GT の有無によらず) to JSON")
 	evalMatching := flag.Bool("match", true, "evaluate song matching (抽出した曲名が正しい楽曲に結びつくか)")
 	noAlias := flag.Bool("noalias", false, "disable the learning layers (song_aliases / artist_aliases) to measure their contribution")
 	badMatchDump := flag.String("baddump", "", "dump false matches / missed matches to JSON")
@@ -96,7 +116,14 @@ func main() {
 	filterKW, keepKW := loadKeywords(db)
 	fmt.Printf("mode=%s structural=%v  (loaded %d filter / %d keep keywords)\n", *mode, *structural, len(filterKW), len(keepKW))
 
+	// 非曲の雑音は「performances が登録されていない配信」（雑談配信など）に偏っている。
+	// そこは GT が無いので precision/recall では測れない。-ids で対象を名指しし、
+	// -nogt で GT 突き合わせを外して、抽出した中身そのものを見る。
 	streams := loadStreams(db)
+	if *idsFile != "" {
+		streams = readLines(*idsFile)
+		fmt.Printf("stream IDs from %s: %d\n", *idsFile, len(streams))
+	}
 	if *limit > 0 && *limit < len(streams) {
 		streams = streams[:*limit]
 	}
@@ -121,7 +148,7 @@ func main() {
 		totalGT, totalExtract, totalTP, totalFP, totalFN int
 		aiFail                                           int
 		fpNames                                          = map[string]int{}
-		fpItems, tpItems                                 []fpItem
+		fpItems, tpItems, extractItems                   []fpItem
 		streamsOverExtract                               int
 		matchAll                                         = newMatchEval()
 		matchNonVerbatim                                 = newMatchEval()
@@ -131,7 +158,7 @@ func main() {
 	for idx, sid := range streams {
 		gt := loadGroundTruthWithIDs(db, sid)
 		comments := loadComments(db, sid)
-		if len(gt) == 0 || len(comments) == 0 {
+		if len(comments) == 0 || (len(gt) == 0 && !*noGT) {
 			continue
 		}
 
@@ -169,6 +196,12 @@ func main() {
 		}
 		deduped := comment.DeduplicateSongs(filtered)
 		valid := comment.ValidateSongs(deduped)
+
+		// 抽出したものを全部書き出す（GT の有無によらず）。
+		// プロンプトを変えた前後で「同じ配信から何が出てくるようになったか」を比べる用。
+		for _, ex := range valid {
+			extractItems = append(extractItems, fpItem{sid, ex.Start, ex.Name, ex.OriginalArtist, firstLine(ex.OriginalComment)})
+		}
 
 		// ---- ground truth と突き合わせ（start 近接でマッチ）----
 		gtUsed := make([]bool, len(gt))
@@ -225,18 +258,22 @@ func main() {
 	}
 
 	fmt.Println("================ AGGREGATE ================")
-	fmt.Printf("ground-truth songs : %d\n", totalGT)
-	fmt.Printf("extracted songs    : %d\n", totalExtract)
-	fmt.Printf("true positives     : %d\n", totalTP)
-	fmt.Printf("false positives    : %d  (抽出したが GT に無い = 非曲の誤検出 or GT 欠落)\n", totalFP)
-	fmt.Printf("false negatives    : %d  (GT にあるが抽出漏れ)\n", totalFN)
-	if totalExtract > 0 {
-		fmt.Printf("precision          : %.3f\n", float64(totalTP)/float64(totalExtract))
-	}
-	if totalGT > 0 {
+	// GT が無い対象（-nogt）で precision 0.000 と出すと、抽出が全部外れたように読める。
+	// 実際は突き合わせる正解が無いだけなので、抽出件数だけを出す。
+	if totalGT == 0 {
+		fmt.Printf("extracted songs    : %d  （GT が無いので精度は出せない。-extractdump で中身を見ること）\n", totalExtract)
+	} else {
+		fmt.Printf("ground-truth songs : %d\n", totalGT)
+		fmt.Printf("extracted songs    : %d\n", totalExtract)
+		fmt.Printf("true positives     : %d\n", totalTP)
+		fmt.Printf("false positives    : %d  (抽出したが GT に無い = 非曲の誤検出 or GT 欠落)\n", totalFP)
+		fmt.Printf("false negatives    : %d  (GT にあるが抽出漏れ)\n", totalFN)
+		if totalExtract > 0 {
+			fmt.Printf("precision          : %.3f\n", float64(totalTP)/float64(totalExtract))
+		}
 		fmt.Printf("recall             : %.3f\n", float64(totalTP)/float64(totalGT))
+		fmt.Printf("streams over-extracting (extract>GT): %d / %d\n", streamsOverExtract, len(streams))
 	}
-	fmt.Printf("streams over-extracting (extract>GT): %d / %d\n", streamsOverExtract, len(streams))
 	if usesAI(*mode) {
 		fmt.Printf("streams that fell back to regex (AI failed): %d\n", aiFail)
 	}
@@ -270,6 +307,10 @@ func main() {
 		fmt.Println("   findOrCreateSong で作られており、当たって当然の組が数字を押し上げるため。")
 	}
 
+	if *extractDump != "" {
+		dumpJSON(*extractDump, extractItems)
+		fmt.Printf("wrote %d extracted items to %s\n", len(extractItems), *extractDump)
+	}
 	if *fpDump != "" {
 		dumpJSON(*fpDump, fpItems)
 		fmt.Printf("\nwrote %d FP items to %s\n", len(fpItems), *fpDump)
@@ -474,6 +515,21 @@ func loadComments(db *sql.DB, sid string) []string {
 	}
 	var out []string
 	json.Unmarshal(raw, &out)
+	return out
+}
+
+// readLines は空行を除いた行を返す（-ids 用）。
+func readLines(path string) []string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		fatal(err)
+	}
+	var out []string
+	for _, l := range strings.Split(string(b), "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			out = append(out, l)
+		}
+	}
 	return out
 }
 
