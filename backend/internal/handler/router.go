@@ -2019,7 +2019,18 @@ func (r *Router) handleAnalyzeComments(w http.ResponseWriter, req *http.Request)
 	// ?force=true で快取を無視して再分析（再正規化）する
 	force := req.URL.Query().Get("force") == "true"
 
-	result, err := r.commentService.AnalyzeComments(videoID, force)
+	// ?dry_run=true は解析だけして何も書かない（計測用の読み取り専用の口）。
+	// 保存だけでなく、別名義の学習・コメントの取り直しの保存も止まる。
+	// 結果は応答の stats で確かめる。
+	var (
+		result *dto.AnalyzeCommentsResponse
+		err    error
+	)
+	if req.URL.Query().Get("dry_run") == "true" {
+		result, err = r.commentService.AnalyzeCommentsDryRun(videoID)
+	} else {
+		result, err = r.commentService.AnalyzeComments(videoID, force)
+	}
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return

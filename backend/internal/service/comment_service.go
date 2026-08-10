@@ -137,6 +137,22 @@ func (s *CommentService) ConfirmCommentSongMatch(videoID string, index int, expe
 // AnalyzeComments 從留言分析歌曲：AI 抽取 → 正規化＋DB 照合 → live chat 拍手 end → 存 DB。
 // 以 comment_raw 的 hash 為快取鍵：資料沒變且非強制時，直接回傳已存的 comment_songs（不打 AI）。
 func (s *CommentService) AnalyzeComments(videoID string, force bool) (*dto.AnalyzeCommentsResponse, error) {
+	return s.analyzeComments(videoID, force, false)
+}
+
+// AnalyzeCommentsDryRun は解析だけ行い、**何も書き込まない**。
+//
+// comment_songs も、遠隔から取り直したコメントも、別名義の学習も保存しない。
+// 本番のデータを触らずに「今のパイプラインがこの配信に何を出すか」を測るための口で、
+// 読み取り専用であることが取り柄なので、ここに書き込みを足さないこと。
+//
+// 別名義の AI 判定は**行わない**（判定は artist_alias_checks への書き込みを伴うため）。
+// その分だけ本番の挙動とはズレる。stats.path と alias_pairs_asked=0 で判別できる。
+func (s *CommentService) AnalyzeCommentsDryRun(videoID string) (*dto.AnalyzeCommentsResponse, error) {
+	return s.analyzeComments(videoID, true, true)
+}
+
+func (s *CommentService) analyzeComments(videoID string, force, dryRun bool) (*dto.AnalyzeCommentsResponse, error) {
 	stream, err := s.streamRepo.FindByID(videoID)
 	if err != nil {
 		return nil, fmt.Errorf("find stream: %w", err)
@@ -158,22 +174,25 @@ func (s *CommentService) AnalyzeComments(videoID string, force bool) (*dto.Analy
 				// 照合が変わったら保存する。応答にだけ乗せて DB を古いまま残すと、
 				// 一覧や集計は誤ったまま、開いた画面だけ正しいという食い違いが残る。
 				// hash は据え置く ── 変わったのは照合結果だけで、抽出元のコメントは同じ。
-				if s.reresolveMatches(cached) {
+				saved := false
+				if s.reresolveMatches(cached) && !dryRun {
 					if b, mErr := json.Marshal(cached); mErr == nil {
 						if err := s.streamRepo.SaveCommentSongs(videoID, b, rawHash); err != nil {
 							logger.Warnf("[comment] failed to persist re-resolved matches for %s: %v", videoID, err)
+						} else {
+							saved = true
 						}
 					}
 				}
 				logger.Infof("/comments/analyze cache hit for %s (%d songs)", videoID, len(cached))
-				return &dto.AnalyzeCommentsResponse{Songs: cached}, nil
+				return &dto.AnalyzeCommentsResponse{Songs: cached, Stats: buildStats("cache", dryRun, saved, cached, 0, 0)}, nil
 			}
 		}
 	}
 
 	// 1. 取得原始留言（DB 優先，否則 YouTube/Holodex 抓取）
 	logger.Infof("starting comment analysis for %s (force=%v, raw len=%d)", videoID, force, len(stream.CommentRaw))
-	comments, err := s.getComments(videoID, stream)
+	comments, err := s.getComments(videoID, stream, dryRun)
 	if err != nil {
 		return nil, err
 	}
@@ -181,7 +200,7 @@ func (s *CommentService) AnalyzeComments(videoID string, force bool) (*dto.Analy
 	rawHash = hashComments(comments)
 
 	// 2. AI で抽出（統合経路では正規化と重複排除もここで済む）。失敗時は段階的に退避
-	parsedSongs, preNormalized, extractWarning := s.parseComments(comments)
+	parsedSongs, preNormalized, extractWarning, path := s.parseComments(comments)
 
 	// 3. 過濾 + 去重 + 驗證（先過濾避免非歌曲項目影響去重）
 	//
@@ -221,6 +240,7 @@ func (s *CommentService) AnalyzeComments(videoID string, force bool) (*dto.Analy
 	// 統合経路では正規化が済んでいるので DB 照合だけを行う（AI を再度呼ばない）。
 	// 2 段階経路に退避した場合はここで AI 正規化を実行する。
 	var aiWarning string
+	var aliasAsked, aliasLinked int
 	if preNormalized {
 		s.reresolveMatches(songs)
 		// 曲名は一意に当たったのにアーティストだけ食い違った組を AI に判定させ、
@@ -230,8 +250,12 @@ func (s *CommentService) AnalyzeComments(videoID string, force bool) (*dto.Analy
 		// 統合経路はそこを通らないので、ここに置かないと**一度も実行されない**
 		// （既定が統合経路に変わった時点でそうなっていた）。
 		// 呼ぶのは新規解析のときだけ ── キャッシュ命中と backfill は AI を呼ばない約束。
-		if s.normalizationService != nil && s.normalizationService.AdjudicateAliasesForCommentSongs(songs) {
-			s.reresolveMatches(songs)
+		// dry-run では行わない。判定は artist_alias_checks への書き込みを伴うため。
+		if s.normalizationService != nil && !dryRun {
+			aliasAsked, aliasLinked = s.normalizationService.AdjudicateAliasesForCommentSongs(songs)
+			if aliasLinked > 0 {
+				s.reresolveMatches(songs)
+			}
 		}
 	} else {
 		aiWarning = s.normalizeInto(songs)
@@ -256,7 +280,10 @@ func (s *CommentService) AnalyzeComments(videoID string, force bool) (*dto.Analy
 	// キャッシュに載せると、既存の良い分析結果を上書きしてしまううえ、
 	// 次回以降はキャッシュ命中で AI を呼ばなくなり劣化が固定される。
 	// 保存しなければ以前の結果と hash がそのまま残り、復旧を待てる。
+	saved := false
 	switch {
+	case dryRun:
+		// 読み取り専用の口。何も書かない
 	case rawHash == "":
 		// hash が無い（コメントが空など）ので保存対象外
 	case aiWarning != "":
@@ -265,12 +292,37 @@ func (s *CommentService) AnalyzeComments(videoID string, force bool) (*dto.Analy
 		if songsJSON, mErr := json.Marshal(songs); mErr == nil {
 			if err := s.streamRepo.SaveCommentSongs(videoID, songsJSON, rawHash); err != nil {
 				logger.Warnf("[comment] save comment_songs failed (%s): %v", videoID, err)
+			} else {
+				saved = true
 			}
 		}
 	}
 
 	logger.Infof("comment analysis completed for %s: %d songs", videoID, len(songs))
-	return &dto.AnalyzeCommentsResponse{Songs: songs, Warning: aiWarning}, nil
+	return &dto.AnalyzeCommentsResponse{
+		Songs:   songs,
+		Warning: aiWarning,
+		Stats:   buildStats(path, dryRun, saved, songs, aliasAsked, aliasLinked),
+	}, nil
+}
+
+// buildStats は応答に載せる内訳を作る。ログを読まずに挙動を確かめられるようにするためのもの。
+func buildStats(path string, dryRun, saved bool, songs []dto.CommentSong, aliasAsked, aliasLinked int) *dto.AnalyzeStats {
+	st := &dto.AnalyzeStats{
+		Path: path, DryRun: dryRun, Saved: saved, Extracted: len(songs),
+		AliasPairsAsked: aliasAsked, AliasLinksAdded: aliasLinked,
+	}
+	for i := range songs {
+		switch {
+		case songs[i].MatchedSongID != nil:
+			st.Matched++
+		case len(songs[i].MatchCandidates) > 0:
+			st.WithCandidates++
+		default:
+			st.Unmatched++
+		}
+	}
+	return st
 }
 
 // strPtrEq は *string 同士を値で比べる（どちらも nil なら等しい）。
@@ -673,19 +725,19 @@ func (s *CommentService) loadFilterKeywords() (filterKW, keepKW []string, err er
 //
 // warning を呼び出し側へ伝えないと、AI 障害が「この配信には曲が無い」という見た目で
 // 通ってしまい、しかもその空の結果がキャッシュに保存されて既存の分析を上書きする。
-func (s *CommentService) parseComments(comments []string) (songs []comment.ParsedSong, preNormalized bool, warning string) {
+func (s *CommentService) parseComments(comments []string) (songs []comment.ParsedSong, preNormalized bool, warning, path string) {
 	if s.aiClient != nil {
 		// 第1候補：統合経路（抽出＋正規化＋重複排除を 1 回で）
 		songs, err := comment.ParseNormalizeAndDedupWithAI(s.aiClient, comments)
 		if err == nil {
 			logger.Infof("Using grouped AI extraction (%d songs)", len(songs))
-			return songs, true, ""
+			return songs, true, "", "grouped"
 		}
 		if errors.Is(err, comment.ErrNoTimestampLines) {
 			// 解析対象が無いだけで、AI の障害ではない。劣化として扱うと
 			// 毎回警告が出るうえキャッシュも書かれず、無駄に再解析し続ける。
 			logger.Infof("No timestamp lines in comments; nothing to extract")
-			return nil, false, ""
+			return nil, false, "", "none"
 		}
 		logger.Warnf("grouped AI extraction failed, falling back to 2-stage: %v", err)
 
@@ -693,18 +745,19 @@ func (s *CommentService) parseComments(comments []string) (songs []comment.Parse
 		songs, err = comment.ParseCommentsWithAI(s.aiClient, comments)
 		if err == nil {
 			logger.Infof("Using AI-extracted songs for analysis (%d songs)", len(songs))
-			return songs, false, ""
+			return songs, false, "", "two_stage"
 		}
 		logger.Warnf("AI comment parse failed, falling back to regex: %v", err)
 		return comment.ParseComments(comments), false,
-			fmt.Sprintf("AI抽出に失敗しました（%v）。正規表現のみで解析しました。", err)
+			fmt.Sprintf("AI抽出に失敗しました（%v）。正規表現のみで解析しました。", err), "regex"
 	}
 	logger.Infof("Using regex-only comment parse (no AI client configured)")
-	return comment.ParseComments(comments), false, ""
+	return comment.ParseComments(comments), false, "", "regex"
 }
 
 // getComments 從 DB 讀取非空的原始留言，若無則從 YouTube/Holodex 抓取並保存。
-func (s *CommentService) getComments(videoID string, stream *models.Stream) ([]string, error) {
+// saveRaw=false のとき、遠隔から取り直したコメントを DB に書かない（dry-run 用）。
+func (s *CommentService) getComments(videoID string, stream *models.Stream, dryRun bool) ([]string, error) {
 	if stream != nil && len(stream.CommentRaw) > 0 {
 		var comments []string
 		if err := json.Unmarshal(stream.CommentRaw, &comments); err == nil && len(comments) > 0 {
@@ -716,7 +769,7 @@ func (s *CommentService) getComments(videoID string, stream *models.Stream) ([]s
 	if err != nil {
 		return nil, fmt.Errorf("get comments: %w", err)
 	}
-	if raw, marshalErr := json.Marshal(comments); marshalErr == nil {
+	if raw, marshalErr := json.Marshal(comments); marshalErr == nil && !dryRun {
 		if saveErr := s.streamRepo.SaveCommentRaw(videoID, util.SanitizeJSONB(raw)); saveErr != nil {
 			logger.Warnf("save comment raw error (video: %s): %v", videoID, saveErr)
 		}

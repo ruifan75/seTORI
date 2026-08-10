@@ -270,9 +270,10 @@ func collectArtistAliasPairsFromCandidates(artist string, dtoCands []dto.SongMat
 //
 // **キャッシュ命中と backfill からは呼ばないこと。** あちらは「AI を呼ばない」約束の経路で、
 // 何度でも無料で回せることが取り柄になっている。
-func (s *NormalizationService) AdjudicateAliasesForCommentSongs(songs []dto.CommentSong) bool {
+// 戻り値は (問い合わせた組, 同一人物と判定できた組)。応答の stats に載せる。
+func (s *NormalizationService) AdjudicateAliasesForCommentSongs(songs []dto.CommentSong) (asked, linked int) {
 	if s.matchService == nil || s.aiClient == nil {
-		return false
+		return 0, 0
 	}
 	var pairs []artistPair
 	for i := range songs {
@@ -284,9 +285,9 @@ func (s *NormalizationService) AdjudicateAliasesForCommentSongs(songs []dto.Comm
 		pairs = append(pairs, collectArtistAliasPairsFromCandidates(artist, songs[i].MatchCandidates)...)
 	}
 	if len(pairs) == 0 {
-		return false
+		return 0, 0
 	}
-	return s.adjudicateArtistAliases(pairs) > 0
+	return len(pairs), s.adjudicateArtistAliases(pairs)
 }
 
 // buildBatchMessage 構築包含所有楽曲のバッチメッセージ

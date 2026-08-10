@@ -99,8 +99,8 @@ func TestAdjudicateAliasesForCommentSongs(t *testing.T) {
 	}}
 
 	// 依存が無ければ黙って false（照合は規則ベースのまま残る）
-	if (&NormalizationService{}).AdjudicateAliasesForCommentSongs(songs) {
-		t.Error("aiClient も matchService も無いのに true。AI を呼ばない経路で呼びに行っている")
+	if asked, linked := (&NormalizationService{}).AdjudicateAliasesForCommentSongs(songs); asked != 0 || linked != 0 {
+		t.Errorf("aiClient も matchService も無いのに asked=%d linked=%d。AI を呼ばない経路で呼びに行っている", asked, linked)
 	}
 
 	// 問い合わせ対象の組を候補から拾えること
@@ -118,8 +118,8 @@ func TestAdjudicateAliasesForCommentSongs(t *testing.T) {
 		Name: "Catch You Catch Me", OriginalArtist: "GUMI", MatchedSongID: &matched,
 		MatchCandidates: songs[0].MatchCandidates,
 	}}
-	if (&NormalizationService{}).AdjudicateAliasesForCommentSongs(done) {
-		t.Error("照合済みの行まで問い合わせ対象にしている")
+	if asked, _ := (&NormalizationService{}).AdjudicateAliasesForCommentSongs(done); asked != 0 {
+		t.Errorf("照合済みの行まで問い合わせ対象にしている（asked=%d）", asked)
 	}
 
 	// 連名は「どの名前とどの名前を比べるのか」が定まらないので聞かない

@@ -368,6 +368,29 @@ type AnalyzeCommentsResponse struct {
 	// AI 正規化が失敗（全プロバイダー冷却等）し、抽出のみで返した場合に設定される。
 	// バッチ分析はこれを見て冷却待ち後に force 再試行する。
 	Warning string `json:"warning,omitempty"`
+	// 何が起きたかの内訳。応答だけで挙動を確かめられるようにするためのもので、
+	// これが無いとサーバーのログを読まないと「どの経路を通ったか」が分からない。
+	Stats *AnalyzeStats `json:"stats,omitempty"`
+}
+
+// AnalyzeStats は 1 回の解析で実際に何が起きたか。
+type AnalyzeStats struct {
+	// grouped（既定）/ two_stage / regex / cache / none のいずれか。
+	// 経路によって後段の処理が変わるので、まずこれが分からないと何も判断できない。
+	Path   string `json:"path"`
+	DryRun bool   `json:"dry_run,omitempty"`
+	Saved  bool   `json:"saved"` // comment_songs を書いたか
+
+	Extracted      int `json:"extracted"`       // フィルタ・重複排除を通ったあとの曲数
+	Matched        int `json:"matched"`         // 自動採用できた
+	WithCandidates int `json:"with_candidates"` // 未照合だが候補あり（人が選べる）
+	Unmatched      int `json:"unmatched"`       // 候補も無い
+
+	// 別名義の AI 判定。asked は問い合わせた組、linked は同一人物と判定できた組。
+	// 統合経路で判定が動いているかを応答から確かめられるようにしてある
+	// （動いていない不具合を一度出しているため）。
+	AliasPairsAsked int `json:"alias_pairs_asked"`
+	AliasLinksAdded int `json:"alias_links_added"`
 }
 
 // BatchAnalyzeStatus 未処理配信の一括分析ジョブの進捗

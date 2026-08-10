@@ -18,7 +18,7 @@ func TestParseCommentsAIZeroSongsNoRegexFallback(t *testing.T) {
 	}
 
 	comments := []string{"1:00 ちゃんと靴までみました!"}
-	got, _, warning := svc.parseComments(comments)
+	got, _, warning, _ := svc.parseComments(comments)
 	if len(got) != 0 {
 		t.Fatalf("got %d songs, want 0 (AI said not a song; must not regex-fallback): %+v", len(got), got)
 	}
@@ -69,7 +69,7 @@ func TestParseCommentsReportsAIFailure(t *testing.T) {
 	}
 
 	comments := []string{"1:00 ちゃんと靴までみました!"}
-	got, _, warning := svc.parseComments(comments)
+	got, _, warning, _ := svc.parseComments(comments)
 
 	if warning == "" {
 		t.Fatal("AI が失敗したのに警告が空。呼び出し側が劣化に気づけない")
@@ -86,7 +86,7 @@ func TestParseCommentsReportsAIFailure(t *testing.T) {
 // AI client が未設定の場合は「劣化」ではないので警告を出さない。
 func TestParseCommentsNoAIClientIsNotADegradation(t *testing.T) {
 	svc := &CommentService{}
-	_, _, warning := svc.parseComments([]string{"1:00 テスト"})
+	_, _, warning, _ := svc.parseComments([]string{"1:00 テスト"})
 	if warning != "" {
 		t.Errorf("AI 未設定は劣化ではないので警告不要: %q", warning)
 	}
@@ -100,7 +100,7 @@ func TestParseCommentsNoTimestampLinesIsNotADegradation(t *testing.T) {
 		aiClient: fakeCommentAI{response: `[]`}, // ここまで到達しない
 	}
 
-	got, _, warning := svc.parseComments([]string{"今日も楽しかったです", "かわいい"})
+	got, _, warning, _ := svc.parseComments([]string{"今日も楽しかったです", "かわいい"})
 
 	if warning != "" {
 		t.Errorf("解析対象が無いだけなので警告は不要: %q", warning)

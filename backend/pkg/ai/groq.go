@@ -362,8 +362,19 @@ func CleanJSONResponse(resp string) string {
 		resp = strings.TrimSpace(resp)
 	}
 
-	// 最初の [ または { から始まるように
-	if idx := strings.Index(resp, "["); idx > 0 {
+	// 前置き（説明文・コードフェンス）を捨てて、最初の [ か { から始める。
+	//
+	// [ を優先するのは {"suggestions":[...]} のように配列をオブジェクトで包んだ
+	// 応答から中の配列を取り出すため（後段の「最後の ] で切る」と対になっている）。
+	//
+	// **条件は 0 を含めること。** 以前は「[ が 0 より後にあるか」だったので、
+	// 正しく "[{...}]" で始まる応答では [ の位置が 0 で条件を満たさず、
+	// 直後の { の位置 1 で切って**先頭の [ を削っていた**。
+	// そのあと「{ で始まるなら配列に包む」が働いて "]" が二重になり、
+	// json.Unmarshal が「invalid character ']' after top-level value」で落ちる。
+	// grouped 経路が無事だったのは Decoder.Decode が末尾の余りを無視するためで、
+	// Unmarshal を使う別名義の AI 判定だけが常に失敗していた。
+	if idx := strings.Index(resp, "["); idx >= 0 {
 		resp = resp[idx:]
 	} else if idx := strings.Index(resp, "{"); idx > 0 {
 		resp = resp[idx:]
