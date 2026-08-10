@@ -157,22 +157,23 @@ func newMatchService(db *sql.DB, withAliases bool) *service.SongMatchService {
 	)
 }
 
-// matchQuery は照合に渡す名称を返す。production の CommentService.matchInputs と同じ規則
-// （正規化結果があればそれ、無ければ抽出のまま）。ここがずれるとベンチが本番と違うものを測る。
-func matchQuery(p comment.ParsedSong) (name, artist string) {
-	name, artist = p.NormalizedName, p.NormalizedArtist
-	if name == "" {
-		name = p.Name
-	}
-	if artist == "" {
-		artist = p.OriginalArtist
-	}
-	return name, artist
+// newResolver は本番が留言経路で使うのと同じ NormalizationService を組む。
+// AI クライアントは nil でよい ── ResolveMatch は AI を呼ばない約束の経路。
+func newResolver(db *sql.DB, ms *service.SongMatchService) *service.NormalizationService {
+	return service.NewNormalizationService(nil, repository.NewSongItunesRepository(db), ms)
 }
 
-// evalMatch は 1 件を照合し、正解（GT の楽曲 ID）と突き合わせる。
-func evalMatch(ms *service.SongMatchService, sid string, p comment.ParsedSong, gt gtSong) matchOutcome {
-	name, artist := matchQuery(p)
+// evalMatch は 1 件を **本番と同じ関数** に通し、結果の曲 ID を正解と突き合わせる。
+//
+// 照合入力は service.MatchInputs、照合そのものは NormalizationService.ResolveMatch
+// （留言経路の reresolveMatches / backfill-matches が呼ぶのと同じもの）。
+// 閾値の判定をベンチ側で書き直さないのが要点 ── 書き直すと、本番の線引きを変えたときに
+// ベンチだけが古い線引きで「改善した」と言い続ける。
+//
+// 「正解が候補に居るか」は ResolveMatch が返す候補（ReviewScore 以上）だけで見る。
+// それ未満は本番でも捨てられていて、人にも見えないため。
+func evalMatch(ns *service.NormalizationService, sid string, p comment.ParsedSong, gt gtSong) matchOutcome {
+	name, artist := service.MatchInputs(p.Name, p.OriginalArtist, p.NormalizedName, p.NormalizedArtist)
 	o := matchOutcome{
 		Stream: sid, Start: p.Start,
 		QueryName: name, QueryArtist: artist,
@@ -180,28 +181,33 @@ func evalMatch(ms *service.SongMatchService, sid string, p comment.ParsedSong, g
 		tier: tierNone, Tier: "none",
 	}
 
-	cands, err := ms.FindCandidates(name, artist, nil)
-	if err != nil || len(cands) == 0 {
-		return o
-	}
-	for _, c := range cands {
-		if c.Song.ID == gt.songID {
+	res := ns.ResolveMatch(name, artist)
+	want := gt.songID.String()
+	for _, c := range res.MatchCandidates {
+		if c.SongID == want {
 			o.InCands = true
 			break
 		}
 	}
 
-	best := cands[0]
-	o.Reason, o.Score = best.Reason, best.Score
-	o.GotName, o.GotArtist = best.Song.Name, best.Song.OriginalArtist
-	o.Correct = best.Song.ID == gt.songID
 	switch {
-	case best.Auto():
+	case res.MatchedSongID != nil:
 		o.tier, o.Tier = tierAuto, "auto"
-	case best.NeedsReview():
+		o.Reason, o.Score = res.MatchReason, res.MatchScore
+		o.Correct = *res.MatchedSongID == want
+		if res.MatchedSongName != nil {
+			o.GotName = *res.MatchedSongName
+		}
+		if res.MatchedSongArtist != nil {
+			o.GotArtist = *res.MatchedSongArtist
+		}
+	case len(res.MatchCandidates) > 0:
+		best := res.MatchCandidates[0]
 		o.tier, o.Tier = tierReview, "review"
+		o.Reason, o.Score = best.Reason, best.Score
+		o.GotName, o.GotArtist = best.Name, best.Artist
+		o.Correct = best.SongID == want
 	}
-	// ReviewScore 未満の候補は「別の曲」として扱われる＝新規登録されるので tierNone のまま
 	return o
 }
 

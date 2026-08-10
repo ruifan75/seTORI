@@ -131,9 +131,10 @@ func main() {
 
 	// 照合の評価器。照合キーは起動時に作り直される想定なので、ここでも揃えておく
 	// （古い規則のキーのまま測ると、直したはずの改善が数字に出ない）。
-	var matchSvc *service.SongMatchService
+	var resolver *service.NormalizationService
 	if *evalMatching {
-		matchSvc = newMatchService(db, !*noAlias)
+		matchSvc := newMatchService(db, !*noAlias)
+		resolver = newResolver(db, matchSvc)
 		if n, err := matchSvc.RebuildKeys(); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: 照合キーの再構築に失敗: %v\n", err)
 		} else if n > 0 {
@@ -216,8 +217,8 @@ func main() {
 
 				// 照合の評価は「抽出が当たった曲」だけを対象にする。
 				// 抽出を外した曲まで混ぜると、照合の成績が抽出の成績に汚染される。
-				if matchSvc != nil {
-					o := evalMatch(matchSvc, sid, ex, gt[mi])
+				if resolver != nil {
+					o := evalMatch(resolver, sid, ex, gt[mi])
 					matchAll.add(o)
 					// DB の表記と抽出の表記が逐字で同じ組は、その曲がこのコメントから
 					// 作られた（＝当たって当然）可能性が高い。主指標からは外す。
@@ -300,7 +301,7 @@ func main() {
 		fmt.Printf("%4d  %s\n", k.n, k.name)
 	}
 
-	if matchSvc != nil {
+	if resolver != nil {
 		matchNonVerbatim.print("MATCHING（主指標：DB 表記と抽出表記が食い違う組）")
 		matchAll.print("MATCHING（参考：逐字一致の組を含む全件）")
 		fmt.Println("\n※ 主指標から逐字一致を外すのは、GT の楽曲の一部がそのコメント自身から")

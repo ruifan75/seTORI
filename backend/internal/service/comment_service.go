@@ -277,12 +277,19 @@ func strPtrEq(a, b *string) bool {
 // 空文字で照合して必ず外れる。確定操作もここと同じ入力で別表記を学習しないと、
 // 学習した鍵と次回の照合の鍵がずれて当たらなくなる。
 func matchInputs(s dto.CommentSong) (name, artist string) {
-	name, artist = s.NormalizedName, s.NormalizedArtist
+	return MatchInputs(s.Name, s.OriginalArtist, s.NormalizedName, s.NormalizedArtist)
+}
+
+// MatchInputs は matchInputs の中身。ベンチ（cmd/setoribench）が
+// **本番とまったく同じ規則**で照合入力を決められるように公開している。
+// ここを写し取って二重に持つと、片方を直したときにベンチだけが古い規則で測り続ける。
+func MatchInputs(rawName, rawArtist, normName, normArtist string) (name, artist string) {
+	name, artist = normName, normArtist
 	if name == "" {
-		name = s.Name
+		name = rawName
 	}
 	if artist == "" {
-		artist = s.OriginalArtist
+		artist = rawArtist
 	}
 	return name, artist
 }
