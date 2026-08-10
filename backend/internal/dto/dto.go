@@ -360,6 +360,26 @@ type CommentSong struct {
 	MatchedSongItunesID      *int64  `json:"matched_song_itunes_id,omitempty"`
 	// 自動採用に届かなかった照合候補（別名義・同名異曲など。UI で選ばせる）
 	MatchCandidates []SongMatchCandidate `json:"match_candidates,omitempty"`
+
+	// Changes は「抽出したままの値が、どの処理でどう変わったか」の履歴。
+	// 画面に「元は X、AI 正規化で Y、DB 照合で Z」と出すためのもの。
+	//
+	// 保存しない（照合は読み取り時に計算するので、保存しても古くなるだけ）。
+	Changes []FieldChange `json:"changes,omitempty"`
+}
+
+// FieldChange は 1 つの処理でその欄がどう変わったか。
+//
+// 名前が勝手に変わって見えるのが一番困る ── 利用者は「自分が入れた覚えのない歌手名」を
+// 見せられても、それが AI の正規化なのか DB 照合なのか判断できない。
+// どちらの仕業かと、その根拠を添えて出せるようにしておく。
+type FieldChange struct {
+	Field  string  `json:"field"`            // name | artist
+	By     string  `json:"by"`               // ai_normalize | db_match
+	From   string  `json:"from"`             // 変わる前
+	To     string  `json:"to"`               // 変わった後
+	Reason string  `json:"reason,omitempty"` // db_match の根拠（exact / title_artist / song_alias …）
+	Score  float64 `json:"score,omitempty"`  // db_match の確信度
 }
 
 type AnalyzeCommentsResponse struct {

@@ -95,6 +95,8 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	holodexService := service.NewHolodexService(cfg.HolodexAPIKey, cfg.YouTubeAPIKey, cfg.GroqAPIKey, streamRepo, singerRepo, cfg.HolodexEditorToken)
 	holodexService.SetRepositoriesWithSongItunes(perfRepo, songRepo, songItunesRepo) // SyncSetoriToHolodex に必要な repositories を提供
 	normalizationService := service.NewNormalizationService(aiService, songItunesRepo, songMatchService)
+	// 照合は保存せず読み取り時に計算する。配信詳細を返すときにここを通す。
+	streamService.SetResolver(normalizationService)
 	chatEndService := service.NewChatEndService(streamRepo, cfg.YtdlpPath, "")
 	// CommentService は分析時に正規化・拍手 end を内部で実行する（抽出→正規化→end→キャッシュ）
 	commentService := service.NewCommentService(holodexService, streamRepo, filterKeywordRepo, aiService, normalizationService, chatEndService, songMatchService)
@@ -350,7 +352,6 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("POST /api/streams/{id}/comments/analyze", r.handleAnalyzeComments)
 	r.mux.HandleFunc("POST /api/comments/backfill", r.handleBackfillCommentSongs)
 	r.mux.HandleFunc("POST /api/comments/backfill-hashes", r.handleBackfillCommentSongsHashes)
-	r.mux.HandleFunc("POST /api/comments/backfill-matches", r.handleBackfillMatches)
 	r.mux.HandleFunc("POST /api/streams/{id}/comment-songs/match", r.handleConfirmCommentSongMatch)
 	r.mux.HandleFunc("POST /api/streams/{id}/analyze-chat-ends", r.handleAnalyzeChatEnds)
 	r.mux.HandleFunc("POST /api/streams/{id}/chat-end-estimate", r.handleEstimateChatEnds)
@@ -2184,25 +2185,10 @@ func (r *Router) handleDeleteFilterKeyword(w http.ResponseWriter, req *http.Requ
 }
 
 // handleBackfillCommentSongs 補填所有有 comment_raw 但沒有 comment_songs 的 stream
-// handleBackfillMatches は保存済みの解析結果に対して DB 照合だけをやり直す。
-// AI を呼ばないので費用はかからない（曲が増えたあと・照合を直したあとに回す）。
-func (r *Router) handleBackfillMatches(w http.ResponseWriter, req *http.Request) {
-	res, err := r.commentService.BackfillMatches()
-	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	respondJSON(w, http.StatusOK, map[string]any{
-		"message": fmt.Sprintf("%d件を走査し、%d件の照合を更新しました", res.Scanned, res.Changed),
-		"scanned": res.Scanned,
-		"changed": res.Changed,
-		"songs":   res.Songs,
-	})
-}
-
 // handleConfirmCommentSongMatch は解析結果の1行に対して、人が選んだ候補を確定させる（content:edit）。
 //
 // 確定は別表記の学習として残る（/admin/aliases から取り消せる）。AI は呼ばない。
+// 照合そのものは保存しないので、次に画面を開いたときは学習した別表記経由で当たる。
 func (r *Router) handleConfirmCommentSongMatch(w http.ResponseWriter, req *http.Request) {
 	videoID := req.PathValue("id")
 	if videoID == "" {

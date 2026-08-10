@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/google/uuid"
 	"github.com/ruifan75/setori/internal/dto"
@@ -111,23 +110,12 @@ func (s *CommentService) ConfirmCommentSongMatch(videoID string, index int, expe
 		return nil, fmt.Errorf("learn song alias: %w", err)
 	}
 
-	// 学習が効いていれば、この行は song_alias（確信度 1.00）で song に結びつく。
-	// 同じ表記の他の行もここで一緒に直る。
-	s.reresolveMatches(songs)
+	// 学習が効いたことをその場で確かめる。照合は保存しないので、
+	// ここで確認できれば次に画面を開いたときも同じ答えになる。
+	s.normalizationService.ResolveForDisplay(songs)
 	got := songs[index].MatchedSongID
 	if got == nil || *got != songID.String() {
 		return nil, fmt.Errorf("別表記を学習しましたが照合に反映されませんでした（%q / %q）", name, artist)
-	}
-
-	b, err := json.Marshal(songs)
-	if err != nil {
-		return nil, fmt.Errorf("marshal comment songs: %w", err)
-	}
-	// hash は据え置く。抽出元のコメントは変えていないので、
-	// ここを書き換えると次回の解析がキャッシュを外して AI を呼んでしまう。
-	hash, _ := s.streamRepo.GetCommentSongsHash(videoID)
-	if err := s.streamRepo.SaveCommentSongs(videoID, b, hash.String); err != nil {
-		return nil, fmt.Errorf("save comment songs: %w", err)
 	}
 	logger.Infof("[comment] 照合を確定しました %s[%d]: %q / %q → %q / %q",
 		videoID, index, name, artist, song.Name, song.OriginalArtist)
@@ -174,18 +162,11 @@ func (s *CommentService) analyzeComments(videoID string, force, dryRun bool) (*d
 				// 照合が変わったら保存する。応答にだけ乗せて DB を古いまま残すと、
 				// 一覧や集計は誤ったまま、開いた画面だけ正しいという食い違いが残る。
 				// hash は据え置く ── 変わったのは照合結果だけで、抽出元のコメントは同じ。
-				saved := false
-				if s.reresolveMatches(cached) && !dryRun {
-					if b, mErr := json.Marshal(cached); mErr == nil {
-						if err := s.streamRepo.SaveCommentSongs(videoID, b, rawHash); err != nil {
-							logger.Warnf("[comment] failed to persist re-resolved matches for %s: %v", videoID, err)
-						} else {
-							saved = true
-						}
-					}
-				}
+				// 照合は保存された値ではなく、今の DB で計算して返す。
+				// 保存しないので書き戻しも要らない（曲が増えれば次に開いたとき自然に直る）。
+				s.normalizationService.ResolveForDisplay(cached)
 				logger.Infof("/comments/analyze cache hit for %s (%d songs)", videoID, len(cached))
-				return &dto.AnalyzeCommentsResponse{Songs: cached, Stats: buildStats("cache", dryRun, saved, cached, 0, 0)}, nil
+				return &dto.AnalyzeCommentsResponse{Songs: cached, Stats: buildStats("cache", dryRun, false, cached, 0, 0)}, nil
 			}
 		}
 	}
@@ -242,7 +223,7 @@ func (s *CommentService) analyzeComments(videoID string, force, dryRun bool) (*d
 	var aiWarning string
 	var aliasAsked, aliasLinked int
 	if preNormalized {
-		s.reresolveMatches(songs)
+		s.normalizationService.ResolveForDisplay(songs)
 		// 曲名は一意に当たったのにアーティストだけ食い違った組を AI に判定させ、
 		// 別名義が確定したぶんだけ照合をやり直す。
 		//
@@ -254,7 +235,7 @@ func (s *CommentService) analyzeComments(videoID string, force, dryRun bool) (*d
 		if s.normalizationService != nil && !dryRun {
 			aliasAsked, aliasLinked = s.normalizationService.AdjudicateAliasesForCommentSongs(songs)
 			if aliasLinked > 0 {
-				s.reresolveMatches(songs)
+				s.normalizationService.ResolveForDisplay(songs)
 			}
 		}
 	} else {
@@ -289,7 +270,8 @@ func (s *CommentService) analyzeComments(videoID string, force, dryRun bool) (*d
 	case aiWarning != "":
 		logger.Warnf("[comment] skipping cache write for %s due to AI degradation: %s", videoID, aiWarning)
 	default:
-		if songsJSON, mErr := json.Marshal(songs); mErr == nil {
+		// 照合の結果は保存しない（読み取り時に計算する）
+		if songsJSON, mErr := json.Marshal(stripMatchForStorage(songs)); mErr == nil {
 			if err := s.streamRepo.SaveCommentSongs(videoID, songsJSON, rawHash); err != nil {
 				logger.Warnf("[comment] save comment_songs failed (%s): %v", videoID, err)
 			} else {
@@ -356,59 +338,7 @@ func MatchInputs(rawName, rawArtist, normName, normArtist string) (name, artist 
 	return name, artist
 }
 
-// candidateSig は候補列の同一性を短い文字列にする。曲 ID と点数だけ見れば、
-// 「候補が増えた」「点数が動いた」はどちらも拾える。
-func candidateSig(cands []dto.SongMatchCandidate) string {
-	if len(cands) == 0 {
-		return ""
-	}
-	var b strings.Builder
-	for _, c := range cands {
-		fmt.Fprintf(&b, "%s:%.2f;", c.SongID, c.Score)
-	}
-	return b.String()
-}
 
-// reresolveMatches は AI を呼ばず、正規化済みの名称で DB 照合だけをやり直し、
-// matched_song_* を現在の DB 状態に更新する（キャッシュ命中時に呼ぶ）。
-//
-// 自動採用に届かなかった候補（match_candidates）も一緒に書き戻す。
-// これが無いと、songmatch が「似ているので人に見せろ」と付けた候補が
-// 保存の段階で毎回捨てられ、編集画面には「照合できませんでした」としか出ない。
-// 実測では本番の未照合 2220 件のうち 203 件がこの候補を持っていた。
-//
-// 変化があったかを返す。呼び出し側はこれを見て保存するかを決める ── 保存しないと
-// 直った照合が応答にしか乗らず、DB は古いまま据え置かれる。
-// 判定に ID・曲名・候補列を使うのは、「別の曲に付け替わった」「曲名が改名された」
-// 「候補だけ増えた」のいずれも拾いたいため。
-func (s *CommentService) reresolveMatches(songs []dto.CommentSong) bool {
-	if s.normalizationService == nil {
-		return false
-	}
-	changed := false
-	for i := range songs {
-		beforeID, beforeName := songs[i].MatchedSongID, songs[i].MatchedSongName
-		beforeCands := candidateSig(songs[i].MatchCandidates)
-
-		name, artist := matchInputs(songs[i])
-		m := s.normalizationService.ResolveMatch(name, artist)
-		songs[i].MatchedSongID = m.MatchedSongID
-		songs[i].MatchedSongName = m.MatchedSongName
-		songs[i].MatchedSongNameReading = m.MatchedSongNameReading
-		songs[i].MatchedSongArtist = m.MatchedSongArtist
-		songs[i].MatchedSongArtistReading = m.MatchedSongArtistReading
-		songs[i].MatchedSongArtURL = m.MatchedSongArtURL
-		songs[i].MatchedSongItunesID = m.MatchedSongItunesID
-		songs[i].MatchCandidates = m.MatchCandidates
-
-		if !strPtrEq(beforeID, songs[i].MatchedSongID) ||
-			!strPtrEq(beforeName, songs[i].MatchedSongName) ||
-			candidateSig(songs[i].MatchCandidates) != beforeCands {
-			changed = true
-		}
-	}
-	return changed
-}
 
 // normalizeInto 對 songs 跑 AI 正規化＋DB 照合，把結果填回每首 song（in-place）。
 // AI が失敗して抽出のみになった場合は warning 文字列を返す（成功時は空）。
@@ -586,73 +516,7 @@ type HashBackfillResult struct {
 // comment_raw は不変なので AI は一切呼ばない。安全のため、保存済み hash が
 // 旧アルゴリズム（生bytes sha）と一致する場合のみ正規化 hash へ差し替える。
 // 既に正規化済み・hash 未設定・未知形式のものは触らない（冪等・再実行安全）。
-// MatchBackfillResult は照合の再解決の結果。
-type MatchBackfillResult struct {
-	Scanned int `json:"scanned"` // 走査したストリーム数
-	Changed int `json:"changed"` // 照合が変わって保存したストリーム数
-	Songs   int `json:"songs"`   // そのうち照合が付いた曲の総数（変更後の合計）
-}
 
-// BackfillMatches は保存済みの comment_songs に対して DB 照合だけをやり直す。
-//
-// **AI は呼ばない。** 抽出も正規化もやり直さず、matched_song_* を現在の DB 状態に
-// 合わせるだけなので、無料で何度でも回せる。
-//
-// 必要になる理由は 2 つ：
-//   - comment_songs は分析した時点の結果が凍結される。あとから曲が増えたり
-//     別名義が登録されたりしても、既存の行は古い「照合できなかった」状態のまま残る
-//   - 照合そのものの不具合を直したときも、既存データには効かない
-//     （例：AI が空の曲名を返すと空文字で照合していた件）
-//
-// 抽出元のコメントは変わらないので comment_songs_hash は据え置く
-// （ここで hash を書き換えると、次回の解析がキャッシュを外して AI を呼んでしまう）。
-func (s *CommentService) BackfillMatches() (MatchBackfillResult, error) {
-	var res MatchBackfillResult
-	if s.normalizationService == nil {
-		return res, fmt.Errorf("正規化サービスが未設定です")
-	}
-
-	ids, err := s.streamRepo.FindIDsWithCommentSongs()
-	if err != nil {
-		return res, fmt.Errorf("find streams: %w", err)
-	}
-	logger.Infof("[comment] match backfill 開始: %d 件", len(ids))
-
-	for _, id := range ids {
-		stream, err := s.streamRepo.FindByID(id)
-		if err != nil || stream == nil || len(stream.CommentSongs) == 0 {
-			continue
-		}
-		var songs []dto.CommentSong
-		if err := json.Unmarshal(stream.CommentSongs, &songs); err != nil || len(songs) == 0 {
-			continue
-		}
-		res.Scanned++
-
-		if !s.reresolveMatches(songs) {
-			continue
-		}
-		b, err := json.Marshal(songs)
-		if err != nil {
-			logger.Warnf("[comment] match backfill marshal %s: %v", id, err)
-			continue
-		}
-		// hash は現在の値をそのまま残す（抽出結果は変えていない）。
-		hash, _ := s.streamRepo.GetCommentSongsHash(id)
-		if err := s.streamRepo.SaveCommentSongs(id, b, hash.String); err != nil {
-			logger.Warnf("[comment] match backfill save %s: %v", id, err)
-			continue
-		}
-		res.Changed++
-		for i := range songs {
-			if songs[i].MatchedSongID != nil {
-				res.Songs++
-			}
-		}
-	}
-	logger.Infof("[comment] match backfill 完了: 走査 %d / 変更 %d", res.Scanned, res.Changed)
-	return res, nil
-}
 
 func (s *CommentService) BackfillCommentSongsHashes() (HashBackfillResult, error) {
 	rows, err := s.streamRepo.FindCommentHashRows()

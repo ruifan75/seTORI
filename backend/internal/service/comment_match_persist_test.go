@@ -39,45 +39,74 @@ func TestMatchInputsFallsBackToExtraction(t *testing.T) {
 	}
 }
 
-// 候補だけが変わったときも「変化あり」と判定すること。
-// ここを見落とすと、候補を書き戻すようにしても保存されず DB は空のまま残る。
-func TestReresolveMatchesDetectsCandidateChange(t *testing.T) {
-	// matchService が nil の NormalizationService は候補を返さない。
-	// 保存済みの候補が消える方向の変化を再現できる。
-	svc := &CommentService{normalizationService: &NormalizationService{}}
-
-	songs := []dto.CommentSong{{
-		Name: "Starry night",
-		MatchCandidates: []dto.SongMatchCandidate{
-			{SongID: "8f7a7665-6d12-4f36-8f58-92f81ded9a10", Name: "Starry night", Score: 0.80, Reason: ReasonTitleOnly},
-		},
+// 保存前に照合の結果を落とすこと。
+//
+// 照合は読み取り時に計算する約束なので、保存すると「古い答えが 2 か所にある」状態になる。
+// これを守らないと、曲が増えても保存済みの古い matched_song_id が返り続ける。
+func TestStripMatchForStorage(t *testing.T) {
+	id := "8f7a7665-6d12-4f36-8f58-92f81ded9a10"
+	in := []dto.CommentSong{{
+		Start: 945, Name: "Starry night", NormalizedName: "Starry night",
+		MatchedSongID: &id, MatchedSongName: &id,
+		MatchCandidates: []dto.SongMatchCandidate{{SongID: id, Score: 0.80}},
+		Changes:         []dto.FieldChange{{Field: "name", By: "db_match"}},
 	}}
+	out := stripMatchForStorage(in)
 
-	if !svc.reresolveMatches(songs) {
-		t.Error("候補が消えたのに changed=false。保存されず古い候補が残る")
+	if out[0].MatchedSongID != nil || out[0].MatchCandidates != nil || out[0].Changes != nil {
+		t.Error("照合の結果が保存対象に残っている")
 	}
-	if len(songs[0].MatchCandidates) != 0 {
-		t.Errorf("MatchCandidates = %d 件, want 0（再解決の結果で置き換わること）", len(songs[0].MatchCandidates))
+	// 抽出・正規化は残す（AI を使う高い部分なので保存する価値がある）
+	if out[0].Name != "Starry night" || out[0].NormalizedName != "Starry night" || out[0].Start != 945 {
+		t.Error("抽出・正規化まで落としている。ここは保存しないと再取得に AI が要る")
 	}
-
-	// 2 回目は既に一致しているので変化なし＝無駄な書き込みをしない
-	if svc.reresolveMatches(songs) {
-		t.Error("同じ結果なのに changed=true。毎回 UPDATE が走る")
+	// 元の配列を壊さない（応答にはそのまま照合入りを返す）
+	if in[0].MatchedSongID == nil {
+		t.Error("入力を破壊している。応答用の値まで消える")
 	}
 }
 
-func TestCandidateSigDistinguishesScoreChange(t *testing.T) {
-	id := "8f7a7665-6d12-4f36-8f58-92f81ded9a10"
-	low := []dto.SongMatchCandidate{{SongID: id, Score: 0.80}}
-	high := []dto.SongMatchCandidate{{SongID: id, Score: 0.95}}
-	if candidateSig(low) == candidateSig(high) {
-		t.Error("点数が動いても同じ signature になっている。別名義の登録で確信度が上がった変化を取り逃す")
+// 「元は X、AI 正規化で Y、DB 照合で Z」を画面に出せること。
+func TestBuildFieldChanges(t *testing.T) {
+	name, artist := "Starry night", "稀羽すう"
+	s := dto.CommentSong{
+		// 曲名: 抽出 → 正規化でタグが落ちる。照合先とは同じ文字列なので db_match は記録しない
+		Name: "Starry night (Acoustic)", NormalizedName: "Starry night",
+		// アーティスト: AI は埋めなかったので抽出のまま照合へ行き、そこで表記が直る
+		OriginalArtist: "きうすう",
+		MatchedSongID:  &name, MatchedSongName: &name, MatchedSongArtist: &artist,
 	}
-	if candidateSig(nil) != "" {
-		t.Error("候補なしは空文字であるべき（omitempty で消える状態と一致させる）")
+	got := buildFieldChanges(s, ReasonExact, 1.0)
+
+	var byStep []string
+	for _, c := range got {
+		byStep = append(byStep, c.Field+":"+c.By)
 	}
-	if candidateSig(low) != candidateSig([]dto.SongMatchCandidate{{SongID: id, Score: 0.80}}) {
-		t.Error("同じ内容が別の signature になっている。毎回 changed 扱いで書き込みが走る")
+	want := map[string]bool{"name:ai_normalize": true, "artist:db_match": true}
+	for _, k := range byStep {
+		if !want[k] {
+			t.Errorf("余計な変更を記録している: %s", k)
+		}
+		delete(want, k)
+	}
+	for k := range want {
+		t.Errorf("記録されていない変更がある: %s", k)
+	}
+
+	// 留言に歌手が書かれておらず、照合で埋まった場合も記録すること。
+	// ここを落とすと、画面に理由なく歌手名が現れたように見える。
+	empty := dto.CommentSong{
+		Name: "Starry night", OriginalArtist: "",
+		MatchedSongID: &name, MatchedSongName: &name, MatchedSongArtist: &artist,
+	}
+	var found bool
+	for _, c := range buildFieldChanges(empty, ReasonTitleOnly, 0.8) {
+		if c.Field == "artist" && c.By == "db_match" && c.From == "" && c.To == artist {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("未記入 → 照合で補完 が記録されていない")
 	}
 }
 
