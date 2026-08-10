@@ -4,9 +4,12 @@
 // Source       = comment_raw (歌枠のセトリコメント).
 //
 // -mode regex    : pure deterministic path (comment.ParseComments). AI 失敗時のフォールバック。
-// -mode ai       : production と同じ 2 段階の抽出（comment.ParseCommentsWithAI, AI 失敗時は regex）。
+// -mode ai       : 2 段階の抽出（comment.ParseCommentsWithAI, AI 失敗時は regex）。
+//
+//	production では grouped が失敗したときの退避先。
+//
 // -mode combined : 抽出と正規化を 1 回で行う（comment.ParseAndNormalizeWithAI）。
-// -mode grouped  : 抽出＋正規化＋重複排除まで 1 回で行う実験経路
+// -mode grouped  : **production の既定**。抽出＋正規化＋重複排除まで 1 回で行う
 //
 //	（comment.ParseNormalizeAndDedupWithAI）。コメント境界を見せ、
 //	AI に「どの行をまとめたか」を src で申告させる。

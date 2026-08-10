@@ -223,6 +223,16 @@ func (s *CommentService) AnalyzeComments(videoID string, force bool) (*dto.Analy
 	var aiWarning string
 	if preNormalized {
 		s.reresolveMatches(songs)
+		// 曲名は一意に当たったのにアーティストだけ食い違った組を AI に判定させ、
+		// 別名義が確定したぶんだけ照合をやり直す。
+		//
+		// 2 段階経路では BatchAINormalization の中で同じことをしている。
+		// 統合経路はそこを通らないので、ここに置かないと**一度も実行されない**
+		// （既定が統合経路に変わった時点でそうなっていた）。
+		// 呼ぶのは新規解析のときだけ ── キャッシュ命中と backfill は AI を呼ばない約束。
+		if s.normalizationService != nil && s.normalizationService.AdjudicateAliasesForCommentSongs(songs) {
+			s.reresolveMatches(songs)
+		}
 	} else {
 		aiWarning = s.normalizeInto(songs)
 	}

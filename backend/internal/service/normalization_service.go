@@ -201,6 +201,9 @@ func (s *NormalizationService) BatchAINormalization(items []dto.AINormalizationI
 // resolveAliasesAndRematch は照合しきれなかったアーティストの組を AI に判定させ、
 // 別名義が登録できたぶんだけ照合をやり直す（in-place）。
 //
+// これは 2 段階経路（BatchAINormalization）用の入口。既定の統合経路は
+// AdjudicateAliasesForCommentSongs から同じ判定を呼ぶ。
+//
 // 呼ばない場所が 2 つある。
 //   - キャッシュ命中時の再解決（ResolveMatch）… AI を呼ばない約束の経路
 //   - 正規化の AI 呼び出しが失敗したとき … 2 回目も同じ理由で失敗する
@@ -238,15 +241,52 @@ func (s *NormalizationService) resolveAliasesAndRematch(items []dto.AINormalizat
 
 // collectArtistAliasPairsFromDTO は候補（DTO）から問い合わせ対象の組を拾う。
 func collectArtistAliasPairsFromDTO(sug dto.AISuggestionResult) []artistPair {
-	cands := make([]MatchCandidate, 0, len(sug.MatchCandidates))
-	for _, c := range sug.MatchCandidates {
+	return collectArtistAliasPairsFromCandidates(sug.OriginalArtist, sug.MatchCandidates)
+}
+
+// collectArtistAliasPairsFromCandidates は DTO の候補列から問い合わせ対象の組を拾う。
+// 2 段階経路（AISuggestionResult）と統合経路（CommentSong）の両方から使う。
+func collectArtistAliasPairsFromCandidates(artist string, dtoCands []dto.SongMatchCandidate) []artistPair {
+	cands := make([]MatchCandidate, 0, len(dtoCands))
+	for _, c := range dtoCands {
 		cands = append(cands, MatchCandidate{
 			Song:   models.Song{OriginalArtist: c.Artist},
 			Score:  c.Score,
 			Reason: c.Reason,
 		})
 	}
-	return collectArtistAliasPairs(sug.OriginalArtist, cands)
+	return collectArtistAliasPairs(artist, cands)
+}
+
+// AdjudicateAliasesForCommentSongs は統合経路（grouped）から呼ぶ別名義の AI 判定。
+//
+// 別名義が 1 つでも登録できたら true を返す。呼び出し側は照合をやり直す
+// （やり直しは CommentService.reresolveMatches が持っているので、ここでは判定だけ行う）。
+//
+// なぜ別入口が要るか：統合経路は抽出と正規化を 1 回の AI 呼び出しで済ませるため
+// BatchAINormalization を通らない。判定はそちらの中にあったので、
+// 既定が統合経路に切り替わった時点で**一度も実行されなくなっていた**
+// （本番の artist_alias_checks が 0 件だったのはこれが理由）。
+//
+// **キャッシュ命中と backfill からは呼ばないこと。** あちらは「AI を呼ばない」約束の経路で、
+// 何度でも無料で回せることが取り柄になっている。
+func (s *NormalizationService) AdjudicateAliasesForCommentSongs(songs []dto.CommentSong) bool {
+	if s.matchService == nil || s.aiClient == nil {
+		return false
+	}
+	var pairs []artistPair
+	for i := range songs {
+		if songs[i].MatchedSongID != nil {
+			continue // 既に自動採用できている
+		}
+		_, artist := MatchInputs(songs[i].Name, songs[i].OriginalArtist,
+			songs[i].NormalizedName, songs[i].NormalizedArtist)
+		pairs = append(pairs, collectArtistAliasPairsFromCandidates(artist, songs[i].MatchCandidates)...)
+	}
+	if len(pairs) == 0 {
+		return false
+	}
+	return s.adjudicateArtistAliases(pairs) > 0
 }
 
 // buildBatchMessage 構築包含所有楽曲のバッチメッセージ
