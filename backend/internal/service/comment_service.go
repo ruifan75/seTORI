@@ -528,8 +528,7 @@ func (s *CommentService) BackfillCommentSongs() (int, error) {
 		}
 		songsJSON = util.SanitizeJSONB(songsJSON)
 
-		stream.CommentSongs = songsJSON
-		if err := s.streamRepo.Update(&stream); err != nil {
+		if err := s.streamRepo.UpdateCommentSongs(stream.ID, songsJSON); err != nil {
 			logger.Warnf("backfill update error (video: %s): %v", stream.ID, err)
 			continue
 		}

@@ -109,30 +109,6 @@ func (r *StreamRepository) Create(s *models.Stream) error {
 	return nil
 }
 
-// Update 更新歌回（完整更新，包含大型 JSONB 欄位，僅用於同步/分析流程）
-func (r *StreamRepository) Update(s *models.Stream) error {
-	// 預先清理可能導致 "invalid input syntax for type json" 的壞資料（如舊 backfill 產生的 [null]）
-	s.HolodexData = util.SanitizeJSONB(s.HolodexData)
-	s.CommentRaw = util.SanitizeJSONB(s.CommentRaw)
-	s.CommentSongs = util.SanitizeJSONB(s.CommentSongs)
-
-	query := `
-		UPDATE streams
-		SET title = $2, stream_date = $3, duration_seconds = $4, thumbnail_url = $5,
-		    holodex_data = $6, holodex_hash = $7, comment_raw = $8, comment_songs = $9, is_processed = $10,
-		    is_hidden = COALESCE(visibility_override, $11), updated_at = NOW()
-		WHERE id = $1
-		RETURNING updated_at`
-
-	err := r.db.QueryRow(query, s.ID, s.Title, s.StreamDate, s.DurationSeconds,
-		s.ThumbnailURL, s.HolodexData, s.HolodexHash, s.CommentRaw, s.CommentSongs, s.IsProcessed, s.IsHidden).
-		Scan(&s.UpdatedAt)
-	if err != nil {
-		return fmt.Errorf("update stream: %w", err)
-	}
-	return nil
-}
-
 // UpdateMetadata 只更新可由使用者編輯的 metadata 欄位，不動大型 JSONB（holodex_data / comment_*）
 // 這樣可以避免在一般資訊更新時重寫可能有問題的 JSONB 資料
 func (r *StreamRepository) UpdateMetadata(id string, title string, streamDate time.Time, isProcessed bool) error {
@@ -696,6 +672,25 @@ func (r *StreamRepository) GetCommentSongsHash(id string) (sql.NullString, error
 }
 
 // SaveCommentSongs 寫入分析後的 comment_songs 與其來源 hash（只動這兩欄）
+// UpdateCommentSongs は解析結果の欄だけを書き換える。hash は触らない。
+//
+// hash が指すのは「どの comment_raw から作ったか」なので、抽出をやり直していない
+// 更新（拍手 end の付与など）では据え置くのが正しい。ここで動かすと次回の解析が
+// キャッシュを外して AI を呼ぶ。
+//
+// 行まるごとの更新（旧 Update）を置き換えたもの。あちらは title / holodex_data /
+// comment_raw / is_hidden まで巻き込んで書き戻すので、呼び出し側が完全な行を
+// 持っていることが暗黙の前提になっていた。部分的に組み立てた model を渡すと
+// comment_songs が黙って空になる ── 失敗してもエラーもログも出ない形だった。
+func (r *StreamRepository) UpdateCommentSongs(id string, songs []byte) error {
+	_, err := r.db.Exec(`UPDATE streams SET comment_songs = $2, updated_at = NOW() WHERE id = $1`,
+		id, util.SanitizeJSONB(songs))
+	if err != nil {
+		return fmt.Errorf("update comment songs: %w", err)
+	}
+	return nil
+}
+
 func (r *StreamRepository) SaveCommentSongs(id string, songs []byte, hash string) error {
 	songs = util.SanitizeJSONB(songs)
 	_, err := r.db.Exec(`UPDATE streams SET comment_songs = $2, comment_songs_hash = $3, updated_at = NOW() WHERE id = $1`, id, songs, hash)

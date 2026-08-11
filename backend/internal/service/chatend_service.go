@@ -19,7 +19,6 @@ import (
 	"github.com/ruifan75/setori/internal/logger"
 	"github.com/ruifan75/setori/internal/repository"
 	"github.com/ruifan75/setori/pkg/chatend"
-	"github.com/ruifan75/setori/pkg/util"
 )
 
 // ChatEndService 從 live chat 的「拍手」偵測每首歌的結束時間，並更新 comment_songs。
@@ -137,10 +136,10 @@ func (s *ChatEndService) AnalyzeStream(videoID string) (AnalyzeResult, error) {
 	if err != nil {
 		return res, fmt.Errorf("marshal comment songs: %w", err)
 	}
-	raw = util.SanitizeJSONB(raw)
-	stream.CommentSongs = raw
-	if err := s.streamRepo.Update(stream); err != nil {
-		return res, fmt.Errorf("update stream: %w", err)
+	// 解析結果の欄だけを書く。hash は据え置く（抽出元のコメントは変えていない）。
+	// 行まるごと書き戻すと、拍手 end の付与が title や is_hidden まで巻き込む。
+	if err := s.streamRepo.UpdateCommentSongs(videoID, raw); err != nil {
+		return res, fmt.Errorf("update comment songs: %w", err)
 	}
 	logger.Infof("[chatend] %s: %d/%d 曲の拍手終了を取得（%d 曲を更新）", videoID, filled, len(songs), changed)
 	return res, nil
