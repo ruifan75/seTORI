@@ -122,10 +122,25 @@ func (s *CommentService) ConfirmCommentSongMatch(videoID string, index int, expe
 	return &songs[index], nil
 }
 
-// AnalyzeComments 從留言分析歌曲：AI 抽取 → 正規化＋DB 照合 → live chat 拍手 end → 存 DB。
+// AnalyzeComments 從留言分析歌曲：AI 抽取 → 正規化 → live chat 拍手 end → 存 DB。
 // 以 comment_raw 的 hash 為快取鍵：資料沒變且非強制時，直接回傳已存的 comment_songs（不打 AI）。
+//
+// 利用者が「読み込む」を押した経路。抽出に加えて、決着しなかった行の
+// AI 判定（別名義・楽曲の同一性）まで行う ── 押した人はどのみち待っているし、
+// これから編集する配信なので判定する価値がある。
 func (s *CommentService) AnalyzeComments(videoID string, force bool) (*dto.AnalyzeCommentsResponse, error) {
-	return s.analyzeComments(videoID, force, false)
+	return s.analyzeComments(videoID, force, false, true)
+}
+
+// AnalyzeCommentsForBatch は一括プレ分析用。**AI 判定は行わない。**
+//
+// 一括分析がやるのは「comment_raw → comment_songs」（抽出＋正規化＋拍手 end）まで。
+// 照合とその判定は、人がその配信を開いて読み込むときの仕事なので分ける。
+//
+// 混ぜると、724 本を回すだけで 1 本あたり最大 3 回の AI 呼び出しになり、
+// 誰も見ていない配信のために別名義の学習（全站の照合に効く）が進んでしまう。
+func (s *CommentService) AnalyzeCommentsForBatch(videoID string, force bool) (*dto.AnalyzeCommentsResponse, error) {
+	return s.analyzeComments(videoID, force, false, false)
 }
 
 // AnalyzeCommentsDryRun は解析だけ行い、**何も書き込まない**。
@@ -137,10 +152,10 @@ func (s *CommentService) AnalyzeComments(videoID string, force bool) (*dto.Analy
 // 別名義の AI 判定は**行わない**（判定は artist_alias_checks への書き込みを伴うため）。
 // その分だけ本番の挙動とはズレる。stats.path と alias_pairs_asked=0 で判別できる。
 func (s *CommentService) AnalyzeCommentsDryRun(videoID string) (*dto.AnalyzeCommentsResponse, error) {
-	return s.analyzeComments(videoID, true, true)
+	return s.analyzeComments(videoID, true, true, false)
 }
 
-func (s *CommentService) analyzeComments(videoID string, force, dryRun bool) (*dto.AnalyzeCommentsResponse, error) {
+func (s *CommentService) analyzeComments(videoID string, force, dryRun, adjudicate bool) (*dto.AnalyzeCommentsResponse, error) {
 	stream, err := s.streamRepo.FindByID(videoID)
 	if err != nil {
 		return nil, fmt.Errorf("find stream: %w", err)
@@ -168,7 +183,7 @@ func (s *CommentService) analyzeComments(videoID string, force, dryRun bool) (*d
 				// 抽出のやり直しは不要でも、照合が決着しない行は残りうる。
 				// 利用者が読み込みを押した瞬間なので、ここで判定してよい。
 				var ca, cl int
-				if s.normalizationService != nil && !dryRun {
+				if s.normalizationService != nil && adjudicate && !dryRun {
 					ca, cl = s.adjudicateAll(cached)
 				}
 				logger.Infof("/comments/analyze cache hit for %s (%d songs)", videoID, len(cached))
@@ -238,7 +253,7 @@ func (s *CommentService) analyzeComments(videoID string, force, dryRun bool) (*d
 		// （既定が統合経路に変わった時点でそうなっていた）。
 		// 呼ぶのは新規解析のときだけ ── キャッシュ命中と backfill は AI を呼ばない約束。
 		// dry-run では行わない。判定は checks テーブルへの書き込みを伴うため。
-		if s.normalizationService != nil && !dryRun {
+		if s.normalizationService != nil && adjudicate && !dryRun {
 			aliasAsked, aliasLinked = s.adjudicateAll(songs)
 		}
 	} else {
@@ -297,10 +312,11 @@ func (s *CommentService) analyzeComments(videoID string, force, dryRun bool) (*d
 // （深昏睡 / 深昏睡 (Deep coma)）。前者は曲名キーが当たっている組、
 // 後者は曲名キーごと外れている組が対象なので、両方要る。
 //
-// **利用者が「読み込む」を押した時にだけ通る。** 配信詳細を開いただけの
-// GET からは呼ばない ── あちらは閲覧者が通るだけの経路で、
-// 見ているだけで AI を呼ぶことになる。判定は保存されるので、
-// 一度誰かが読み込めば、以後の閲覧は無料でその結果を受け取る。
+// **利用者が「読み込む」を押した時にだけ通る。** 呼ばない場所が 2 つある。
+//   - 配信詳細の GET … 閲覧者が通るだけの経路。見ているだけで AI を呼ぶことになる
+//   - 一括プレ分析 … 誰も見ていない配信のために、全站の照合に効く学習を進めてしまう
+//
+// 判定は保存されるので、一度誰かが読み込めば以後の閲覧は無料でその結果を受け取る。
 func (s *CommentService) adjudicateAll(songs []dto.CommentSong) (asked, linked int) {
 	n := s.normalizationService
 	a1, l1 := n.AdjudicateAliasesForCommentSongs(songs)

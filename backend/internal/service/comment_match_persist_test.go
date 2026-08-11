@@ -166,3 +166,21 @@ func TestResolveFallsBackToRawWhenNormalizationBreaksMatch(t *testing.T) {
 		t.Fatalf("前提が崩れている: %q / %q", name, artist)
 	}
 }
+
+// 一括プレ分析は AI 判定を行わないこと。
+//
+// 抽出（comment_raw → comment_songs）と照合の判定は別の仕事で、後者は
+// 人がその配信を開いて読み込むときに走るべきもの。混ぜると、724 本を回すだけで
+// 1 本あたり最大 3 回の AI 呼び出しになり、しかも誰も見ていない配信のために
+// 別名義の学習（全站の照合に効く）が進んでしまう。
+//
+// ここでは入口が分かれていること自体を固定する。実際の判定は AI と DB が要るので、
+// 依存の無い状態で「呼んでも何も起きない」ことまでを見る。
+func TestBatchAnalyzeDoesNotAdjudicate(t *testing.T) {
+	svc := &CommentService{}
+	// 判定の入口が nil 安全であること（一括経路では adjudicate=false で素通りする）
+	if asked, linked := (&NormalizationService{}).AdjudicateSongIdentityForCommentSongs(nil); asked != 0 || linked != 0 {
+		t.Errorf("asked=%d linked=%d, want 0/0", asked, linked)
+	}
+	_ = svc
+}

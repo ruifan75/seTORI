@@ -167,7 +167,8 @@ func (s *BatchAnalyzeService) processOne(videoID string, forceStart bool) bool {
 			return false
 		}
 
-		resp, err := s.commentService.AnalyzeComments(videoID, force)
+		// 一括分析は抽出までにとどめる。照合の AI 判定は人が読み込むときの仕事
+		resp, err := s.commentService.AnalyzeCommentsForBatch(videoID, force)
 		if err == nil && resp.Warning == "" {
 			return true
 		}
