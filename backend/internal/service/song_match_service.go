@@ -526,10 +526,14 @@ func (s *SongMatchService) CandidatesForIdentity(name, artist string) ([]MatchCa
 	// 候補が無い場合だけ、曲名キーの接頭辞で拾い直す。
 	// 深昏睡 → 深昏睡deepcoma、革命道中 → 革命道中ontheway のように、
 	// コメントの表記が DB のキーの接頭辞になっている型を拾うため。
+	//
+	// **文字数で足切りしないこと。** 一度 4 文字未満を弾いていて「深昏睡」(3 文字) が
+	// 漏れ、2 文字に下げても「唱」(Ado) のような 1 文字の曲名が漏れた。
+	// 実測すると短い曲名は珍しくない（819 曲中 1 文字 14・2 文字 29・3 文字 64）。
+	// そもそも当たり過ぎるかどうかを決めるのはヒット数であって字数ではない
+	// ── 「怪獣」は 2 文字でも 1 件しか当たらず、「恋」は 1 文字で 10 件当たる。
+	// 数は下の LIMIT で抑える（キー長の昇順なので、近いものから順に取れる）。
 	nameKey := songmatch.TitleKey(name)
-	if len([]rune(nameKey)) < identityPrefixMinKeyRunes {
-		return nil, nil // 短すぎるキーは何にでも当たる
-	}
 	hits, err := s.matchRepo.FindByNameKeyPrefix(nameKey, identityPrefixLimit)
 	if err != nil {
 		return nil, err
@@ -540,14 +544,6 @@ func (s *SongMatchService) CandidatesForIdentity(name, artist string) ([]MatchCa
 	return out, nil
 }
 
-const (
-	// 接頭辞で拾うときの下限。1 文字のキーは何にでも当たるので除くが、それ以上は通す。
-	//
-	// 文字数で切るとき、**ラテン文字と漢字を同じ尺度で測らないこと**。
-	// 「深昏睡」は 3 文字だが十分に特定的で、これを弾くと日本語の曲名が軒並み漏れる
-	// （実際 4 文字にしていて 深昏睡 が拾えなかった）。取りこぼしは LIMIT と
-	// キー長の昇順で抑える。
-	identityPrefixMinKeyRunes = 2
-	// 1 件あたりの問い合わせ数の上限（AI の入力を膨らませないため）。
-	identityPrefixLimit = 3
-)
+// identityPrefixLimit は 1 件あたりの問い合わせ数の上限（AI の入力を膨らませないため）。
+// 当たり過ぎるキー（「恋」で 10 件など）はここで頭打ちになる。
+const identityPrefixLimit = 3

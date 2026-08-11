@@ -49,3 +49,22 @@ func TestIdentityPairKeyMatchesLookupKey(t *testing.T) {
 		t.Errorf("キーの作り方が食い違っている:\n  service 側 %q\n  repo 側    %q", fromPkg, fromRepo)
 	}
 }
+
+// 短い曲名を文字数で足切りしないこと。
+//
+// 実装当初 4 文字未満を弾いていて「深昏睡」(3 文字) が漏れ、2 文字に下げても
+// 「唱」(Ado) のような 1 文字の曲名が漏れた。実測では 819 曲中 1 文字が 14 件、
+// 2 文字が 29 件あり、短い曲名は珍しくない。
+// 当たり過ぎるかどうかを決めるのはヒット数であって字数ではない
+// （「怪獣」は 2 文字でも 1 件、「恋」は 1 文字で 10 件）。
+func TestIdentityRecallHasNoLengthCutoff(t *testing.T) {
+	for _, name := range []string{"唱", "空", "燈", "怪獣", "深昏睡"} {
+		if key := songmatch.TitleKey(name); key == "" {
+			t.Errorf("%q の照合キーが空。これでは召回も学習もできない", name)
+		}
+	}
+	// 上限は件数側で持つ（AI の入力を膨らませないため）
+	if identityPrefixLimit <= 0 || identityPrefixLimit > 5 {
+		t.Errorf("identityPrefixLimit = %d。0 だと召回が死に、大きすぎるとプロンプトが膨らむ", identityPrefixLimit)
+	}
+}
