@@ -2,7 +2,7 @@ package service
 
 import "testing"
 
-func TestDefaultStreamHidden(t *testing.T) {
+func TestInitialStreamHidden(t *testing.T) {
 	tests := []struct {
 		name          string
 		topicID       string
@@ -78,9 +78,9 @@ func TestDefaultStreamHidden(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := defaultStreamHidden(tt.topicID, tt.duration, tt.durationKnown, tt.tagIDs)
+			got := initialStreamHidden(tt.topicID, tt.duration, tt.durationKnown, tt.tagIDs)
 			if got != tt.wantHidden {
-				t.Fatalf("defaultStreamHidden() = %v, want %v", got, tt.wantHidden)
+				t.Fatalf("initialStreamHidden() = %v, want %v", got, tt.wantHidden)
 			}
 		})
 	}

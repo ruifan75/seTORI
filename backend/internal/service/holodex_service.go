@@ -475,19 +475,21 @@ func (s *HolodexService) syncVideo(video holodex.Video, channelID string, forceU
 		return "", fmt.Errorf("apply tag rules: %w", err)
 	}
 
-	// Holodex topic とタイトル規則の両方を反映したあとで自動可視性を決める。
-	// shorts の印だけでは隠さず動画長も見るため、長い歌枠に #shorts があっても表示する。
-	tags, err := s.streamRepo.GetTags(video.ID)
-	if err != nil {
-		return "", fmt.Errorf("get stream tags for visibility: %w", err)
-	}
-	tagIDs := make([]string, 0, len(tags))
-	for _, tag := range tags {
-		tagIDs = append(tagIDs, tag.ID)
-	}
-	autoHidden := defaultStreamHidden(video.TopicID, video.Duration, video.Duration > 0, tagIDs)
-	if err := s.streamRepo.ApplyAutomaticVisibility(video.ID, autoHidden); err != nil {
-		return "", fmt.Errorf("apply automatic stream visibility: %w", err)
+	// 表示状態の自動判定は初回登録時だけ。既存配信は force sync でも触らず、
+	// 以後は画面の「非表示」チェックで人が決めた値をそのまま保つ。
+	if existing == nil {
+		tags, err := s.streamRepo.GetTags(video.ID)
+		if err != nil {
+			return "", fmt.Errorf("get stream tags for initial visibility: %w", err)
+		}
+		tagIDs := make([]string, 0, len(tags))
+		for _, tag := range tags {
+			tagIDs = append(tagIDs, tag.ID)
+		}
+		initialHidden := initialStreamHidden(video.TopicID, video.Duration, video.Duration > 0, tagIDs)
+		if err := s.streamRepo.SetInitialVisibility(video.ID, initialHidden); err != nil {
+			return "", fmt.Errorf("set initial stream visibility: %w", err)
+		}
 	}
 
 	// 影片擁有者（上傳頻道）。collab 影片的擁有者是主辦頻道，不是被同步的頻道，

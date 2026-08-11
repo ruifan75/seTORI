@@ -40,7 +40,8 @@
   `music_cover` / `mv` / `original_song` / `singing` のどれかを持つ配信は既定で表示する。
   ただし topic またはタグが `shorts` で動画長が 180 秒以下（長さ不明を含む）なら、
   音楽タグより短尺判定を優先して非表示にする。長い `#shorts` 付き歌枠は表示する。
-  人工修正は `visibility_override` に保存し、同期は上書きしない。
+  この判定は初回登録時だけ行い、以後は `is_hidden` を手動編集する。再同期は表示状態を
+  上書きせず、タグが変わっても再判定しない。
   詳細な優先順位と実例は [`STREAM_VISIBILITY.md`](./STREAM_VISIBILITY.md)
 - **備考**：`GetChannelVideos`、`SearchVideos` は定義済みだが未使用。
 

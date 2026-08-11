@@ -4,9 +4,10 @@
 Holodex の分類もタイトルキーワード規則も自動判定であり、片方だけを正解として扱うと
 短い Shorts を歌枠として出したり、逆に長い歌枠を隠したりするためである。
 
-## 自動判定の優先順位
+## 初回判定の優先順位
 
-同期は Holodex topic のタグとタイトルキーワードのタグをすべて付けたあと、次の順で判定する。
+配信を初めて登録するときだけ、Holodex topic のタグとタイトルキーワードのタグを
+すべて付けたあと、次の順で判定する。
 
 1. `shorts` の訊号があり、動画長が **180 秒以下**なら非表示
 2. `shorts` の訊号があるが動画長を取得できない場合も、保守的に非表示
@@ -33,28 +34,22 @@ Holodex の分類もタイトルキーワード規則も自動判定であり、
 | `CKppP9S5ZPA` | `shorts`, `singing` | 5,773 秒 | 表示 | shorts の文字はあるが長い歌枠 |
 | `94ogLRe7dwM` | `shorts`, `singing` | 30 秒 | 非表示 | タイトルから singing が付いても実体は短尺 |
 
-判定本体は `internal/service/stream_visibility.go` に置き、Holodex 同期と編集 API が
-同じ関数を使う。SQL migration の閾値も同じ 180 秒に揃えること。
+判定本体は `internal/service/stream_visibility.go` に置く。SQL migration の閾値も
+同じ 180 秒に揃えること。
 
-## 人工修正を同期から守る
+## 初回登録後は再判定しない
 
-`is_hidden` は一覧検索で使う**実効値**であり、自動判定そのものではない。
-人が直した状態を次回同期で戻さないため、`streams.visibility_override` を別に持つ。
+初回判定で `streams.is_hidden` を確定したあとは「自動」という状態を持たない。
+表示か非表示の二態だけで、画面の「非表示」checkbox と
+`PUT /api/streams/{id}` の `is_hidden` がこの列を直接編集する。
 
-| `visibility_override` | 意味 | 実効 `is_hidden` |
-|---|---|---|
-| `NULL` | 自動 | 現在の自動判定 |
-| `FALSE` | 表示に固定 | `FALSE` |
-| `TRUE` | 非表示に固定 | `TRUE` |
+既存配信を Holodex から再同期すると、外部 metadata とタグは更新するが
+`is_hidden` は更新せず、初回判定も呼ばない。タイトルやタグを手で編集したときも
+再判定しない。これにより、人が直した表示状態は追加の override 列なしで維持される。
 
-実効値は常に `COALESCE(visibility_override, auto_hidden)` で決める。
-Holodex 同期は外部データと自動タグを更新して自動判定をやり直すが、
-`visibility_override` は書き換えない。したがって人工修正は何度同期しても残る。
-
-編集 API `PUT /api/streams/{id}` は `visibility_mode` に
-`auto` / `visible` / `hidden` のいずれかを受ける。既存クライアントの `is_hidden` も
-互換性のため受けるが、その値は手動固定として保存する。画面で「自動」に戻すと
-override を `NULL` にし、その時点の topic・動画長・タグで直ちに再判定する。
+`StreamRepository.Upsert` の conflict 更新に `is_hidden` を含めないこと、
+`HolodexService` が初回登録 (`existing == nil`) のときだけ `SetInitialVisibility` を
+呼ぶことの二段で、この仕様を守る。
 
 ## migration は一度だけ実行される
 
@@ -65,11 +60,12 @@ override を `NULL` にし、その時点の topic・動画長・タグで直ち
 
 `039_fix_shorts_visibility.sql` は次を行う。
 
-- nullable な `visibility_override` を追加
+- 三態案のため `visibility_override` を一時的に追加（最終的には 041 で削除）
 - 新しい DB でも `shorts` タグとタイトルキーワード規則が必ず存在するよう補完
-- `038` が表示した既存の短尺 Shorts のうち、override が無い行だけを再び非表示にする
+- `038` が表示した既存の短尺 Shorts を一度だけ再び非表示にする
 - 180 秒を超える `CKppP9S5ZPA` のような長い歌枠は変更しない
 
-なお、039 より前の `is_hidden` には「自動で決まったか、人が直したか」の履歴が無い。
-過去の人工修正を機械的に識別して override へ移すことはできないため、039 適用後に
-画面から固定した値を、以後の同期で保護する。
+039 は一度 `visibility_override` も追加したが、三態設計を採用しないことにしたため、
+`041_remove_stream_visibility_override.sql` がこの列を削除する。039 の期間中に人工設定が
+あった場合も、その実効値は既に `is_hidden` に書かれているので表示状態は失われない。
+041 適用後は `is_hidden` だけが正となる。

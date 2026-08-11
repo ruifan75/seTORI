@@ -220,7 +220,6 @@ type StreamResponse struct {
 	ChannelOwner         *SingerResponse     `json:"channel_owner,omitempty"` // 頻道擁有者
 	IsProcessed          bool                `json:"is_processed"`
 	IsHidden             bool                `json:"is_hidden"`
-	VisibilityOverride   *bool               `json:"visibility_override"`              // nil=自動、true=非表示固定、false=表示固定
 	HolodexTimelineSongs []SongSuggestion    `json:"holodex_timeline_songs,omitempty"` // 從 holodex_data 解析
 	CommentTimelineSongs []CommentSong       `json:"comment_timeline_songs,omitempty"` // 從 comment_songs 解析（已分析快取）
 	HasCommentRaw        bool                `json:"has_comment_raw"`                  // comment_raw 是否有留言可供分析
@@ -248,7 +247,6 @@ type UpdateStreamRequest struct {
 	ParticipantIDs []string `json:"participant_ids,omitempty"`
 	IsProcessed    *bool    `json:"is_processed,omitempty"`
 	IsHidden       *bool    `json:"is_hidden,omitempty"`
-	VisibilityMode *string  `json:"visibility_mode,omitempty"` // auto / visible / hidden
 }
 
 // ========== 演出 ==========

@@ -1,10 +1,7 @@
 package service
 
 import (
-	"encoding/json"
 	"strings"
-
-	"github.com/ruifan75/setori/internal/models"
 )
 
 const shortFormMaxDurationSeconds = 180
@@ -20,10 +17,10 @@ var visibleMusicStreamTagIDs = []string{
 	"singing",
 }
 
-// defaultStreamHidden は Holodex topic と seTORI 側のタグをどちらも「自動判定の
+// initialStreamHidden は Holodex topic と seTORI 側のタグをどちらも「初回判定の
 // 訊号」として扱う。どちらか一方を常に正しいとはみなさず、shorts は動画長と
 // 組み合わせて判定する。
-func defaultStreamHidden(topicID string, durationSeconds int, durationKnown bool, tagIDs []string) bool {
+func initialStreamHidden(topicID string, durationSeconds int, durationKnown bool, tagIDs []string) bool {
 	tags := make(map[string]struct{}, len(tagIDs))
 	for _, tagID := range tagIDs {
 		tagID = strings.ToLower(strings.TrimSpace(tagID))
@@ -45,32 +42,4 @@ func defaultStreamHidden(topicID string, durationSeconds int, durationKnown bool
 	}
 
 	return true
-}
-
-func automaticStreamHidden(stream models.Stream, tags []models.StreamTag) bool {
-	tagIDs := make([]string, 0, len(tags))
-	for _, tag := range tags {
-		tagIDs = append(tagIDs, tag.ID)
-	}
-
-	return defaultStreamHidden(
-		streamTopicID(stream.HolodexData),
-		int(stream.DurationSeconds.Int32),
-		stream.DurationSeconds.Valid && stream.DurationSeconds.Int32 > 0,
-		tagIDs,
-	)
-}
-
-func streamTopicID(holodexData []byte) string {
-	if len(holodexData) == 0 {
-		return ""
-	}
-
-	var data struct {
-		TopicID string `json:"topic_id"`
-	}
-	if err := json.Unmarshal(holodexData, &data); err != nil {
-		return ""
-	}
-	return data.TopicID
 }

@@ -102,12 +102,11 @@ type Stream struct {
 	// CommentSongsAnalyzedAt は解析（抽出＋正規化）を最後に走らせた時刻。
 	// FindByID でのみ読む（一覧では使わないので他の SELECT には含めていない）。
 	CommentSongsAnalyzedAt sql.NullTime
-	CommentSongs           []byte       `json:"comment_songs"`       // JSONB - Parsed songs (undeduped)
-	IsProcessed            bool         `json:"is_processed"`        // 處理完成
-	IsHidden               bool         `json:"is_hidden"`           // 有效的隱藏狀態（自動判定または手動 override）
-	VisibilityOverride     sql.NullBool `json:"visibility_override"` // NULL=自動、TRUE=非表示固定、FALSE=表示固定
-	CreatedAt              time.Time    `json:"created_at"`
-	UpdatedAt              time.Time    `json:"updated_at"`
+	CommentSongs           []byte    `json:"comment_songs"` // JSONB - Parsed songs (undeduped)
+	IsProcessed            bool      `json:"is_processed"`  // 處理完成
+	IsHidden               bool      `json:"is_hidden"`     // 初回登録時に判定し、その後は手動編集のみ
+	CreatedAt              time.Time `json:"created_at"`
+	UpdatedAt              time.Time `json:"updated_at"`
 }
 
 // StreamSearchFilters 配信検索で組み合わせられる条件。
