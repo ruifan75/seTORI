@@ -141,3 +141,28 @@ func TestAdjudicateAliasesForCommentSongs(t *testing.T) {
 		t.Errorf("連名の組を %d 件拾っている。問いが曖昧になるので対象外のはず", len(p))
 	}
 }
+
+// 正規化が照合を壊したときに抽出のままで引き直すこと。
+//
+// AI 正規化は「日本語と英語の併記なら日本語のみ」という規則で
+// `Departures 〜あなたにおくるアイの歌〜` を `あなたにおくるアイの歌` にし、
+// アーティストも `グミ` → `GUMI` と書き換える。どちらも DB の表記から離れる方向で、
+// 本番の GT では照合できなかった 213 件のうち 78 件（37%）がこれだった。
+//
+// なお **照合できないのが正しい場合もある**。`弱虫モンブラン` と
+// `弱虫モンブラン (Reloaded)` は編曲が違う別録音で、コメント側の書き手が
+// 取り違えていることがある。ここを機械で「直して」はいけない
+// ── 気づくのは人で、修正提案の仕組みがその受け皿になっている。
+func TestResolveFallsBackToRawWhenNormalizationBreaksMatch(t *testing.T) {
+	// matchService が nil のときは 2 回目も引かない（無駄な問い合わせをしない）
+	svc := &NormalizationService{}
+	if m, _ := svc.resolveOne("Departures 〜あなたに〜", "EGOIST", "あなたに", "EGOIST", nil); m.MatchedSongID != nil {
+		t.Error("照合サービスが無いのに結果が返っている")
+	}
+
+	// 正規化値と抽出値が同じなら引き直さない（条件の確認）
+	name, artist := MatchInputs("Lemon", "米津玄師", "Lemon", "米津玄師")
+	if name != "Lemon" || artist != "米津玄師" {
+		t.Fatalf("前提が崩れている: %q / %q", name, artist)
+	}
+}

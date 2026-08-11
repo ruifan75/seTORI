@@ -21,6 +21,23 @@ func (s *NormalizationService) resolveOne(rawName, rawArtist, normName, normArti
 	name, artist := MatchInputs(rawName, rawArtist, normName, normArtist)
 	m := s.ResolveMatch(name, artist, itunesID)
 
+	// 正規化が照合を壊すことがある。外れたら抽出のままでもう一度引く。
+	//
+	// AI 正規化は「日本語と英語が併記されていたら日本語のみ」という規則を持つので、
+	// `Departures 〜あなたにおくるアイの歌〜` を `あなたにおくるアイの歌` にしてしまう。
+	// アーティストも `グミ` を `GUMI` に書き換える。どちらも DB 側の表記から離れる方向。
+	// 本番の GT で数えると、照合できなかった 213 件のうち 78 件（37%）がこれだった
+	// ── 抽出のまま引けば当たる。
+	//
+	// 正規化そのものは残す。新曲を登録するときの名前はこちらを使う（`Acoustic Ver.` 等が
+	// 落ちた形が欲しい）。正規化を**照合の唯一の鍵にしない**というだけ。
+	usedRaw := false
+	if m.MatchedSongID == nil && (name != rawName || artist != rawArtist) {
+		if raw := s.ResolveMatch(rawName, rawArtist, itunesID); raw.MatchedSongID != nil {
+			m, usedRaw = raw, true
+		}
+	}
+
 	var changes []dto.FieldChange
 	add := func(field, by, from, to, reason string, score float64) {
 		// from が空でも記録する。「留言に歌手が書かれていなかったのに、
@@ -38,13 +55,19 @@ func (s *NormalizationService) resolveOne(rawName, rawArtist, normName, normArti
 	add("name", "ai_normalize", rawName, normName, "", 0)
 	add("artist", "ai_normalize", rawArtist, normArtist, "", 0)
 
-	// 正規化（無ければ抽出） → DB 照合。照合できた場合だけ
+	// 正規化（無ければ抽出） → DB 照合。照合できた場合だけ。
+	// 抽出のままで当たった場合は、そちらを起点として見せる（画面の「元の値」が
+	// 実際に照合に使われた値と食い違わないように）。
 	if m.MatchedSongID != nil {
+		from, fromArt := name, artist
+		if usedRaw {
+			from, fromArt = rawName, rawArtist
+		}
 		if m.MatchedSongName != nil {
-			add("name", "db_match", name, *m.MatchedSongName, m.MatchReason, m.MatchScore)
+			add("name", "db_match", from, *m.MatchedSongName, m.MatchReason, m.MatchScore)
 		}
 		if m.MatchedSongArtist != nil {
-			add("artist", "db_match", artist, *m.MatchedSongArtist, m.MatchReason, m.MatchScore)
+			add("artist", "db_match", fromArt, *m.MatchedSongArtist, m.MatchReason, m.MatchScore)
 		}
 	}
 	return m, changes

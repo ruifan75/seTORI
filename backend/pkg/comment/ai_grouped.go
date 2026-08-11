@@ -296,7 +296,7 @@ func buildSongsFromGrouped(selections []groupedSelection, lines []commentLine) [
 		merged.NormalizedArtist = strings.TrimSpace(sel.NormArt)
 		merged.NormalizedNameReading = strings.TrimSpace(sel.NormRead)
 		merged.NormalizedArtistReading = strings.TrimSpace(sel.NormArtRd)
-		merged.Tags = filterAllowedTags(sel.Tags)
+		merged.Tags = normalizeTags(sel.Tags, merged.Name)
 		merged.Confidence = sel.Confid
 
 		result = append(result, *merged)

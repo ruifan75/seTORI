@@ -23,6 +23,30 @@ import (
 //   - 元コメントがある  → こちら（1 回で抽出＋正規化）
 //   - 元コメントが無い  → BatchAINormalization（正規化のみ）
 
+// tagSynonyms は「同じ演奏バージョンを指す別の言い方」を正規のタグへ寄せる。
+//
+// AI は原文にある語をそのままタグにしがちで、`1chorus` のような書き方は
+// allowedTags に無いので黙って捨てられていた。捨てるとタグが付かないだけでなく、
+// **その情報が二度と復元できない**（正規化後の曲名からは既に削られている）。
+var tagSynonyms = map[string]string{
+	"1chorus":   "short",
+	"1coruhs":   "short", // 実データにある綴り間違い
+	"onechorus": "short",
+	"1コーラス":     "short",
+	"ワンコーラス":    "short",
+	"1番のみ":      "short",
+	"ショート":      "short",
+	"フル":        "full",
+	"アカペラ":      "acappella",
+	"ピアノ":       "piano",
+	"アコースティック":  "acoustic",
+	"メドレー":      "medley",
+}
+
+// shortMarkers は逐字の曲名から short を導ける語。
+// AI がタグを付け忘れても、原文に書いてあれば拾えるようにしておく。
+var shortMarkers = []string{"1chorus", "1 chorus", "1コーラス", "ワンコーラス", "1番のみ", "short ver", "ショートver"}
+
 // allowedTags は正規化で許可する演奏バージョンタグ。
 // AI が語彙外の値を返しても DB を汚さないよう、Go 側で必ず濾す。
 var allowedTags = map[string]bool{
@@ -246,7 +270,7 @@ func buildSongsFromCombined(selections []combinedSelection, lines []string) []Pa
 		parsed.NormalizedArtist = strings.TrimSpace(sel.NormArt)
 		parsed.NormalizedNameReading = strings.TrimSpace(sel.NormRead)
 		parsed.NormalizedArtistReading = strings.TrimSpace(sel.NormArtRd)
-		parsed.Tags = filterAllowedTags(sel.Tags)
+		parsed.Tags = normalizeTags(sel.Tags, parsed.Name)
 		parsed.Confidence = sel.Confid
 
 		result = append(result, *parsed)
@@ -258,6 +282,28 @@ func buildSongsFromCombined(selections []combinedSelection, lines []string) []Pa
 // filterAllowedTags は既知のタグ語彙だけを残す。
 // AI が "piano ver." や "ピアノ" のような表記で返しても DB のタグ ID とは一致しないため、
 // 語彙外は落とす（誤ったタグを作るより、付かない方が害が小さい）。
+// normalizeTags は AI が返したタグを正規の語彙へ寄せ、
+// 逐字の曲名からも導けるタグを補う。
+func normalizeTags(tags []string, verbatim string) []string {
+	out := filterAllowedTags(tags)
+
+	// 原文に 1chorus 等が書かれていれば short を補う。
+	// 正規化後の曲名からは削られているので、ここで拾わないと失われる。
+	low := strings.ToLower(verbatim)
+	for _, m := range shortMarkers {
+		if !strings.Contains(low, m) {
+			continue
+		}
+		for _, t := range out {
+			if t == "short" {
+				return out
+			}
+		}
+		return append(out, "short")
+	}
+	return out
+}
+
 func filterAllowedTags(tags []string) []string {
 	if len(tags) == 0 {
 		return nil
@@ -266,7 +312,14 @@ func filterAllowedTags(tags []string) []string {
 	seen := make(map[string]bool, len(tags))
 	for _, t := range tags {
 		t = strings.TrimSpace(t)
-		if t == "" || seen[t] {
+		if t == "" {
+			continue
+		}
+		// 別の言い方は正規のタグへ寄せる（捨てると情報が復元できない）
+		if canon, ok := tagSynonyms[strings.ToLower(t)]; ok {
+			t = canon
+		}
+		if seen[t] {
 			continue
 		}
 		if !allowedTags[t] {
