@@ -38,8 +38,10 @@
   `Original_Song` は `original_song`、`Music_Cover` は `music_cover` へ正規化する。
   topic とタイトルキーワード規則を両方タグへ反映したあと、`concert` / `karaoke` /
   `music_cover` / `mv` / `original_song` / `singing` のどれかを持つ配信は既定で表示する。
-  topic だけを見て先に hidden を確定すると、別 topic のライブや MV を取りこぼすため、
-  この順序を変えないこと
+  ただし topic またはタグが `shorts` で動画長が 180 秒以下（長さ不明を含む）なら、
+  音楽タグより短尺判定を優先して非表示にする。長い `#shorts` 付き歌枠は表示する。
+  人工修正は `visibility_override` に保存し、同期は上書きしない。
+  詳細な優先順位と実例は [`STREAM_VISIBILITY.md`](./STREAM_VISIBILITY.md)
 - **備考**：`GetChannelVideos`、`SearchVideos` は定義済みだが未使用。
 
 ## 2. Holodex Editor Token（書） — `HOLODEX_EDITOR_TOKEN`

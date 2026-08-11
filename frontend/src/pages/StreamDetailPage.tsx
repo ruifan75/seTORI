@@ -2033,16 +2033,21 @@ export default function StreamDetailPage() {
                   </div>
                 )}
 
-                {/* 非表示 */}
+                {/* 表示設定：自動判定と手動固定を分け、同期で人工修正が戻らないようにする */}
                 {canEdit && (
-                  <label className="mt-4 flex items-center gap-2 cursor-pointer w-fit">
-                    <input
-                      type="checkbox"
-                      checked={stream.is_hidden}
-                      onChange={(e) => quickSaveStream({ is_hidden: e.target.checked })}
-                      className="w-4 h-4 text-red-600 border-gray-300 rounded focus:ring-red-500"
-                    />
-                    <span className="text-sm font-medium text-gray-700">非表示</span>
+                  <label className="mt-4 flex items-center gap-2 w-fit">
+                    <span className="text-sm font-medium text-gray-700">表示設定</span>
+                    <select
+                      value={stream.visibility_override == null ? 'auto' : stream.visibility_override ? 'hidden' : 'visible'}
+                      onChange={(e) => quickSaveStream({
+                        visibility_mode: e.target.value as 'auto' | 'visible' | 'hidden',
+                      })}
+                      className="rounded border border-gray-300 bg-white px-2 py-1 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    >
+                      <option value="auto">自動（現在: {stream.is_hidden ? '非表示' : '表示'}）</option>
+                      <option value="visible">表示に固定</option>
+                      <option value="hidden">非表示に固定</option>
+                    </select>
                   </label>
                 )}
               </>

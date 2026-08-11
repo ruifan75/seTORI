@@ -91,19 +91,20 @@ type SongITunes struct {
 
 // Stream 歌回直播
 type Stream struct {
-	ID              string         `json:"id"` // YouTube Video ID
-	Title           string         `json:"title"`
-	StreamDate      time.Time      `json:"stream_date"`
-	DurationSeconds sql.NullInt32  `json:"duration_seconds"`
-	ThumbnailURL    sql.NullString `json:"thumbnail_url"`
-	HolodexData     []byte         `json:"holodex_data"` // JSONB - Holodex songs data
-	HolodexHash     sql.NullString `json:"holodex_hash"`
-	CommentRaw      []byte         `json:"comment_raw"`   // JSONB - Raw comment list
-	CommentSongs    []byte         `json:"comment_songs"` // JSONB - Parsed songs (undeduped)
-	IsProcessed     bool           `json:"is_processed"`  // 處理完成
-	IsHidden        bool           `json:"is_hidden"`     // 隱藏
-	CreatedAt       time.Time      `json:"created_at"`
-	UpdatedAt       time.Time      `json:"updated_at"`
+	ID                 string         `json:"id"` // YouTube Video ID
+	Title              string         `json:"title"`
+	StreamDate         time.Time      `json:"stream_date"`
+	DurationSeconds    sql.NullInt32  `json:"duration_seconds"`
+	ThumbnailURL       sql.NullString `json:"thumbnail_url"`
+	HolodexData        []byte         `json:"holodex_data"` // JSONB - Holodex songs data
+	HolodexHash        sql.NullString `json:"holodex_hash"`
+	CommentRaw         []byte         `json:"comment_raw"`         // JSONB - Raw comment list
+	CommentSongs       []byte         `json:"comment_songs"`       // JSONB - Parsed songs (undeduped)
+	IsProcessed        bool           `json:"is_processed"`        // 處理完成
+	IsHidden           bool           `json:"is_hidden"`           // 有效的隱藏狀態（自動判定または手動 override）
+	VisibilityOverride sql.NullBool   `json:"visibility_override"` // NULL=自動、TRUE=非表示固定、FALSE=表示固定
+	CreatedAt          time.Time      `json:"created_at"`
+	UpdatedAt          time.Time      `json:"updated_at"`
 }
 
 // StreamSearchFilters 配信検索で組み合わせられる条件。

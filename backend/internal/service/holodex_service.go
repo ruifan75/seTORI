@@ -141,17 +141,6 @@ var holodexTopicTagAliases = map[string]string{
 	"singing":       "singing",
 }
 
-// このいずれかのタグが付いた配信は、Holodex の topic が別分類でも一覧へ出す。
-// 例: Outfit_Reveal だがタイトル規則で concert、Original_Song かつタイトルに MV。
-var visibleMusicStreamTagIDs = []string{
-	"concert",
-	"karaoke",
-	"music_cover",
-	"mv",
-	"original_song",
-	"singing",
-}
-
 func streamTagIDForHolodexTopic(topicID string) (string, bool) {
 	topicID = strings.TrimSpace(topicID)
 	if topicID == "" {
@@ -486,11 +475,19 @@ func (s *HolodexService) syncVideo(video holodex.Video, channelID string, forceU
 		return "", fmt.Errorf("apply tag rules: %w", err)
 	}
 
-	// topic とタイトル規則の両方を反映したあとで可視性を決める。
-	// singing だけを先に見ると、Original_Song / Music_Cover や、別 topic のライブ・MV が
-	// タグを持っていても hidden のままになる。
-	if _, err := s.streamRepo.UnhideIfTagged(video.ID, visibleMusicStreamTagIDs); err != nil {
-		return "", fmt.Errorf("apply stream tag visibility: %w", err)
+	// Holodex topic とタイトル規則の両方を反映したあとで自動可視性を決める。
+	// shorts の印だけでは隠さず動画長も見るため、長い歌枠に #shorts があっても表示する。
+	tags, err := s.streamRepo.GetTags(video.ID)
+	if err != nil {
+		return "", fmt.Errorf("get stream tags for visibility: %w", err)
+	}
+	tagIDs := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		tagIDs = append(tagIDs, tag.ID)
+	}
+	autoHidden := defaultStreamHidden(video.TopicID, video.Duration, video.Duration > 0, tagIDs)
+	if err := s.streamRepo.ApplyAutomaticVisibility(video.ID, autoHidden); err != nil {
+		return "", fmt.Errorf("apply automatic stream visibility: %w", err)
 	}
 
 	// 影片擁有者（上傳頻道）。collab 影片的擁有者是主辦頻道，不是被同步的頻道，

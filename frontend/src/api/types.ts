@@ -215,7 +215,8 @@ export interface Stream {
   participants: Singer[];  // 参加者
   channel_owner?: Singer;  // チャンネルオーナー
   is_processed: boolean;   // 処理済み
-  is_hidden: boolean;      // 非表示
+  is_hidden: boolean;      // 実効値（自動判定または手動固定）
+  visibility_override: boolean | null; // null=自動、false=表示固定、true=非表示固定
   holodex_timeline_songs?: SongSuggestion[];  // Holodex タイムライン データ
   comment_timeline_songs?: CommentSong[];     // コメント解析済みタイムライン（分析キャッシュ）
   has_comment_raw?: boolean;                  // 分析可能な生コメントがあるか
@@ -235,6 +236,7 @@ export interface UpdateStreamRequest {
   participant_ids?: string[];
   is_processed?: boolean;
   is_hidden?: boolean;
+  visibility_mode?: 'auto' | 'visible' | 'hidden';
 }
 
 // ========== パフォーマンス ==========

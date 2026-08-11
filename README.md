@@ -263,7 +263,7 @@ cd frontend && npm run build                          # dist/ に出力
 
 - `singers` — VTuber、PK は YouTube チャンネル ID。`metadata_source=holodex` は Holodex 管理、`youtube` は手動編集可能な fallback 登録
 - `songs` — 楽曲マスター、一意キー `(name, original_artist)`；`song_itunes` で iTunes Track と 1:N 紐付け
-- `streams` — 歌枠、PK は YouTube 動画 ID；`holodex_data` / `comment_raw` / `comment_songs` は JSONB
+- `streams` — 歌枠、PK は YouTube 動画 ID；`holodex_data` / `comment_raw` / `comment_songs` は JSONB。自動表示判定と手動固定は [`docs/STREAM_VISIBILITY.md`](./docs/STREAM_VISIBILITY.md) を参照
 - `performances` — 歌唱記録、一意キー `(stream_id, song_id, start_seconds)`
 - 多対多：`stream_singers`（`is_owner` 含む）、`performance_singers`、`stream_stream_tags`、`performance_performance_tags`
 - `performance_tags` / `stream_tags` — ビルトインタグをプリロード；`filter_keywords` — コメントの除外/保持キーワード（seed 含む）
@@ -272,7 +272,7 @@ cd frontend && npm run build                          # dist/ に出力
 - `edit_suggestions` — 修正提案。承認時に「提案時点のスナップショット vs 現在値」を突き合わせ、ズレていれば `conflict` で停止
 - `app_settings` — 汎用 KV（JSONB）。バックアップ設定・自動反映の条件・外部サービスの API キー（暗号化）
 
-マイグレーションのファイル名は `NNN_description.sql`。起動時にファイル名順で実行し、`schema_migrations` テーブルで追跡。冪等に動作します。
+マイグレーションのファイル名は `NNN_description.sql`。起動時にファイル名順で実行し、`schema_migrations` テーブルで追跡します。各ファイル名は通常 1 回だけ実行されるため、実行済みファイルを編集せず、修正は新しい番号で追加します。SQL 自体も安全な再実行を考慮して冪等に書きます。
 
 ---
 

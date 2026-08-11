@@ -348,6 +348,10 @@ func (s *SingerService) toStreamResponse(stream models.Stream, tags []models.Str
 	if stream.ThumbnailURL.Valid {
 		resp.ThumbnailURL = &stream.ThumbnailURL.String
 	}
+	if stream.VisibilityOverride.Valid {
+		override := stream.VisibilityOverride.Bool
+		resp.VisibilityOverride = &override
+	}
 
 	// 轉換標籤
 	resp.Tags = make([]dto.StreamTagResponse, len(tags))

@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ruifan75/setori/internal/dto"
@@ -265,6 +266,10 @@ func (s *StreamService) toStreamResponse(stream models.Stream, tags []models.Str
 	if stream.ThumbnailURL.Valid {
 		resp.ThumbnailURL = &stream.ThumbnailURL.String
 	}
+	if stream.VisibilityOverride.Valid {
+		override := stream.VisibilityOverride.Bool
+		resp.VisibilityOverride = &override
+	}
 
 	resp.Tags = make([]dto.StreamTagResponse, len(tags))
 	for i, tag := range tags {
@@ -445,6 +450,30 @@ func (s *StreamService) Update(id string, req *dto.UpdateStreamRequest) (*dto.St
 		return nil, nil
 	}
 
+	// visibility_mode が新しい三態 API。古いクライアントの is_hidden は
+	// 「手動固定」として互換性を保つ。両方あれば visibility_mode を優先する。
+	visibilityRequested := false
+	var visibilityOverride *bool
+	if req.VisibilityMode != nil {
+		visibilityRequested = true
+		switch strings.ToLower(strings.TrimSpace(*req.VisibilityMode)) {
+		case "auto":
+			visibilityOverride = nil
+		case "visible":
+			visible := false
+			visibilityOverride = &visible
+		case "hidden":
+			hidden := true
+			visibilityOverride = &hidden
+		default:
+			return nil, fmt.Errorf("invalid visibility_mode: must be auto, visible, or hidden")
+		}
+	} else if req.IsHidden != nil {
+		visibilityRequested = true
+		override := *req.IsHidden
+		visibilityOverride = &override
+	}
+
 	// 更新標題
 	if req.Title != nil && *req.Title != "" {
 		stream.Title = *req.Title
@@ -469,13 +498,8 @@ func (s *StreamService) Update(id string, req *dto.UpdateStreamRequest) (*dto.St
 		stream.IsProcessed = *req.IsProcessed
 	}
 
-	// 更新隱藏狀態
-	if req.IsHidden != nil {
-		stream.IsHidden = *req.IsHidden
-	}
-
 	// 更新 Stream metadata（只更新可變欄位，不重寫大型 JSONB）
-	if err := s.streamRepo.UpdateMetadata(id, stream.Title, stream.StreamDate, stream.IsProcessed, stream.IsHidden); err != nil {
+	if err := s.streamRepo.UpdateMetadata(id, stream.Title, stream.StreamDate, stream.IsProcessed); err != nil {
 		return nil, fmt.Errorf("update stream: %w", err)
 	}
 
@@ -484,6 +508,21 @@ func (s *StreamService) Update(id string, req *dto.UpdateStreamRequest) (*dto.St
 		if err := s.streamRepo.SetTags(id, req.TagIDs); err != nil {
 			return nil, fmt.Errorf("set tags: %w", err)
 		}
+	}
+
+	// タグ更新後の状態から自動判定を作る。手動固定がある場合は repository 側で
+	// 常に override が優先されるため、同期や別の編集で人工修正は戻らない。
+	tags, err := s.streamRepo.GetTags(id)
+	if err != nil {
+		return nil, fmt.Errorf("get tags for stream visibility: %w", err)
+	}
+	autoHidden := automaticStreamHidden(*stream, tags)
+	if visibilityRequested {
+		if err := s.streamRepo.SetVisibilityOverride(id, visibilityOverride, autoHidden); err != nil {
+			return nil, err
+		}
+	} else if err := s.streamRepo.ApplyAutomaticVisibility(id, autoHidden); err != nil {
+		return nil, err
 	}
 
 	// 更新參與者
