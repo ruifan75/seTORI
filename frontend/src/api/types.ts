@@ -219,6 +219,8 @@ export interface Stream {
   visibility_override: boolean | null; // null=自動、false=表示固定、true=非表示固定
   holodex_timeline_songs?: SongSuggestion[];  // Holodex タイムライン データ
   comment_timeline_songs?: CommentSong[];     // コメント解析済みタイムライン（分析キャッシュ）
+  // 解析を最後に走らせた時刻。updated_at は Holodex 同期でも動くので代用できない
+  comment_songs_analyzed_at?: string;
   has_comment_raw?: boolean;                  // 分析可能な生コメントがあるか
   created_at: string;
   updated_at: string;

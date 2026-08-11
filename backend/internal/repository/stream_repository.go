@@ -77,13 +77,13 @@ func (r *StreamRepository) FindAll(limit, offset int, includeHidden bool, sort, 
 // FindByID 根據 Video ID 取得歌回
 func (r *StreamRepository) FindByID(id string) (*models.Stream, error) {
 	query := `
-			SELECT id, title, stream_date, duration_seconds, thumbnail_url, holodex_data, holodex_hash, comment_raw, comment_songs, is_processed, is_hidden, visibility_override, created_at, updated_at
+			SELECT id, title, stream_date, duration_seconds, thumbnail_url, holodex_data, holodex_hash, comment_raw, comment_songs, comment_songs_analyzed_at, is_processed, is_hidden, visibility_override, created_at, updated_at
 		FROM streams WHERE id = $1`
 
 	var s models.Stream
 	err := r.db.QueryRow(query, id).Scan(
 		&s.ID, &s.Title, &s.StreamDate, &s.DurationSeconds,
-		&s.ThumbnailURL, &s.HolodexData, &s.HolodexHash, &s.CommentRaw, &s.CommentSongs, &s.IsProcessed, &s.IsHidden, &s.VisibilityOverride, &s.CreatedAt, &s.UpdatedAt)
+		&s.ThumbnailURL, &s.HolodexData, &s.HolodexHash, &s.CommentRaw, &s.CommentSongs, &s.CommentSongsAnalyzedAt, &s.IsProcessed, &s.IsHidden, &s.VisibilityOverride, &s.CreatedAt, &s.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -693,7 +693,11 @@ func (r *StreamRepository) UpdateCommentSongs(id string, songs []byte) error {
 
 func (r *StreamRepository) SaveCommentSongs(id string, songs []byte, hash string) error {
 	songs = util.SanitizeJSONB(songs)
-	_, err := r.db.Exec(`UPDATE streams SET comment_songs = $2, comment_songs_hash = $3, updated_at = NOW() WHERE id = $1`, id, songs, hash)
+	// comment_songs_analyzed_at は**ここでだけ**刻む。updated_at では代用できない
+	// （毎日回る Holodex 同期が全配信の updated_at を今日に押し上げる）。
+	_, err := r.db.Exec(`UPDATE streams
+		SET comment_songs = $2, comment_songs_hash = $3, comment_songs_analyzed_at = NOW(), updated_at = NOW()
+		WHERE id = $1`, id, songs, hash)
 	if err != nil {
 		return fmt.Errorf("save comment songs: %w", err)
 	}

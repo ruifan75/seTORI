@@ -372,6 +372,11 @@ func (s *StreamService) toStreamResponse(stream models.Stream, tags []models.Str
 		}
 	}
 
+	if stream.CommentSongsAnalyzedAt.Valid {
+		t := stream.CommentSongsAnalyzedAt.Time.Format(time.RFC3339)
+		resp.CommentSongsAnalyzedAt = &t
+	}
+
 	// comment_raw に留言があれば分析ボタンを有効化できる（comment_songs 未生成でも分析可能）
 	resp.HasCommentRaw = len(stream.CommentRaw) > 0 && string(stream.CommentRaw) != "null" && string(stream.CommentRaw) != "[]"
 

@@ -224,8 +224,11 @@ type StreamResponse struct {
 	HolodexTimelineSongs []SongSuggestion    `json:"holodex_timeline_songs,omitempty"` // 從 holodex_data 解析
 	CommentTimelineSongs []CommentSong       `json:"comment_timeline_songs,omitempty"` // 從 comment_songs 解析（已分析快取）
 	HasCommentRaw        bool                `json:"has_comment_raw"`                  // comment_raw 是否有留言可供分析
-	CreatedAt            time.Time           `json:"created_at"`
-	UpdatedAt            time.Time           `json:"updated_at"`
+	// CommentSongsAnalyzedAt は解析を最後に走らせた時刻。updated_at では代用できない
+	// （毎日回る Holodex 同期が全配信の updated_at を今日に押し上げる）。
+	CommentSongsAnalyzedAt *string   `json:"comment_songs_analyzed_at,omitempty"`
+	CreatedAt              time.Time `json:"created_at"`
+	UpdatedAt              time.Time `json:"updated_at"`
 }
 
 type StreamListResponse struct {

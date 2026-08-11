@@ -1799,6 +1799,18 @@ export default function StreamDetailPage() {
                         )}
                       </button>
                     </div>
+                    {/* 最後に解析した時刻。プロンプトや抽出規則を変えたあと、
+                        この配信がまだ古い規則のままかを判断する手がかりになる。
+                        stream.updated_at は Holodex 同期でも動くので使えない。 */}
+                    {stream.comment_songs_analyzed_at && (
+                      <p className="px-1 text-xs text-gray-400">
+                        最終解析:{' '}
+                        {new Date(stream.comment_songs_analyzed_at).toLocaleString('ja-JP', {
+                          year: 'numeric', month: '2-digit', day: '2-digit',
+                          hour: '2-digit', minute: '2-digit', hour12: false,
+                        })}
+                      </p>
+                    )}
                     {commentTimelineSongs.length === 0 ? (
                       <p className="text-sm text-gray-400 py-2">
                         分析済みの曲がありません（「全部読み込む」で分析を実行）
