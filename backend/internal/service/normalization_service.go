@@ -61,7 +61,9 @@ JSON配列形式で応答してください。各要素：
 - index: 入力楽曲の番号 (number, 0から開始)
 - normalized_name: 正規化後の歌名 (string)
 - normalized_name_reading: 歌名の平仮名読み (string)
-- original_artist: 原曲アーティスト (string)
+- original_artist: 照合に使うアーティスト (string)。**入力に書かれていればそのまま返すこと。**
+  原曲を知っていても書き換えない（DB はカバーした歌手を持っていることが多く、外れる）。
+  入力が空のときだけ、分かるなら原曲アーティストを補う
 - original_artist_reading: アーティスト名の平仮名読み (string)
 - tags: 検出されたバージョンタグ（上記7種のみ） (array of strings)
 - confidence: 信頼度 0.0-1.0 (number)
