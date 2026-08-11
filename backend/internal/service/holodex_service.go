@@ -127,6 +127,45 @@ type SyncResult struct {
 	Skipped     []string
 }
 
+// Holodex の topic_id と seTORI の stream_tags.id は同じ語でも表記が一致しない。
+// 特に Original_Song / Music_Cover はそのまま FK へ入れるとタグが付かないため、
+// seTORI 側の安定した ID へ明示的に寄せる。
+var holodexTopicTagAliases = map[string]string{
+	"concert":       "concert",
+	"karaoke":       "karaoke",
+	"live":          "concert",
+	"music_cover":   "music_cover",
+	"music_video":   "mv",
+	"mv":            "mv",
+	"original_song": "original_song",
+	"singing":       "singing",
+}
+
+// このいずれかのタグが付いた配信は、Holodex の topic が別分類でも一覧へ出す。
+// 例: Outfit_Reveal だがタイトル規則で concert、Original_Song かつタイトルに MV。
+var visibleMusicStreamTagIDs = []string{
+	"concert",
+	"karaoke",
+	"music_cover",
+	"mv",
+	"original_song",
+	"singing",
+}
+
+func streamTagIDForHolodexTopic(topicID string) (string, bool) {
+	topicID = strings.TrimSpace(topicID)
+	if topicID == "" {
+		return "", false
+	}
+	tagID, mapped := holodexTopicTagAliases[strings.ToLower(topicID)]
+	if mapped {
+		return tagID, true
+	}
+	// shorts など、Holodex と seTORI で同じ ID を使っている既存 topic は
+	// 従来どおりそのまま試す。対応する tag が無い topic の FK エラーは無視する。
+	return topicID, false
+}
+
 // SyncChannelInfo 只同步頻道資訊，不同步直播
 func (s *HolodexService) SyncChannelInfo(channelInput string) (*models.Singer, error) {
 	lookup := youtube.ParseChannelLookup(channelInput)
@@ -408,7 +447,7 @@ func (s *HolodexService) syncVideo(video holodex.Video, channelID string, forceU
 		streamDate, _ = time.Parse(time.RFC3339, video.PublishedAt)
 	}
 
-	// 非 singing 的影片預設為 hidden
+	// topic だけから作る暫定値。タグ付け後に音楽系タグを見て可視へ戻す。
 	isHidden := video.TopicID != "singing"
 
 	stream := &models.Stream{
@@ -434,15 +473,24 @@ func (s *HolodexService) syncVideo(video holodex.Video, channelID string, forceU
 	}
 	logger.Infof("[holodex] upserted stream %s (existing=%v, force=%v)", video.ID, existing != nil, forceUpdate)
 
-	// 處理 topic_id -> 設定標籤
-	if video.TopicID != "" {
-		// 對應 topic_id 到 stream_tag（Holodex 的 topic_id 可以直接作為標籤使用）
-		s.streamRepo.AddTag(video.ID, video.TopicID)
+	// Holodex topic_id -> seTORI stream tag。両者の ID は必ずしも同じではない。
+	if tagID, mapped := streamTagIDForHolodexTopic(video.TopicID); tagID != "" {
+		if err := s.streamRepo.AddTag(video.ID, tagID); err != nil && mapped {
+			return "", fmt.Errorf("add mapped Holodex topic tag (topic=%s, tag=%s): %w",
+				video.TopicID, tagID, err)
+		}
 	}
 
 	// タイトルの文字列マッチによる自動タグ付け（Holodex topic で拾えない種別を補完・追加のみ）
 	if _, err := s.streamRepo.ApplyTagRulesToStream(video.ID); err != nil {
-		logger.Warnf("apply tag rules failed (video: %s): %v", video.ID, err)
+		return "", fmt.Errorf("apply tag rules: %w", err)
+	}
+
+	// topic とタイトル規則の両方を反映したあとで可視性を決める。
+	// singing だけを先に見ると、Original_Song / Music_Cover や、別 topic のライブ・MV が
+	// タグを持っていても hidden のままになる。
+	if _, err := s.streamRepo.UnhideIfTagged(video.ID, visibleMusicStreamTagIDs); err != nil {
+		return "", fmt.Errorf("apply stream tag visibility: %w", err)
 	}
 
 	// 影片擁有者（上傳頻道）。collab 影片的擁有者是主辦頻道，不是被同步的頻道，

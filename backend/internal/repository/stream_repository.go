@@ -422,6 +422,31 @@ func (r *StreamRepository) RemoveTag(streamID, tagID string) error {
 	return nil
 }
 
+// UnhideIfTagged は指定したタグのどれかを持つ配信を一覧へ出す。
+// Holodex topic とタイトル規則のタグ付けが終わったあとに呼び、配信分類と
+// is_hidden の判定順が食い違わないようにする。タグが無い配信は変更しない。
+func (r *StreamRepository) UnhideIfTagged(streamID string, tagIDs []string) (bool, error) {
+	if len(tagIDs) == 0 {
+		return false, nil
+	}
+	res, err := r.db.Exec(`
+		UPDATE streams s
+		SET is_hidden = FALSE, updated_at = NOW()
+		WHERE s.id = $1
+		  AND s.is_hidden = TRUE
+		  AND EXISTS (
+			SELECT 1
+			FROM stream_stream_tags sst
+			WHERE sst.stream_id = s.id
+			  AND sst.tag_id = ANY($2)
+		  )`, streamID, pq.Array(tagIDs))
+	if err != nil {
+		return false, fmt.Errorf("unhide stream by tags: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
 // FindByTagID は指定タグが付いた配信を新しい順で返す（タグ検索用、非表示は除外）。
 func (r *StreamRepository) FindByTagID(tagID string, limit, offset int) ([]models.Stream, int, error) {
 	var total int

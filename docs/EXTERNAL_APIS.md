@@ -34,6 +34,12 @@
   - `GET /api/streams/{id}/holodex-songs`（セットリスト即時読込）
   - `GET /api/streams/{id}/comments`、`POST /api/streams/{id}/comments/analyze`（コメント取得）
   - `POST /api/singers`（チャンネル情報のみ同期）
+- **topic と表示状態**：Holodex の topic ID と seTORI の tag ID は同一とは限らない。
+  `Original_Song` は `original_song`、`Music_Cover` は `music_cover` へ正規化する。
+  topic とタイトルキーワード規則を両方タグへ反映したあと、`concert` / `karaoke` /
+  `music_cover` / `mv` / `original_song` / `singing` のどれかを持つ配信は既定で表示する。
+  topic だけを見て先に hidden を確定すると、別 topic のライブや MV を取りこぼすため、
+  この順序を変えないこと
 - **備考**：`GetChannelVideos`、`SearchVideos` は定義済みだが未使用。
 
 ## 2. Holodex Editor Token（書） — `HOLODEX_EDITOR_TOKEN`

@@ -28,7 +28,7 @@ seTORI は VTuber の歌枠で歌われた楽曲を収集・識別・管理す�
 | # | 機能 | 説明 |
 |---|------|------|
 | 1 | **楽曲管理 (Songs)** | CRUD、GIN trigram あいまい検索、重複楽曲のマージ、全履歴の歌唱記録。一意キー `(name + original_artist)` |
-| 2 | **配信管理 (Streams)** | YouTube 動画 ID を主キー；`is_processed` / `is_hidden` ステータス；JSONB カラム `holodex_data` / `comment_raw` / `comment_songs` |
+| 2 | **配信管理 (Streams)** | YouTube 動画 ID を主キー；`is_processed` / `is_hidden` ステータス；Holodex topic とタイトル規則から配信タグ・既定表示を決定；JSONB カラム `holodex_data` / `comment_raw` / `comment_songs` |
 | 3 | **歌手管理 (Singers)** | YouTube チャンネル ID を主キー；所属事務所、アバター、英語名；複数人コラボ歌枠対応 |
 | 4 | **歌唱記録 (Performances)** | 開始/終了秒数、歌唱タグ、複数歌手コラボ。一意キー `(stream_id + song_id + start_seconds)` |
 | 5 | **Holodex 双方向同期** | チャンネルの配信とセットリストの取得、seTORI セットリストの Holodex へのアップロード、SHA256 ハッシュキャッシュによる重複防止 |
