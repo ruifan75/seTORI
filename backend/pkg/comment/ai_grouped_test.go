@@ -167,3 +167,30 @@ func TestParseNormalizeAndDedupWithAI_空配列は正常(t *testing.T) {
 		t.Errorf("空配列は正常な結果のはず: %v", err)
 	}
 }
+
+// プロンプトが「歌手を推測で埋めない」ことを指示していること。
+//
+// 本番の GT で数えると、コメントに歌手が書かれていない 49 行すべてで
+// **その曲名は DB 内で唯一**だった。つまり AI が歌手を補っても
+// 「補わなければ照合できなかった」ケースは 1 件も無く、
+// 得られたのは確認を省けたこと（42 行）だけ。代わりに 7 行で
+// 誤った歌手が入り、0.95 の自動採用として**人の確認を通らずに保存**された。
+//
+// 誤りは冷門曲に集中していた（Re:AcT の原創曲に有名な同名曲の歌手を当てる）。
+// 空のままなら title_only 0.80 に落ちて人の確認に回るので、
+// 「確認が要る」ことが可視化される。
+func TestGroupedPromptDoesNotInventArtist(t *testing.T) {
+	must := []string{
+		"行に書かれているものだけを入れる",
+		"推測して埋めてはいけない",
+	}
+	for _, m := range must {
+		if !strings.Contains(groupedAISystemPrompt, m) {
+			t.Errorf("プロンプトに %q が無い。歌手の推測を許すと誤りが確認を通らず保存される", m)
+		}
+	}
+	// 例が指示と矛盾していないこと（例は指示より強く効く）
+	if strings.Contains(groupedAISystemPrompt, `"a":"YOASOBI"`) {
+		t.Error("例が「歌手を補う」挙動を示している。指示と矛盾する")
+	}
+}
