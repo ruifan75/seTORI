@@ -32,3 +32,6 @@ Thumbs.db
 deploy/certs/
 *.key
 *.pem
+
+# 本番データから生成した分析結果（再生成できるので追跡しない）
+gt_*.csv
