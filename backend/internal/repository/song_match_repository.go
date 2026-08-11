@@ -203,6 +203,31 @@ func (r *SongMatchRepository) FindByNameKey(nameKey string) ([]KeyedSong, error)
 	return scanKeyedSongs(rows)
 }
 
+// FindByNameKeyPrefix は「このキーで始まる」楽曲を返す。
+//
+// 深昏睡 → 深昏睡deepcoma、革命道中 → 革命道中ontheway のように、
+// コメントの表記が DB のキーの接頭辞になっている型を拾う。
+// **これ単体では精度が出ない**（ダーリン → ダーリンダンス のような別曲も混ざる。
+// 実測で同じ曲を指すのは 2 割）。AI か人が裁く前提の召回専用。
+//
+// LIKE の右側にだけワイルドカードを置くので name_key の btree 索引が効く。
+func (r *SongMatchRepository) FindByNameKeyPrefix(nameKey string, limit int) ([]KeyedSong, error) {
+	if nameKey == "" || limit <= 0 {
+		return nil, nil
+	}
+	rows, err := r.db.Query(`
+		SELECT `+keyedSongColumns+`
+		FROM song_match_keys k JOIN songs s ON s.id = k.song_id
+		WHERE k.name_key LIKE $1 || '%' AND k.name_key <> $1
+		ORDER BY length(k.name_key), s.created_at
+		LIMIT $2`, nameKey, limit)
+	if err != nil {
+		return nil, fmt.Errorf("find by name key prefix: %w", err)
+	}
+	defer rows.Close()
+	return scanKeyedSongs(rows)
+}
+
 // FindSimilarByName は曲名キーが完全一致しないときの保険。
 // trigram で近い曲名を拾い、下位ティアの候補として返す（自動採用はしない）。
 func (r *SongMatchRepository) FindSimilarByName(name string, threshold float64, limit int) ([]KeyedSong, error) {

@@ -430,6 +430,11 @@ func (s *SongMatchService) LearnFromMerge(source, target *models.Song) {
 	if err := s.aliasRepo.RepointSongAliases(nil, source.ID, target.ID); err != nil {
 		logger.Warnf("repoint song aliases failed: %v", err)
 	}
+	// 同一性の判定も付け替える。しないと統合のたびに「もう聞いた」記録が
+	// 曲ごと消え（ON DELETE CASCADE）、同じ組を AI に聞き直すことになる。
+	if err := s.aliasRepo.RepointSongIdentityChecks(nil, source.ID, target.ID); err != nil {
+		logger.Warnf("repoint song identity checks failed: %v", err)
+	}
 
 	srcName, srcArtist := songmatch.TitleKey(source.Name), songmatch.ParseArtist(source.OriginalArtist)
 	dstName, dstArtist := songmatch.TitleKey(target.Name), songmatch.ParseArtist(target.OriginalArtist)
@@ -476,3 +481,73 @@ func (s *SongMatchService) DismissMergeCandidate(id uuid.UUID) error {
 func (s *SongMatchService) ResolveCandidatesForMergedSong(sourceID, targetID uuid.UUID) error {
 	return s.matchRepo.ResolveCandidatesForMergedSong(sourceID, targetID)
 }
+
+// ---------- 楽曲の同一性判定（AI / 人の判決） ----------
+
+// CheckedSongPairs は既に判定済みの組を返す（AI への再問い合わせ抑止）。
+func (s *SongMatchService) CheckedSongPairs(pairKeys []string) (map[string]bool, error) {
+	return s.aliasRepo.FindSongIdentityChecks(pairKeys)
+}
+
+// RecordSongIdentityVerdict は「同じ曲ではない」も含めて判定を残す。
+func (s *SongMatchService) RecordSongIdentityVerdict(nameKey, artistKey string, songID uuid.UUID, same bool, source, note string) error {
+	return s.aliasRepo.RecordSongIdentityCheck(nameKey, artistKey, songID, same, source, note)
+}
+
+// LearnSongAliasByKey は既に畳んだキーで別表記を記録する。
+// LearnSongAlias と違い、呼び出し側が計算済みのキーをそのまま使う
+// （判定に使ったキーと学習するキーがずれると、次の照合で当たらなくなる）。
+func (s *SongMatchService) LearnSongAliasByKey(nameKey, artistKey string, songID uuid.UUID, source string) error {
+	return s.aliasRepo.PutSongAlias(nil, nameKey, artistKey, songID, source)
+}
+
+// CandidatesForIdentity は AI に「同じ曲か」を聞く相手を集める。
+//
+// FindCandidates と分けているのは、**求めるものが違う**から。
+// 照合は精度が要る（誤ると歌唱が別の曲にぶら下がる）が、こちらは召回でよい
+// ── 後ろに AI という裁き手が居るので、外れが混ざっても捨てられるだけ。
+// 実測でも接頭辞で拾うと同じ曲を指す率は 2 割だったが、裁き手が居るなら十分。
+func (s *SongMatchService) CandidatesForIdentity(name, artist string) ([]MatchCandidate, error) {
+	cands, err := s.FindCandidates(name, artist, nil)
+	if err != nil {
+		return nil, err
+	}
+	// 既に人に見せる水準の候補があるなら、それを聞けばよい
+	var out []MatchCandidate
+	for _, c := range cands {
+		if c.Score >= ReviewScore {
+			out = append(out, c)
+		}
+	}
+	if len(out) > 0 {
+		return out, nil
+	}
+
+	// 候補が無い場合だけ、曲名キーの接頭辞で拾い直す。
+	// 深昏睡 → 深昏睡deepcoma、革命道中 → 革命道中ontheway のように、
+	// コメントの表記が DB のキーの接頭辞になっている型を拾うため。
+	nameKey := songmatch.TitleKey(name)
+	if len([]rune(nameKey)) < identityPrefixMinKeyRunes {
+		return nil, nil // 短すぎるキーは何にでも当たる
+	}
+	hits, err := s.matchRepo.FindByNameKeyPrefix(nameKey, identityPrefixLimit)
+	if err != nil {
+		return nil, err
+	}
+	for _, h := range hits {
+		out = append(out, MatchCandidate{Song: h.Song, Score: 0.0, Reason: ReasonFuzzy})
+	}
+	return out, nil
+}
+
+const (
+	// 接頭辞で拾うときの下限。1 文字のキーは何にでも当たるので除くが、それ以上は通す。
+	//
+	// 文字数で切るとき、**ラテン文字と漢字を同じ尺度で測らないこと**。
+	// 「深昏睡」は 3 文字だが十分に特定的で、これを弾くと日本語の曲名が軒並み漏れる
+	// （実際 4 文字にしていて 深昏睡 が拾えなかった）。取りこぼしは LIMIT と
+	// キー長の昇順で抑える。
+	identityPrefixMinKeyRunes = 2
+	// 1 件あたりの問い合わせ数の上限（AI の入力を膨らませないため）。
+	identityPrefixLimit = 3
+)

@@ -353,3 +353,75 @@ func artistKeyDisplay(display, key string) string {
 	}
 	return key
 }
+
+// ---------- 楽曲の同一性判定（song_identity_checks） ----------
+
+// SongIdentityPairKey は「この表記」と「この曲」の組を一意に表す。
+func SongIdentityPairKey(nameKey, artistKey string, songID uuid.UUID) string {
+	return nameKey + "\x1f" + artistKey + "\x1f" + songID.String()
+}
+
+// FindSongIdentityChecks は判定済みの組を引く（pair_key → same）。
+// **否定も返す**ので、呼び出し側は「聞いていない組」だけを AI に回せる。
+func (r *AliasRepository) FindSongIdentityChecks(pairKeys []string) (map[string]bool, error) {
+	if len(pairKeys) == 0 {
+		return map[string]bool{}, nil
+	}
+	rows, err := r.db.Query(
+		`SELECT pair_key, same FROM song_identity_checks WHERE pair_key = ANY($1)`, pq.Array(pairKeys))
+	if err != nil {
+		return nil, fmt.Errorf("find song identity checks: %w", err)
+	}
+	defer rows.Close()
+
+	out := map[string]bool{}
+	for rows.Next() {
+		var k string
+		var same bool
+		if err := rows.Scan(&k, &same); err != nil {
+			return nil, fmt.Errorf("scan song identity check: %w", err)
+		}
+		out[k] = same
+	}
+	return out, rows.Err()
+}
+
+// RecordSongIdentityCheck は判定を残す。same=false も必ず残すこと
+// （残さないと、当たらない組に毎回 AI を呼び続けて費用も待ち時間も収束しない）。
+func (r *AliasRepository) RecordSongIdentityCheck(nameKey, artistKey string, songID uuid.UUID, same bool, source, note string) error {
+	_, err := r.db.Exec(`
+		INSERT INTO song_identity_checks (pair_key, name_key, artist_key, song_id, same, source, note)
+		VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, ''))
+		ON CONFLICT (pair_key) DO UPDATE
+		SET same = EXCLUDED.same, source = EXCLUDED.source, note = EXCLUDED.note, checked_at = NOW()`,
+		SongIdentityPairKey(nameKey, artistKey, songID), nameKey, artistKey, songID, same, source, note)
+	if err != nil {
+		return fmt.Errorf("record song identity check: %w", err)
+	}
+	return nil
+}
+
+// RepointSongIdentityChecks は統合で消える楽曲を指していた判定を統合先へ付け替える。
+// これをしないと、統合のたびに「もう聞いた」記録が曲ごと消えて聞き直しになる。
+func (r *AliasRepository) RepointSongIdentityChecks(db execer, fromSongID, toSongID uuid.UUID) error {
+	if db == nil {
+		db = r.db
+	}
+	// 付け替えると pair_key が衝突しうる（同じ表記について両方の曲を判定済みの場合）。
+	// 統合先の判定を正とし、統合元の行は捨てる。
+	if _, err := db.Exec(`
+		DELETE FROM song_identity_checks a
+		WHERE a.song_id = $1 AND EXISTS (
+			SELECT 1 FROM song_identity_checks b
+			WHERE b.song_id = $2 AND b.name_key = a.name_key AND b.artist_key = a.artist_key)`,
+		fromSongID, toSongID); err != nil {
+		return fmt.Errorf("prune song identity checks: %w", err)
+	}
+	if _, err := db.Exec(`
+		UPDATE song_identity_checks
+		SET song_id = $2, pair_key = name_key || E'\x1f' || artist_key || E'\x1f' || $2::text
+		WHERE song_id = $1`, fromSongID, toSongID); err != nil {
+		return fmt.Errorf("repoint song identity checks: %w", err)
+	}
+	return nil
+}

@@ -165,8 +165,14 @@ func (s *CommentService) analyzeComments(videoID string, force, dryRun bool) (*d
 				// 照合は保存された値ではなく、今の DB で計算して返す。
 				// 保存しないので書き戻しも要らない（曲が増えれば次に開いたとき自然に直る）。
 				s.normalizationService.ResolveForDisplay(cached)
+				// 抽出のやり直しは不要でも、照合が決着しない行は残りうる。
+				// 利用者が読み込みを押した瞬間なので、ここで判定してよい。
+				var ca, cl int
+				if s.normalizationService != nil && !dryRun {
+					ca, cl = s.adjudicateAll(cached)
+				}
 				logger.Infof("/comments/analyze cache hit for %s (%d songs)", videoID, len(cached))
-				return &dto.AnalyzeCommentsResponse{Songs: cached, Stats: buildStats("cache", dryRun, false, cached, 0, 0)}, nil
+				return &dto.AnalyzeCommentsResponse{Songs: cached, Stats: buildStats("cache", dryRun, false, cached, ca, cl)}, nil
 			}
 		}
 	}
@@ -231,12 +237,9 @@ func (s *CommentService) analyzeComments(videoID string, force, dryRun bool) (*d
 		// 統合経路はそこを通らないので、ここに置かないと**一度も実行されない**
 		// （既定が統合経路に変わった時点でそうなっていた）。
 		// 呼ぶのは新規解析のときだけ ── キャッシュ命中と backfill は AI を呼ばない約束。
-		// dry-run では行わない。判定は artist_alias_checks への書き込みを伴うため。
+		// dry-run では行わない。判定は checks テーブルへの書き込みを伴うため。
 		if s.normalizationService != nil && !dryRun {
-			aliasAsked, aliasLinked = s.normalizationService.AdjudicateAliasesForCommentSongs(songs)
-			if aliasLinked > 0 {
-				s.normalizationService.ResolveForDisplay(songs)
-			}
+			aliasAsked, aliasLinked = s.adjudicateAll(songs)
 		}
 	} else {
 		aiWarning = s.normalizeInto(songs)
@@ -286,6 +289,29 @@ func (s *CommentService) analyzeComments(videoID string, force, dryRun bool) (*d
 		Warning: aiWarning,
 		Stats:   buildStats(path, dryRun, saved, songs, aliasAsked, aliasLinked),
 	}, nil
+}
+
+// adjudicateAll は決着しなかった行を AI に判定させ、決まったぶんだけ照合し直す。
+//
+// 2 種類ある。アーティストの別名義（GUMI / グミ）と、楽曲の同一性
+// （深昏睡 / 深昏睡 (Deep coma)）。前者は曲名キーが当たっている組、
+// 後者は曲名キーごと外れている組が対象なので、両方要る。
+//
+// **利用者が「読み込む」を押した時にだけ通る。** 配信詳細を開いただけの
+// GET からは呼ばない ── あちらは閲覧者が通るだけの経路で、
+// 見ているだけで AI を呼ぶことになる。判定は保存されるので、
+// 一度誰かが読み込めば、以後の閲覧は無料でその結果を受け取る。
+func (s *CommentService) adjudicateAll(songs []dto.CommentSong) (asked, linked int) {
+	n := s.normalizationService
+	a1, l1 := n.AdjudicateAliasesForCommentSongs(songs)
+	if l1 > 0 {
+		n.ResolveForDisplay(songs) // 別名義が増えたので照合し直してから次の判定へ
+	}
+	a2, l2 := n.AdjudicateSongIdentityForCommentSongs(songs)
+	if l2 > 0 {
+		n.ResolveForDisplay(songs)
+	}
+	return a1 + a2, l1 + l2
 }
 
 // buildStats は応答に載せる内訳を作る。ログを読まずに挙動を確かめられるようにするためのもの。

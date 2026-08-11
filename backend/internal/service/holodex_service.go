@@ -783,6 +783,7 @@ func (s *HolodexService) AnalyzeHolodexSongs(videoID string, force bool) ([]dto.
 			if err := json.Unmarshal(cached, &songs); err == nil && len(songs) > 0 {
 				// 照合は保存していないので、今の DB に対して計算して返す
 				s.normalizationService.ResolveSuggestionsForDisplay(songs)
+				s.adjudicateSuggestions(songs)
 				s.attachChatComparison(stream, songs)
 				return songs, nil
 			}
@@ -827,6 +828,7 @@ func (s *HolodexService) AnalyzeHolodexSongs(videoID string, force bool) ([]dto.
 	//    そちらは変更履歴（changes）を作らない。2 つの経路で違うものを返さないよう、
 	//    照合は必ずここを通す（数ミリ秒なので二度引く分は問題にならない）。
 	s.normalizationService.ResolveSuggestionsForDisplay(songs)
+	s.adjudicateSuggestions(songs)
 
 	// 3. 拍手 end：明示 end が無い曲は補完。明示 end がある曲も chat 値を検出し、
 	//    ChatEnd/EndDiff として付与する（Holodex 側の誤りをユーザーが確認できるように）。
@@ -873,6 +875,20 @@ func (s *HolodexService) AnalyzeHolodexSongs(videoID string, force bool) ([]dto.
 	}
 
 	return songs, nil
+}
+
+// adjudicateSuggestions は照合が決着しなかった曲を AI に判定させ、決まったぶんだけ照合し直す。
+//
+// 呼ぶのは利用者が「Holodex から読み込む」を押したときだけ。
+// 配信詳細を開いただけの GET からは呼ばない（見ているだけで AI を呼ぶことになる）。
+// 判定は保存されるので、一度誰かが読み込めば以後の閲覧は無料でその結果を受け取る。
+func (s *HolodexService) adjudicateSuggestions(songs []dto.SongSuggestion) {
+	if s.normalizationService == nil {
+		return
+	}
+	if _, linked := s.normalizationService.AdjudicateSongIdentityForSuggestions(songs); linked > 0 {
+		s.normalizationService.ResolveSuggestionsForDisplay(songs)
+	}
 }
 
 // normalizeHolodexInto SongSuggestion に AI 正規化＋DB 照合結果を埋め込む（in-place）。

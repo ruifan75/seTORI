@@ -302,3 +302,9 @@ func sortStrings(s []string) {
 		}
 	}
 }
+
+// IdentityPairKey は「この表記」と「この曲」の組を一意に表すキー。
+// 判定の重複問い合わせを避けるために使う（repository 側の列と同じ組み立て方）。
+func IdentityPairKey(nameKey, artistKey, songID string) string {
+	return nameKey + "\x1f" + artistKey + "\x1f" + songID
+}
