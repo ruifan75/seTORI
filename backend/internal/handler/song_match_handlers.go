@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/ruifan75/setori/internal/dto"
+	"github.com/ruifan75/setori/internal/logger"
 	"github.com/ruifan75/setori/internal/models"
 	"github.com/ruifan75/setori/internal/repository"
 )
@@ -112,14 +113,30 @@ func toMergeCandidateSong(s models.Song, perfCount int, itunesIDs []int64, role 
 // 取り込み時の検出は「これから作る曲」しか見ないので、導入前からあった重複は
 // これを走らせないと誰にも気づかれない。
 func (r *Router) handleScanDuplicates(w http.ResponseWriter, req *http.Request) {
+	// ① 曲名キーが同じ組。確実で無料
 	added, err := r.songMatchService.ScanDuplicates()
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
+	// ② キーが違う組（邦題と原題、誤字、ローマ字）。①では原理的に見つからない。
+	//    AI 呼び出しが失敗しても①の結果は返す（走査全体を落とさない）。
+	byAI, aiErr := r.songMatchService.ScanDuplicatesWithAI(r.aiService)
+	if aiErr != nil {
+		logger.Warnf("[dup] AI 全件走査に失敗しました: %v", aiErr)
+	}
+
+	msg := fmt.Sprintf("%d 件の重複候補を追加しました（曲名キー %d / AI %d）", added+byAI, added, byAI)
+	if aiErr != nil {
+		msg = fmt.Sprintf("%d 件の重複候補を追加しました（曲名キーのみ。AI 走査は失敗: %v）", added, aiErr)
+	}
 	respondJSON(w, http.StatusOK, map[string]any{
-		"added":   added,
-		"message": fmt.Sprintf("%d 件の重複候補を追加しました", added),
+		"added":    added + byAI,
+		"by_key":   added,
+		"by_ai":    byAI,
+		"ai_error": aiErr != nil,
+		"message":  msg,
 	})
 }
 

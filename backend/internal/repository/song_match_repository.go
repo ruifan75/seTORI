@@ -339,6 +339,38 @@ func (r *SongMatchRepository) ScanDuplicateTitles() (int, error) {
 	return added, nil
 }
 
+// ScanSong は全件走査で AI に見せる最小の情報。
+type ScanSong struct {
+	ID             uuid.UUID
+	Name           string
+	OriginalArtist string
+}
+
+// ListAllForScan は登録曲を全件返す（AI の全件走査用）。
+// 走査は滅多に回さないので、ページングせず一度に読む。
+func (r *SongMatchRepository) ListAllForScan() ([]ScanSong, error) {
+	rows, err := r.db.Query(`SELECT id, name, original_artist FROM songs ORDER BY created_at`)
+	if err != nil {
+		return nil, fmt.Errorf("list songs for scan: %w", err)
+	}
+	defer rows.Close()
+	var out []ScanSong
+	for rows.Next() {
+		var x ScanSong
+		if err := rows.Scan(&x.ID, &x.Name, &x.OriginalArtist); err != nil {
+			return nil, fmt.Errorf("scan song: %w", err)
+		}
+		out = append(out, x)
+	}
+	return out, rows.Err()
+}
+
+// RecordScanCandidate は走査で見つけた組を候補に積む（origin='scan'）。
+// 既にある組（却下済みを含む）は積み直さない ── 蒸し返すと同じ判断を何度もさせることになる。
+func (r *SongMatchRepository) RecordScanCandidate(a, b uuid.UUID, score float64, reason string) (bool, error) {
+	return r.recordMergeCandidate(a, b, score, reason, "scan")
+}
+
 // SetMergeVerdict は AI の見立てを候補に書き込む。統合の実行はしない。
 func (r *SongMatchRepository) SetMergeVerdict(id uuid.UUID, v MergeVerdict) error {
 	_, err := r.db.Exec(`

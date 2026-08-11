@@ -161,3 +161,97 @@ func artistOrUnknown(a string) string {
 	}
 	return a
 }
+
+// 全件走査の system prompt。
+//
+// 曲名キーで束ねる走査は**同じキーの組しか見つけられない**。
+// `ホール・ニュー・ワールド` と `A Whole New World` はキーが完全に別なので、
+// どれだけ走査しても同じ組に入らず、判定の AI にも届かなかった。
+// 文字列の側で寄せ方を工夫するより、一覧を丸ごと渡して選ばせるほうが確実で単純。
+//
+// 入力は大きいが（本番 819 曲で約 13k トークン）出力は数組しかない。
+// 入力は出力より一桁安く、この走査は滅多に回さないので割に合う。
+const dupScanSystemPrompt = `あなたは楽曲データベースの重複検出を助けるアシスタントです。
+番号つきの登録曲一覧を渡します。**同じ楽曲が別々に登録されている組**を挙げてください。
+
+同じ楽曲とみなすもの:
+- 表記の違いだけ（翻訳・ローマ字・副題・記号・送り仮名・誤字）
+  例: "ルーマー" と "Rumor"、"創聖のアクエリオン" と "創生のアクエリオン"
+- アーティスト欄が作曲者と原唱のどちらを書いたかの違い
+- カバー・歌ってみたでも編曲が原曲と同じもの
+
+**別の楽曲**とみなすもの（挙げてはいけない）:
+- 編曲・録音が違う（instrumental / Remix / Reloaded / アコースティック / 和風アレンジ）
+- 曲名が似ているだけの別の曲（"ダーリン" と "ダーリンダンス"）
+- 同名だが別の曲（"オレンジ" の SPYAIR 版と 逢坂大河 版）
+
+確信が持てない組は挙げないでください。挙げても統合は実行されず、人のレビューに回ります。
+
+JSON配列のみ。説明文を付けないこと。
+各要素: {"a":番号,"b":番号,"why":"30字以内の理由"}`
+
+type dupScanPair struct {
+	A   int    `json:"a"`
+	B   int    `json:"b"`
+	Why string `json:"why"`
+}
+
+// ScanDuplicatesWithAI は登録曲を丸ごと AI に見せ、重複している組を候補に積む。
+//
+// 曲名キーの走査（ScanDuplicates）と役割が違う。あちらは同じキーの組を確実に拾うが、
+// キーが違う組（邦題と原題、誤字、ローマ字）は原理的に見つけられない。
+// ここはその穴を埋める。両方を回すのが前提。
+//
+// 統合は実行しない。候補として積み、AI の理由を verdict として添えるだけ。
+// 同名の組には「統合すべき」「編曲違いで分けるべき」「そもそも別の曲」が混在し、
+// その線引きは編集方針なので人が決める。
+func (s *SongMatchService) ScanDuplicatesWithAI(aiClient ai.Chatter) (int, error) {
+	if aiClient == nil {
+		return 0, fmt.Errorf("AI プロバイダーが設定されていません")
+	}
+	songs, err := s.matchRepo.ListAllForScan()
+	if err != nil {
+		return 0, err
+	}
+	if len(songs) < 2 {
+		return 0, nil
+	}
+
+	var sb strings.Builder
+	sb.WriteString("## 登録曲一覧\n\n")
+	for i, sg := range songs {
+		fmt.Fprintf(&sb, "%d\t%s / %s\n", i, sg.Name, artistOrUnknown(sg.OriginalArtist))
+	}
+	logger.Infof("[dup] AI に全件走査を依頼します: %d 曲", len(songs))
+
+	resp, err := aiClient.SimpleChat(dupScanSystemPrompt, sb.String())
+	if err != nil {
+		return 0, fmt.Errorf("AI 呼び出しに失敗しました: %w", err)
+	}
+	var pairs []dupScanPair
+	if err := json.Unmarshal([]byte(ai.CleanJSONResponse(resp)), &pairs); err != nil {
+		logger.Warnf("[dup] 全件走査の応答を解析できません: %v (resp=%.200s)", err, resp)
+		return 0, fmt.Errorf("AI の応答を解析できませんでした")
+	}
+
+	added := 0
+	for _, p := range pairs {
+		if p.A < 0 || p.A >= len(songs) || p.B < 0 || p.B >= len(songs) || p.A == p.B {
+			continue
+		}
+		a, b := songs[p.A], songs[p.B]
+		ok, err := s.matchRepo.RecordScanCandidate(a.ID, b.ID, 0.0, "ai_scan")
+		if err != nil {
+			logger.Warnf("[dup] 候補の記録に失敗: %v", err)
+			continue
+		}
+		if !ok {
+			continue // 既にある組（却下済みを含む）は蒸し返さない
+		}
+		added++
+		logger.Infof("[dup] AI が重複を検出: %q / %q ↔ %q / %q（%s）",
+			a.Name, a.OriginalArtist, b.Name, b.OriginalArtist, p.Why)
+	}
+	logger.Infof("[dup] 全件走査で %d 組を追加しました", added)
+	return added, nil
+}
