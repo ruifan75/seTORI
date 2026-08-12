@@ -1053,6 +1053,9 @@ export default function StreamDetailPage() {
       const merged = mergeDuplicateSongs(songs);
       const mergedCount = songs.length - merged.length;
       setEditableSongs(merged);
+      // 照合の結果（候補・変更履歴）はこの応答にしか無い。配信を開いただけの
+      // 読み取りでは照合しないので、タイムライン側もここで差し替える。
+      setCommentTimelineSongs(sortedSongs);
       const mergeMsg = mergedCount > 0 ? `（${mergedCount}曲の重複を統合）` : '';
       showToast(`コメントから${merged.length}曲を読み込みました${mergeMsg}`, 'success');
     } catch (error) {
@@ -1113,9 +1116,10 @@ export default function StreamDetailPage() {
   const confirmMatchMutation = useMutation({
     mutationFn: ({ index, name, songId }: { index: number; name: string; songId: string }) =>
       commentApi.confirmMatch(id!, index, name, songId),
-    onSuccess: (updated) => {
-      // comment_songs が書き換わっているのでタイムラインの元データを読み直す
-      queryClient.invalidateQueries({ queryKey: ['stream', id] });
+    onSuccess: (updated, { index }) => {
+      // 別名義を学習したうえで照合し直した結果が返る。stream を読み直しても
+      // 照合は付いてこない（読み取り時には引かない）ので、その場で差し替える。
+      setCommentTimelineSongs((prev) => prev.map((s, i) => (i === index ? updated : s)));
       showToast(`「${updated.matched_song_name}」に結びつけました（次から自動で当たります）`, 'success');
     },
     onError: (err: Error) => showToast(`確定に失敗しました: ${err.message}`, 'error'),

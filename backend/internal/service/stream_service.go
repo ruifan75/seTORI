@@ -12,7 +12,6 @@ import (
 
 type StreamService struct {
 	streamRepo *repository.StreamRepository
-	resolver   *NormalizationService // 読み取り時の照合（保存はしない）
 	perfRepo   *repository.PerformanceRepository
 }
 
@@ -22,10 +21,6 @@ func NewStreamService(streamRepo *repository.StreamRepository, perfRepo *reposit
 		perfRepo:   perfRepo,
 	}
 }
-
-// SetResolver は照合を読み取り時に行うための依存を渡す。
-// 照合結果は保存しないので、画面に出す直前にここで計算する。
-func (s *StreamService) SetResolver(n *NormalizationService) { s.resolver = n }
 
 // ApplyTagRulesToAll は全配信にタイトル自動タグ付けルールを適用し、追加されたタグ数を返す。
 func (s *StreamService) ApplyTagRulesToAll() (int64, error) {
@@ -97,7 +92,7 @@ func (s *StreamService) GetAll(page, limit int, sort, dir string) (*dto.StreamLi
 	// 轉換為 DTO
 	streamResponses := make([]dto.StreamResponse, len(streams))
 	for i, stream := range streams {
-		streamResponses[i] = s.toStreamResponse(stream, tagsMap[stream.ID], participantsMap[stream.ID], ownersMap[stream.ID], false)
+		streamResponses[i] = s.toStreamResponse(stream, tagsMap[stream.ID], participantsMap[stream.ID], ownersMap[stream.ID])
 	}
 
 	totalPages := (total + limit - 1) / limit
@@ -130,7 +125,7 @@ func (s *StreamService) composeStreamList(streams []models.Stream, total, page, 
 
 	streamResponses := make([]dto.StreamResponse, len(streams))
 	for i, stream := range streams {
-		streamResponses[i] = s.toStreamResponse(stream, tagsMap[stream.ID], participantsMap[stream.ID], ownersMap[stream.ID], false)
+		streamResponses[i] = s.toStreamResponse(stream, tagsMap[stream.ID], participantsMap[stream.ID], ownersMap[stream.ID])
 	}
 
 	return &dto.StreamListResponse{
@@ -225,7 +220,7 @@ func (s *StreamService) GetByID(id string) (*dto.StreamDetailResponse, error) {
 	tags, _ := s.streamRepo.GetTags(stream.ID)
 	participants, _ := s.streamRepo.GetSingers(stream.ID)
 	channelOwner, _ := s.streamRepo.GetChannelOwner(stream.ID)
-	streamResp := s.toStreamResponse(*stream, tags, participants, channelOwner, true)
+	streamResp := s.toStreamResponse(*stream, tags, participants, channelOwner)
 
 	// 取得演出清單
 	performances, err := s.perfRepo.FindByStreamID(id)
@@ -244,10 +239,8 @@ func (s *StreamService) GetByID(id string) (*dto.StreamDetailResponse, error) {
 	}, nil
 }
 
-// toStreamResponse 轉換 Model 到 DTO
-// withMatch=true のときだけ DB 照合を当てる。一覧では当てない ── 配信ごとに
-// 曲数ぶんの問い合わせが増えるうえ、一覧は照合結果を使っていない。
-func (s *StreamService) toStreamResponse(stream models.Stream, tags []models.StreamTag, participants []models.Singer, channelOwner *models.Singer, withMatch bool) dto.StreamResponse {
+// toStreamResponse 轉換 Model 到 DTO。**照合はしない**（理由は下の comment_songs の節）。
+func (s *StreamService) toStreamResponse(stream models.Stream, tags []models.StreamTag, participants []models.Singer, channelOwner *models.Singer) dto.StreamResponse {
 	resp := dto.StreamResponse{
 		ID:          stream.ID,
 		Title:       stream.Title,
@@ -355,20 +348,19 @@ func (s *StreamService) toStreamResponse(stream models.Stream, tags []models.Str
 		}
 	}
 
-	// 從 comment_songs 載入已分析的快取結果
+	// 從 comment_songs 載入已分析的快取結果。
+	//
+	// **ここでは照合しない。** 照合するのは「どの源から取り込むか」を決めて
+	// 編集フォームへ読み込む操作（POST /comments/analyze、/holodex-songs/analyze）
+	// だけで、配信を開いただけの読み取りでは何も引かない。Holodex 側も同じ扱い
+	// （このメソッドは holodex_data をそのまま組み立てるだけ）。
+	//
+	// 保存済みの JSON に照合の痕跡が残っている配信（read-time 照合に移す前に
+	// backfill-matches が書いたもの）があるので、落としてから返す。
 	if len(stream.CommentSongs) > 0 {
 		var commentSongs []dto.CommentSong
 		if err := json.Unmarshal(stream.CommentSongs, &commentSongs); err == nil && len(commentSongs) > 0 {
-			if withMatch {
-				// 照合は保存していないので、ここで今の DB に対して計算する
-				s.resolver.ResolveForDisplay(commentSongs)
-			} else {
-				// 一覧では照合しない。保存済みの JSON に照合の痕跡が残っている
-				// 配信（read-time 照合に移す前に backfill-matches が書いたもの）が
-				// あるので、そのまま返すと古い答えを配ることになる。
-				commentSongs = stripMatchForStorage(commentSongs)
-			}
-			resp.CommentTimelineSongs = commentSongs
+			resp.CommentTimelineSongs = stripMatchForStorage(commentSongs)
 		}
 	}
 

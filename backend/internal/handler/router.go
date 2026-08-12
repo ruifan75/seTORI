@@ -96,7 +96,6 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	holodexService.SetRepositoriesWithSongItunes(perfRepo, songRepo, songItunesRepo) // SyncSetoriToHolodex に必要な repositories を提供
 	normalizationService := service.NewNormalizationService(aiService, songItunesRepo, songMatchService)
 	// 照合は保存せず読み取り時に計算する。配信詳細を返すときにここを通す。
-	streamService.SetResolver(normalizationService)
 	chatEndService := service.NewChatEndService(streamRepo, cfg.YtdlpPath, "")
 	// CommentService は分析時に正規化・拍手 end を内部で実行する（抽出→正規化→end→キャッシュ）
 	commentService := service.NewCommentService(holodexService, streamRepo, filterKeywordRepo, aiService, normalizationService, chatEndService, songMatchService)
