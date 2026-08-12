@@ -362,6 +362,11 @@ func (s *StreamService) toStreamResponse(stream models.Stream, tags []models.Str
 			if withMatch {
 				// 照合は保存していないので、ここで今の DB に対して計算する
 				s.resolver.ResolveForDisplay(commentSongs)
+			} else {
+				// 一覧では照合しない。保存済みの JSON に照合の痕跡が残っている
+				// 配信（read-time 照合に移す前に backfill-matches が書いたもの）が
+				// あるので、そのまま返すと古い答えを配ることになる。
+				commentSongs = stripMatchForStorage(commentSongs)
 			}
 			resp.CommentTimelineSongs = commentSongs
 		}
