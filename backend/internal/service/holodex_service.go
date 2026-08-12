@@ -933,9 +933,7 @@ func (s *HolodexService) adjudicateSuggestions(songs []dto.SongSuggestion) {
 	if s.normalizationService == nil {
 		return
 	}
-	if _, linked := s.normalizationService.AdjudicateSongIdentityForSuggestions(songs); linked > 0 {
-		s.normalizationService.ResolveSuggestionsForDisplay(songs)
-	}
+	s.normalizationService.AdjudicateSuggestions(songs)
 }
 
 // normalizeHolodexInto SongSuggestion に AI 正規化＋DB 照合結果を埋め込む（in-place）。

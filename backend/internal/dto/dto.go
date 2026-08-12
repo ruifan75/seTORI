@@ -363,6 +363,8 @@ type CommentSong struct {
 	MatchedSongItunesID      *int64  `json:"matched_song_itunes_id,omitempty"`
 	// 自動採用に届かなかった照合候補（別名義・同名異曲など。UI で選ばせる）
 	MatchCandidates []SongMatchCandidate `json:"match_candidates,omitempty"`
+	// AI が照合した場合の申し送り（歌手が DB と違うとき）
+	ArtistAlias *ArtistAliasProposal `json:"artist_alias,omitempty"`
 
 	// Changes は「抽出したままの値が、どの処理でどう変わったか」の履歴。
 	// 画面に「元は X、AI 正規化で Y、DB 照合で Z」と出すためのもの。
@@ -381,8 +383,20 @@ type FieldChange struct {
 	By     string  `json:"by"`               // ai_normalize | db_match
 	From   string  `json:"from"`             // 変わる前
 	To     string  `json:"to"`               // 変わった後
-	Reason string  `json:"reason,omitempty"` // db_match の根拠（exact / title_artist / song_alias …）
+	Reason string  `json:"reason,omitempty"` // db_match の根拠（exact / title_artist / ai …）
 	Score  float64 `json:"score,omitempty"`  // db_match の確信度
+}
+
+// ArtistAliasProposal は「歌手名が DB と違うが、AI は同一人物だと言っている」ことの
+// 申し送り。編集フォームでチェックボックスとして出し、**保存したときだけ**登録する。
+//
+// 作曲者と原唱の取り違え（メルト / 初音ミク に対し DB は ryo (supercell)）は
+// 「同じ曲だが別人」なので SameArtist=false になる。これを混同すると、
+// その人の全楽曲に効く別名義が誤って作られる。
+type ArtistAliasProposal struct {
+	Canonical  string `json:"canonical"`   // DB 側の表記（別名義の本体になる）
+	Alias      string `json:"alias"`       // コメント側の表記
+	SameArtist bool   `json:"same_artist"` // AI の判定。true のときだけ既定でチェックが入る
 }
 
 type AnalyzeCommentsResponse struct {
@@ -467,6 +481,8 @@ type SongSuggestion struct {
 	MatchedSongItunesID      *int64  `json:"matched_song_itunes_id,omitempty"`
 	// 自動採用に届かなかった照合候補（CommentSong と対称）
 	MatchCandidates []SongMatchCandidate `json:"match_candidates,omitempty"`
+	// AI が照合した場合の申し送り（歌手が DB と違うとき）
+	ArtistAlias *ArtistAliasProposal `json:"artist_alias,omitempty"`
 	// Changes は「抽出したままの値が、どの処理でどう変わったか」の履歴。
 	// 保存しない（照合は読み取り時に計算する）。
 	Changes []FieldChange `json:"changes,omitempty"`
@@ -550,6 +566,8 @@ type AISuggestionResult struct {
 	// MatchCandidates は「似ているが自動採用の水準に届かなかった」既存楽曲。
 	// 別名義（松任谷由実 / 荒井由実）や同名異曲がここに出る。UI で人に選ばせる。
 	MatchCandidates []SongMatchCandidate `json:"match_candidates,omitempty"`
+	// AI が照合した場合の申し送り（歌手が DB と違うとき）
+	ArtistAlias *ArtistAliasProposal `json:"artist_alias,omitempty"`
 }
 
 // ========== 楽曲の統合候補 ==========

@@ -362,7 +362,7 @@ func (s *SongService) MergeSongs(sourceSongID, targetSongID uuid.UUID) error {
 	}
 
 	if s.matchService != nil {
-		s.matchService.LearnFromMerge(source, target)
+		s.matchService.OnSongMerged(source, target)
 		// 統合が済んだので、この 2 曲に紐づく未処理の統合候補は畳む。
 		// 残しておくと解決済みの組が一覧に出続ける。
 		if err := s.matchService.ResolveCandidatesForMergedSong(sourceSongID, targetSongID); err != nil {

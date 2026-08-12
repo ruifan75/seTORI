@@ -7,14 +7,12 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/google/uuid"
 	"github.com/ruifan75/setori/internal/dto"
 	"github.com/ruifan75/setori/internal/logger"
 	"github.com/ruifan75/setori/internal/models"
 	"github.com/ruifan75/setori/internal/repository"
 	"github.com/ruifan75/setori/pkg/ai"
 	"github.com/ruifan75/setori/pkg/comment"
-	"github.com/ruifan75/setori/pkg/songmatch"
 	"github.com/ruifan75/setori/pkg/util"
 )
 
@@ -56,71 +54,6 @@ var (
 	ErrMatchSongNotFound   = errors.New("指定された楽曲が見つかりません")
 	ErrUnlearnableName     = errors.New("この曲名からは照合キーを作れないため確定できません")
 )
-
-// ConfirmCommentSongMatch は「この表記はこの曲だ」という人の判断を確定させる。
-//
-// songmatch が 0.50〜0.85 で返す候補は、文字列だけでは決められないもの
-// （アーティスト不明の title_only、feat./CV 表記ゆれの title_mismatch、別名義）で、
-// 自動採用させると同名異曲を巻き込む。人が選んだ結果をここで受ける。
-//
-// 確定は matched_song_* を直接書かず、**別表記として学習してから照合をやり直す**。
-// こうすると学習が効いていることがその場で検証でき、同じ表記が他の配信に出てきても
-// （backfill-matches を回せば）同じ答えになる。直接書くと、この 1 行だけが直って
-// 次に同じ表記が来たらまた人が選ぶことになる。
-//
-// index と一緒に expectName を受け取るのは、画面が見ていた行と保存する行が
-// 同じであることを確かめるため（再分析で並びが変わりうる）。
-func (s *CommentService) ConfirmCommentSongMatch(videoID string, index int, expectName string, songID uuid.UUID) (*dto.CommentSong, error) {
-	if s.matchService == nil || s.normalizationService == nil {
-		return nil, fmt.Errorf("照合サービスが未設定です")
-	}
-
-	stream, err := s.streamRepo.FindByID(videoID)
-	if err != nil {
-		return nil, fmt.Errorf("find stream: %w", err)
-	}
-	if stream == nil || len(stream.CommentSongs) == 0 {
-		return nil, ErrCommentSongNotFound
-	}
-	var songs []dto.CommentSong
-	if err := json.Unmarshal(stream.CommentSongs, &songs); err != nil {
-		return nil, fmt.Errorf("parse comment songs: %w", err)
-	}
-	if index < 0 || index >= len(songs) {
-		return nil, ErrCommentSongNotFound
-	}
-	if expectName != "" && songs[index].Name != expectName {
-		return nil, ErrCommentSongChanged
-	}
-
-	song, err := s.matchService.FindSong(songID)
-	if err != nil {
-		return nil, fmt.Errorf("find song: %w", err)
-	}
-	if song == nil {
-		return nil, ErrMatchSongNotFound
-	}
-
-	// 学習と照合で同じ入力を使う（片方だけ抽出名に落ちると鍵がずれて当たらない）
-	name, artist := matchInputs(songs[index])
-	if songmatch.TitleKey(name) == "" {
-		return nil, ErrUnlearnableName
-	}
-	if err := s.matchService.LearnSongAlias(name, artist, songID, "comment"); err != nil {
-		return nil, fmt.Errorf("learn song alias: %w", err)
-	}
-
-	// 学習が効いたことをその場で確かめる。照合は保存しないので、
-	// ここで確認できれば次に画面を開いたときも同じ答えになる。
-	s.normalizationService.ResolveForDisplay(songs)
-	got := songs[index].MatchedSongID
-	if got == nil || *got != songID.String() {
-		return nil, fmt.Errorf("別表記を学習しましたが照合に反映されませんでした（%q / %q）", name, artist)
-	}
-	logger.Infof("[comment] 照合を確定しました %s[%d]: %q / %q → %q / %q",
-		videoID, index, name, artist, song.Name, song.OriginalArtist)
-	return &songs[index], nil
-}
 
 // AnalyzeComments 從留言分析歌曲：AI 抽取 → 正規化 → live chat 拍手 end → 存 DB。
 // 以 comment_raw 的 hash 為快取鍵：資料沒變且非強制時，直接回傳已存的 comment_songs（不打 AI）。
@@ -306,28 +239,13 @@ func (s *CommentService) analyzeComments(videoID string, force, dryRun, adjudica
 	}, nil
 }
 
-// adjudicateAll は決着しなかった行を AI に判定させ、決まったぶんだけ照合し直す。
-//
-// 2 種類ある。アーティストの別名義（GUMI / グミ）と、楽曲の同一性
-// （深昏睡 / 深昏睡 (Deep coma)）。前者は曲名キーが当たっている組、
-// 後者は曲名キーごと外れている組が対象なので、両方要る。
+// adjudicateAll は規則で決まらなかった行を AI に回す。
 //
 // **利用者が「読み込む」を押した時にだけ通る。** 呼ばない場所が 2 つある。
 //   - 配信詳細の GET … 閲覧者が通るだけの経路。見ているだけで AI を呼ぶことになる
-//   - 一括プレ分析 … 誰も見ていない配信のために、全站の照合に効く学習を進めてしまう
-//
-// 判定は保存されるので、一度誰かが読み込めば以後の閲覧は無料でその結果を受け取る。
-func (s *CommentService) adjudicateAll(songs []dto.CommentSong) (asked, linked int) {
-	n := s.normalizationService
-	a1, l1 := n.AdjudicateAliasesForCommentSongs(songs)
-	if l1 > 0 {
-		n.ResolveForDisplay(songs) // 別名義が増えたので照合し直してから次の判定へ
-	}
-	a2, l2 := n.AdjudicateSongIdentityForCommentSongs(songs)
-	if l2 > 0 {
-		n.ResolveForDisplay(songs)
-	}
-	return a1 + a2, l1 + l2
+//   - 一括プレ分析 … 誰も見ていない配信のために AI を焚くことになる
+func (s *CommentService) adjudicateAll(songs []dto.CommentSong) (asked, resolved int) {
+	return s.normalizationService.AdjudicateCommentSongs(songs)
 }
 
 // buildStats は応答に載せる内訳を作る。ログを読まずに挙動を確かめられるようにするためのもの。

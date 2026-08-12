@@ -96,7 +96,7 @@ func main() {
 	noGT := flag.Bool("nogt", false, "evaluate streams that have no performances (雑音の計測用。precision/recall は出ない)")
 	extractDump := flag.String("extractdump", "", "dump every extracted item (GT の有無によらず) to JSON")
 	evalMatching := flag.Bool("match", true, "evaluate song matching (抽出した曲名が正しい楽曲に結びつくか)")
-	noAlias := flag.Bool("noalias", false, "disable the learning layers (song_aliases / artist_aliases) to measure their contribution")
+	noAlias := flag.Bool("noalias", false, "disable the artist alias layer (artists.aliases) to measure its contribution")
 	badMatchDump := flag.String("baddump", "", "dump false matches / missed matches to JSON")
 	flag.Parse()
 

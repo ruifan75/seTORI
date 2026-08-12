@@ -1,6 +1,11 @@
 package service
 
-import "github.com/ruifan75/setori/internal/dto"
+import (
+	"github.com/google/uuid"
+
+	"github.com/ruifan75/setori/internal/dto"
+	"github.com/ruifan75/setori/pkg/songmatch"
+)
 
 // 照合（どの楽曲か）は**保存しない**。読み取るたびに現在の DB で計算する。
 //
@@ -157,4 +162,145 @@ func stripMatchFromSuggestions(songs []dto.SongSuggestion) []dto.SongSuggestion 
 		out[i].Changes = nil
 	}
 	return out
+}
+
+// ---------- 規則で決まらなかった行を AI に回す ----------
+
+// AdjudicateCommentSongs は未照合の行を AI に判定させ、決まったものを書き戻す。
+// 戻り値は (AI に回した行数, 照合できた行数)。
+//
+// 呼ぶのは「源を編集フォームへ読み込む」ときだけ。
+func (s *NormalizationService) AdjudicateCommentSongs(songs []dto.CommentSong) (asked, resolved int) {
+	rows := make([]*aiMatchRow, 0, len(songs))
+	idx := make([]int, 0, len(songs))
+	for i := range songs {
+		if songs[i].MatchedSongID != nil {
+			continue
+		}
+		name, artist := MatchInputs(songs[i].Name, songs[i].OriginalArtist,
+			songs[i].NormalizedName, songs[i].NormalizedArtist)
+		rows = append(rows, s.newAIMatchRow(name, artist, songs[i].MatchCandidates))
+		idx = append(idx, i)
+	}
+	if len(rows) == 0 {
+		return 0, 0
+	}
+	asked, resolved = s.AdjudicateMatches(rows)
+	for n, row := range rows {
+		i := idx[n]
+		m, alias, changes := s.aiMatchResult(row)
+		if m.MatchedSongID == nil {
+			continue
+		}
+		songs[i].MatchedSongID = m.MatchedSongID
+		songs[i].MatchedSongName = m.MatchedSongName
+		songs[i].MatchedSongNameReading = m.MatchedSongNameReading
+		songs[i].MatchedSongArtist = m.MatchedSongArtist
+		songs[i].MatchedSongArtistReading = m.MatchedSongArtistReading
+		songs[i].MatchedSongArtURL = m.MatchedSongArtURL
+		songs[i].MatchedSongItunesID = m.MatchedSongItunesID
+		songs[i].ArtistAlias = alias
+		songs[i].Changes = append(songs[i].Changes, changes...)
+	}
+	return asked, resolved
+}
+
+// AdjudicateSuggestions は Holodex 経路の同じ処理。
+func (s *NormalizationService) AdjudicateSuggestions(songs []dto.SongSuggestion) (asked, resolved int) {
+	rows := make([]*aiMatchRow, 0, len(songs))
+	idx := make([]int, 0, len(songs))
+	for i := range songs {
+		if songs[i].MatchedSongID != nil {
+			continue
+		}
+		name, artist := MatchInputs(songs[i].Name, songs[i].OriginalArtist,
+			songs[i].NormalizedName, songs[i].NormalizedArtist)
+		rows = append(rows, s.newAIMatchRow(name, artist, songs[i].MatchCandidates))
+		idx = append(idx, i)
+	}
+	if len(rows) == 0 {
+		return 0, 0
+	}
+	asked, resolved = s.AdjudicateMatches(rows)
+	for n, row := range rows {
+		i := idx[n]
+		m, alias, changes := s.aiMatchResult(row)
+		if m.MatchedSongID == nil {
+			continue
+		}
+		songs[i].MatchedSongID = m.MatchedSongID
+		songs[i].MatchedSongName = m.MatchedSongName
+		songs[i].MatchedSongNameReading = m.MatchedSongNameReading
+		songs[i].MatchedSongArtist = m.MatchedSongArtist
+		songs[i].MatchedSongArtistReading = m.MatchedSongArtistReading
+		songs[i].MatchedSongArtURL = m.MatchedSongArtURL
+		songs[i].MatchedSongItunesID = m.MatchedSongItunesID
+		songs[i].ArtistAlias = alias
+		songs[i].Changes = append(songs[i].Changes, changes...)
+	}
+	return asked, resolved
+}
+
+// newAIMatchRow は DTO の候補を照合サービスの候補へ戻す。
+// AI には曲名とアーティストの両方を見せたいので、DTO に落ちている情報だけでは足りず
+// 候補の楽曲そのものを引き直す。
+func (s *NormalizationService) newAIMatchRow(name, artist string, dtoCands []dto.SongMatchCandidate) *aiMatchRow {
+	row := &aiMatchRow{Name: name, Artist: artist}
+	for _, c := range dtoCands {
+		id, err := uuid.Parse(c.SongID)
+		if err != nil {
+			continue
+		}
+		song, err := s.matchService.FindSong(id)
+		if err != nil || song == nil {
+			continue
+		}
+		row.Candidates = append(row.Candidates, MatchCandidate{Song: *song, Score: c.Score, Reason: c.Reason})
+	}
+	return row
+}
+
+// aiMatchResult は AI の判定を照合結果の形へ組み直す。
+// 詰め方は規則で決まった場合と同じ関数（populateMatchedSong）を通す。
+func (s *NormalizationService) aiMatchResult(row *aiMatchRow) (dto.AISuggestionResult, *dto.ArtistAliasProposal, []dto.FieldChange) {
+	var res dto.AISuggestionResult
+	if row.SongID == nil {
+		return res, nil, nil
+	}
+	song, err := s.matchService.FindSong(*row.SongID)
+	if err != nil || song == nil {
+		return res, nil, nil
+	}
+	s.populateMatchedSong(&res, song, ReasonAI, row.Confidence)
+
+	// 歌手が違うなら、同一人物かどうかを申し送る。登録は保存のときに行う。
+	//
+	// **連名は申し送らない。** 「May'n & 中島愛」と「ランカ・リー=中島愛」では
+	// どの名前とどの名前が同じ人なのかが定まらず、別名義はその人の全楽曲に効くので
+	// 誤った 1 件の影響が広い。曲の照合自体は AI の判断のまま採用してよい。
+	var alias *dto.ArtistAliasProposal
+	single := len(songmatch.ParseArtist(row.Artist).Tokens) <= 1 &&
+		len(songmatch.ParseArtist(song.OriginalArtist).Tokens) <= 1
+	if single && row.SameArtist != nil && song.OriginalArtist != "" && row.Artist != "" && row.Artist != song.OriginalArtist {
+		alias = &dto.ArtistAliasProposal{
+			Canonical:  song.OriginalArtist,
+			Alias:      row.Artist,
+			SameArtist: *row.SameArtist,
+		}
+	}
+
+	var changes []dto.FieldChange
+	if row.Name != song.Name {
+		changes = append(changes, dto.FieldChange{
+			Field: "name", By: "ai_match", From: row.Name, To: song.Name,
+			Reason: ReasonAI, Score: row.Confidence,
+		})
+	}
+	if row.Artist != song.OriginalArtist && song.OriginalArtist != "" {
+		changes = append(changes, dto.FieldChange{
+			Field: "artist", By: "ai_match", From: row.Artist, To: song.OriginalArtist,
+			Reason: ReasonAI, Score: row.Confidence,
+		})
+	}
+	return res, alias, changes
 }

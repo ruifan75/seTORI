@@ -2,7 +2,6 @@ package service
 
 import (
 	"errors"
-	"strings"
 	"testing"
 
 	"github.com/ruifan75/setori/internal/dto"
@@ -108,46 +107,23 @@ func TestMatchAndPopulateSong_NilMatchServiceIsSafe(t *testing.T) {
 	}
 }
 
-// AI が別名義を 1 件も確定できなかったら、照合はやり直さない（元の結果のまま）。
-func TestResolveAliases_NoLinkKeepsOriginalMatches(t *testing.T) {
-	ai := &countingAI{response: `[{"i":0,"same":false,"why":"別人"}]`}
+// 照合サービスが無ければ AI を呼ばない。
+//
+// 未照合の行を AI に回す入口は、依存が欠けているときに黙って素通りすること。
+// ここが落ちると、AI が使えない環境で読み込みごと失敗する。
+func TestAdjudicate_NoMatchServiceIsAIFree(t *testing.T) {
+	ai := &countingAI{response: `[{"i":0,"id":null}]`}
 	svc := &NormalizationService{aiClient: ai}
 
-	// matchService が nil なので resolveAliasesAndRematch は即 return する。
-	// ここで落ちないことと、AI が余計に呼ばれないことを確認する。
-	sugs := []dto.AISuggestionResult{{
-		Index:          0,
-		OriginalArtist: "松任谷由実",
-		MatchCandidates: []dto.SongMatchCandidate{
-			{Artist: "荒井由実", Reason: ReasonTitleMismatch, Score: 0.6},
-		},
-	}}
-	svc.resolveAliasesAndRematch([]dto.AINormalizationItem{{Name: "ひこうき雲"}}, sugs)
-
+	songs := []dto.CommentSong{{Name: "ひこうき雲", OriginalArtist: "松任谷由実"}}
+	if asked, resolved := svc.AdjudicateCommentSongs(songs); asked == 0 && resolved != 0 {
+		t.Errorf("resolved=%d, want 0", resolved)
+	}
 	if ai.calls != 0 {
 		t.Errorf("照合サービスが無いのに AI を %d 回呼んでいる", ai.calls)
 	}
-	if len(sugs[0].MatchCandidates) != 1 {
-		t.Error("元の候補が消えている")
-	}
-}
-
-// 別名義の問い合わせ対象を集める段階は AI に触れない。
-// AI が死んでいても、規則で拾えるものは拾える形になっているかの確認。
-func TestCollectPairs_IsPureAndAIFree(t *testing.T) {
-	sug := dto.AISuggestionResult{
-		OriginalArtist: "松任谷由実",
-		MatchCandidates: []dto.SongMatchCandidate{
-			{Artist: "荒井由実", Reason: ReasonTitleMismatch},
-			{Artist: "YOASOBI", Reason: ReasonTitleAmbiguous},
-		},
-	}
-	pairs := collectArtistAliasPairsFromDTO(sug)
-	if len(pairs) != 1 {
-		t.Fatalf("got %d pairs, want 1（title_mismatch だけが対象）", len(pairs))
-	}
-	if !strings.Contains(pairs[0].DisplayB, "荒井由実") {
-		t.Errorf("pair = %+v", pairs[0])
+	if songs[0].MatchedSongID != nil {
+		t.Error("照合できていないのに結果が入っている")
 	}
 }
 

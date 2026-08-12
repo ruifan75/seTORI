@@ -145,7 +145,7 @@ func (e *matchEval) print(title string) {
 // withAliases=false なら学習層（song_aliases / artist_aliases）を外す。
 // 両方を回して差を見ると、学習が実際にどれだけ効いているかが分かる。
 func newMatchService(db *sql.DB, withAliases bool) *service.SongMatchService {
-	var aliasRepo *repository.AliasRepository
+	var aliasRepo *repository.AliasRepository // nil にすると別名義を使わない
 	if withAliases {
 		aliasRepo = repository.NewAliasRepository(db)
 	}

@@ -251,11 +251,6 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("GET /api/songs/{id}/merge-candidates", r.handleGetSongMergeCandidates)
 
 	// API routes - 照合の学習層（アーティストの別名義・楽曲の別表記）
-	r.mux.HandleFunc("GET /api/aliases/artists", r.handleListArtistAliases)
-	r.mux.HandleFunc("POST /api/aliases/artists", r.handleLinkArtistAliases)
-	r.mux.HandleFunc("DELETE /api/aliases/artists/{nameKey}", r.handleUnlinkArtistAlias)
-	r.mux.HandleFunc("GET /api/aliases/songs", r.handleListSongAliases)
-	r.mux.HandleFunc("DELETE /api/aliases/songs", r.handleDeleteSongAlias)
 
 	// API routes - Streams
 	r.mux.HandleFunc("GET /api/streams", r.handleListStreams)
@@ -351,7 +346,6 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("POST /api/streams/{id}/comments/analyze", r.handleAnalyzeComments)
 	r.mux.HandleFunc("POST /api/comments/backfill", r.handleBackfillCommentSongs)
 	r.mux.HandleFunc("POST /api/comments/backfill-hashes", r.handleBackfillCommentSongsHashes)
-	r.mux.HandleFunc("POST /api/streams/{id}/comment-songs/match", r.handleConfirmCommentSongMatch)
 	r.mux.HandleFunc("POST /api/streams/{id}/analyze-chat-ends", r.handleAnalyzeChatEnds)
 	r.mux.HandleFunc("POST /api/streams/{id}/chat-end-estimate", r.handleEstimateChatEnds)
 	r.mux.HandleFunc("POST /api/chat-ends/backfill", r.handleBackfillChatEnds)
@@ -2184,48 +2178,6 @@ func (r *Router) handleDeleteFilterKeyword(w http.ResponseWriter, req *http.Requ
 }
 
 // handleBackfillCommentSongs 補填所有有 comment_raw 但沒有 comment_songs 的 stream
-// handleConfirmCommentSongMatch は解析結果の1行に対して、人が選んだ候補を確定させる（content:edit）。
-//
-// 確定は別表記の学習として残る（/admin/aliases から取り消せる）。AI は呼ばない。
-// 照合そのものは保存しないので、次に画面を開いたときは学習した別表記経由で当たる。
-func (r *Router) handleConfirmCommentSongMatch(w http.ResponseWriter, req *http.Request) {
-	videoID := req.PathValue("id")
-	if videoID == "" {
-		respondError(w, http.StatusBadRequest, "無効な動画ID")
-		return
-	}
-	var body struct {
-		Index  int    `json:"index"`
-		Name   string `json:"name"` // 画面に出ていた曲名（行のズレ検出用）
-		SongID string `json:"song_id"`
-	}
-	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-		respondError(w, http.StatusBadRequest, "リクエストの形式が正しくありません")
-		return
-	}
-	songID, err := uuid.Parse(body.SongID)
-	if err != nil {
-		respondError(w, http.StatusBadRequest, "無効な楽曲ID")
-		return
-	}
-
-	song, err := r.commentService.ConfirmCommentSongMatch(videoID, body.Index, body.Name, songID)
-	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrCommentSongNotFound), errors.Is(err, service.ErrMatchSongNotFound):
-			respondError(w, http.StatusNotFound, err.Error())
-		case errors.Is(err, service.ErrCommentSongChanged):
-			respondError(w, http.StatusConflict, err.Error())
-		case errors.Is(err, service.ErrUnlearnableName):
-			respondError(w, http.StatusBadRequest, err.Error())
-		default:
-			respondError(w, http.StatusInternalServerError, err.Error())
-		}
-		return
-	}
-	respondJSON(w, http.StatusOK, song)
-}
-
 func (r *Router) handleBackfillCommentSongs(w http.ResponseWriter, req *http.Request) {
 	count, err := r.commentService.BackfillCommentSongs()
 	if err != nil {

@@ -192,104 +192,7 @@ func (s *NormalizationService) BatchAINormalization(items []dto.AINormalizationI
 	// 判定は肯定・否定とも永続化されるので、同じ組を二度は聞かない。
 	//
 	// warning が付いているときは AI 呼び出し自体が失敗しているので試さない。
-	// 同じ理由で必ず失敗する 2 回目を投げても、待ち時間が延びるだけ。
-	if warning == "" {
-		s.resolveAliasesAndRematch(items, suggestions)
-	}
-
 	return &dto.BatchAINormalizationResponse{Suggestions: suggestions, Warning: warning}, nil
-}
-
-// resolveAliasesAndRematch は照合しきれなかったアーティストの組を AI に判定させ、
-// 別名義が登録できたぶんだけ照合をやり直す（in-place）。
-//
-// これは 2 段階経路（BatchAINormalization）用の入口。既定の統合経路は
-// AdjudicateAliasesForCommentSongs から同じ判定を呼ぶ。
-//
-// 呼ばない場所が 2 つある。
-//   - キャッシュ命中時の再解決（ResolveMatch）… AI を呼ばない約束の経路
-//   - 正規化の AI 呼び出しが失敗したとき … 2 回目も同じ理由で失敗する
-//
-// どちらの場合も照合結果は規則ベースのまま残る。別名義が増えないだけで、
-// 決着しなかった組は統合候補として人に回る。
-func (s *NormalizationService) resolveAliasesAndRematch(items []dto.AINormalizationItem, suggestions []dto.AISuggestionResult) {
-	if s.matchService == nil {
-		return
-	}
-
-	var pairs []artistPair
-	for i := range suggestions {
-		if suggestions[i].MatchedSongID != nil {
-			continue // 既に自動採用できている
-		}
-		pairs = append(pairs, collectArtistAliasPairsFromDTO(suggestions[i])...)
-	}
-	if len(pairs) == 0 {
-		return
-	}
-	if linked := s.adjudicateArtistAliases(pairs); linked == 0 {
-		return
-	}
-
-	// 別名義が増えたので、まだ結びついていない項目だけ照合しなおす
-	for i := range suggestions {
-		if suggestions[i].MatchedSongID != nil {
-			continue
-		}
-		suggestions[i].MatchCandidates = nil
-		s.matchAndPopulateSong(&suggestions[i], &items[i], suggestions[i].NormalizedName, suggestions[i].OriginalArtist)
-	}
-}
-
-// collectArtistAliasPairsFromDTO は候補（DTO）から問い合わせ対象の組を拾う。
-func collectArtistAliasPairsFromDTO(sug dto.AISuggestionResult) []artistPair {
-	return collectArtistAliasPairsFromCandidates(sug.OriginalArtist, sug.MatchCandidates)
-}
-
-// collectArtistAliasPairsFromCandidates は DTO の候補列から問い合わせ対象の組を拾う。
-// 2 段階経路（AISuggestionResult）と統合経路（CommentSong）の両方から使う。
-func collectArtistAliasPairsFromCandidates(artist string, dtoCands []dto.SongMatchCandidate) []artistPair {
-	cands := make([]MatchCandidate, 0, len(dtoCands))
-	for _, c := range dtoCands {
-		cands = append(cands, MatchCandidate{
-			Song:   models.Song{OriginalArtist: c.Artist},
-			Score:  c.Score,
-			Reason: c.Reason,
-		})
-	}
-	return collectArtistAliasPairs(artist, cands)
-}
-
-// AdjudicateAliasesForCommentSongs は統合経路（grouped）から呼ぶ別名義の AI 判定。
-//
-// 別名義が 1 つでも登録できたら true を返す。呼び出し側は照合をやり直す
-// （やり直しは CommentService.reresolveMatches が持っているので、ここでは判定だけ行う）。
-//
-// なぜ別入口が要るか：統合経路は抽出と正規化を 1 回の AI 呼び出しで済ませるため
-// BatchAINormalization を通らない。判定はそちらの中にあったので、
-// 既定が統合経路に切り替わった時点で**一度も実行されなくなっていた**
-// （本番の artist_alias_checks が 0 件だったのはこれが理由）。
-//
-// **キャッシュ命中と backfill からは呼ばないこと。** あちらは「AI を呼ばない」約束の経路で、
-// 何度でも無料で回せることが取り柄になっている。
-// 戻り値は (問い合わせた組, 同一人物と判定できた組)。応答の stats に載せる。
-func (s *NormalizationService) AdjudicateAliasesForCommentSongs(songs []dto.CommentSong) (asked, linked int) {
-	if s.matchService == nil || s.aiClient == nil {
-		return 0, 0
-	}
-	var pairs []artistPair
-	for i := range songs {
-		if songs[i].MatchedSongID != nil {
-			continue // 既に自動採用できている
-		}
-		_, artist := MatchInputs(songs[i].Name, songs[i].OriginalArtist,
-			songs[i].NormalizedName, songs[i].NormalizedArtist)
-		pairs = append(pairs, collectArtistAliasPairsFromCandidates(artist, songs[i].MatchCandidates)...)
-	}
-	if len(pairs) == 0 {
-		return 0, 0
-	}
-	return len(pairs), s.adjudicateArtistAliases(pairs)
 }
 
 // buildBatchMessage 構築包含所有楽曲のバッチメッセージ
@@ -349,13 +252,17 @@ func (s *NormalizationService) matchAndPopulateSong(result *dto.AISuggestionResu
 	if !best.Auto() {
 		return
 	}
-	matchedSong := &best.Song
+	s.populateMatchedSong(result, &best.Song, best.Reason, best.Score)
+}
 
-	// 填入匹配結果
+// populateMatchedSong は決まった楽曲を result に写す。
+// 規則で決めた場合（matchAndPopulateSong）と AI が決めた場合（applyAIMatch）で共用する
+// ── 別々に書いていた頃、iTunes ID を片方だけ埋めるといった食い違いが起きた。
+func (s *NormalizationService) populateMatchedSong(result *dto.AISuggestionResult, matchedSong *models.Song, reason string, score float64) {
 	songID := matchedSong.ID.String()
 	result.MatchedSongID = &songID
-	result.MatchReason = best.Reason
-	result.MatchScore = best.Score
+	result.MatchReason = reason
+	result.MatchScore = score
 	result.MatchedSongName = &matchedSong.Name
 	result.MatchedSongArtist = &matchedSong.OriginalArtist
 	if matchedSong.NameReading.Valid {

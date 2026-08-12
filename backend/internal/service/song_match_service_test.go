@@ -3,7 +3,6 @@ package service
 import (
 	"testing"
 
-	"github.com/ruifan75/setori/internal/models"
 	"github.com/ruifan75/setori/pkg/songmatch"
 )
 
@@ -79,43 +78,4 @@ func TestCanonicalizeArtistKey(t *testing.T) {
 	if c.String() != songmatch.ParseArtist("YOASOBI").String() {
 		t.Errorf("無関係な名前が書き換わっている: %q", c.String())
 	}
-}
-
-// AI に問うのは「曲名が一意に一致・アーティストだけ違う」単独名義どうしに限る。
-func TestCollectArtistAliasPairs(t *testing.T) {
-	cand := func(artist, reason string) MatchCandidate {
-		return MatchCandidate{Song: models.Song{OriginalArtist: artist}, Reason: reason}
-	}
-
-	t.Run("title_mismatch は問い合わせ対象", func(t *testing.T) {
-		got := collectArtistAliasPairs("松任谷由実", []MatchCandidate{cand("荒井由実", ReasonTitleMismatch)})
-		if len(got) != 1 {
-			t.Fatalf("got %d pairs, want 1", len(got))
-		}
-		if got[0].DisplayA != "松任谷由実" || got[0].DisplayB != "荒井由実" {
-			t.Errorf("pair = %+v", got[0])
-		}
-	})
-
-	t.Run("他の理由は聞かない", func(t *testing.T) {
-		for _, r := range []string{ReasonTitleAmbiguous, ReasonFuzzy, ReasonTitleOnly, ReasonExact} {
-			if got := collectArtistAliasPairs("松任谷由実", []MatchCandidate{cand("荒井由実", r)}); len(got) != 0 {
-				t.Errorf("reason=%s で %d 組を問い合わせようとしている", r, len(got))
-			}
-		}
-	})
-
-	t.Run("連名クレジットは聞かない", func(t *testing.T) {
-		// どの名前とどの名前を比べるのか定まらず、誤った別名義を作りやすい
-		got := collectArtistAliasPairs("May'n & 中島愛", []MatchCandidate{cand("ランカ・リー=中島愛", ReasonTitleMismatch)})
-		if len(got) != 0 {
-			t.Errorf("連名を %d 組問い合わせようとしている: %+v", len(got), got)
-		}
-	})
-
-	t.Run("アーティスト未記入は聞かない", func(t *testing.T) {
-		if got := collectArtistAliasPairs("", []MatchCandidate{cand("荒井由実", ReasonTitleMismatch)}); len(got) != 0 {
-			t.Errorf("got %d pairs, want 0", len(got))
-		}
-	})
 }

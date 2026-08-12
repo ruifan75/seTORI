@@ -379,7 +379,7 @@ export interface FieldChange {
   by: 'ai_normalize' | 'db_match';
   from: string;
   to: string;
-  reason?: string;  // db_match の根拠（exact / title_artist / song_alias …）
+  reason?: string;  // db_match の根拠（exact / title_artist / ai …）
   score?: number;
 }
 
@@ -1062,30 +1062,6 @@ export interface MergeCandidate {
 
 // 同一人物としてまとめられたアーティスト名義。source='ai' は AI が判定したもので、
 // 誤っていれば解除できる（解除は「別人」という判定として残る）。
-export interface ArtistAliasMember {
-  name_key: string;
-  display_name: string;
-  source: 'manual' | 'ai' | string;
-  note?: string;
-}
-
-export interface ArtistAliasGroup {
-  group_id: string;
-  members: ArtistAliasMember[];
-}
-
-// 楽曲の統合から学習した「この表記はこの曲」。
-export interface SongAlias {
-  name_key: string;
-  artist_key: string;
-  source: string;
-  song_id: string;
-  song_name: string;
-  song_artist: string;
-}
-
-// 稼働中のビルド（GET /api/version）。commit はデプロイ時の短縮ハッシュ、
-// built_at は UTC の ISO 文字列。埋め込まれていなければ 'dev' / 空文字。
 export interface BuildVersion {
   commit: string;
   built_at: string;
