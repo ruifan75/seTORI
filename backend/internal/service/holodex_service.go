@@ -809,6 +809,17 @@ type holodexDataSong struct {
 // 以既有の holodex_hash をキャッシュキーとし、Holodex 資料が変わっていなければ AI を再実行しない。
 // Holodex が明示的に end を持つ曲はそれを優先（人力キュレーションのため最も正確）。
 func (s *HolodexService) AnalyzeHolodexSongs(videoID string, force bool) ([]dto.SongSuggestion, error) {
+	return s.analyzeHolodexSongs(videoID, force, true)
+}
+
+// AnalyzeHolodexSongsForBatch は一括セットリスト作成用。**AI 判定は行わない。**
+// 一括は配信を跨いで 1 回にまとめて聞く（曲庫を配信の数だけ送らないため。
+// 実測で 58 回 → 9 回。詳細は docs/SETLIST_FLOW.md）。
+func (s *HolodexService) AnalyzeHolodexSongsForBatch(videoID string, force bool) ([]dto.SongSuggestion, error) {
+	return s.analyzeHolodexSongs(videoID, force, false)
+}
+
+func (s *HolodexService) analyzeHolodexSongs(videoID string, force, adjudicate bool) ([]dto.SongSuggestion, error) {
 	stream, err := s.streamRepo.FindByID(videoID)
 	if err != nil {
 		return nil, fmt.Errorf("find stream: %w", err)
@@ -830,7 +841,9 @@ func (s *HolodexService) AnalyzeHolodexSongs(videoID string, force bool) ([]dto.
 			if err := json.Unmarshal(cached, &songs); err == nil && len(songs) > 0 {
 				// 照合は保存していないので、今の DB に対して計算して返す
 				s.normalizationService.ResolveSuggestionsForDisplay(songs)
-				s.adjudicateSuggestions(songs)
+				if adjudicate {
+					s.adjudicateSuggestions(songs)
+				}
 				s.attachChatComparison(stream, songs)
 				return songs, nil
 			}
@@ -875,7 +888,9 @@ func (s *HolodexService) AnalyzeHolodexSongs(videoID string, force bool) ([]dto.
 	//    そちらは変更履歴（changes）を作らない。2 つの経路で違うものを返さないよう、
 	//    照合は必ずここを通す（数ミリ秒なので二度引く分は問題にならない）。
 	s.normalizationService.ResolveSuggestionsForDisplay(songs)
-	s.adjudicateSuggestions(songs)
+	if adjudicate {
+		s.adjudicateSuggestions(songs)
+	}
 
 	// 3. 拍手 end：明示 end が無い曲は補完。明示 end がある曲も chat 値を検出し、
 	//    ChatEnd/EndDiff として付与する（Holodex 側の誤りをユーザーが確認できるように）。

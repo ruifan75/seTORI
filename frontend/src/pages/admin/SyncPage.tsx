@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { holodexApi, batchAnalyzeApi, singerApi } from '../../api/client';
+import { holodexApi, batchAnalyzeApi, batchFillApi, singerApi } from '../../api/client';
 import { useToast } from '../../components/ui/ToastContext';
 
 // 一括分析のモード定義（バックエンドの BatchMode* と対応）
@@ -48,6 +48,41 @@ export default function SyncPage() {
   const singers = singerList?.singers ?? [];
 
   // 一括分析：実行中は 3 秒ごとに進捗をポーリング
+  // 一括セットリスト作成（歌唱を直接作るので、プレ分析とは別物）
+  const [fillMode, setFillMode] = useState('unprocessed');
+  const [fillSingerId, setFillSingerId] = useState('');
+
+  const { data: fillStatus } = useQuery({
+    queryKey: ['batch-fill-status'],
+    queryFn: batchFillApi.status,
+    refetchInterval: (q) => (q.state.data?.running ? 3000 : false),
+  });
+  const { data: fillRuns } = useQuery({
+    queryKey: ['batch-fill-runs'],
+    queryFn: () => batchFillApi.listRuns(10),
+    refetchInterval: fillStatus?.running ? 5000 : false,
+  });
+  const startFillMutation = useMutation({
+    mutationFn: () => batchFillApi.start(fillMode, fillSingerId),
+    onSuccess: () => {
+      showToast('一括セットリスト作成を開始しました', 'success');
+      queryClient.invalidateQueries({ queryKey: ['batch-fill-status'] });
+    },
+    onError: (err: Error) => showToast(`開始できません: ${err.message}`, 'error'),
+  });
+  const cancelFillMutation = useMutation({
+    mutationFn: batchFillApi.cancel,
+    onSuccess: () => showToast('停止を要求しました', 'info'),
+  });
+  const revertFillMutation = useMutation({
+    mutationFn: (runId: string) => batchFillApi.revert(runId),
+    onSuccess: (res) => {
+      showToast(res.message, 'success');
+      queryClient.invalidateQueries({ queryKey: ['batch-fill-runs'] });
+    },
+    onError: (err: Error) => showToast(`撤回に失敗: ${err.message}`, 'error'),
+  });
+
   const { data: batchStatus } = useQuery({
     queryKey: ['batch-analyze-status'],
     queryFn: batchAnalyzeApi.status,
@@ -334,6 +369,139 @@ export default function SyncPage() {
                 )}
               </span>
             )}
+          </div>
+        )}
+      </div>
+
+      {/* 一括セットリスト作成 */}
+      <div className="bg-white rounded-lg shadow p-6">
+        <h2 className="text-xl font-bold text-gray-900 mb-2">一括セットリスト作成</h2>
+        <p className="text-sm text-gray-500 mb-4">
+          源（Holodex 優先、無ければコメント）から歌唱を自動で作ります。
+          <span className="font-medium text-gray-700">上のプレ分析と違い、歌唱（performances）に直接書き込みます。</span>
+          決めきれないものは人の審査（修正提案）へ回り、実行単位でまとめて撤回できます。
+        </p>
+
+        <div className="flex flex-wrap items-end gap-3 mb-4">
+          <label className="text-sm">
+            <span className="block text-gray-700 mb-1">対象</span>
+            <select
+              value={fillMode}
+              onChange={(e) => setFillMode(e.target.value)}
+              disabled={fillStatus?.running}
+              className="border border-gray-300 rounded-lg px-3 py-2"
+            >
+              <option value="unprocessed">歌唱がまだ無い配信だけ</option>
+              <option value="force">源を持つ配信すべて（既存と違う分は審査へ）</option>
+            </select>
+          </label>
+          <label className="text-sm">
+            <span className="block text-gray-700 mb-1">チャンネル</span>
+            <select
+              value={fillSingerId}
+              onChange={(e) => setFillSingerId(e.target.value)}
+              disabled={fillStatus?.running}
+              className="border border-gray-300 rounded-lg px-3 py-2"
+            >
+              <option value="">すべて</option>
+              {singers.map((sg) => (
+                <option key={sg.id} value={sg.id}>{sg.name}</option>
+              ))}
+            </select>
+          </label>
+          {fillStatus?.running ? (
+            <button
+              onClick={() => cancelFillMutation.mutate()}
+              className="px-4 py-2 rounded-lg bg-red-50 text-red-700 border border-red-200 hover:bg-red-100"
+            >
+              停止
+            </button>
+          ) : (
+            <button
+              onClick={() => startFillMutation.mutate()}
+              disabled={startFillMutation.isPending}
+              className="px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+            >
+              自動で埋める
+            </button>
+          )}
+        </div>
+
+        {fillStatus?.running && (
+          <div className="mb-4 rounded-lg bg-indigo-50 border border-indigo-100 p-3 text-sm">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <span className="font-medium text-indigo-900">
+                {/* 段によって待ち時間の意味が違うので、どこに居るかを出す */}
+                {fillStatus.phase === 'ai'
+                  ? 'AI に判定を問い合わせ中'
+                  : fillStatus.phase === 'write'
+                    ? '歌唱を作成中'
+                    : '配信を読み込み中'}
+              </span>
+              <span className="text-indigo-700">{fillStatus.done}/{fillStatus.total}</span>
+              {fillStatus.current && (
+                <span className="text-gray-500 truncate max-w-xs">{fillStatus.current}</span>
+              )}
+              <span className="text-gray-600">
+                作成 {fillStatus.created} ／ 審査 {fillStatus.review}
+                {fillStatus.ai_asked > 0 && ` ／ AI ${fillStatus.ai_asked} 行`}
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* 実行の履歴。撤回はここから */}
+        {fillRuns && fillRuns.runs.length > 0 && (
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="text-left text-gray-500 border-b">
+                  <th className="py-2 pr-3">実行</th>
+                  <th className="py-2 pr-3">対象</th>
+                  <th className="py-2 pr-3">作成</th>
+                  <th className="py-2 pr-3">審査</th>
+                  <th className="py-2 pr-3">状態</th>
+                  <th className="py-2"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {fillRuns.runs.map((run) => (
+                  <tr key={run.id} className="border-b last:border-0">
+                    <td className="py-2 pr-3 whitespace-nowrap text-gray-600">
+                      {new Date(run.started_at).toLocaleString('ja-JP', {
+                        month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
+                      })}
+                      {run.started_by_name && <span className="ml-1 text-gray-400">{run.started_by_name}</span>}
+                    </td>
+                    <td className="py-2 pr-3 text-gray-600">
+                      {run.mode === 'force' ? 'すべて' : '歌唱なし'}
+                      {run.singer_id && (
+                        <span className="ml-1 text-gray-400">
+                          {singers.find((sg) => sg.id === run.singer_id)?.name ?? run.singer_id}
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-2 pr-3 font-medium text-gray-800">{run.songs_created}</td>
+                    <td className="py-2 pr-3 text-amber-700">{run.songs_review}</td>
+                    <td className="py-2 pr-3 text-gray-500" title={run.message}>
+                      {{ running: '実行中', done: '完了', cancelled: '中止', failed: '失敗', reverted: '撤回済み' }[run.status]}
+                    </td>
+                    <td className="py-2 text-right">
+                      {run.songs_created > 0 && run.status !== 'reverted' && (
+                        <button
+                          onClick={() => revertFillMutation.mutate(run.id)}
+                          disabled={revertFillMutation.isPending}
+                          title="この実行が作った歌唱をまとめて削除します"
+                          className="text-red-600 hover:text-red-800 disabled:opacity-50"
+                        >
+                          撤回
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </div>

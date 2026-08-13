@@ -1077,3 +1077,38 @@ export interface BuildVersion {
   commit: string;
   built_at: string;
 }
+
+// ========== 一括セットリスト作成 ==========
+
+// 一括プレ分析（BatchAnalyzeStatus）とは別物。あちらは抽出だけで主データを触らないが、
+// こちらは performances に直接書く（docs/SETLIST_FLOW.md）。
+export interface BatchFillStatus {
+  running: boolean;
+  mode?: string;
+  singer_id?: string;
+  run_id?: string;
+  phase?: 'ai' | 'write';  // 未設定なら配信を読んでいる最中
+  total: number;
+  done: number;
+  current?: string;
+  created: number;
+  review: number;
+  ai_asked: number;
+  message?: string;
+}
+
+export interface BatchFillRun {
+  id: string;
+  mode: string;
+  singer_id?: string;
+  status: 'running' | 'done' | 'cancelled' | 'failed' | 'reverted';
+  streams_total: number;
+  streams_done: number;
+  songs_created: number;
+  songs_review: number;
+  ai_asked: number;
+  message: string;
+  started_at: string;
+  finished_at?: string;
+  started_by_name?: string;
+}

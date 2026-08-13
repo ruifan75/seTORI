@@ -399,6 +399,22 @@ type ArtistAliasProposal struct {
 	SameArtist bool   `json:"same_artist"` // AI の判定。true のときだけ既定でチェックが入る
 }
 
+// BatchFillStatus は一括セットリスト作成の進捗。
+type BatchFillStatus struct {
+	Running  bool   `json:"running"`
+	Mode     string `json:"mode,omitempty"`
+	SingerID string `json:"singer_id,omitempty"`
+	RunID    string `json:"run_id,omitempty"`
+	Phase    string `json:"phase,omitempty"` // scan / ai / write
+	Total    int    `json:"total"`
+	Done     int    `json:"done"`
+	Current  string `json:"current,omitempty"`
+	Created  int    `json:"created"`
+	Review   int    `json:"review"`
+	AIAsked  int    `json:"ai_asked"`
+	Message  string `json:"message,omitempty"`
+}
+
 type AnalyzeCommentsResponse struct {
 	Songs       []CommentSong `json:"songs"`
 	RawComments []string      `json:"raw_comments"`

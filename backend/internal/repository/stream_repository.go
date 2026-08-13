@@ -943,3 +943,43 @@ func (r *StreamRepository) FindBySingerID(singerID string, limit, offset int, fi
 
 	return streams, total, nil
 }
+
+// FindStreamsForFill は一括セットリスト作成の対象を返す。
+//
+// 一括プレ分析（FindStreamsForBatch）とは対象が違う。あちらは comment_raw を持つ配信だが、
+// こちらは**曲の源を持つ配信**（Holodex の曲か、解析済みのコメント）が対象になる。
+//
+//	unprocessed … まだ歌唱が 1 つも無い配信だけ。既にあるものは触らない
+//	force       … 源を持つ配信すべて。既存と食い違う分は人の審査へ回す
+func (r *StreamRepository) FindStreamsForFill(mode, singerID string) ([]models.Stream, error) {
+	// jsonb_typeof で配列だけを見る。comment_songs には JSON のスカラー 'null' が入っている
+	// 行があり、jsonb_array_length に直接渡すと「cannot get array length of a scalar」で落ちる。
+	where := `s.is_hidden = FALSE AND (
+		(jsonb_typeof(s.holodex_data->'songs') = 'array' AND jsonb_array_length(s.holodex_data->'songs') > 0)
+		OR (jsonb_typeof(s.comment_songs) = 'array' AND jsonb_array_length(s.comment_songs) > 0))`
+	if mode == "unprocessed" {
+		where += " AND NOT EXISTS (SELECT 1 FROM performances p WHERE p.stream_id = s.id)"
+	}
+
+	args := []any{}
+	if singerID != "" {
+		args = append(args, singerID)
+		where += fmt.Sprintf(" AND EXISTS (SELECT 1 FROM stream_singers ss WHERE ss.stream_id = s.id AND ss.singer_id = $%d)", len(args))
+	}
+
+	rows, err := r.db.Query(`SELECT s.id, s.title FROM streams s WHERE `+where+` ORDER BY s.stream_date ASC`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query fill streams: %w", err)
+	}
+	defer rows.Close()
+
+	var streams []models.Stream
+	for rows.Next() {
+		var s models.Stream
+		if err := rows.Scan(&s.ID, &s.Title); err != nil {
+			return nil, fmt.Errorf("scan stream: %w", err)
+		}
+		streams = append(streams, s)
+	}
+	return streams, rows.Err()
+}

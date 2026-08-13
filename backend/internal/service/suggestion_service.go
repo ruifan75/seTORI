@@ -76,6 +76,13 @@ func (e *ConflictError) Error() string {
 type SuggestionActor struct {
 	User       *models.User
 	ClientHint string
+	// System は seTORI 自身が積んだ提案（一括セットリスト作成の審査待ちなど）。
+	// **投稿の絞り込みを飛ばす。** 絞り込みは濫用への対処であって、
+	// 権限のある人が明示的に始めた処理を止めるためのものではない。
+	//
+	// 実際、一括の初回実行で審査へ回すはずの 303 行のうち **295 行が
+	// この制限に当たって静かに消えた**（作られもせず、待ち行列にも入らない）。
+	System bool
 }
 
 // 提案の種別。
@@ -615,6 +622,9 @@ func median(sorted []int) int {
 // checkRate は直近ウィンドウ内の投稿数で投稿を制限する。
 // 判定に失敗した場合（DB エラー）は投稿を止めない：濫用対策より投稿できることを優先する。
 func (s *SuggestionService) checkRate(actor SuggestionActor) error {
+	if actor.System {
+		return nil
+	}
 	limit := suggestionRateLimitAnon
 	var by *uuid.UUID
 	if actor.User != nil {

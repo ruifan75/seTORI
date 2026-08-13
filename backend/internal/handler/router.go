@@ -49,6 +49,7 @@ type Router struct {
 	chatEndService       *service.ChatEndService
 	artistService        *service.ArtistService
 	batchAnalyzeService  *service.BatchAnalyzeService
+	batchFillService     *service.BatchFillService
 	authService          *service.AuthService
 	// ログイン試行の絞り込み（総当たりと bcrypt による CPU 消費を止める）
 	loginLimiter      *loginLimiter
@@ -110,6 +111,9 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	suggestionRepo := repository.NewSuggestionRepository(db)
 	appSettingsRepo := repository.NewAppSettingsRepository(db)
 	suggestionService := service.NewSuggestionService(suggestionRepo, appSettingsRepo, songService, artistService, performanceService)
+	batchFillRepo := repository.NewBatchFillRepository(db)
+	batchFillService := service.NewBatchFillService(streamRepo, perfRepo, batchFillRepo,
+		commentService, holodexService, normalizationService, performanceService, suggestionService)
 	driveClient := gdrive.NewClient(cfg.GoogleOAuthClientID, cfg.GoogleOAuthSecret)
 	backupService := service.NewBackupService(db, appSettingsRepo, driveClient, cfg.DatabaseURL, cfg.BackupDir, cfg.BackupDockerContainer)
 	playlistRepo := repository.NewPlaylistRepository(db, perfRepo)
@@ -162,6 +166,7 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 		chatEndService:       chatEndService,
 		artistService:        artistService,
 		batchAnalyzeService:  batchAnalyzeService,
+		batchFillService:     batchFillService,
 		authService:          authService,
 		loginLimiter:         newLoginLimiter(),
 		readingService:       readingService,
@@ -231,6 +236,11 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("GET /api/streams/search", r.handleSearchStreams)
 
 	// 未処理配信の一括プレ分析（背景ジョブ、singleton）
+	r.mux.HandleFunc("POST /api/streams/batch-fill", r.handleStartBatchFill)
+	r.mux.HandleFunc("POST /api/streams/batch-fill/cancel", r.handleCancelBatchFill)
+	r.mux.HandleFunc("GET /api/streams/batch-fill/status", r.handleBatchFillStatus)
+	r.mux.HandleFunc("GET /api/streams/batch-fill/runs", r.handleListBatchFillRuns)
+	r.mux.HandleFunc("POST /api/streams/batch-fill/runs/{id}/revert", r.handleRevertBatchFill)
 	r.mux.HandleFunc("POST /api/streams/batch-analyze", r.handleStartBatchAnalyze)
 	r.mux.HandleFunc("POST /api/streams/batch-analyze/cancel", r.handleCancelBatchAnalyze)
 	r.mux.HandleFunc("GET /api/streams/batch-analyze/status", r.handleBatchAnalyzeStatus)
@@ -640,6 +650,73 @@ func parseIDQueryParams(req *http.Request, multiKey string, legacyKeys ...string
 }
 
 // ========== Batch Analyze Handlers ==========
+
+// handleStartBatchFill は範囲を指定してセットリストを自動で埋める（content:edit）。
+//
+// 一括プレ分析（batch-analyze）と混同しないこと。あちらは抽出だけで主データを触らない。
+// こちらは performances に直接書くので、実行記録を残し、撤回できるようにしてある。
+func (r *Router) handleStartBatchFill(w http.ResponseWriter, req *http.Request) {
+	var body struct {
+		Mode     string `json:"mode"`      // unprocessed / force
+		SingerID string `json:"singer_id"` // 空なら全チャンネル
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		respondError(w, http.StatusBadRequest, "リクエストの形式が正しくありません")
+		return
+	}
+	var startedBy *uuid.UUID
+	if u := currentUser(req); u != nil {
+		id := u.ID
+		startedBy = &id
+	}
+	runID, err := r.batchFillService.Start(body.Mode, body.SingerID, startedBy)
+	if err != nil {
+		if errors.Is(err, service.ErrBatchFillAlreadyRunning) {
+			respondError(w, http.StatusConflict, err.Error())
+			return
+		}
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"run_id": runID, "message": "一括作成を開始しました"})
+}
+
+func (r *Router) handleCancelBatchFill(w http.ResponseWriter, req *http.Request) {
+	r.batchFillService.Cancel()
+	respondJSON(w, http.StatusOK, map[string]string{"message": "停止を要求しました"})
+}
+
+func (r *Router) handleBatchFillStatus(w http.ResponseWriter, req *http.Request) {
+	respondJSON(w, http.StatusOK, r.batchFillService.Status())
+}
+
+func (r *Router) handleListBatchFillRuns(w http.ResponseWriter, req *http.Request) {
+	limit, _ := strconv.Atoi(req.URL.Query().Get("limit"))
+	runs, err := r.batchFillService.ListRuns(limit)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"runs": runs})
+}
+
+// handleRevertBatchFill はその実行が作った歌唱をまとめて消す（content:edit）。
+func (r *Router) handleRevertBatchFill(w http.ResponseWriter, req *http.Request) {
+	runID, err := uuid.Parse(req.PathValue("id"))
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "無効な実行 ID")
+		return
+	}
+	n, err := r.batchFillService.RevertRun(runID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{
+		"deleted": n,
+		"message": fmt.Sprintf("%d件の歌唱を撤回しました", n),
+	})
+}
 
 // handleStartBatchAnalyze 未処理配信の一括プレ分析を開始する（content:edit）。
 // mode / singer_id は JSON body で受け取る（後方互換で query param の mode もフォールバック）。
@@ -2802,6 +2879,12 @@ func requiredPermission(method, path string) (perm string, needsAuth bool) {
 		return "", false
 	case "/api/auth/logout", "/api/auth/me":
 		return "", true
+	}
+
+	// 一括セットリスト作成は進捗・履歴も含めて content:edit。
+	// 実行の履歴には誰が回したかが載るので、閲覧者には出さない。
+	if strings.HasPrefix(path, "/api/streams/batch-fill") {
+		return auth.PermContentEdit, true
 	}
 
 	// 別名義の登録：ログインだけ必要。権限があればその場で反映し、無ければ提案になる

@@ -25,6 +25,8 @@ import type {
   MergeCandidate,
   AnalyzeCommentsResponse,
   BatchAnalyzeStatus,
+  BatchFillStatus,
+  BatchFillRun,
   SuccessResponse,
   LoadHolodexSongsResponse,
   CreatePerformancesRequest,
@@ -422,6 +424,30 @@ export const commentApi = {
 };
 
 // ========== 一括プレ分析 API ==========
+
+// 一括セットリスト作成。歌唱（performances）を直接作るので、実行記録と撤回がある。
+export const batchFillApi = {
+  start: async (mode: string, singerId?: string): Promise<{ run_id: string; message: string }> => {
+    const { data } = await api.post('/api/streams/batch-fill', { mode, singer_id: singerId ?? '' });
+    return data;
+  },
+  cancel: async (): Promise<{ message: string }> => {
+    const { data } = await api.post('/api/streams/batch-fill/cancel');
+    return data;
+  },
+  status: async (): Promise<BatchFillStatus> => {
+    const { data } = await api.get('/api/streams/batch-fill/status');
+    return data;
+  },
+  listRuns: async (limit = 20): Promise<{ runs: BatchFillRun[] }> => {
+    const { data } = await api.get(`/api/streams/batch-fill/runs?limit=${limit}`);
+    return data;
+  },
+  revert: async (runId: string): Promise<{ deleted: number; message: string }> => {
+    const { data } = await api.post(`/api/streams/batch-fill/runs/${runId}/revert`);
+    return data;
+  },
+};
 
 export const batchAnalyzeApi = {
   // 一括プレ分析を開始（背景ジョブ・singleton）

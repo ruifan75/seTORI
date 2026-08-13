@@ -3,6 +3,8 @@ package service
 import (
 	"github.com/google/uuid"
 
+	"github.com/ruifan75/setori/internal/logger"
+
 	"github.com/ruifan75/setori/internal/dto"
 	"github.com/ruifan75/setori/pkg/songmatch"
 )
@@ -303,4 +305,20 @@ func (s *NormalizationService) aiMatchResult(row *aiMatchRow) (dto.AISuggestionR
 		})
 	}
 	return res, alias, changes
+}
+
+// newAIMatchRowFromCandidates は表記から候補を引いて AI 用の行を作る。
+// 一括はまだ候補を持っていない状態から始まるので、ここで召回まで済ませる。
+func (s *NormalizationService) newAIMatchRowFromCandidates(name, artist string) *aiMatchRow {
+	row := &aiMatchRow{Name: name, Artist: artist}
+	if s.matchService == nil {
+		return row
+	}
+	cands, err := s.matchService.CandidatesForAI(name, artist)
+	if err != nil {
+		logger.Warnf("candidates for AI failed (%s / %s): %v", name, artist, err)
+		return row
+	}
+	row.Candidates = cands
+	return row
 }
