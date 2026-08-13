@@ -705,6 +705,11 @@ func (r *Router) handleListBatchFillRuns(w http.ResponseWriter, req *http.Reques
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	// 空でも null ではなく [] を返す。Go の nil スライスは JSON の null になり、
+	// 受け手が配列として扱った瞬間に落ちる（実際に画面が真っ白になった）。
+	if runs == nil {
+		runs = []repository.BatchFillRun{}
+	}
 	respondJSON(w, http.StatusOK, map[string]any{"runs": runs})
 }
 

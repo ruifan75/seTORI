@@ -451,7 +451,7 @@ export default function SyncPage() {
         )}
 
         {/* 実行の履歴。撤回はここから */}
-        {fillRuns && fillRuns.runs.length > 0 && (
+        {(fillRuns?.runs?.length ?? 0) > 0 && (
           <div className="overflow-x-auto">
             <table className="min-w-full text-sm">
               <thead>
@@ -465,7 +465,7 @@ export default function SyncPage() {
                 </tr>
               </thead>
               <tbody>
-                {fillRuns.runs.map((run) => (
+                {fillRuns!.runs.map((run) => (
                   <tr key={run.id} className="border-b last:border-0">
                     <td className="py-2 pr-3 whitespace-nowrap text-gray-600">
                       {new Date(run.started_at).toLocaleString('ja-JP', {
