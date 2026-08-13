@@ -92,6 +92,7 @@ type fillRow struct {
 	ItunesID *int64
 	Source   string // holodex / comment
 
+	EndSource  string // 終了時間の由来（docs/DATA_COMPLETION.md の語彙）
 	SongID     *uuid.UUID
 	Via        string // rule / ai
 	Confidence float64
@@ -357,7 +358,7 @@ func (s *BatchFillService) applyStream(runID uuid.UUID, streamID string, rows []
 			Tags:           row.Tags,
 			SingerIDs:      s.defaultSingerIDs(streamID),
 			ItunesID:       row.ItunesID,
-			EndSource:      "batch",
+			EndSource:      row.EndSource,
 			EndConfirmed:   &endConfirmed,
 		})
 		origins = append(origins, repository.BatchOrigin{
@@ -474,6 +475,10 @@ func suggestionToFillRow(streamID string, sg dto.SongSuggestion) *fillRow {
 	row := &fillRow{
 		StreamID: streamID, Name: name, Artist: artist,
 		Start: sg.StartSeconds, End: sg.EndSeconds, ItunesID: sg.ItunesID, Source: "holodex",
+		// 由来は画面（StreamDetailPage）と同じ規則で決める。**"batch" のような
+		// 独自の値を入れないこと** ── end_source は「どれだけ信用できるか」を表す
+		// 語彙で、誰が書いたかを表す欄ではない（docs/DATA_COMPLETION.md）。
+		EndSource: endSourceForHolodex(sg),
 	}
 	applyMatched(row, sg.MatchedSongID, sg.MatchedSongName, sg.MatchedSongArtist)
 	return row
@@ -484,9 +489,36 @@ func commentSongToFillRow(streamID string, cs dto.CommentSong) *fillRow {
 	row := &fillRow{
 		StreamID: streamID, Name: name, Artist: artist,
 		Start: cs.Start, End: cs.End, Tags: cs.Tags, Source: "comment",
+		EndSource: endSourceForComment(cs),
 	}
 	applyMatched(row, cs.MatchedSongID, cs.MatchedSongName, cs.MatchedSongArtist)
 	return row
+}
+
+// endSourceForHolodex / endSourceForComment は終了時間の由来を決める。
+// 画面が編集中ずっと追跡しているのと同じ規則にしてある
+// ── 経路によって違う値が入ると、確度で絞り込む問い合わせが当てにならなくなる。
+func endSourceForHolodex(sg dto.SongSuggestion) string {
+	if sg.EndSeconds <= 0 {
+		return "unknown"
+	}
+	if sg.ChatEnd > 0 && sg.ChatEnd == sg.EndSeconds {
+		return "chat"
+	}
+	return "holodex"
+}
+
+func endSourceForComment(cs dto.CommentSong) string {
+	if cs.End <= 0 {
+		return "unknown"
+	}
+	if cs.ChatEnd > 0 && cs.ChatEnd == cs.End {
+		return "chat"
+	}
+	if cs.IsEndTimeEstimated {
+		return "next_start" // 推定値。確度は低い（画面でも由来なしとして扱われる）
+	}
+	return "comment"
 }
 
 func applyMatched(row *fillRow, id, name, artist *string) {
