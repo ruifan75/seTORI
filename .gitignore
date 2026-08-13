@@ -34,4 +34,10 @@ deploy/certs/
 *.pem
 
 # 本番データから生成した分析結果（再生成できるので追跡しない）
-gt_*.csv
+# 解析で作った CSV・DB ダンプ・ログは追跡しない。
+# 2026-08-13 に `git add -A` で DB ダンプ（users / sessions / ai_providers を含む）を
+# 誤って commit した。個別に列挙するのではなく、拡張子ごと弾く。
+*.csv
+*.dump
+*.sql.gz
+*.log
