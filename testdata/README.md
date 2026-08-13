@@ -38,7 +38,7 @@ WHERE id = '<video_id>';
 | `Plastic Love` → `プラスティック・ラブ` | 同上 | △ AI のみ |
 | `涙そうそう` | AI が歌手を `BEGIN` に書き換えがち（DB は `夏川りみ`） | ○ 書き換え禁止が効いていること |
 | `私は最強` | 同上（`Mrs. GREEN APPLE` ← DB は `Ado`） | ○ 同上 |
-| `Catch You Catch Me / GUMI` ↔ `グミ` | 別名義 → `artist_aliases` | ○ 判定後は自動 |
+| `Catch You Catch Me / GUMI` ↔ `グミ` | 別名義 → `artists.aliases` | ○ 登録後は自動 |
 | `ひこうき雲 / 松任谷由実` ↔ `荒井由実` | 改名。同一人物 | ○ 同上 |
 | `Starry night`（歌手なし） | `title_only` 0.80 | △ 自動採用しない |
 | DB の `Starry night (instrumental)` | **別録音** | × 寄せない |
