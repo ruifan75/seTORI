@@ -74,7 +74,6 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	songItunesRepo := repository.NewSongItunesRepository(db)
 	filterKeywordRepo := repository.NewFilterKeywordRepository(db)
 	tagRepo := repository.NewTagRepository(db)
-	aiProviderRepo := repository.NewAIProviderRepository(db)
 	authRepo := repository.NewAuthRepository(db)
 	artistRepo := repository.NewArtistRepository(db)
 	songMatchRepo := repository.NewSongMatchRepository(db)
@@ -82,6 +81,22 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	orgRepo := repository.NewOrganizationRepository(db)
 
 	// AI サービス：複数 provider ローテーション + failover、未設定時は GROQ_API_KEY にフォールバック
+	// 外部サービス連携の設定：DB（暗号化保存）→ .env の順に解決し、変更を各サービスへ即時反映する。
+	// これにより .env を編集して再起動しなくても管理画面からキーを差し替えられる。
+	settingsCipher, err := secrets.NewCipher(cfg.SettingsEncryptionKey)
+	if err != nil {
+		logger.Errorf("設定の暗号化を初期化できませんでした: %v", err)
+		settingsCipher, _ = secrets.NewCipher("")
+	}
+	// AI プロバイダーのキーも同じ鍵で暗号化する（pkg/secrets の狙いは
+	// 「バックアップ 1 つの流出で全キーが漏れない」こと。ここが平文だと成立しない）。
+	aiProviderRepo := repository.NewAIProviderRepository(db, settingsCipher)
+	if n, err := aiProviderRepo.EncryptPlaintextKeys(); err != nil {
+		logger.Warnf("AI プロバイダーのキー暗号化に失敗しました: %v", err)
+	} else if n > 0 {
+		logger.Infof("AI プロバイダーのキー %d 件を暗号化しました", n)
+	}
+
 	aiService := service.NewAIService(aiProviderRepo, cfg.GroqAPIKey)
 
 	// services を作成
@@ -123,13 +138,6 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	googleProvider := oauth.NewGoogleProvider(cfg.GoogleSigninClientID, cfg.GoogleSigninSecret)
 	oauthService := service.NewOAuthService(authRepo, oauthRepo, cfg.OAuthRedirectBaseURL, googleProvider)
 
-	// 外部サービス連携の設定：DB（暗号化保存）→ .env の順に解決し、変更を各サービスへ即時反映する。
-	// これにより .env を編集して再起動しなくても管理画面からキーを差し替えられる。
-	settingsCipher, err := secrets.NewCipher(cfg.SettingsEncryptionKey)
-	if err != nil {
-		logger.Errorf("設定の暗号化を初期化できませんでした: %v", err)
-		settingsCipher, _ = secrets.NewCipher("")
-	}
 	settingsService := service.NewSettingsService(
 		appSettingsRepo, settingsCipher,
 		cfg.HolodexAPIKey, cfg.HolodexEditorToken, cfg.YouTubeAPIKey, cfg.GroqAPIKey,

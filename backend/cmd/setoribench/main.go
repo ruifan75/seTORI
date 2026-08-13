@@ -53,6 +53,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/ruifan75/setori/pkg/secrets"
 	"os"
 	"sort"
 	"strings"
@@ -80,6 +81,16 @@ type fpItem struct {
 	Name   string `json:"name"`
 	Artist string `json:"artist"`
 	Line   string `json:"line"`
+}
+
+// benchCipher は setoribench 用の復号器。api_key は暗号化して保存されているので、
+// 本番と同じ鍵（SETTINGS_ENCRYPTION_KEY）が無いと AI を呼べない。
+func benchCipher() *secrets.Cipher {
+	c, err := secrets.NewCipher(os.Getenv("SETTINGS_ENCRYPTION_KEY"))
+	if err != nil {
+		c, _ = secrets.NewCipher("")
+	}
+	return c
 }
 
 func main() {
@@ -112,7 +123,7 @@ func main() {
 	// AI モード用の抽出器（production と同じ AIService をそのまま使う）
 	var aiSvc *service.AIService
 	if usesAI(*mode) {
-		aiSvc = service.NewAIService(repository.NewAIProviderRepository(db), os.Getenv("GROQ_API_KEY"))
+		aiSvc = service.NewAIService(repository.NewAIProviderRepository(db, benchCipher()), os.Getenv("GROQ_API_KEY"))
 	}
 	cache := loadCache(*cachePath)
 
