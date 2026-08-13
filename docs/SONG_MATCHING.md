@@ -538,8 +538,8 @@ Departures 〜あなたにおくるアイの歌〜 / EGOIST → EGOIST
 （AI を含めた成績は「二段構え」の節にある本番での実測を見ること）。
 
 ```
-go run ./cmd/setoribench -mode stored -nofilter -baddump /tmp/bad.json
-go run ./cmd/setoribench -mode stored -nofilter -noalias   # 別名義（artists.aliases）を外した場合との差
+go run ./cmd/setoribench -mode stored -baddump /tmp/bad.json
+go run ./cmd/setoribench -mode stored -noalias   # 別名義（artists.aliases）を外した場合との差
 ```
 
 **抽出が当てた曲（TP）だけを照合の評価対象にする。** 抽出を外した曲まで混ぜると、
@@ -564,8 +564,12 @@ go run ./cmd/setoribench -mode stored -nofilter -noalias   # 別名義（artists
 再現手順。**AI は呼ばないので何度でも無料で回せる。**
 
 ```
-go run ./cmd/setoribench -mode stored -nofilter -match
+go run ./cmd/setoribench -mode stored          # 本番と同じ（除外キーワードが効く）
+go run ./cmd/setoribench -mode stored -nofilter # フィルタの寄与を見るとき
 ```
+
+`-nofilter` は**管理画面の除外キーワードを無効にする**デバッグ用の口。
+既定（フィルタ有効）が本番の姿なので、基準値はそちらで取る。
 
 測ったときの手元 DB：楽曲 820・別名義を持つアーティスト 10・歌唱 4268・
 否定の記録 43（曲 16 / 歌手 27）。評価対象は performances と comment_raw の
@@ -573,22 +577,31 @@ go run ./cmd/setoribench -mode stored -nofilter -match
 
 **抽出**（照合の前段。ここが崩れると照合の数字も読めない）
 
-| | |
-|---|---:|
-| precision | 0.853 |
-| recall | 0.976 |
-| true positives | 4127 |
-| 誤検出の上位 | `幕開け` 83・`閉幕` 78・`スパチャ読み` 71 |
+| | フィルタ有効（本番の姿） | `-nofilter` |
+|---|---:|---:|
+| precision | **0.906** | 0.853 |
+| recall | 0.975 | 0.976 |
+| true positives | 4126 | 4127 |
+| false positives | 428 | 714 |
+
+差の 286 件が**管理画面の除外キーワードの寄与**で、`幕開け`(83)・`閉幕`(78)・
+`スパチャ読み`(71) がその大半を占める。この 3 語はいずれも登録済みで、
+本番の再解析済み 5432 行にこれらは **0 行**しか残っていない
+（残っているのは正規表現時代の 1798 行の方）。
+
+フィルタを通した後に残る誤検出は性質が変わる：`あいさつ運動`(7)・`はじまり`(3) のような
+語彙で切れない見出しと、**GT 側の取りこぼし**（`可愛くてごめん` 5・`NIGHT DANCER` 2 など
+実際に歌っているがセットリストに入っていない曲）が混ざる。
 
 **照合**（規則だけの成績。AI の寄与は「二段構え」の節を見ること）
 
-| | 主指標（766 件） | 参考（全 4127 件） |
+| | 主指標（764 件） | 参考（全 4126 件） |
 |---|---:|---:|
-| auto_match_rate | 0.658（504件） | 0.937（3865件） |
-| ── うち正解 | 0.653（500件） | 0.936（3861件） |
+| auto_match_rate | 0.660（504件） | 0.937 |
+| ── うち正解 | 0.654（500件） | 0.936 |
 | **false_match_rate** | **0.005（4件）** | **0.001（4件）** |
-| review_rate | 0.232（178件） | 0.043（178件） |
-| no_candidate_rate | 0.110（84件） | 0.020（84件） |
+| review_rate | 0.233（178件） | 0.043（178件） |
+| no_candidate_rate | 0.107（82件） | 0.020 |
 
 判定理由ごと（主指標・件数 / 正解 / 誤り）:
 
@@ -598,6 +611,9 @@ title_mismatch  130 / 130 / 0      title_overlap  33 / 33 / 0
 title_primary    85 /  85 / 0      fuzzy_title    24 / 24 / 0
 title_only       23 /  23 / 0      exact           3 /  0 / 3
 ```
+
+（照合の数字はフィルタの有無でほとんど動かない。除外される語は曲名として照合に
+かからないため ── 主指標が 766 → 764 件になる程度）
 
 読み取れたこと：
 
@@ -610,7 +626,7 @@ title_only       23 /  23 / 0      exact           3 /  0 / 3
   提案を承認して作った面があるので、「過去の判断と一致した」に近い数字であることは割り引く
 - `artist_alias` 経由が 41 件（すべて正解）。`-noalias` を付けると
   `artists.aliases` を無効にした場合との差が見える
-- 候補すら出ない 84 件が、AI に曲庫を丸ごと見せる経路の入口になる
+- 候補すら出ない 82 件が、AI に曲庫を丸ごと見せる経路の入口になる
 
 > **AI の層はこのベンチに入っていない。** 混ぜると規則の劣化を AI が隠してしまい、
 > どちらを直したのか分からなくなる。AI 込みの成績は本番データで別に測っていて、
