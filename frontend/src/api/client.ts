@@ -662,6 +662,12 @@ export const logsApi = {
 // ========== アーティスト API ==========
 
 export const artistApi = {
+  // 「この 2 つは同じ人」を登録する。権限があれば即時反映、無ければ提案として積まれる。
+  proposeAlias: async (canonical: string, alias: string): Promise<{ applied: boolean }> => {
+    const { data } = await api.post('/api/artists/aliases', { canonical, alias });
+    return data;
+  },
+
   list: async (
     page = 1,
     limit = 50,

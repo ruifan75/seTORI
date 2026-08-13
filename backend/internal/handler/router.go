@@ -333,6 +333,7 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("POST /api/streams/{id}/estimate-end-times", r.handleEstimateEndTimes)
 
 	// Create performances directly
+	r.mux.HandleFunc("POST /api/artists/aliases", r.handleProposeArtistAlias)
 	r.mux.HandleFunc("POST /api/streams/{id}/performances", r.handleCreatePerformances)
 	r.mux.HandleFunc("DELETE /api/streams/{id}/performances", r.handleDeletePerformances)
 
@@ -859,6 +860,72 @@ func parseReadingsCSV(rd io.Reader) (*dto.ReadingsExport, error) {
 		}
 	}
 	return out, nil
+}
+
+// handleProposeArtistAlias は「この 2 つは同じ人」を登録する（要ログイン）。
+//
+// 権限があればその場で反映し、無ければ修正提案として積む
+// （再生バーの時間修正と同じ扱い。詳細は docs/SETLIST_FLOW.md）。
+//
+// 別名義は**その人の全楽曲に効く**ので、読み込んだだけでは書かない。
+// 編集フォームで人がチェックを入れて保存したときにだけここへ来る。
+func (r *Router) handleProposeArtistAlias(w http.ResponseWriter, req *http.Request) {
+	var body struct {
+		Canonical string `json:"canonical"` // DB 側の表記（別名義の本体）
+		Alias     string `json:"alias"`     // コメント側の表記
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		respondError(w, http.StatusBadRequest, "無効なリクエスト形式")
+		return
+	}
+	body.Canonical, body.Alias = strings.TrimSpace(body.Canonical), strings.TrimSpace(body.Alias)
+	if body.Canonical == "" || body.Alias == "" {
+		respondError(w, http.StatusBadRequest, "2 つの名前が必要です")
+		return
+	}
+
+	if userHasPermission(req, auth.PermContentEdit) {
+		if err := r.songMatchService.AddArtistAlias(body.Canonical, body.Alias); err != nil {
+			respondError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		respondJSON(w, http.StatusOK, map[string]any{"applied": true})
+		return
+	}
+
+	// 権限が無い場合は提案にする。対象は artists の行なので、行が無ければ提案できない
+	// （曲が 1 つも無い名義は artists に行を持たない）。
+	artist, err := r.artistService.FindByName(body.Canonical)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if artist == nil {
+		respondError(w, http.StatusNotFound, "このアーティストはまだ登録されていないため提案できません")
+		return
+	}
+	fields := map[string]string{"aliases": joinAliases(artist.Aliases, body.Alias)}
+	sug, err := r.suggestionService.Create(&dto.CreateSuggestionRequest{
+		TargetType: "artist",
+		TargetID:   artist.ID.String(),
+		Fields:     fields,
+		Note:       fmt.Sprintf("%s は %s の別名義", body.Alias, body.Canonical),
+	}, service.SuggestionActor{User: currentUser(req), ClientHint: clientHint(req)})
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"applied": false, "suggestion_id": sug.ID})
+}
+
+// joinAliases は既存の別名義に 1 つ足した文字列を作る（重複は足さない）。
+func joinAliases(existing []string, add string) string {
+	for _, e := range existing {
+		if e == add {
+			return strings.Join(existing, "、")
+		}
+	}
+	return strings.Join(append(append([]string{}, existing...), add), "、")
 }
 
 // ========== Suggestion Handlers（修正提案） ==========
@@ -2734,6 +2801,12 @@ func requiredPermission(method, path string) (perm string, needsAuth bool) {
 	case "/health", "/api/version", "/api/auth/login":
 		return "", false
 	case "/api/auth/logout", "/api/auth/me":
+		return "", true
+	}
+
+	// 別名義の登録：ログインだけ必要。権限があればその場で反映し、無ければ提案になる
+	// （判定はハンドラ側。提案の投稿と同じ扱いにしている）。
+	if path == "/api/artists/aliases" && method == http.MethodPost {
 		return "", true
 	}
 

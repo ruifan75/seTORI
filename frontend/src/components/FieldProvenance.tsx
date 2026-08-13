@@ -13,7 +13,12 @@ import { matchReasonLabel } from '../utils/matchReason';
 const STEP_LABELS: Record<string, string> = {
   ai_normalize: 'AI正規化',
   db_match: 'DB照合',
+  ai_match: 'AI照合',
 };
+
+// 規則で決まらず AI が決めた段。確信度を必ず添える
+// ── 人はここを見て「確かめる価値があるか」を決める。
+const AI_STEP = 'ai_match';
 
 interface Props {
   changes?: FieldChange[];
@@ -32,12 +37,14 @@ export default function FieldProvenance({ changes, field }: Props) {
             className={
               c.by === 'db_match'
                 ? 'shrink-0 rounded bg-emerald-50 px-1.5 text-xs text-emerald-700'
-                : 'shrink-0 rounded bg-blue-50 px-1.5 text-xs text-blue-700'
+                : c.by === AI_STEP
+                  ? 'shrink-0 rounded bg-amber-50 px-1.5 text-xs text-amber-800'
+                  : 'shrink-0 rounded bg-blue-50 px-1.5 text-xs text-blue-700'
             }
             title={
-              c.by === 'db_match'
-                ? `${matchReasonLabel(c.reason)}${c.score ? `（確信度 ${Math.round(c.score * 100)}%）` : ''}`
-                : 'AI が正規化した結果'
+              c.by === 'ai_normalize'
+                ? 'AI が正規化した結果'
+                : `${matchReasonLabel(c.reason)}${c.score ? `（確信度 ${Math.round(c.score * 100)}%）` : ''}`
             }
           >
             {STEP_LABELS[c.by] ?? c.by}
@@ -50,8 +57,12 @@ export default function FieldProvenance({ changes, field }: Props) {
           )}
           <span className="text-gray-300">→</span>
           <span className="font-medium text-gray-800">{c.to}</span>
-          {c.by === 'db_match' && c.reason && (
+          {c.by !== 'ai_normalize' && c.reason && (
             <span className="text-xs text-gray-400">{matchReasonLabel(c.reason)}</span>
+          )}
+          {/* AI が決めた段は確信度を本文に出す。tooltip だけだと気づかない */}
+          {c.by === AI_STEP && !!c.score && (
+            <span className="text-xs font-medium text-amber-700">{Math.round(c.score * 100)}%</span>
           )}
         </div>
       ))}

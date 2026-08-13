@@ -67,9 +67,12 @@ type Artist struct {
 	ID          uuid.UUID      `json:"id"`
 	Name        string         `json:"name"`
 	NameReading sql.NullString `json:"name_reading"`
-	SongCount   int            `json:"song_count"` // JOIN で補完
-	CreatedAt   time.Time      `json:"created_at"`
-	UpdatedAt   time.Time      `json:"updated_at"`
+	// Aliases は同一人物の別名義（松任谷由実 に対する 荒井由実）。
+	// 照合時に各名前を本体へ寄せるために使う（docs/SONG_MATCHING.md）。
+	Aliases   []string  `json:"aliases,omitempty"`
+	SongCount int       `json:"song_count"` // JOIN で補完
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // ArtistReference は楽曲・演唱 API に埋め込む安定したアーティスト参照。

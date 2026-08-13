@@ -368,15 +368,24 @@ export interface CommentSong {
   matched_song_itunes_id?: number;
   // 自動採用に届かなかった照合候補（別名義・同名異曲など）。UI で人に選ばせる
   match_candidates?: SongMatchCandidate[];
+  artist_alias?: ArtistAliasProposal;
   changes?: FieldChange[];
 }
 
 // 「抽出したままの値が、どの処理でどう変わったか」。
 // by は ai_normalize（AI 正規化）か db_match（DB 照合）。
 // 画面に理由なく名前が変わって見えるのを防ぐためのもので、保存はされない。
+// AI が照合したときの申し送り。歌手が DB と違う場合だけ付く。
+// 登録は編集フォームで人がチェックを入れて保存したときだけ（docs/SETLIST_FLOW.md）。
+export interface ArtistAliasProposal {
+  canonical: string;   // DB 側の表記（別名義の本体）
+  alias: string;       // コメント側の表記
+  same_artist: boolean; // AI の判定。true のときだけ既定でチェックが入る
+}
+
 export interface FieldChange {
   field: 'name' | 'artist';
-  by: 'ai_normalize' | 'db_match';
+  by: 'ai_normalize' | 'db_match' | 'ai_match';
   from: string;
   to: string;
   reason?: string;  // db_match の根拠（exact / title_artist / ai …）
@@ -433,6 +442,7 @@ export interface SongSuggestion {
   matched_song_itunes_id?: number;
   // 自動採用に届かなかった照合候補（別名義・同名異曲など）。UI で人に選ばせる
   match_candidates?: SongMatchCandidate[];
+  artist_alias?: ArtistAliasProposal;
   changes?: FieldChange[];
 }
 
@@ -503,6 +513,7 @@ export interface AISuggestionResult {
   matched_song_itunes_id?: number;
   // 自動採用に届かなかった照合候補（別名義・同名異曲など）。UI で人に選ばせる
   match_candidates?: SongMatchCandidate[];
+  artist_alias?: ArtistAliasProposal;
   changes?: FieldChange[];
 }
 

@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, Link } from 'react-router-dom';
-import { streamApi, performanceApi, aiApi, songApi, singerApi, itunesApi, holodexApi, commentApi, tagApi } from '../api/client';
-import type { Singer, CreatePerformanceItem, AINormalizationItem, Song, UpdateStreamRequest, ITunesSearchResult, CommentSong, SongSuggestion, EndSource, FieldChange } from '../api/types';
+import { streamApi, performanceApi, aiApi, songApi, singerApi, itunesApi, holodexApi, commentApi, tagApi, artistApi } from '../api/client';
+import type { Singer, CreatePerformanceItem, AINormalizationItem, Song, UpdateStreamRequest, ITunesSearchResult, CommentSong, SongSuggestion, EndSource, FieldChange, ArtistAliasProposal } from '../api/types';
 import Loading from '../components/ui/Loading';
 import Tag from '../components/ui/Tag';
 import { useToast } from '../components/ui/ToastContext';
@@ -44,6 +44,10 @@ interface EditableSong {
   // AI 正規化追跡
   aiNormalizedName?: string; // AI 変更前の名称（変更された場合）
   aiNormalizedArtist?: string; // AI 変更前のアーティスト（変更された場合）
+  // AI が照合したときの「この 2 つは同じ人か」の申し送りと、人のチェック状態。
+  // 別名義はその人の全楽曲に効くので、**保存したときにだけ**登録する。
+  artistAlias?: ArtistAliasProposal;
+  aliasChecked?: boolean;
   // 「抽出したままの値が、どの処理でどう変わったか」。AI 正規化と DB 照合を区別して出す。
   // aiNormalized* は 1 段しか表せず、どちらの仕業かも分からないので、表示はこちらを使う。
   changes?: FieldChange[];
@@ -948,6 +952,11 @@ export default function StreamDetailPage() {
       aiNormalizedName: finalName !== song.name ? song.name : undefined,
       aiNormalizedArtist: finalArtist !== song.original_artist ? song.original_artist : undefined,
       changes: song.changes,
+      artistAlias: song.artist_alias,
+      // AI が同一人物と言った場合だけ既定でチェックを入れる。
+      // 作曲者と原唱の取り違え（メルト / 初音ミク に対し DB は ryo (supercell)）は
+      // 「同じ曲だが別人」なので入らない ── 本番ではこちらの方が多い。
+      aliasChecked: song.artist_alias?.same_artist ?? false,
       isEndTimeEstimated: false,
       chatEnd: song.chat_end,
       endDiff: song.end_diff,
@@ -995,6 +1004,11 @@ export default function StreamDetailPage() {
       aiNormalizedName: finalName !== song.name ? song.name : undefined,
       aiNormalizedArtist: finalArtist !== song.original_artist ? song.original_artist : undefined,
       changes: song.changes,
+      artistAlias: song.artist_alias,
+      // AI が同一人物と言った場合だけ既定でチェックを入れる。
+      // 作曲者と原唱の取り違え（メルト / 初音ミク に対し DB は ryo (supercell)）は
+      // 「同じ曲だが別人」なので入らない ── 本番ではこちらの方が多い。
+      aliasChecked: song.artist_alias?.same_artist ?? false,
       isEndTimeEstimated: song.is_end_time_estimated,
       chatEnd: song.chat_end,
       endDiff: song.end_diff,
@@ -1481,7 +1495,44 @@ export default function StreamDetailPage() {
       // 保存＝人が見たとみなすので end_confirmed は既定の true に任せる。
       end_source: song.endSource,
     }));
+    // 別名義は保存と同時に登録する。読み込んだだけでは書かない
+    // ── その人の全楽曲に効くので、人が見て残す判断をしたときにだけ入れる。
+    // 権限が無ければバックエンドが提案として積む（docs/SETLIST_FLOW.md）。
+    void registerCheckedAliases();
     createPerformancesMutation.mutate(performances);
+  };
+
+  // チェックの入った別名義を登録する。1 件ずつ独立して扱い、失敗しても保存は止めない
+  // （別名義は付随的な情報で、セットリストの保存の方が主目的）。
+  const registerCheckedAliases = async () => {
+    const seen = new Set<string>();
+    const targets = editableSongs
+      .filter((s) => s.aliasChecked && s.artistAlias)
+      .map((s) => s.artistAlias!)
+      .filter((a) => {
+        const key = `${a.canonical}\u001f${a.alias}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+
+    let applied = 0;
+    let proposed = 0;
+    for (const a of targets) {
+      try {
+        const res = await artistApi.proposeAlias(a.canonical, a.alias);
+        if (res.applied) {
+          applied++;
+        } else {
+          proposed++;
+        }
+      } catch (err) {
+        showToast(`別名義の登録に失敗しました（${a.alias}）`, 'error');
+        console.error('alias registration failed:', err);
+      }
+    }
+    if (applied > 0) showToast(`${applied}件の別名義を登録しました`, 'success');
+    if (proposed > 0) showToast(`${proposed}件の別名義を提案として登録しました`, 'info');
   };
 
   // YouTube 播放器實例（必須在任何條件判斷之前）
@@ -2557,6 +2608,35 @@ export default function StreamDetailPage() {
                             <span className="text-blue-600 font-medium">{song.artist}</span>
                           </div>
                         ) : null}
+
+                        {/*
+                          歌手名が DB と違うときの申し送り。別名義は**その人の全楽曲に効く**ので、
+                          読み込んだだけでは登録せず、保存したときにだけ書く。
+                          既定でチェックが入るのは AI が「同一人物」と言った場合だけ
+                          ── メルト / 初音ミク に対し DB が ryo (supercell) のような
+                          作曲者と原唱の取り違えは「同じ曲だが別人」で、こちらの方が多い。
+                        */}
+                        {song.artistAlias && (
+                          <label className="mt-2 flex items-start gap-2 rounded border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-900">
+                            <input
+                              type="checkbox"
+                              checked={!!song.aliasChecked}
+                              onChange={(e) => handleSongChange(index, 'aliasChecked', e.target.checked)}
+                              className="mt-0.5"
+                            />
+                            <span>
+                              <span className="font-medium">{song.artistAlias.alias}</span>
+                              {' は '}
+                              <span className="font-medium">{song.artistAlias.canonical}</span>
+                              {' の別名義として登録する'}
+                              <span className="ml-1 text-amber-700/70">
+                                {song.artistAlias.same_artist
+                                  ? '（AI：同一人物）'
+                                  : '（AI：別人と判定。同じ曲だが歌った人が違う場合はチェックしない）'}
+                              </span>
+                            </span>
+                          </label>
+                        )}
                       </div>
 
                       {/* Start Time */}

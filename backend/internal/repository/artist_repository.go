@@ -81,10 +81,10 @@ func (r *ArtistRepository) ListWithCounts(limit, offset int, search, sort, dir s
 func (r *ArtistRepository) FindByID(id uuid.UUID) (*models.Artist, error) {
 	var a models.Artist
 	err := r.db.QueryRow(`
-		SELECT a.id, a.name, a.name_reading, a.created_at, a.updated_at,
+		SELECT a.id, a.name, a.name_reading, a.aliases, a.created_at, a.updated_at,
 		       (SELECT COUNT(*) FROM song_artists sa WHERE sa.artist_id = a.id)
 		FROM artists a WHERE a.id = $1`, id).
-		Scan(&a.ID, &a.Name, &a.NameReading, &a.CreatedAt, &a.UpdatedAt, &a.SongCount)
+		Scan(&a.ID, &a.Name, &a.NameReading, pq.Array(&a.Aliases), &a.CreatedAt, &a.UpdatedAt, &a.SongCount)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -97,8 +97,8 @@ func (r *ArtistRepository) FindByID(id uuid.UUID) (*models.Artist, error) {
 // FindByName は名前でアーティストを取得する。見つからなければ nil。
 func (r *ArtistRepository) FindByName(name string) (*models.Artist, error) {
 	var a models.Artist
-	err := r.db.QueryRow(`SELECT id, name, name_reading, created_at, updated_at, 0 FROM artists WHERE name = $1`, name).
-		Scan(&a.ID, &a.Name, &a.NameReading, &a.CreatedAt, &a.UpdatedAt, &a.SongCount)
+	err := r.db.QueryRow(`SELECT id, name, name_reading, aliases, created_at, updated_at, 0 FROM artists WHERE name = $1`, name).
+		Scan(&a.ID, &a.Name, &a.NameReading, pq.Array(&a.Aliases), &a.CreatedAt, &a.UpdatedAt, &a.SongCount)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -407,4 +407,18 @@ func (r *ArtistRepository) ListMissingReadings(limit int) ([]models.Artist, erro
 		}
 	}
 	return out, rows.Err()
+}
+
+// UpdateAliases は別名義（同一人物の別表記）を置き換える。
+// 照合は artists.aliases を本体へ寄せる対応表として読む（詳細は docs/SONG_MATCHING.md）。
+func (r *ArtistRepository) UpdateAliases(id uuid.UUID, aliases []string) error {
+	if aliases == nil {
+		aliases = []string{}
+	}
+	_, err := r.db.Exec(`UPDATE artists SET aliases = $2, updated_at = NOW() WHERE id = $1`,
+		id, pq.Array(aliases))
+	if err != nil {
+		return fmt.Errorf("update artist aliases: %w", err)
+	}
+	return nil
 }

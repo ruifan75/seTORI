@@ -193,7 +193,13 @@ func (s *ArtistService) GetEditableFields(id uuid.UUID) (map[string]string, stri
 	if a.NameReading.Valid {
 		reading = a.NameReading.String
 	}
-	return map[string]string{"name": a.Name, "name_reading": reading}, a.Name, nil
+	// aliases は「同一人物の別名義」。権限の無い利用者が別名義を提案できるように、
+	// 修正提案の編集可能フィールドとして開けてある（読点区切りの 1 行で扱う）。
+	return map[string]string{
+		"name":         a.Name,
+		"name_reading": reading,
+		"aliases":      strings.Join(a.Aliases, "、"),
+	}, a.Name, nil
 }
 
 // ApplyEditableFields は提案された編集値をアーティストへ反映する。
@@ -208,6 +214,22 @@ func (s *ArtistService) ApplyEditableFields(id uuid.UUID, fields map[string]stri
 		vv := v
 		reading = &vv
 	}
+	if v, ok := fields["aliases"]; ok {
+		var aliases []string
+		for _, part := range strings.Split(v, "、") {
+			if t := strings.TrimSpace(part); t != "" {
+				aliases = append(aliases, t)
+			}
+		}
+		if err := s.artistRepo.UpdateAliases(id, aliases); err != nil {
+			return err
+		}
+		// 別名義だけの提案なら名前は触らない（Update は名前の変更を伴うため）
+		if name == nil && reading == nil {
+			return nil
+		}
+	}
+
 	result, err := s.Update(id, name, reading)
 	if err != nil {
 		return err
@@ -334,4 +356,10 @@ func (s *ArtistService) BackfillReadings() (*dto.BackfillReadingsResponse, error
 
 	logger.Infof("readings backfill: artists=%d songs=%d", resp.ArtistsUpdated, resp.SongsUpdated)
 	return resp, nil
+}
+
+// FindByName は表示名でアーティストを引く。見つからなければ nil。
+// 別名義の提案で「その名前が artists に居るか」を確かめるために使う。
+func (s *ArtistService) FindByName(name string) (*models.Artist, error) {
+	return s.artistRepo.FindByName(name)
 }
