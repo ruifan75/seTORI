@@ -1063,6 +1063,22 @@ export interface SongMatchCandidate {
   is_match: boolean;
 }
 
+// 「この表記はこの曲ではない」という否決 1 件。
+//
+// 否決は照合の候補からその曲を外し続け、AI にも聞き直さない。効き続けるものなので
+// 見直せる必要がある（source: ai = AI の判定、review = 人が審査画面で否決）。
+export interface SongIdentityCheck {
+  pair_key: string;
+  name_key: string;   // 抽出された表記の曲名キー（DB の曲名ではない）
+  artist_key: string;
+  song_id: string;
+  song_name: string;
+  song_artist: string;
+  source: string;
+  note: string;
+  checked_at: string;
+}
+
 export interface MergeCandidateSong {
   id: string;
   name: string;

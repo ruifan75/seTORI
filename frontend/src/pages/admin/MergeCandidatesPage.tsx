@@ -1,7 +1,8 @@
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { songApi, itunesApi } from '../../api/client';
-import type { MergeCandidate, MergeCandidateSong } from '../../api/types';
+import type { MergeCandidate, MergeCandidateSong, SongIdentityCheck } from '../../api/types';
 import Loading from '../../components/ui/Loading';
 import { useToast } from '../../components/ui/ToastContext';
 import { matchReasonLabel } from '../../utils/matchReason';
@@ -44,6 +45,83 @@ function ItunesEvidence({ itunesId }: { itunesId: number }) {
       </div>
       {data.preview_url && (
         <audio controls preload="none" src={data.preview_url} className="mt-1 h-7 w-full max-w-[220px]" />
+      )}
+    </div>
+  );
+}
+
+// IdentityChecks は「この表記はこの曲ではない」という否決の一覧。
+//
+// 否決は照合の候補からその曲を外し続け、AI にも聞き直さない。**効き続けるものが
+// 画面から見えないと、誤判定が混ざっていても気付けないまま照合が歪む**ので、
+// ここで一覧して取り消せるようにしてある。重複候補と同じ「楽曲の同一性」の話なので
+// 画面は分けない。
+function IdentityChecks() {
+  const queryClient = useQueryClient();
+  const { showToast } = useToast();
+  const [open, setOpen] = useState(false);
+
+  const { data } = useQuery({
+    queryKey: ['song-identity-checks'],
+    queryFn: () => songApi.identityChecks(200),
+    enabled: open,
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (pairKey: string) => songApi.deleteIdentityCheck(pairKey),
+    onSuccess: (r) => {
+      showToast(r.message, 'success');
+      queryClient.invalidateQueries({ queryKey: ['song-identity-checks'] });
+    },
+    onError: (err: Error) => showToast(`取り消せません: ${err.message}`, 'error'),
+  });
+
+  const checks = data?.checks ?? [];
+
+  return (
+    <div className="mt-8 border-t pt-6">
+      <button
+        onClick={() => setOpen(!open)}
+        className="text-sm font-medium text-gray-700 hover:text-gray-900"
+      >
+        {open ? '▾' : '▸'} 「この曲ではない」と判定した組
+      </button>
+      <p className="mt-1 text-xs text-gray-500">
+        照合の候補からその曲を外し続けている判定です。誤っていれば取り消すと、次回からまた候補に出て AI にも聞き直します。
+      </p>
+
+      {open && (
+        checks.length === 0 ? (
+          <p className="mt-3 text-sm text-gray-500">判定の記録はありません。</p>
+        ) : (
+          <ul className="mt-3 divide-y text-xs">
+            {checks.map((c: SongIdentityCheck) => (
+              <li key={c.pair_key} className="flex flex-wrap items-center gap-x-2 gap-y-1 py-2">
+                <span className="font-mono text-gray-700">{c.name_key}</span>
+                {c.artist_key && <span className="font-mono text-gray-400">/ {c.artist_key}</span>}
+                <span className="text-gray-400">≠</span>
+                <Link to={`/songs/${c.song_id}`} className="text-indigo-600 hover:text-indigo-900">
+                  {c.song_name}
+                  {c.song_artist && <span className="text-gray-400"> / {c.song_artist}</span>}
+                </Link>
+                <span className={`rounded px-1.5 py-0.5 ${
+                  c.source === 'review' ? 'bg-indigo-50 text-indigo-700' : 'bg-gray-100 text-gray-500'
+                }`}>
+                  {c.source === 'review' ? '人の判定' : 'AI'}
+                </span>
+                {c.note && <span className="text-gray-500">{c.note}</span>}
+                <button
+                  onClick={() => deleteMutation.mutate(c.pair_key)}
+                  disabled={deleteMutation.isPending}
+                  className="ml-auto rounded border border-gray-300 px-2 py-0.5 text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                  title="この判定を取り消す"
+                >
+                  取り消す
+                </button>
+              </li>
+            ))}
+          </ul>
+        )
       )}
     </div>
   );
@@ -269,6 +347,8 @@ export default function MergeCandidatesPage() {
           ))}
         </ul>
       )}
+
+      <IdentityChecks />
     </div>
   );
 }

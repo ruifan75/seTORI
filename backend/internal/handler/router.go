@@ -268,6 +268,9 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("POST /api/songs/merge-candidates/scan", r.handleScanDuplicates)
 	r.mux.HandleFunc("POST /api/songs/merge-candidates/adjudicate", r.handleAdjudicateDuplicates)
 	r.mux.HandleFunc("GET /api/songs/{id}/merge-candidates", r.handleGetSongMergeCandidates)
+	// 「この表記はこの曲ではない」という否決の見直し（見えないと誤判定を直せない）
+	r.mux.HandleFunc("GET /api/songs/identity-checks", r.handleListIdentityChecks)
+	r.mux.HandleFunc("POST /api/songs/identity-checks/delete", r.handleDeleteIdentityCheck)
 
 	// API routes - 照合の学習層（アーティストの別名義・楽曲の別表記）
 
@@ -1335,6 +1338,40 @@ func (r *Router) handleUndoRejection(w http.ResponseWriter, req *http.Request) {
 	}
 	respondJSON(w, http.StatusOK, map[string]string{
 		"message": "却下を取り消しました。次回の一括作成でまた提案されます",
+	})
+}
+
+// handleListIdentityChecks は「この表記はこの曲ではない」という否決の一覧を返す（content:edit）。
+//
+// 否決は候補からその曲を外し続け、AI にも聞き直さない。効き続けるものが画面から
+// 見えないと、誤判定が混ざっていても気付けないまま照合が歪む。
+func (r *Router) handleListIdentityChecks(w http.ResponseWriter, req *http.Request) {
+	limit, _ := strconv.Atoi(req.URL.Query().Get("limit"))
+	rows, err := r.songMatchService.ListSongRejections(limit)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"checks": rows})
+}
+
+// handleDeleteIdentityCheck は否決を 1 件取り消す（content:edit）。
+//
+// pair_key は区切りに制御文字を含むので URL パスには載せず body で受ける。
+func (r *Router) handleDeleteIdentityCheck(w http.ResponseWriter, req *http.Request) {
+	var body struct {
+		PairKey string `json:"pair_key"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil || body.PairKey == "" {
+		respondError(w, http.StatusBadRequest, "pair_key が必要です")
+		return
+	}
+	if err := r.songMatchService.DeleteSongRejection(body.PairKey); err != nil {
+		respondError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{
+		"message": "判定を取り消しました。次回からまた候補に出ます",
 	})
 }
 

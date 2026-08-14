@@ -416,6 +416,16 @@ func (s *SongMatchService) RemoveSongRejection(nameKey, artistKey string, songID
 	return s.aliasRepo.RemoveSongRejection(nameKey, artistKey, songID)
 }
 
+// ListSongRejections は否決の一覧を返す（管理画面から見直すため）。
+func (s *SongMatchService) ListSongRejections(limit int) ([]repository.SongRejectionRow, error) {
+	return s.aliasRepo.ListSongRejections(limit)
+}
+
+// DeleteSongRejection は否決を 1 件取り消す。次からまた候補に出て、AI にも聞き直す。
+func (s *SongMatchService) DeleteSongRejection(pairKey string) error {
+	return s.aliasRepo.DeleteSongRejectionByPair(pairKey)
+}
+
 // CandidatesForAI は AI に見せる候補を集める。
 //
 // FindCandidates と分けているのは、**求めるものが違う**から。

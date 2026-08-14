@@ -3,6 +3,7 @@ package repository
 import (
 	"database/sql"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/lib/pq"
@@ -142,6 +143,64 @@ func (r *AliasRepository) RecordSongRejection(nameKey, artistKey string, songID 
 		SongIdentityPairKey(nameKey, artistKey, songID), nameKey, artistKey, songID, source, note)
 	if err != nil {
 		return fmt.Errorf("record song rejection: %w", err)
+	}
+	return nil
+}
+
+// SongRejectionRow は否決 1 件（表示用に楽曲名を添えて返す）。
+type SongRejectionRow struct {
+	PairKey    string    `json:"pair_key"`
+	NameKey    string    `json:"name_key"`
+	ArtistKey  string    `json:"artist_key"`
+	SongID     uuid.UUID `json:"song_id"`
+	SongName   string    `json:"song_name"`
+	SongArtist string    `json:"song_artist"`
+	Source     string    `json:"source"` // ai / review
+	Note       string    `json:"note"`
+	CheckedAt  time.Time `json:"checked_at"`
+}
+
+// ListSongRejections は「この表記はこの曲ではない」の記録を新しい順に返す。
+//
+// 見えないと直せない。AI が下した否決は候補からその曲を外し続けるので、
+// 誤判定が混ざっていても気付く手立てが無いままになる。
+func (r *AliasRepository) ListSongRejections(limit int) ([]SongRejectionRow, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 200
+	}
+	rows, err := r.db.Query(`
+		SELECT c.pair_key, c.name_key, c.artist_key, c.song_id,
+		       s.name, s.original_artist, c.source, COALESCE(c.note, ''), c.checked_at
+		FROM song_identity_checks c
+		JOIN songs s ON s.id = c.song_id
+		WHERE NOT c.same
+		ORDER BY c.checked_at DESC
+		LIMIT $1`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list song rejections: %w", err)
+	}
+	defer rows.Close()
+
+	out := []SongRejectionRow{}
+	for rows.Next() {
+		var x SongRejectionRow
+		if err := rows.Scan(&x.PairKey, &x.NameKey, &x.ArtistKey, &x.SongID,
+			&x.SongName, &x.SongArtist, &x.Source, &x.Note, &x.CheckedAt); err != nil {
+			return nil, fmt.Errorf("scan song rejection: %w", err)
+		}
+		out = append(out, x)
+	}
+	return out, rows.Err()
+}
+
+// DeleteSongRejectionByPair は否決を pair_key で消す（画面から取り消す用）。
+func (r *AliasRepository) DeleteSongRejectionByPair(pairKey string) error {
+	res, err := r.db.Exec(`DELETE FROM song_identity_checks WHERE pair_key = $1`, pairKey)
+	if err != nil {
+		return fmt.Errorf("delete song rejection: %w", err)
+	}
+	if n, err := res.RowsAffected(); err == nil && n == 0 {
+		return fmt.Errorf("該当する判定が見つかりません")
 	}
 	return nil
 }

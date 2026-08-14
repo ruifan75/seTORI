@@ -23,6 +23,7 @@ import type {
   SyncHolodexResponse,
   SongSuggestion,
   MergeCandidate,
+  SongIdentityCheck,
   AnalyzeCommentsResponse,
   BatchAnalyzeStatus,
   BatchFillStatus,
@@ -215,6 +216,19 @@ export const songApi = {
   // 未判定の候補について AI の見立てを取る。統合は実行しない
   adjudicateDuplicates: async (): Promise<{ judged: number; message: string }> => {
     const { data } = await api.post('/api/songs/merge-candidates/adjudicate');
+    return data;
+  },
+
+  // 「この表記はこの曲ではない」という否決の一覧。
+  // 否決は候補からその曲を外し続けるので、誤判定を見直せるようにしてある。
+  identityChecks: async (limit = 200): Promise<{ checks: SongIdentityCheck[] }> => {
+    const { data } = await api.get(`/api/songs/identity-checks?limit=${limit}`);
+    return data;
+  },
+
+  // 否決を 1 件取り消す。次からまた候補に出て、AI にも聞き直す。
+  deleteIdentityCheck: async (pairKey: string): Promise<{ message: string }> => {
+    const { data } = await api.post('/api/songs/identity-checks/delete', { pair_key: pairKey });
     return data;
   },
 };
