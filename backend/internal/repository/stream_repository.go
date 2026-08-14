@@ -951,6 +951,7 @@ func (r *StreamRepository) FindBySingerID(singerID string, limit, offset int, fi
 //
 //	unprocessed … まだ歌唱が 1 つも無い配信だけ。既にあるものは触らない
 //	force       … 源を持つ配信すべて。既存と食い違う分は人の審査へ回す
+//
 // 範囲は singerIDs で絞る（空なら全チャンネル）。**既定はチャンネルの所有者**で、
 // includeCollabs を立てたときだけ「参加した歌回」まで広がる。
 // 以前は参加者で絞っていたので、あるチャンネルを選んだつもりが、そのチャンネルが
