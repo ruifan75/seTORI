@@ -904,6 +904,14 @@ export const suggestionApi = {
     const { data } = await api.delete(`/api/suggestions/${id}`);
     return data;
   },
+
+  // 却下を取り消す（要 content:edit・perf.missing のみ）。
+  // 却下した行は status に関係なく重複判定に引っかかるので、そのままだと
+  // 次の一括作成で二度と出てこない。「この曲ではない」の否決記録も一緒に消える。
+  undoRejection: async (id: string): Promise<{ message: string }> => {
+    const { data } = await api.post(`/api/suggestions/${id}/undo-rejection`);
+    return data;
+  },
 };
 
 // ========== グローバル検索 API ==========

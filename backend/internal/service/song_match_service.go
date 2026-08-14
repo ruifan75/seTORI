@@ -411,6 +411,11 @@ func (s *SongMatchService) RecordSongRejection(nameKey, artistKey string, songID
 	return s.aliasRepo.RecordSongRejection(nameKey, artistKey, songID, source, note)
 }
 
+// RemoveSongRejection は「この表記はこの曲ではない」の記録を取り消す（却下の取り消し用）。
+func (s *SongMatchService) RemoveSongRejection(nameKey, artistKey string, songID uuid.UUID) error {
+	return s.aliasRepo.RemoveSongRejection(nameKey, artistKey, songID)
+}
+
 // CandidatesForAI は AI に見せる候補を集める。
 //
 // FindCandidates と分けているのは、**求めるものが違う**から。

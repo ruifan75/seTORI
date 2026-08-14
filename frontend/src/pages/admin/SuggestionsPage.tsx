@@ -137,6 +137,16 @@ export default function SuggestionsPage() {
     onError: (err: Error) => showToast(`却下できません: ${err.message}`, 'error'),
   });
 
+  // 却下は「次から提案しない」という持続する副作用を持つので、取り消せる必要がある。
+  const undoRejectionMutation = useMutation({
+    mutationFn: (id: string) => suggestionApi.undoRejection(id),
+    onSuccess: (r) => {
+      showToast(r.message, 'success');
+      invalidate();
+    },
+    onError: (err: Error) => showToast(`取り消せません: ${err.message}`, 'error'),
+  });
+
   const batchRejectMutation = useMutation({
     mutationFn: (ids: string[]) => suggestionApi.batchReview(ids, 'reject'),
     onSuccess: (r) => {
@@ -150,7 +160,8 @@ export default function SuggestionsPage() {
     adoptMutation.isPending ||
     batchRejectMutation.isPending ||
     approveMissingMutation.isPending ||
-    rejectMissingMutation.isPending;
+    rejectMissingMutation.isPending ||
+    undoRejectionMutation.isPending;
 
   // 絞りを変えたら開きかけのプレイヤーも畳む（別の配信を指したままにしない）
   const resetView = () => {
@@ -247,7 +258,14 @@ export default function SuggestionsPage() {
                     onMerged={invalidate}
                   />
                 ))
-              : listQuery.data!.suggestions.map((s) => <HistoryCard key={s.id} suggestion={s} />)}
+              : listQuery.data!.suggestions.map((s) => (
+                  <HistoryCard
+                    key={s.id}
+                    suggestion={s}
+                    busy={busy}
+                    onUndoRejection={() => undoRejectionMutation.mutate(s.id)}
+                  />
+                ))}
           </div>
 
           {pagination && pagination.total_pages > 1 && (
@@ -568,7 +586,20 @@ function SuggestionRow({
 }
 
 // HistoryCard 承認済み・却下の履歴表示（時系列の一覧）。
-function HistoryCard({ suggestion }: { suggestion: Suggestion }) {
+//
+// 未登録曲の却下だけは取り消せる。一括は同じ (配信, 開始秒, 曲名) を status に関係なく
+// 積み直さないので、却下した行はそのままだと次の実行で二度と出てこない
+// ── 判断を変えたときに戻す口がここ。
+function HistoryCard({
+  suggestion,
+  busy,
+  onUndoRejection,
+}: {
+  suggestion: Suggestion;
+  busy: boolean;
+  onUndoRejection: () => void;
+}) {
+  const canUndo = suggestion.status === 'rejected' && suggestion.kind === 'perf.missing';
   return (
     <div className="bg-white rounded-lg shadow-sm border p-4">
       <div className="flex flex-wrap items-start justify-between gap-2 mb-2">
@@ -605,6 +636,19 @@ function HistoryCard({ suggestion }: { suggestion: Suggestion }) {
       )}
       {suggestion.note && (
         <p className="text-xs text-gray-600 mt-1 whitespace-pre-wrap break-words">💬 {suggestion.note}</p>
+      )}
+
+      {canUndo && (
+        <div className="flex justify-end mt-2">
+          <button
+            onClick={onUndoRejection}
+            disabled={busy}
+            title="この却下を取り消します。次回の一括作成でまた提案され、「この曲ではない」の記録も消えます"
+            className="px-3 py-1.5 text-xs bg-white border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+          >
+            却下を取り消す
+          </button>
+        </div>
       )}
     </div>
   );

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/google/uuid"
@@ -221,6 +222,66 @@ func TestApplyMissingSongEdits(t *testing.T) {
 		out, _ := applyMissingSongEdits(base, edits)
 		if out.StreamID != "abc123" {
 			t.Errorf("StreamID = %q, want abc123（別の配信の話なら別の提案）", out.StreamID)
+		}
+	})
+}
+
+// 否決の鍵は「記録するとき」と「取り消すとき」で同じでなければならない。
+// ずれると「取り消したのに候補から外れたまま」という、画面からは追えない壊れ方をする。
+func TestSongVerdictOf(t *testing.T) {
+	songA := uuid.New()
+	mk := func(p dto.MissingSongPayload) *models.EditSuggestion {
+		b, _ := json.Marshal(p)
+		return &models.EditSuggestion{Kind: KindMissingSong, Payload: b}
+	}
+
+	t.Run("鍵は抽出したままの表記から作る", func(t *testing.T) {
+		// 照合で song_name は DB の表記に化けるが、次の実行が突き合わせるのは raw_name。
+		v, ok := songVerdictOf(mk(dto.MissingSongPayload{
+			SongName: "深昏睡 (Deep coma)", OriginalArtist: "wowaka",
+			RawName: "深昏睡", RawArtist: "ボカロ",
+			SongID: songA.String(),
+		}))
+		if !ok {
+			t.Fatal("否決の対象が取れなかった")
+		}
+		if v.name != "深昏睡" || v.artist != "ボカロ" {
+			t.Errorf("name/artist = %q/%q, want 深昏睡/ボカロ（抽出時の表記）", v.name, v.artist)
+		}
+		if len(v.songIDs) != 1 || v.songIDs[0] != songA {
+			t.Errorf("songIDs = %v, want [%v]", v.songIDs, songA)
+		}
+	})
+
+	t.Run("raw が無ければ照合後の値で代用する", func(t *testing.T) {
+		v, ok := songVerdictOf(mk(dto.MissingSongPayload{
+			SongName: "ギラギラ", OriginalArtist: "Ado", SongID: songA.String(),
+		}))
+		if !ok || v.name != "ギラギラ" || v.artist != "Ado" {
+			t.Errorf("v = %+v, ok = %v", v, ok)
+		}
+	})
+
+	t.Run("曲が決まっていなければ候補すべてが対象", func(t *testing.T) {
+		c1, c2 := uuid.New().String(), uuid.New().String()
+		v, ok := songVerdictOf(mk(dto.MissingSongPayload{
+			SongName:   "Real Face",
+			Candidates: []dto.SongMatchCandidate{{SongID: c1}, {SongID: c2}},
+		}))
+		if !ok || len(v.songIDs) != 2 {
+			t.Errorf("songIDs = %v, want 2 件（候補のどれでもない）", v.songIDs)
+		}
+	})
+
+	t.Run("曲も候補も無ければ否決するものが無い", func(t *testing.T) {
+		if _, ok := songVerdictOf(mk(dto.MissingSongPayload{SongName: "Real Face"})); ok {
+			t.Error("否決の対象が無いのに ok が返った")
+		}
+	})
+
+	t.Run("perf.missing 以外は対象外", func(t *testing.T) {
+		if _, ok := songVerdictOf(&models.EditSuggestion{Kind: KindField, Payload: []byte("{}")}); ok {
+			t.Error("field 提案が否決の対象になった")
 		}
 	})
 }

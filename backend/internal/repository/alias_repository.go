@@ -146,6 +146,19 @@ func (r *AliasRepository) RecordSongRejection(nameKey, artistKey string, songID 
 	return nil
 }
 
+// RemoveSongRejection は「この表記はこの曲ではない」の記録を取り消す。
+//
+// 否定は次の一括実行の候補から曲を外し続けるので、人が判断を変えたときに
+// 戻せる必要がある。記録するときと同じ鍵で引く。
+func (r *AliasRepository) RemoveSongRejection(nameKey, artistKey string, songID uuid.UUID) error {
+	_, err := r.db.Exec(`DELETE FROM song_identity_checks WHERE pair_key = $1`,
+		SongIdentityPairKey(nameKey, artistKey, songID))
+	if err != nil {
+		return fmt.Errorf("remove song rejection: %w", err)
+	}
+	return nil
+}
+
 // RepointSongIdentityChecks は統合で消える楽曲を指していた否定を統合先へ付け替える。
 // 付け替えないと「この表記はこの曲ではない」が楽曲ごと消え、統合のたびに復活する。
 func (r *AliasRepository) RepointSongIdentityChecks(db execer, fromSongID, toSongID uuid.UUID) error {

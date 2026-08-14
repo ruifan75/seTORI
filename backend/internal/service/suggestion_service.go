@@ -1038,8 +1038,10 @@ func (s *SuggestionService) Withdraw(id uuid.UUID, user *models.User) error {
 	if !isOwner && !isReviewer {
 		return ErrSuggestionNotFound
 	}
-	// 処理済みのものは取り下げられない（反映済みの変更は「元に戻す」の話であって
-	// 取り下げではないし、却下済みのものを消しても意味がない）。
+	// 処理済みのものは取り下げられない。反映済みの変更は「元に戻す」の話であって
+	// 取り下げではない。却下済みのものは UndoRejection で扱う ── perf.missing の却下は
+	// 「次から提案しない」という持続する副作用を持つので、消せる必要がある
+	// （取り下げとは別の操作。引っ込めるのは投稿者、取り消すのは審査担当）。
 	if sug.Status == "approved" || sug.Status == "rejected" {
 		return ErrAlreadyReviewed
 	}
@@ -1222,13 +1224,24 @@ func (s *SuggestionService) RejectWithVerdict(id uuid.UUID, reviewer *models.Use
 
 // recordSongVerdict は perf.missing の否決を「別の曲」として残す。
 // 失敗しても却下自体は成立しているので、警告に留める。
-func (s *SuggestionService) recordSongVerdict(sug *models.EditSuggestion, note string) {
-	if s.matchService == nil || sug.Kind != KindMissingSong {
-		return
+// songVerdict は否決の対象（どの表記が、どの曲でないか）。
+type songVerdict struct {
+	name, artist       string
+	nameKey, artistKey string
+	songIDs            []uuid.UUID
+}
+
+// songVerdictOf は提案から否決の対象を割り出す。
+//
+// **記録するときと取り消すときで必ず同じ鍵を使う**ため 1 か所にまとめてある
+// ── ずれると「取り消したのに消えていない」という、画面からは追えない壊れ方をする。
+func songVerdictOf(sug *models.EditSuggestion) (songVerdict, bool) {
+	if sug.Kind != KindMissingSong {
+		return songVerdict{}, false
 	}
 	var p dto.MissingSongPayload
 	if json.Unmarshal(sug.Payload, &p) != nil {
-		return
+		return songVerdict{}, false
 	}
 	// 鍵は**抽出したままの表記**から作る。次の実行が突き合わせるのはその表記であって、
 	// 照合で書き換わった後の曲名ではない。
@@ -1239,34 +1252,85 @@ func (s *SuggestionService) recordSongVerdict(sug *models.EditSuggestion, note s
 	if artist == "" {
 		artist = p.OriginalArtist
 	}
-	nameKey := songmatch.TitleKey(name)
-	artistKey := songmatch.ParseArtist(artist).String()
-	if nameKey == "" {
-		return
+	v := songVerdict{
+		name: name, artist: artist,
+		nameKey:   songmatch.TitleKey(name),
+		artistKey: songmatch.ParseArtist(artist).String(),
 	}
-
+	if v.nameKey == "" {
+		return songVerdict{}, false
+	}
 	// 曲が決まっている提案は「その曲ではない」、決まっていない提案は
 	// 「候補のどれでもない」という否決になる。
-	var targets []uuid.UUID
 	if p.SongID != "" {
 		if id, err := uuid.Parse(p.SongID); err == nil {
-			targets = append(targets, id)
+			v.songIDs = append(v.songIDs, id)
 		}
 	} else {
 		for _, c := range p.Candidates {
 			if id, err := uuid.Parse(c.SongID); err == nil {
-				targets = append(targets, id)
+				v.songIDs = append(v.songIDs, id)
 			}
 		}
 	}
-	for _, songID := range targets {
-		if err := s.matchService.RecordSongRejection(nameKey, artistKey, songID, "review", note); err != nil {
+	return v, len(v.songIDs) > 0
+}
+
+func (s *SuggestionService) recordSongVerdict(sug *models.EditSuggestion, note string) {
+	if s.matchService == nil {
+		return
+	}
+	v, ok := songVerdictOf(sug)
+	if !ok {
+		return
+	}
+	for _, songID := range v.songIDs {
+		if err := s.matchService.RecordSongRejection(v.nameKey, v.artistKey, songID, "review", note); err != nil {
 			logger.Warnf("record song rejection failed (%s): %v", sug.ID, err)
 		}
 	}
-	if len(targets) > 0 {
-		logger.Infof("song identity rejected by review: %q / %q ≠ %d 曲", name, artist, len(targets))
+	logger.Infof("song identity rejected by review: %q / %q ≠ %d 曲", v.name, v.artist, len(v.songIDs))
+}
+
+// UndoRejection は却下を取り消し、次の一括実行でまた提案されるようにする。
+//
+// **却下には持続する副作用がある**ので、取り消す口が要る。
+// 一括は同じ (配信, 開始秒 ±30, 曲名キー) の提案を status に関係なく積み直さないので、
+// 却下した行はそのままだと永久に出てこない。「この曲ではない」を押していれば
+// song_identity_checks にも残っていて、候補からも外れたままになる。
+//
+// 対象は perf.missing の却下だけ。field / perf.meta の却下は次の提案を妨げないので、
+// 消しても履歴が減るだけで得るものが無い。
+func (s *SuggestionService) UndoRejection(id uuid.UUID, reviewer *models.User) error {
+	sug, err := s.repo.FindByID(id)
+	if err != nil {
+		return err
 	}
+	if sug == nil {
+		return ErrSuggestionNotFound
+	}
+	if sug.Kind != KindMissingSong {
+		return invalid("却下の取り消しは未登録曲の報告だけが対象です")
+	}
+	if sug.Status != "rejected" {
+		return invalid("却下されていない提案です")
+	}
+
+	// 先に否決の記録を消す。ここで失敗しても提案の行は残るので、やり直せる。
+	if s.matchService != nil {
+		if v, ok := songVerdictOf(sug); ok {
+			for _, songID := range v.songIDs {
+				if err := s.matchService.RemoveSongRejection(v.nameKey, v.artistKey, songID); err != nil {
+					return fmt.Errorf("否決の記録を取り消せませんでした: %w", err)
+				}
+			}
+		}
+	}
+	if err := s.repo.Delete(id); err != nil {
+		return err
+	}
+	logger.Infof("rejection undone: %s by %s", id, reviewerLabel(reviewer))
+	return nil
 }
 
 func reviewerID(u *models.User) *uuid.UUID {

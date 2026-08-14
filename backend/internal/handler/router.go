@@ -299,6 +299,7 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("POST /api/suggestions/{id}/approve", r.handleApproveSuggestion)
 	r.mux.HandleFunc("POST /api/suggestions/{id}/reject", r.handleRejectSuggestion)
 	r.mux.HandleFunc("DELETE /api/suggestions/{id}", r.handleWithdrawSuggestion)
+	r.mux.HandleFunc("POST /api/suggestions/{id}/undo-rejection", r.handleUndoRejection)
 
 	// 外部サービス連携の設定（キーの値は返さない。要 users:manage）
 	r.mux.HandleFunc("GET /api/settings/integrations", r.handleGetIntegrationSettings)
@@ -1308,6 +1309,33 @@ func (r *Router) handleRejectSuggestion(w http.ResponseWriter, req *http.Request
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"message": "提案を却下しました"})
+}
+
+// handleUndoRejection は却下を取り消し、次の一括実行でまた提案されるようにする（content:edit）。
+//
+// 却下した提案は status に関係なく重複判定に引っかかるため、そのままだと永久に出てこない。
+// 「この曲ではない」を押していれば song_identity_checks にも残っているので、それも消す。
+func (r *Router) handleUndoRejection(w http.ResponseWriter, req *http.Request) {
+	id, err := uuid.Parse(req.PathValue("id"))
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "無効な提案ID")
+		return
+	}
+	if err := r.suggestionService.UndoRejection(id, currentUser(req)); err != nil {
+		var invalid *service.ValidationError
+		switch {
+		case errors.Is(err, service.ErrSuggestionNotFound):
+			respondError(w, http.StatusNotFound, err.Error())
+		case errors.As(err, &invalid):
+			respondError(w, http.StatusConflict, err.Error())
+		default:
+			respondError(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{
+		"message": "却下を取り消しました。次回の一括作成でまた提案されます",
+	})
 }
 
 // ========== Tag Search Handlers ==========
