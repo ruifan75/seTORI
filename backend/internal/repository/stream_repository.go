@@ -951,20 +951,35 @@ func (r *StreamRepository) FindBySingerID(singerID string, limit, offset int, fi
 //
 //	unprocessed … まだ歌唱が 1 つも無い配信だけ。既にあるものは触らない
 //	force       … 源を持つ配信すべて。既存と食い違う分は人の審査へ回す
-func (r *StreamRepository) FindStreamsForFill(mode, singerID string) ([]models.Stream, error) {
+// 範囲は singerIDs で絞る（空なら全チャンネル）。**既定はチャンネルの所有者**で、
+// includeCollabs を立てたときだけ「参加した歌回」まで広がる。
+// 以前は参加者で絞っていたので、あるチャンネルを選んだつもりが、そのチャンネルが
+// ゲスト参加しただけの他人の配信まで対象になっていた。
+func (r *StreamRepository) FindStreamsForFill(mode string, singerIDs []string, includeCollabs bool) ([]models.Stream, error) {
 	// jsonb_typeof で配列だけを見る。comment_songs には JSON のスカラー 'null' が入っている
 	// 行があり、jsonb_array_length に直接渡すと「cannot get array length of a scalar」で落ちる。
+	//
+	// comment_raw しか無い（まだ抽出していない）配信も対象に入れる。読み込みの側が
+	// 未解析なら抽出から走らせるので、「コメントはあるがまだ解析していない」を
+	// 一括の対象外にしておく理由が無い。
 	where := `s.is_hidden = FALSE AND (
 		(jsonb_typeof(s.holodex_data->'songs') = 'array' AND jsonb_array_length(s.holodex_data->'songs') > 0)
-		OR (jsonb_typeof(s.comment_songs) = 'array' AND jsonb_array_length(s.comment_songs) > 0))`
+		OR (jsonb_typeof(s.comment_songs) = 'array' AND jsonb_array_length(s.comment_songs) > 0)
+		OR (s.comment_raw IS NOT NULL AND s.comment_raw != 'null'))`
 	if mode == "unprocessed" {
 		where += " AND NOT EXISTS (SELECT 1 FROM performances p WHERE p.stream_id = s.id)"
 	}
 
 	args := []any{}
-	if singerID != "" {
-		args = append(args, singerID)
-		where += fmt.Sprintf(" AND EXISTS (SELECT 1 FROM stream_singers ss WHERE ss.stream_id = s.id AND ss.singer_id = $%d)", len(args))
+	if len(singerIDs) > 0 {
+		args = append(args, pq.Array(singerIDs))
+		ownerOnly := " AND ss.is_owner"
+		if includeCollabs {
+			ownerOnly = ""
+		}
+		where += fmt.Sprintf(
+			" AND EXISTS (SELECT 1 FROM stream_singers ss WHERE ss.stream_id = s.id AND ss.singer_id = ANY($%d)%s)",
+			len(args), ownerOnly)
 	}
 
 	rows, err := r.db.Query(`SELECT s.id, s.title FROM streams s WHERE `+where+` ORDER BY s.stream_date ASC`, args...)

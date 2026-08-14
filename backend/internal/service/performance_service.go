@@ -338,14 +338,26 @@ func (s *PerformanceService) OverlappingPerformances(streamID string, start, end
 }
 
 // CreateFromMissingSong は「この配信のこの時点に曲がある」という報告から歌唱記録を作る。
-// 曲が未登録なら曲も作られる（セットリスト保存と同じ findOrCreateSong を通す）。
+//
+// **payload に song_id があればそれを使う。** 一括セットリスト作成は照合まで済ませてから
+// 審査へ回すので、承認のたびに曲名から引き直すとその結果が捨てられる。DB の表記と
+// 食い違う組（`深昏睡` ↔ `深昏睡 (Deep coma)`）では、承認の瞬間に新曲が作られてしまう。
+// 曲名から引き直すのは song_id を持たない報告（閲覧者からの投稿）だけ。
+//
+// 歌手・タグ・終了時間の由来も payload から反映する。以前は perfRepo.Create を呼ぶだけで
+// SetSingers を通らず、multi_singer を審査に回す設計なのに承認しても vocalist が空だった。
 func (s *PerformanceService) CreateFromMissingSong(p dto.MissingSongPayload) error {
-	song, _, err := s.findOrCreateSong(dto.CreatePerformanceItem{
-		Name:           p.SongName,
-		OriginalArtist: p.OriginalArtist,
-	})
+	song, err := s.songForMissing(p)
 	if err != nil {
-		return fmt.Errorf("find or create song: %w", err)
+		return err
+	}
+
+	// 終了時間の確度。審査担当が画面で時間を見て承認するので、終了時間があれば
+	// confirmed とみなす。無い（0＝動画の最後まで）ものは確認しようがないので false。
+	endConfirmed := p.EndSeconds > 0
+	endSource := p.EndSource
+	if endSource == "" && p.EndSeconds > 0 {
+		endSource = repository.EndSourceManual
 	}
 
 	perf := &models.Performance{
@@ -354,6 +366,8 @@ func (s *PerformanceService) CreateFromMissingSong(p dto.MissingSongPayload) err
 		StartSeconds: p.StartSeconds,
 		EndSeconds:   p.EndSeconds,
 		OrderIndex:   0, // start_seconds で並べるため使わない
+		EndSource:    endSource,
+		EndConfirmed: endConfirmed,
 	}
 	if err := s.perfRepo.Create(perf); err != nil {
 		if isUniqueViolation(err) {
@@ -361,7 +375,73 @@ func (s *PerformanceService) CreateFromMissingSong(p dto.MissingSongPayload) err
 		}
 		return fmt.Errorf("create performance: %w", err)
 	}
-	logger.Infof("performance created from suggestion: %s @%ds (%s)", p.SongName, p.StartSeconds, p.StreamID)
+
+	// 歌手は指定が無ければ配信のオーナー（居なければ参加者が1人のときだけその人）。
+	// 誰も決まらなければ空のまま作る（複数人の配信で勝手に選ばない）。
+	singerIDs := p.SingerIDs
+	if len(singerIDs) == 0 {
+		singerIDs = s.defaultSingerIDs(p.StreamID)
+	}
+	if len(singerIDs) > 0 {
+		if err := s.perfRepo.SetSingers(perf.ID, singerIDs); err != nil {
+			return fmt.Errorf("set performance singers: %w", err)
+		}
+	}
+	if len(p.Tags) > 0 {
+		if err := s.perfRepo.SetTags(perf.ID, p.Tags); err != nil {
+			return fmt.Errorf("set performance tags: %w", err)
+		}
+	}
+
+	logger.Infof("performance created from suggestion: %s @%ds (%s, singers=%d)",
+		song.Name, p.StartSeconds, p.StreamID, len(singerIDs))
+	return nil
+}
+
+// songForMissing は提案が指す楽曲を返す。song_id があればそれ、無ければ名前から探す／作る。
+//
+// song_id が指す曲が消えている（統合された・削除された）場合は名前で引き直す。
+// 提案は溜まるものなので、承認するときに対象が消えていることは普通に起きる。
+func (s *PerformanceService) songForMissing(p dto.MissingSongPayload) (*models.Song, error) {
+	if id := strings.TrimSpace(p.SongID); id != "" {
+		songID, err := uuid.Parse(id)
+		if err != nil {
+			return nil, fmt.Errorf("song_id が不正です")
+		}
+		song, err := s.songRepo.FindByID(songID)
+		if err != nil {
+			return nil, fmt.Errorf("find song: %w", err)
+		}
+		if song != nil {
+			return song, nil
+		}
+		logger.Warnf("missing song suggestion points at a song that no longer exists (%s); falling back to name lookup", id)
+	}
+	song, _, err := s.findOrCreateSong(dto.CreatePerformanceItem{
+		Name:           p.SongName,
+		OriginalArtist: p.OriginalArtist,
+		ItunesID:       p.ItunesID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("find or create song: %w", err)
+	}
+	return song, nil
+}
+
+// defaultSingerIDs は配信のオーナー（居なければ参加者が1人のときだけその人）を返す。
+// 複数人の配信では誰が歌ったか決められないので空を返す（推測しない）。
+func (s *PerformanceService) defaultSingerIDs(streamID string) []string {
+	participants, owners, err := s.streamRepo.GetSingersForStreams([]string{streamID})
+	if err != nil {
+		logger.Warnf("default singers lookup failed (%s): %v", streamID, err)
+		return nil
+	}
+	if owner := owners[streamID]; owner != nil {
+		return []string{owner.ID}
+	}
+	if list := participants[streamID]; len(list) == 1 {
+		return []string{list[0].ID}
+	}
 	return nil
 }
 

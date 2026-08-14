@@ -597,12 +597,37 @@ export interface SongSwapPayload {
 }
 
 // 「この配信のこの時点に、登録されていない曲がある」という報告の中身
+// 「この配信のこの時点に曲がある」という報告の中身。
+// 前半は閲覧者の投稿でも埋まる。後半は一括セットリスト作成が審査へ回すときに付ける
+// 照合結果と監査情報で、人手の投稿では空になる。
 export interface MissingSongPayload {
   stream_id: string;
   song_name: string;
   original_artist: string;
   start_seconds: number;
   end_seconds: number; // 0 = 未指定（動画の最後まで）
+
+  // 照合済みの内容。song_id があれば承認は曲名から引き直さない
+  song_id?: string;
+  singer_ids?: string[];
+  end_source?: string;
+  tags?: string[];
+  itunes_id?: number;
+
+  // 監査（どういう経緯でこの提案になったか）
+  review_reasons?: string[]; // no_end / no_artist / unmatched / …
+  source?: string; // holodex / comment
+  via?: string; // rule / ai
+  confidence?: number;
+  ai_reason?: string;
+  batch_run_id?: string;
+
+  // 抽出したままの表記（正規化・照合で書き換わる前）
+  raw_name?: string;
+  raw_artist?: string;
+
+  // 決めきれなかったときの候補（審査画面でそのまま選べる）
+  candidates?: SongMatchCandidate[];
 }
 
 export interface CreateSuggestionRequest {
@@ -1085,7 +1110,10 @@ export interface BuildVersion {
 export interface BatchFillStatus {
   running: boolean;
   mode?: string;
-  singer_id?: string;
+  // 対象チャンネル（空なら全部）。include_collabs が false なら
+  // そのチャンネルが所有する配信だけが対象
+  singer_ids?: string[];
+  include_collabs?: boolean;
   run_id?: string;
   phase?: 'ai' | 'write';  // 未設定なら配信を読んでいる最中
   total: number;

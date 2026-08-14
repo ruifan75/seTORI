@@ -14,6 +14,7 @@ import (
 	"github.com/ruifan75/setori/internal/models"
 	"github.com/ruifan75/setori/internal/repository"
 	"github.com/ruifan75/setori/pkg/auth"
+	"github.com/ruifan75/setori/pkg/songmatch"
 )
 
 // TargetEditor は修正提案の対象（曲・アーティスト・歌唱記録）が満たすインターフェース。
@@ -30,6 +31,9 @@ var (
 	ErrSuggestionNotFound = fmt.Errorf("提案が見つかりません")
 	ErrAlreadyReviewed    = fmt.Errorf("この提案は既に処理済みです")
 	ErrTooManySuggestions = fmt.Errorf("提案の送信が多すぎます。しばらく待ってから再度お試しください")
+	// ErrDuplicateSuggestion は同じ行についての報告が既にあることを示す。
+	// 一括はこれを「もう待ち行列に居る」として黙って数えないので、判別できるよう型で持つ。
+	ErrDuplicateSuggestion = fmt.Errorf("同じ内容の提案が既にあります")
 )
 
 // 投稿の rate limit。ログイン済みは緩め、匿名は厳しめ。
@@ -99,6 +103,9 @@ type SuggestionService struct {
 	editors      map[string]TargetEditor
 	missing      MissingSongCreator
 	swapper      SongSwapper
+	// matchService は「この表記はこの曲ではない」という否決を残すために使う。
+	// 残さないと、次の一括実行が同じ組をまた審査へ積む。
+	matchService *SongMatchService
 }
 
 func NewSuggestionService(
@@ -107,6 +114,7 @@ func NewSuggestionService(
 	songService *SongService,
 	artistService *ArtistService,
 	performanceService *PerformanceService,
+	matchService *SongMatchService,
 ) *SuggestionService {
 	return &SuggestionService{
 		repo:         repo,
@@ -116,8 +124,9 @@ func NewSuggestionService(
 			"artist":      artistService,
 			"performance": performanceService,
 		},
-		missing: performanceService,
-		swapper: performanceService,
+		missing:      performanceService,
+		swapper:      performanceService,
+		matchService: matchService,
 	}
 }
 
@@ -247,6 +256,16 @@ func (s *SuggestionService) createMissingSong(req *dto.CreateSuggestionRequest, 
 		return nil, ErrTargetNotFound
 	}
 
+	// 同じ行の提案を積み直さない。
+	//
+	// 判定が無かったころは、一括を 2 回回すと同じ (配信, 開始秒, 曲名) が 2 件並び、
+	// 却下したものも次の実行でまた出ていた（System は投稿の絞り込みも飛ばすので歯止めが無い）。
+	if dup, err := s.findDuplicateMissingSong(p); err != nil {
+		logger.Warnf("missing song duplicate check failed (%s): %v", p.StreamID, err)
+	} else if dup != nil {
+		return nil, fmt.Errorf("%w（%s・%s）", ErrDuplicateSuggestion, dup.Status, dup.CreatedAt.Local().Format("01/02 15:04"))
+	}
+
 	if err := s.checkRate(actor); err != nil {
 		return nil, err
 	}
@@ -283,9 +302,45 @@ func (s *SuggestionService) createMissingSong(req *dto.CreateSuggestionRequest, 
 	return created, nil
 }
 
+// missingSongDedupeWindow は「同じ行の報告」とみなす開始秒の窓。
+// 既存の歌唱との突き合わせ（overlapsExisting）と同じ 30 秒に揃えてある。
+const missingSongDedupeWindow = 30
+
+// findDuplicateMissingSong は同じ配信・ほぼ同じ開始秒・同じ曲名キーの提案を探す。
+// status は問わない（却下済みが一番効く ── 覚えていないと同じものが何度でも出る）。
+func (s *SuggestionService) findDuplicateMissingSong(p *dto.MissingSongPayload) (*models.EditSuggestion, error) {
+	existing, err := s.repo.FindMissingSongsByStream(p.StreamID)
+	if err != nil {
+		return nil, err
+	}
+	nameKey := songmatch.TitleKey(p.SongName)
+	for i := range existing {
+		var q dto.MissingSongPayload
+		if json.Unmarshal(existing[i].Payload, &q) != nil {
+			continue
+		}
+		if abs(q.StartSeconds-p.StartSeconds) > missingSongDedupeWindow {
+			continue
+		}
+		// 曲が決まっているものどうしは ID で、決まっていなければ曲名キーで見る。
+		// 表記が揺れていても同じ曲を指していれば同じ行の報告とみなす。
+		if p.SongID != "" && q.SongID == p.SongID {
+			return &existing[i], nil
+		}
+		if nameKey != "" && songmatch.TitleKey(q.SongName) == nameKey {
+			return &existing[i], nil
+		}
+	}
+	return nil, nil
+}
+
 // approveMissingSong は未登録曲の報告を承認し、歌唱記録を作る。
-// 曲が未登録なら曲も作られる（既存の findOrCreateSong と同じ経路）。
-func (s *SuggestionService) approveMissingSong(sug *models.EditSuggestion, reviewer *models.User) error {
+// payload が song_id を持っていればその曲へ、無ければ曲名から探す／作る。
+//
+// edits は審査担当が画面で直した内容（曲の差し替え・時間・歌手・曲名）。
+// 一括が積んだ審査待ちは「そのまま登録する」ものではなく「人が直して登録する」ものなので、
+// 承認と修正を 1 往復で済ませられるようにしてある。nil ならそのまま登録する。
+func (s *SuggestionService) approveMissingSong(sug *models.EditSuggestion, reviewer *models.User, edits *dto.MissingSongPayload) error {
 	if s.missing == nil {
 		return ErrInvalidTarget
 	}
@@ -293,14 +348,99 @@ func (s *SuggestionService) approveMissingSong(sug *models.EditSuggestion, revie
 	if err := json.Unmarshal(sug.Payload, &p); err != nil {
 		return fmt.Errorf("提案内容の解析に失敗しました: %w", err)
 	}
+	note := "歌唱記録を作成"
+	if edits != nil {
+		var changes []string
+		p, changes = applyMissingSongEdits(p, *edits)
+		if len(changes) > 0 {
+			note += "（審査時に修正：" + strings.Join(changes, "・") + "）"
+		}
+	}
+	if p.SongName == "" && p.SongID == "" {
+		return invalid("曲名は必須です")
+	}
+	if p.StartSeconds < 0 || p.EndSeconds < 0 {
+		return invalid("時間が不正です")
+	}
+	if p.EndSeconds != 0 && p.EndSeconds <= p.StartSeconds {
+		return ErrInvalidTimeRange
+	}
+
 	if err := s.missing.CreateFromMissingSong(p); err != nil {
 		return err // 例：同じ時間に既に歌唱がある
 	}
-	if err := s.repo.UpdateStatus(sug.ID, "approved", reviewerID(reviewer), "歌唱記録を作成"); err != nil {
+	if err := s.repo.UpdateStatus(sug.ID, "approved", reviewerID(reviewer), note); err != nil {
 		return err
 	}
-	logger.Infof("missing song suggestion approved: %s (%s @%ds)", sug.ID, p.SongName, p.StartSeconds)
+	logger.Infof("missing song suggestion approved: %s (%s @%ds) by %s", sug.ID, p.SongName, p.StartSeconds, reviewerLabel(reviewer))
 	return nil
+}
+
+// applyMissingSongEdits は審査担当の修正を提案の内容へ重ねる。
+// 直した項目の一覧も返す（レビュー履歴に「何を直して通したか」を残すため）。
+//
+// 配信 ID は差し替えさせない。別の配信の話になるなら、それは別の提案。
+func applyMissingSongEdits(base, edits dto.MissingSongPayload) (dto.MissingSongPayload, []string) {
+	out := base
+	var changed []string
+
+	// 曲の差し替え。song_id を空文字で送ると「照合を解除して曲名から作り直す」意味になるので、
+	// 送られてきたかどうか（＝画面で触ったか）ではなく値の違いで判定する。
+	if newID := strings.TrimSpace(edits.SongID); newID != base.SongID {
+		out.SongID = newID
+		changed = append(changed, "曲")
+	}
+	if name := strings.TrimSpace(edits.SongName); name != "" && name != base.SongName {
+		out.SongName = name
+		if out.SongID == base.SongID {
+			changed = append(changed, "曲名")
+		}
+	}
+	if artist := strings.TrimSpace(edits.OriginalArtist); artist != base.OriginalArtist {
+		out.OriginalArtist = artist
+		changed = append(changed, "歌手名")
+	}
+	if edits.StartSeconds != base.StartSeconds {
+		out.StartSeconds = edits.StartSeconds
+		changed = append(changed, "開始")
+	}
+	if edits.EndSeconds != base.EndSeconds {
+		out.EndSeconds = edits.EndSeconds
+		changed = append(changed, "終了")
+	}
+	// 時間を人が直したなら、由来は推定値ではなく人の手（manual）になる。
+	// ここを据え置くと「chat 検出の値」として保存され、確度の絞り込みが嘘になる。
+	if out.StartSeconds != base.StartSeconds || out.EndSeconds != base.EndSeconds {
+		out.EndSource = repository.EndSourceManual
+	}
+	if !sameStrings(edits.SingerIDs, base.SingerIDs) {
+		out.SingerIDs = edits.SingerIDs
+		changed = append(changed, "歌手")
+	}
+	if len(edits.Tags) > 0 && !sameStrings(edits.Tags, base.Tags) {
+		out.Tags = edits.Tags
+		changed = append(changed, "タグ")
+	}
+	return out, changed
+}
+
+func sameStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func reviewerLabel(u *models.User) string {
+	if u == nil {
+		return "system"
+	}
+	return displayNameOf(u)
 }
 
 // ========== 曲の差し替え提案（perf.meta）==========
@@ -642,15 +782,15 @@ func (s *SuggestionService) checkRate(actor SuggestionActor) error {
 	return nil
 }
 
-// List は status（空なら全件）で絞った提案一覧を返す。
-func (s *SuggestionService) List(status string, page, limit int) (*dto.SuggestionListResponse, error) {
+// List は status / kind（どちらも空なら全件）で絞った提案一覧を返す。
+func (s *SuggestionService) List(status, kind string, page, limit int) (*dto.SuggestionListResponse, error) {
 	if page < 1 {
 		page = 1
 	}
 	if limit < 1 || limit > 100 {
 		limit = 20
 	}
-	items, total, err := s.repo.List(status, limit, (page-1)*limit)
+	items, total, err := s.repo.List(status, kind, limit, (page-1)*limit)
 	if err != nil {
 		return nil, err
 	}
@@ -697,14 +837,15 @@ func (s *SuggestionService) ListMine(user *models.User, status string, page, lim
 // ListGrouped は提案を対象ごとにまとめて返す。
 // 再生中のワンタップ通報は同じ歌唱に何件も集まるため、1件ずつではなく
 // 対象単位で見比べて処理できるようにする。
-func (s *SuggestionService) ListGrouped(status string, page, limit int) (*dto.SuggestionGroupListResponse, error) {
+// kind が空でなければその種別だけを返す（レビュー画面の種別の絞り込み用）。
+func (s *SuggestionService) ListGrouped(status, kind string, page, limit int) (*dto.SuggestionGroupListResponse, error) {
 	if page < 1 {
 		page = 1
 	}
 	if limit < 1 || limit > 100 {
 		limit = 20
 	}
-	groups, total, err := s.repo.ListGroupedByTarget(status, limit, (page-1)*limit)
+	groups, total, err := s.repo.ListGroupedByTarget(status, kind, limit, (page-1)*limit)
 	if err != nil {
 		return nil, err
 	}
@@ -922,6 +1063,12 @@ func (s *SuggestionService) CountPending() (int, error) {
 // これが無いと「古い提案の承認」が他人の編集を黙って巻き戻す（lost update）。
 // force=true は管理者が差分を見た上で「現在値を上書きしてよい」と判断した場合。
 func (s *SuggestionService) Approve(id uuid.UUID, reviewer *models.User, force bool) error {
+	return s.ApproveWithEdits(id, reviewer, force, nil)
+}
+
+// ApproveWithEdits は承認時に審査担当が加えた修正を添えて反映する（perf.missing のみ）。
+// edits が nil なら Approve と同じ。
+func (s *SuggestionService) ApproveWithEdits(id uuid.UUID, reviewer *models.User, force bool, edits *dto.MissingSongPayload) error {
 	sug, err := s.repo.FindByID(id)
 	if err != nil {
 		return err
@@ -939,7 +1086,7 @@ func (s *SuggestionService) Approve(id uuid.UUID, reviewer *models.User, force b
 
 	// 未登録曲の追加は「フィールドの差し替え」ではないので別経路（歌唱記録を新規作成する）
 	if sug.Kind == KindMissingSong {
-		return s.approveMissingSong(sug, reviewer)
+		return s.approveMissingSong(sug, reviewer, edits)
 	}
 	// 曲の差し替えも同様（別の曲マスタへ繋ぎ替える）
 	if sug.Kind == KindSongSwap {
@@ -1044,6 +1191,16 @@ func (s *SuggestionService) detectConflicts(editor TargetEditor, sug *models.Edi
 
 // Reject は提案を却下する（対象は変更しない）。
 func (s *SuggestionService) Reject(id uuid.UUID, reviewer *models.User, note string) error {
+	return s.RejectWithVerdict(id, reviewer, note, false)
+}
+
+// RejectWithVerdict は却下する。notThisSong を立てると「この表記はこの曲ではない」を
+// song_identity_checks に残し、次の一括実行が同じ組を提案しないようにする。
+//
+// 却下そのものは「今回は登録しない」という程度の意思表示でしかないので、既定では
+// 何も学習しない。学習させるのは審査担当が**曲の同一性について**明確に否決したときだけ
+// ── ここを一緒くたにすると、「時間が違うから却下」がその曲の否定として残ってしまう。
+func (s *SuggestionService) RejectWithVerdict(id uuid.UUID, reviewer *models.User, note string, notThisSong bool) error {
 	sug, err := s.repo.FindByID(id)
 	if err != nil {
 		return err
@@ -1054,7 +1211,62 @@ func (s *SuggestionService) Reject(id uuid.UUID, reviewer *models.User, note str
 	if sug.Status == "approved" || sug.Status == "rejected" {
 		return ErrAlreadyReviewed
 	}
-	return s.repo.UpdateStatus(id, "rejected", reviewerID(reviewer), strings.TrimSpace(note))
+	if err := s.repo.UpdateStatus(id, "rejected", reviewerID(reviewer), strings.TrimSpace(note)); err != nil {
+		return err
+	}
+	if notThisSong {
+		s.recordSongVerdict(sug, note)
+	}
+	return nil
+}
+
+// recordSongVerdict は perf.missing の否決を「別の曲」として残す。
+// 失敗しても却下自体は成立しているので、警告に留める。
+func (s *SuggestionService) recordSongVerdict(sug *models.EditSuggestion, note string) {
+	if s.matchService == nil || sug.Kind != KindMissingSong {
+		return
+	}
+	var p dto.MissingSongPayload
+	if json.Unmarshal(sug.Payload, &p) != nil {
+		return
+	}
+	// 鍵は**抽出したままの表記**から作る。次の実行が突き合わせるのはその表記であって、
+	// 照合で書き換わった後の曲名ではない。
+	name, artist := p.RawName, p.RawArtist
+	if name == "" {
+		name = p.SongName
+	}
+	if artist == "" {
+		artist = p.OriginalArtist
+	}
+	nameKey := songmatch.TitleKey(name)
+	artistKey := songmatch.ParseArtist(artist).String()
+	if nameKey == "" {
+		return
+	}
+
+	// 曲が決まっている提案は「その曲ではない」、決まっていない提案は
+	// 「候補のどれでもない」という否決になる。
+	var targets []uuid.UUID
+	if p.SongID != "" {
+		if id, err := uuid.Parse(p.SongID); err == nil {
+			targets = append(targets, id)
+		}
+	} else {
+		for _, c := range p.Candidates {
+			if id, err := uuid.Parse(c.SongID); err == nil {
+				targets = append(targets, id)
+			}
+		}
+	}
+	for _, songID := range targets {
+		if err := s.matchService.RecordSongRejection(nameKey, artistKey, songID, "review", note); err != nil {
+			logger.Warnf("record song rejection failed (%s): %v", sug.ID, err)
+		}
+	}
+	if len(targets) > 0 {
+		logger.Infof("song identity rejected by review: %q / %q ≠ %d 曲", name, artist, len(targets))
+	}
 }
 
 func reviewerID(u *models.User) *uuid.UUID {

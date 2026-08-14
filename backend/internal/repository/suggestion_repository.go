@@ -3,6 +3,7 @@ package repository
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -54,13 +55,21 @@ func (r *SuggestionRepository) Create(s *models.EditSuggestion) (*models.EditSug
 	return s, nil
 }
 
-// List は status で絞った提案一覧をページングして返す。status が空なら全件。
-func (r *SuggestionRepository) List(status string, limit, offset int) ([]models.EditSuggestion, int, error) {
-	where := ""
+// List は status / kind で絞った提案一覧をページングして返す。どちらも空なら全件。
+func (r *SuggestionRepository) List(status, kind string, limit, offset int) ([]models.EditSuggestion, int, error) {
+	var conds []string
 	args := []any{}
 	if status != "" {
-		where = "WHERE status = $1"
 		args = append(args, status)
+		conds = append(conds, fmt.Sprintf("status = $%d", len(args)))
+	}
+	if kind != "" {
+		args = append(args, kind)
+		conds = append(conds, fmt.Sprintf("kind = $%d", len(args)))
+	}
+	where := ""
+	if len(conds) > 0 {
+		where = "WHERE " + strings.Join(conds, " AND ")
 	}
 
 	var total int
@@ -108,12 +117,21 @@ type TargetGroup struct {
 // グループが分断されないようページングは対象単位で行う。
 //
 // 返るグループは「最も新しい提案が新しい順」、グループ内は投稿の古い順。
-func (r *SuggestionRepository) ListGroupedByTarget(status string, limit, offset int) ([]TargetGroup, int, error) {
-	where := ""
+// kind が空でなければその種別だけを返す（レビュー画面の種別の絞り込み用）。
+func (r *SuggestionRepository) ListGroupedByTarget(status, kind string, limit, offset int) ([]TargetGroup, int, error) {
+	var conds []string
 	args := []any{}
 	if status != "" {
-		where = "WHERE status = $1"
 		args = append(args, status)
+		conds = append(conds, fmt.Sprintf("status = $%d", len(args)))
+	}
+	if kind != "" {
+		args = append(args, kind)
+		conds = append(conds, fmt.Sprintf("kind = $%d", len(args)))
+	}
+	where := ""
+	if len(conds) > 0 {
+		where = "WHERE " + strings.Join(conds, " AND ")
 	}
 
 	// グループ総数（＝対象の種類数）
@@ -173,8 +191,12 @@ func (r *SuggestionRepository) ListGroupedByTarget(status string, limit, offset 
 	detailArgs := []any{pq.Array(ids), pq.Array(keys)}
 	detailWhere := "WHERE target_id = ANY($1::uuid[]) AND target_key = ANY($2::varchar[])"
 	if status != "" {
-		detailWhere += " AND status = $3"
 		detailArgs = append(detailArgs, status)
+		detailWhere += fmt.Sprintf(" AND status = $%d", len(detailArgs))
+	}
+	if kind != "" {
+		detailArgs = append(detailArgs, kind)
+		detailWhere += fmt.Sprintf(" AND kind = $%d", len(detailArgs))
 	}
 	detailRows, err := r.db.Query(
 		`SELECT `+suggestionColumns+` FROM edit_suggestions `+detailWhere+` ORDER BY created_at ASC`, detailArgs...)
@@ -263,6 +285,32 @@ func (r *SuggestionRepository) FindPendingTimingByTarget(targetType string, targ
 		ORDER BY created_at ASC`, targetType, targetID)
 	if err != nil {
 		return nil, fmt.Errorf("find pending timing suggestions: %w", err)
+	}
+	defer rows.Close()
+
+	var out []models.EditSuggestion
+	for rows.Next() {
+		s, err := scanSuggestion(rows.Scan)
+		if err != nil {
+			return nil, fmt.Errorf("scan suggestion: %w", err)
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+// FindMissingSongsByStream は配信に積まれた perf.missing 提案をすべて返す（status は問わない）。
+//
+// 重複の判定に使う。**却下済みも返すのが要点** ── 却下を覚える先がここしかないので、
+// 処理済みを除くと「却下したものが次の一括実行でまた出る」が直らない。
+// 配信あたりの件数はせいぜい数十なので、突き合わせ（開始秒・曲名キー）は呼び出し側で行う。
+func (r *SuggestionRepository) FindMissingSongsByStream(streamID string) ([]models.EditSuggestion, error) {
+	rows, err := r.db.Query(`SELECT `+suggestionColumns+`
+		FROM edit_suggestions
+		WHERE kind = 'perf.missing' AND target_key = $1
+		ORDER BY created_at ASC`, streamID)
+	if err != nil {
+		return nil, fmt.Errorf("find missing song suggestions: %w", err)
 	}
 	defer rows.Close()
 

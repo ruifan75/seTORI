@@ -401,18 +401,21 @@ type ArtistAliasProposal struct {
 
 // BatchFillStatus は一括セットリスト作成の進捗。
 type BatchFillStatus struct {
-	Running  bool   `json:"running"`
-	Mode     string `json:"mode,omitempty"`
-	SingerID string `json:"singer_id,omitempty"`
-	RunID    string `json:"run_id,omitempty"`
-	Phase    string `json:"phase,omitempty"` // scan / ai / write
-	Total    int    `json:"total"`
-	Done     int    `json:"done"`
-	Current  string `json:"current,omitempty"`
-	Created  int    `json:"created"`
-	Review   int    `json:"review"`
-	AIAsked  int    `json:"ai_asked"`
-	Message  string `json:"message,omitempty"`
+	Running bool   `json:"running"`
+	Mode    string `json:"mode,omitempty"`
+	// SingerIDs は対象チャンネル（空なら全部）。IncludeCollabs が false なら
+	// そのチャンネルが所有する配信だけが対象。
+	SingerIDs      []string `json:"singer_ids,omitempty"`
+	IncludeCollabs bool     `json:"include_collabs,omitempty"`
+	RunID          string   `json:"run_id,omitempty"`
+	Phase          string   `json:"phase,omitempty"` // scan / ai / write
+	Total          int      `json:"total"`
+	Done           int      `json:"done"`
+	Current        string   `json:"current,omitempty"`
+	Created        int      `json:"created"`
+	Review         int      `json:"review"`
+	AIAsked        int      `json:"ai_asked"`
+	Message        string   `json:"message,omitempty"`
 }
 
 type AnalyzeCommentsResponse struct {
@@ -746,12 +749,49 @@ type ImportReadingsResult struct {
 
 // MissingSongPayload 「この配信のこの時点に、登録されていない曲がある」という報告の中身。
 // 既存レコードの修正ではないので before/after ではなくこの形で持つ。
+//
+// 前半（StreamID 〜 EndSeconds）は閲覧者からの報告でも埋まる。
+// 後半は**一括セットリスト作成が審査へ回すとき**に付ける照合結果と監査情報で、
+// 人手の報告では空のまま。
+//
+// SongID を持たせているのがこの構造体の要。持たせる前は承認が曲名から引き直していたので、
+// 一括が決めた照合（`深昏睡` → `深昏睡 (Deep coma)`）が承認の瞬間に捨てられ、
+// DB の表記と食い違う組では新曲が作られていた。
 type MissingSongPayload struct {
 	StreamID       string `json:"stream_id"` // YouTube 動画 ID
 	SongName       string `json:"song_name"`
 	OriginalArtist string `json:"original_artist"`
 	StartSeconds   int    `json:"start_seconds"`
 	EndSeconds     int    `json:"end_seconds"` // 0 = 未指定（動画の最後まで）
+
+	// ---- 照合済みの内容（承認はこれをそのまま使う） ----
+
+	// SongID は照合済みの楽曲。空でなければ承認は**文字列から引き直さない**。
+	SongID string `json:"song_id,omitempty"`
+	// SingerIDs は歌った人。空なら承認時に配信のオーナー（1人だけなら参加者）を使う。
+	SingerIDs []string `json:"singer_ids,omitempty"`
+	// EndSource は終了時間の確度（chat / holodex / comment / next_start / unknown）。
+	EndSource string   `json:"end_source,omitempty"`
+	Tags      []string `json:"tags,omitempty"`
+	ItunesID  *int64   `json:"itunes_id,omitempty"`
+
+	// ---- 監査（どういう経緯でこの提案になったか） ----
+
+	// ReviewReasons は審査へ回した理由（no_end / no_artist / unmatched / …）。
+	ReviewReasons []string `json:"review_reasons,omitempty"`
+	Source        string   `json:"source,omitempty"`       // holodex / comment
+	Via           string   `json:"via,omitempty"`          // rule / ai
+	Confidence    float64  `json:"confidence,omitempty"`   // AI が照合した場合の確信度
+	AIReason      string   `json:"ai_reason,omitempty"`    // AI の判断理由
+	BatchRunID    string   `json:"batch_run_id,omitempty"` // どの実行が積んだか
+
+	// RawName / RawArtist は抽出したままの表記（正規化・照合で書き換わる前）。
+	// 審査画面に「元は何と書かれていたか」を出すために持つ。
+	RawName   string `json:"raw_name,omitempty"`
+	RawArtist string `json:"raw_artist,omitempty"`
+
+	// Candidates は決めきれなかったときの候補。審査画面でそのまま選べる。
+	Candidates []SongMatchCandidate `json:"candidates,omitempty"`
 }
 
 // SongSwapPayload 「この歌唱は別の曲だ」という指摘の中身。
@@ -781,6 +821,24 @@ type CreateSuggestionRequest struct {
 	Payload    *MissingSongPayload `json:"payload,omitempty"`
 	SongSwap   *SongSwapPayload    `json:"song_swap,omitempty"`
 	Note       string              `json:"note"` // 提案者コメント（任意）
+}
+
+// ApproveSuggestionRequest 承認（任意ボディ）。
+//
+// Payload は perf.missing を承認するときだけ使う。審査担当が画面で直した内容
+// （曲の差し替え・時間の微調整・歌手の選択）をそのまま反映するためのもので、
+// 「提案の内容を書き換えてから承認する」操作を 1 往復で済ませる。
+type ApproveSuggestionRequest struct {
+	Payload *MissingSongPayload `json:"payload,omitempty"`
+}
+
+// RejectSuggestionRequest 却下（任意ボディ）。
+type RejectSuggestionRequest struct {
+	Note string `json:"note"`
+	// NotThisSong は「この表記はこの曲ではない」という明確な否決。
+	// song_identity_checks に残し、次の一括実行が同じ組を提案しないようにする。
+	// 単に「今は要らない」という却下と区別するため、明示的に立ててもらう。
+	NotThisSong bool `json:"not_this_song"`
 }
 
 // FieldConflict 承認時に検出した「提案時点の値」と「現在の値」のズレ。

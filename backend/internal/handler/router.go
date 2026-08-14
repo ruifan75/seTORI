@@ -125,7 +125,7 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	readingService := service.NewReadingService(artistRepo, songRepo)
 	suggestionRepo := repository.NewSuggestionRepository(db)
 	appSettingsRepo := repository.NewAppSettingsRepository(db)
-	suggestionService := service.NewSuggestionService(suggestionRepo, appSettingsRepo, songService, artistService, performanceService)
+	suggestionService := service.NewSuggestionService(suggestionRepo, appSettingsRepo, songService, artistService, performanceService, songMatchService)
 	batchFillRepo := repository.NewBatchFillRepository(db)
 	batchFillService := service.NewBatchFillService(streamRepo, perfRepo, batchFillRepo,
 		commentService, holodexService, normalizationService, performanceService, suggestionService)
@@ -665,19 +665,27 @@ func parseIDQueryParams(req *http.Request, multiKey string, legacyKeys ...string
 // こちらは performances に直接書くので、実行記録を残し、撤回できるようにしてある。
 func (r *Router) handleStartBatchFill(w http.ResponseWriter, req *http.Request) {
 	var body struct {
-		Mode     string `json:"mode"`      // unprocessed / force
-		SingerID string `json:"singer_id"` // 空なら全チャンネル
+		Mode string `json:"mode"` // unprocessed / force
+		// SingerIDs は対象チャンネル（空なら全部）。既定はそのチャンネルが**所有する**配信で、
+		// IncludeCollabs を立てるとゲスト参加した配信も含む。
+		SingerIDs      []string `json:"singer_ids"`
+		IncludeCollabs bool     `json:"include_collabs"`
+		// SingerID は 1 チャンネルだけ指定していた頃の互換。
+		SingerID string `json:"singer_id"`
 	}
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 		respondError(w, http.StatusBadRequest, "リクエストの形式が正しくありません")
 		return
+	}
+	if body.SingerID != "" {
+		body.SingerIDs = append(body.SingerIDs, body.SingerID)
 	}
 	var startedBy *uuid.UUID
 	if u := currentUser(req); u != nil {
 		id := u.ID
 		startedBy = &id
 	}
-	runID, err := r.batchFillService.Start(body.Mode, body.SingerID, startedBy)
+	runID, err := r.batchFillService.Start(body.Mode, body.SingerIDs, body.IncludeCollabs, startedBy)
 	if err != nil {
 		if errors.Is(err, service.ErrBatchFillAlreadyRunning) {
 			respondError(w, http.StatusConflict, err.Error())
@@ -1064,13 +1072,15 @@ func (r *Router) handleCreateSuggestion(w http.ResponseWriter, req *http.Request
 // handleListSuggestions は提案一覧を返す（content:edit）。
 // ?status=pending|conflict|approved|rejected で絞る。
 // ?group=target で対象ごとにまとめた形（ページングの単位も対象）で返す。
+// ?kind=perf.missing で種別を絞る（一括が積んだ審査待ちだけを見たいときに使う）。
 func (r *Router) handleListSuggestions(w http.ResponseWriter, req *http.Request) {
 	status := req.URL.Query().Get("status")
+	kind := req.URL.Query().Get("kind")
 	page, _ := strconv.Atoi(req.URL.Query().Get("page"))
 	limit, _ := strconv.Atoi(req.URL.Query().Get("limit"))
 
 	if req.URL.Query().Get("group") == "target" {
-		grouped, err := r.suggestionService.ListGrouped(status, page, limit)
+		grouped, err := r.suggestionService.ListGrouped(status, kind, page, limit)
 		if err != nil {
 			respondError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -1079,7 +1089,7 @@ func (r *Router) handleListSuggestions(w http.ResponseWriter, req *http.Request)
 		return
 	}
 
-	result, err := r.suggestionService.List(status, page, limit)
+	result, err := r.suggestionService.List(status, kind, page, limit)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1228,7 +1238,12 @@ func (r *Router) handleApproveSuggestion(w http.ResponseWriter, req *http.Reques
 		return
 	}
 	force := req.URL.Query().Get("force") == "1"
-	if err := r.suggestionService.Approve(id, currentUser(req), force); err != nil {
+	// ボディは任意。審査の画面は「そこで直した内容」を添えて承認する
+	// （曲の差し替え・時間の微調整・歌手の選択を、承認と 1 往復で済ませるため）。
+	var body dto.ApproveSuggestionRequest
+	_ = json.NewDecoder(req.Body).Decode(&body)
+
+	if err := r.suggestionService.ApproveWithEdits(id, currentUser(req), force, body.Payload); err != nil {
 		var conflict *service.ConflictError
 		switch {
 		case errors.As(err, &conflict):
@@ -1258,12 +1273,11 @@ func (r *Router) handleRejectSuggestion(w http.ResponseWriter, req *http.Request
 		return
 	}
 	// 却下理由（任意）。ボディが無くても却下できる。
-	var body struct {
-		Note string `json:"note"`
-	}
+	// not_this_song を立てると「この表記はこの曲ではない」として学習する。
+	var body dto.RejectSuggestionRequest
 	_ = json.NewDecoder(req.Body).Decode(&body)
 
-	if err := r.suggestionService.Reject(id, currentUser(req), body.Note); err != nil {
+	if err := r.suggestionService.RejectWithVerdict(id, currentUser(req), body.Note, body.NotThisSong); err != nil {
 		switch {
 		case errors.Is(err, service.ErrSuggestionNotFound):
 			respondError(w, http.StatusNotFound, err.Error())

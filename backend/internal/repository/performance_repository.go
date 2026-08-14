@@ -317,12 +317,16 @@ func (r *PerformanceRepository) FindOverlapping(streamID string, start, end int,
 // Update 既存の演出を ID を保ったまま更新する。
 // ID を維持することが重要：プレイリスト項目が performance_id を参照しているため、
 // 編集のたびに ID が変わると利用者のプレイリストから曲が消えてしまう。
+//
+// **batch_run_id を外す。** 一括が作った歌唱を人が直したなら、それはもう人のもの。
+// 印を残したままにすると、その実行を撤回したときに人の編集ごと消える。
+// created_via / match_confidence は残す（「元は AI が作った行」という履歴は消さない）。
 func (r *PerformanceRepository) Update(p *models.Performance) error {
 	query := `
 		UPDATE performances
 		SET stream_id = $2, song_id = $3, start_seconds = $4, end_seconds = $5,
 		    order_index = $6, holodex_song_id = $7, custom_tags = $8,
-		    end_source = $9, end_confirmed = $10
+		    end_source = $9, end_confirmed = $10, batch_run_id = NULL
 		WHERE id = $1`
 
 	res, err := r.db.Exec(query, p.ID, p.StreamID, p.SongID, p.StartSeconds, p.EndSeconds,
@@ -618,11 +622,14 @@ func (r *PerformanceRepository) ReconcilePerformances(streamID string, desired [
 	for i := range desired {
 		d := desired[i]
 		if id := assigned[i]; id != uuid.Nil {
+			// 既存行の更新＝人が編集画面から保存した経路（一括は歌唱が無い配信にしか書かない）。
+			// batch_run_id を外して「もう人のもの」にする ── 残すと、その実行を
+			// 撤回したときに人が直した行まで消える。
 			_, err := tx.Exec(`
 				UPDATE performances
 				SET song_id = $2, start_seconds = $3, end_seconds = $4,
 				    order_index = $5, holodex_song_id = $6, custom_tags = $7,
-				    end_source = $8, end_confirmed = $9
+				    end_source = $8, end_confirmed = $9, batch_run_id = NULL
 				WHERE id = $1`,
 				id, d.SongID, d.StartSeconds, d.EndSeconds, d.OrderIndex, d.HolodexSongID, d.CustomTags,
 				normalizeEndSource(d.EndSource), d.EndConfirmed)

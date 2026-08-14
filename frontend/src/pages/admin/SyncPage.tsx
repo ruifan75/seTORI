@@ -50,7 +50,10 @@ export default function SyncPage() {
   // 一括分析：実行中は 3 秒ごとに進捗をポーリング
   // 一括セットリスト作成（歌唱を直接作るので、プレ分析とは別物）
   const [fillMode, setFillMode] = useState('unprocessed');
-  const [fillSingerId, setFillSingerId] = useState('');
+  // 対象チャンネルは複数選べる。既定は「そのチャンネルが所有する配信だけ」で、
+  // ゲスト参加した他人の配信まで巻き込まないようにしてある。
+  const [fillSingerIds, setFillSingerIds] = useState<string[]>([]);
+  const [fillIncludeCollabs, setFillIncludeCollabs] = useState(false);
 
   const { data: fillStatus } = useQuery({
     queryKey: ['batch-fill-status'],
@@ -63,7 +66,7 @@ export default function SyncPage() {
     refetchInterval: fillStatus?.running ? 5000 : false,
   });
   const startFillMutation = useMutation({
-    mutationFn: () => batchFillApi.start(fillMode, fillSingerId),
+    mutationFn: () => batchFillApi.start(fillMode, fillSingerIds, fillIncludeCollabs),
     onSuccess: () => {
       showToast('一括セットリスト作成を開始しました', 'success');
       queryClient.invalidateQueries({ queryKey: ['batch-fill-status'] });
@@ -396,18 +399,36 @@ export default function SyncPage() {
             </select>
           </label>
           <label className="text-sm">
-            <span className="block text-gray-700 mb-1">チャンネル</span>
+            <span className="block text-gray-700 mb-1">
+              チャンネル
+              <span className="ml-1 text-xs text-gray-400">（Ctrl / ⌘ で複数選択・未選択なら全部）</span>
+            </span>
             <select
-              value={fillSingerId}
-              onChange={(e) => setFillSingerId(e.target.value)}
+              multiple
+              size={5}
+              value={fillSingerIds}
+              onChange={(e) =>
+                setFillSingerIds(Array.from(e.target.selectedOptions, (o) => o.value))
+              }
               disabled={fillStatus?.running}
-              className="border border-gray-300 rounded-lg px-3 py-2"
+              className="border border-gray-300 rounded-lg px-3 py-2 min-w-56"
             >
-              <option value="">すべて</option>
               {singers.map((sg) => (
                 <option key={sg.id} value={sg.id}>{sg.name}</option>
               ))}
             </select>
+          </label>
+          <label className="text-sm flex items-center gap-2 pb-2" title="既定では、選んだチャンネルが所有する配信だけを対象にします">
+            <input
+              type="checkbox"
+              checked={fillIncludeCollabs}
+              onChange={(e) => setFillIncludeCollabs(e.target.checked)}
+              disabled={fillStatus?.running || fillSingerIds.length === 0}
+              className="accent-indigo-600"
+            />
+            <span className={fillSingerIds.length === 0 ? 'text-gray-400' : 'text-gray-700'}>
+              ゲスト参加した配信も含む
+            </span>
           </label>
           {fillStatus?.running ? (
             <button
@@ -477,7 +498,11 @@ export default function SyncPage() {
                       {run.mode === 'force' ? 'すべて' : '歌唱なし'}
                       {run.singer_id && (
                         <span className="ml-1 text-gray-400">
-                          {singers.find((sg) => sg.id === run.singer_id)?.name ?? run.singer_id}
+                          {/* 複数チャンネルはカンマ区切りで記録されている */}
+                          {run.singer_id
+                            .split(',')
+                            .map((id) => singers.find((sg) => sg.id === id)?.name ?? id)
+                            .join('・')}
                         </span>
                       )}
                     </td>

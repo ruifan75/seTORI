@@ -27,6 +27,7 @@ import type {
   BatchAnalyzeStatus,
   BatchFillStatus,
   BatchFillRun,
+  MissingSongPayload,
   SuccessResponse,
   LoadHolodexSongsResponse,
   CreatePerformancesRequest,
@@ -60,6 +61,7 @@ import type {
   MergeSuggestionsResponse,
   AutoApplySettings,
   SuggestionStatus,
+  SuggestionKind,
   AIProvider,
   AIProviderInput,
   AIModelInfo,
@@ -427,8 +429,18 @@ export const commentApi = {
 
 // 一括セットリスト作成。歌唱（performances）を直接作るので、実行記録と撤回がある。
 export const batchFillApi = {
-  start: async (mode: string, singerId?: string): Promise<{ run_id: string; message: string }> => {
-    const { data } = await api.post('/api/streams/batch-fill', { mode, singer_id: singerId ?? '' });
+  // singerIds は対象チャンネル（空なら全部）。既定はそのチャンネルが**所有する**配信で、
+  // includeCollabs を立てるとゲスト参加した配信も含む。
+  start: async (
+    mode: string,
+    singerIds: string[] = [],
+    includeCollabs = false
+  ): Promise<{ run_id: string; message: string }> => {
+    const { data } = await api.post('/api/streams/batch-fill', {
+      mode,
+      singer_ids: singerIds,
+      include_collabs: includeCollabs,
+    });
     return data;
   },
   cancel: async (): Promise<{ message: string }> => {
@@ -775,14 +787,16 @@ export const suggestionApi = {
     return data;
   },
 
-  // 提案一覧（要 content:edit）。status で絞り込み
+  // 提案一覧（要 content:edit）。status / kind で絞り込み
   list: async (
     status: SuggestionStatus | '' = 'pending',
     page = 1,
-    limit = 20
+    limit = 20,
+    kind?: SuggestionKind
   ): Promise<SuggestionListResponse> => {
     const params = new URLSearchParams({ page: String(page), limit: String(limit) });
     if (status) params.set('status', status);
+    if (kind) params.set('kind', kind);
     const { data } = await api.get(`/api/suggestions?${params}`);
     return data;
   },
@@ -801,13 +815,16 @@ export const suggestionApi = {
 
   // 対象ごとにまとめた提案一覧（要 content:edit）。同じ歌唱への通報を1枚で捌くため。
   // ページングの単位はグループ（対象）。
+  // kind を渡すとその種別だけを返す（レビュー画面の種別の絞り込み用）。
   listGrouped: async (
     status: SuggestionStatus | '' = 'pending',
     page = 1,
-    limit = 20
+    limit = 20,
+    kind?: SuggestionKind
   ): Promise<SuggestionGroupListResponse> => {
     const params = new URLSearchParams({ page: String(page), limit: String(limit), group: 'target' });
     if (status) params.set('status', status);
+    if (kind) params.set('kind', kind);
     const { data } = await api.get(`/api/suggestions?${params}`);
     return data;
   },
@@ -849,13 +866,28 @@ export const suggestionApi = {
 
   // 承認して対象へ反映。提案後に対象が変更されていると 409（conflicts 付き）で止まる。
   // force = true は差分を確認した上で現在値を上書きする場合。
-  approve: async (id: string, force = false): Promise<{ message: string }> => {
-    const { data } = await api.post(`/api/suggestions/${id}/approve${force ? '?force=1' : ''}`);
+  //
+  // payload は perf.missing を承認するときだけ使う。審査の画面で直した内容
+  // （曲の差し替え・時間・歌手）を添えて、承認と修正を 1 往復で済ませる。
+  approve: async (
+    id: string,
+    force = false,
+    payload?: MissingSongPayload
+  ): Promise<{ message: string }> => {
+    const { data } = await api.post(
+      `/api/suggestions/${id}/approve${force ? '?force=1' : ''}`,
+      payload ? { payload } : undefined
+    );
     return data;
   },
 
-  reject: async (id: string, note = ''): Promise<{ message: string }> => {
-    const { data } = await api.post(`/api/suggestions/${id}/reject`, { note });
+  // notThisSong を立てると「この表記はこの曲ではない」を学習し、
+  // 次の一括実行が同じ組を審査へ積まないようにする。
+  reject: async (id: string, note = '', notThisSong = false): Promise<{ message: string }> => {
+    const { data } = await api.post(`/api/suggestions/${id}/reject`, {
+      note,
+      not_this_song: notThisSong,
+    });
     return data;
   },
 
