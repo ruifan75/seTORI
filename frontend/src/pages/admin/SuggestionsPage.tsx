@@ -460,10 +460,14 @@ function usePlaybackSource(group: SuggestionGroup, open: boolean) {
   const isPerformance = group.target_type === 'performance';
   const isSong = group.target_type === 'song';
 
+  // 配信は**開いていなくても**引く。参加者のチェックボックスがこれに依存していて、
+  // 開いたときだけ引くと「一度も開いていない組では歌手を選べない」ことになる
+  // ── multi_singer の行がまさにそれで、歌手を選ばないまま登録すると
+  // vocalist が空の歌唱ができる（この機能が防ぎたかったもの）。
   const { data: stream } = useQuery({
     queryKey: ['streams', group.target_key],
     queryFn: () => streamApi.get(group.target_key),
-    enabled: open && isStream,
+    enabled: isStream,
   });
   const { data: perf } = useQuery({
     queryKey: ['performances', group.target_id],
