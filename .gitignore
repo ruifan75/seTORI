@@ -41,3 +41,10 @@ deploy/certs/
 *.dump
 *.sql.gz
 *.log
+
+# yt-dlp が落とす live chat のキャッシュ（1配信あたり数〜数十 MB）。
+# 本番では named volume に載せるもので、リポジトリに入れる物ではない。
+# 2026-08-15 に `git add -A` で 18.5 MB の 1 ファイルを誤って commit した
+# （push 前に履歴から除いた）。上の DB ダンプの件と同じ原因なので、
+# 生成物が落ちてくるディレクトリごと弾く。
+data/
