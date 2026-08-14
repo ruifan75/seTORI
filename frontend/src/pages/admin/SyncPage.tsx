@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import { holodexApi, batchAnalyzeApi, batchFillApi, singerApi } from '../../api/client';
 import { useToast } from '../../components/ui/ToastContext';
+import { formatSeconds } from '../../components/usePerformanceTiming';
 
 // 一括分析のモード定義（バックエンドの BatchMode* と対応）
 const BATCH_MODES = [
@@ -54,6 +56,8 @@ export default function SyncPage() {
   // ゲスト参加した他人の配信まで巻き込まないようにしてある。
   const [fillSingerIds, setFillSingerIds] = useState<string[]>([]);
   const [fillIncludeCollabs, setFillIncludeCollabs] = useState(false);
+  // 「源に無い」の内訳を開いている実行（一度に 1 つ）
+  const [openGapRun, setOpenGapRun] = useState<string | null>(null);
 
   const { data: fillStatus } = useQuery({
     queryKey: ['batch-fill-status'],
@@ -481,55 +485,132 @@ export default function SyncPage() {
                   <th className="py-2 pr-3">対象</th>
                   <th className="py-2 pr-3">作成</th>
                   <th className="py-2 pr-3">審査</th>
+                  <th className="py-2 pr-3" title="DB にあるが、今回の源には出てこなかった歌唱">
+                    源に無い
+                  </th>
                   <th className="py-2 pr-3">状態</th>
                   <th className="py-2"></th>
                 </tr>
               </thead>
               <tbody>
                 {fillRuns!.runs.map((run) => (
-                  <tr key={run.id} className="border-b last:border-0">
-                    <td className="py-2 pr-3 whitespace-nowrap text-gray-600">
-                      {new Date(run.started_at).toLocaleString('ja-JP', {
-                        month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
-                      })}
-                      {run.started_by_name && <span className="ml-1 text-gray-400">{run.started_by_name}</span>}
-                    </td>
-                    <td className="py-2 pr-3 text-gray-600">
-                      {run.mode === 'force' ? 'すべて' : '歌唱なし'}
-                      {run.singer_id && (
-                        <span className="ml-1 text-gray-400">
-                          {/* 複数チャンネルはカンマ区切りで記録されている */}
-                          {run.singer_id
-                            .split(',')
-                            .map((id) => singers.find((sg) => sg.id === id)?.name ?? id)
-                            .join('・')}
-                        </span>
-                      )}
-                    </td>
-                    <td className="py-2 pr-3 font-medium text-gray-800">{run.songs_created}</td>
-                    <td className="py-2 pr-3 text-amber-700">{run.songs_review}</td>
-                    <td className="py-2 pr-3 text-gray-500" title={run.message}>
-                      {{ running: '実行中', done: '完了', cancelled: '中止', failed: '失敗', reverted: '撤回済み' }[run.status]}
-                    </td>
-                    <td className="py-2 text-right">
-                      {run.songs_created > 0 && run.status !== 'reverted' && (
-                        <button
-                          onClick={() => revertFillMutation.mutate(run.id)}
-                          disabled={revertFillMutation.isPending}
-                          title="この実行が作った歌唱をまとめて削除します"
-                          className="text-red-600 hover:text-red-800 disabled:opacity-50"
-                        >
-                          撤回
-                        </button>
-                      )}
-                    </td>
-                  </tr>
+                  <Fragment key={run.id}>
+                    <tr className="border-b last:border-0">
+                      <td className="py-2 pr-3 whitespace-nowrap text-gray-600">
+                        {new Date(run.started_at).toLocaleString('ja-JP', {
+                          month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
+                        })}
+                        {run.started_by_name && <span className="ml-1 text-gray-400">{run.started_by_name}</span>}
+                      </td>
+                      <td className="py-2 pr-3 text-gray-600">
+                        {run.mode === 'force' ? 'すべて' : '歌唱なし'}
+                        {run.singer_id && (
+                          <span className="ml-1 text-gray-400">
+                            {/* 複数チャンネルはカンマ区切りで記録されている */}
+                            {run.singer_id
+                              .split(',')
+                              .map((id) => singers.find((sg) => sg.id === id)?.name ?? id)
+                              .join('・')}
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-2 pr-3 font-medium text-gray-800">{run.songs_created}</td>
+                      <td className="py-2 pr-3 text-amber-700">{run.songs_review}</td>
+                      <td className="py-2 pr-3">
+                        {run.songs_gap > 0 ? (
+                          <button
+                            onClick={() => setOpenGapRun(openGapRun === run.id ? null : run.id)}
+                            className="text-gray-600 underline hover:text-gray-900"
+                            title="DB にあるが、今回の源には出てこなかった歌唱を一覧する"
+                          >
+                            {run.songs_gap}
+                          </button>
+                        ) : (
+                          <span className="text-gray-300">—</span>
+                        )}
+                      </td>
+                      <td className="py-2 pr-3 text-gray-500" title={run.message}>
+                        {{ running: '実行中', done: '完了', cancelled: '中止', failed: '失敗', reverted: '撤回済み' }[run.status]}
+                      </td>
+                      <td className="py-2 text-right">
+                        {run.songs_created > 0 && run.status !== 'reverted' && (
+                          <button
+                            onClick={() => revertFillMutation.mutate(run.id)}
+                            disabled={revertFillMutation.isPending}
+                            title="この実行が作った歌唱をまとめて削除します"
+                            className="text-red-600 hover:text-red-800 disabled:opacity-50"
+                          >
+                            撤回
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                    {openGapRun === run.id && (
+                      <tr className="border-b last:border-0">
+                        <td colSpan={7} className="py-2 pr-3 bg-gray-50">
+                          <GapList runId={run.id} />
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// GapList は「DB にあるが、その実行の源には出てこなかった」歌唱を並べる。
+//
+// **これらは審査待ちとして積んでいない。** 源（Holodex のセットリストもコメントも）は
+// 欠けているのが普通なので、欠落 1 件ごとに待ち行列を作ると人が処理できない量になり、
+// しかも「源に無い」だけでは何をすべきか決まらない（消すべきとは限らない）。
+// 気付けるようにはしておきたいので、実行履歴から辿れる形にだけしてある。
+function GapList({ runId }: { runId: string }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['batch-fill-gaps', runId],
+    queryFn: () => batchFillApi.gaps(runId),
+  });
+
+  if (isLoading) return <p className="text-xs text-gray-400">読み込み中…</p>;
+  const gaps = data?.gaps ?? [];
+  if (gaps.length === 0) {
+    // 実行後に歌唱が消えていれば記録も消える（CASCADE）ので、件数と合わないことがある
+    return <p className="text-xs text-gray-400">該当する歌唱は残っていません</p>;
+  }
+
+  // 配信ごとにまとめる（1 配信に何曲も落ちることが多い）
+  const byStream = new Map<string, typeof gaps>();
+  for (const g of gaps) {
+    const list = byStream.get(g.stream_id) ?? [];
+    list.push(g);
+    byStream.set(g.stream_id, list);
+  }
+
+  return (
+    <div className="space-y-2">
+      <p className="text-xs text-gray-500">
+        すでに登録されている歌唱のうち、この実行で読んだ源には出てこなかったものです。
+        源の取りこぼしのことも、登録が誤っていることもあるので、自動では何もしていません。
+      </p>
+      {[...byStream.entries()].map(([streamId, list]) => (
+        <div key={streamId} className="text-xs">
+          <Link to={`/streams/${streamId}`} className="text-indigo-600 hover:text-indigo-900">
+            {list[0].stream_title || streamId}
+          </Link>
+          <ul className="mt-0.5 ml-3 flex flex-wrap gap-x-3 gap-y-0.5 text-gray-600">
+            {list.map((g) => (
+              <li key={g.performance_id}>
+                <span className="font-mono text-gray-400">{formatSeconds(g.start_seconds)}</span>{' '}
+                {g.song_name}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
     </div>
   );
 }

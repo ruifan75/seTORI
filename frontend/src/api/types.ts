@@ -1121,8 +1121,20 @@ export interface BatchFillStatus {
   current?: string;
   created: number;
   review: number;
+  /** 「DB にあるが源に無い」歌唱の件数（force 実行のみ） */
+  gaps: number;
   ai_asked: number;
   message?: string;
+}
+
+// force 実行が見つけた「DB にあるが源に無い」歌唱 1 件。
+// 提案としては積まないので、実行履歴からここへ辿るのが唯一の入口。
+export interface BatchFillGap {
+  stream_id: string;
+  stream_title: string;
+  performance_id: string;
+  song_name: string;
+  start_seconds: number;
 }
 
 export interface BatchFillRun {
@@ -1134,6 +1146,8 @@ export interface BatchFillRun {
   streams_done: number;
   songs_created: number;
   songs_review: number;
+  /** 「DB にあるが源に無い」と分かった既存の歌唱の件数（force 実行のみ） */
+  songs_gap: number;
   ai_asked: number;
   message: string;
   started_at: string;

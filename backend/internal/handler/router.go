@@ -249,6 +249,7 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("GET /api/streams/batch-fill/status", r.handleBatchFillStatus)
 	r.mux.HandleFunc("GET /api/streams/batch-fill/runs", r.handleListBatchFillRuns)
 	r.mux.HandleFunc("POST /api/streams/batch-fill/runs/{id}/revert", r.handleRevertBatchFill)
+	r.mux.HandleFunc("GET /api/streams/batch-fill/runs/{id}/gaps", r.handleListBatchFillGaps)
 	r.mux.HandleFunc("POST /api/streams/batch-analyze", r.handleStartBatchAnalyze)
 	r.mux.HandleFunc("POST /api/streams/batch-analyze/cancel", r.handleCancelBatchAnalyze)
 	r.mux.HandleFunc("GET /api/streams/batch-analyze/status", r.handleBatchAnalyzeStatus)
@@ -737,6 +738,24 @@ func (r *Router) handleRevertBatchFill(w http.ResponseWriter, req *http.Request)
 		"deleted": n,
 		"message": fmt.Sprintf("%d件の歌唱を撤回しました", n),
 	})
+}
+
+// handleListBatchFillGaps はその実行で「DB にあるが源に無い」と分かった歌唱を返す（content:edit）。
+//
+// これらは提案として積んでいない（源は欠けているのが普通で、欠落 1 件ごとに待ち行列を
+// 作ると処理できない量になるため）。実行履歴からここへ辿るのが唯一の入口。
+func (r *Router) handleListBatchFillGaps(w http.ResponseWriter, req *http.Request) {
+	runID, err := uuid.Parse(req.PathValue("id"))
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "無効な実行 ID")
+		return
+	}
+	gaps, err := r.batchFillService.ListGaps(runID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"gaps": gaps})
 }
 
 // handleStartBatchAnalyze 未処理配信の一括プレ分析を開始する（content:edit）。

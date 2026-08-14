@@ -414,8 +414,10 @@ type BatchFillStatus struct {
 	Current        string   `json:"current,omitempty"`
 	Created        int      `json:"created"`
 	Review         int      `json:"review"`
-	AIAsked        int      `json:"ai_asked"`
-	Message        string   `json:"message,omitempty"`
+	// Gaps は「DB にあるが源に無い」歌唱の件数（force 実行のみ）。
+	Gaps    int    `json:"gaps"`
+	AIAsked int    `json:"ai_asked"`
+	Message string `json:"message,omitempty"`
 }
 
 type AnalyzeCommentsResponse struct {

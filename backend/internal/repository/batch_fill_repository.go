@@ -22,19 +22,31 @@ func NewBatchFillRepository(db *sql.DB) *BatchFillRepository {
 
 // BatchFillRun は実行 1 回。
 type BatchFillRun struct {
-	ID            uuid.UUID  `json:"id"`
-	Mode          string     `json:"mode"`
-	SingerID      *string    `json:"singer_id,omitempty"`
-	Status        string     `json:"status"`
-	StreamsTotal  int        `json:"streams_total"`
-	StreamsDone   int        `json:"streams_done"`
-	SongsCreated  int        `json:"songs_created"`
-	SongsReview   int        `json:"songs_review"`
+	ID           uuid.UUID `json:"id"`
+	Mode         string    `json:"mode"`
+	SingerID     *string   `json:"singer_id,omitempty"`
+	Status       string    `json:"status"`
+	StreamsTotal int       `json:"streams_total"`
+	StreamsDone  int       `json:"streams_done"`
+	SongsCreated int       `json:"songs_created"`
+	SongsReview  int       `json:"songs_review"`
+	// SongsGap は「DB にあるが源に無い」歌唱の件数（force 実行のみ）。
+	// 提案としては積まないので、ここが唯一の入口になる。
+	SongsGap      int        `json:"songs_gap"`
 	AIAsked       int        `json:"ai_asked"`
 	Message       string     `json:"message"`
 	StartedAt     time.Time  `json:"started_at"`
 	FinishedAt    *time.Time `json:"finished_at,omitempty"`
 	StartedByName *string    `json:"started_by_name,omitempty"`
+}
+
+// BatchFillGap は「DB にあるが源に無い」歌唱 1 件（表示用に曲名と時間を添えて返す）。
+type BatchFillGap struct {
+	StreamID      string `json:"stream_id"`
+	StreamTitle   string `json:"stream_title"`
+	PerformanceID string `json:"performance_id"`
+	SongName      string `json:"song_name"`
+	StartSeconds  int    `json:"start_seconds"`
 }
 
 // BatchOrigin は「この歌唱をどう作ったか」。歌唱は (stream_id, song_id, start_seconds) で一意。
@@ -58,15 +70,59 @@ func (r *BatchFillRepository) CreateRun(mode string, singerID *string, startedBy
 }
 
 // UpdateProgress は進捗を書く（実行中に何度も呼ばれる）。
-func (r *BatchFillRepository) UpdateProgress(id uuid.UUID, total, done, created, review, aiAsked int) error {
+func (r *BatchFillRepository) UpdateProgress(id uuid.UUID, total, done, created, review, gap, aiAsked int) error {
 	_, err := r.db.Exec(`
 		UPDATE batch_fill_runs
-		SET streams_total = $2, streams_done = $3, songs_created = $4, songs_review = $5, ai_asked = $6
-		WHERE id = $1`, id, total, done, created, review, aiAsked)
+		SET streams_total = $2, streams_done = $3, songs_created = $4, songs_review = $5,
+		    songs_gap = $6, ai_asked = $7
+		WHERE id = $1`, id, total, done, created, review, gap, aiAsked)
 	if err != nil {
 		return fmt.Errorf("update batch fill progress: %w", err)
 	}
 	return nil
+}
+
+// RecordGaps は「DB にあるが源に無い」歌唱を実行に紐づけて残す。
+//
+// 提案としては積まない（源は欠けているのが普通で、欠落 1 件ごとに待ち行列を作ると
+// 人が処理できない量になるうえ、「源に無い」だけでは何をすべきか決まらない）。
+// それでもログだけでは誰も気付けないので、実行履歴から辿れるようにここへ書く。
+func (r *BatchFillRepository) RecordGaps(runID uuid.UUID, streamID string, perfIDs []uuid.UUID) error {
+	for _, pid := range perfIDs {
+		if _, err := r.db.Exec(`
+			INSERT INTO batch_fill_gaps (run_id, stream_id, performance_id)
+			VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, runID, streamID, pid); err != nil {
+			return fmt.Errorf("record batch fill gap: %w", err)
+		}
+	}
+	return nil
+}
+
+// ListGaps は実行が見つけた「源に無い既存の歌唱」を返す。
+// 歌唱が後から消されていれば CASCADE で行ごと消えるので、ここには出てこない。
+func (r *BatchFillRepository) ListGaps(runID uuid.UUID) ([]BatchFillGap, error) {
+	rows, err := r.db.Query(`
+		SELECT g.stream_id, st.title, g.performance_id, s.name, p.start_seconds
+		FROM batch_fill_gaps g
+		JOIN performances p ON p.id = g.performance_id
+		JOIN songs s ON s.id = p.song_id
+		JOIN streams st ON st.id = g.stream_id
+		WHERE g.run_id = $1
+		ORDER BY st.stream_date DESC, p.start_seconds`, runID)
+	if err != nil {
+		return nil, fmt.Errorf("list batch fill gaps: %w", err)
+	}
+	defer rows.Close()
+
+	out := []BatchFillGap{}
+	for rows.Next() {
+		var g BatchFillGap
+		if err := rows.Scan(&g.StreamID, &g.StreamTitle, &g.PerformanceID, &g.SongName, &g.StartSeconds); err != nil {
+			return nil, fmt.Errorf("scan batch fill gap: %w", err)
+		}
+		out = append(out, g)
+	}
+	return out, rows.Err()
 }
 
 // FinishRun は実行を終える。
@@ -126,8 +182,8 @@ func (r *BatchFillRepository) ListRuns(limit int) ([]BatchFillRun, error) {
 	}
 	rows, err := r.db.Query(`
 		SELECT b.id, b.mode, b.singer_id, b.status, b.streams_total, b.streams_done,
-		       b.songs_created, b.songs_review, b.ai_asked, b.message, b.started_at, b.finished_at,
-		       u.username
+		       b.songs_created, b.songs_review, b.songs_gap, b.ai_asked, b.message,
+		       b.started_at, b.finished_at, u.username
 		FROM batch_fill_runs b
 		LEFT JOIN users u ON u.id = b.started_by
 		ORDER BY b.started_at DESC LIMIT $1`, limit)
@@ -140,8 +196,8 @@ func (r *BatchFillRepository) ListRuns(limit int) ([]BatchFillRun, error) {
 	for rows.Next() {
 		var b BatchFillRun
 		if err := rows.Scan(&b.ID, &b.Mode, &b.SingerID, &b.Status, &b.StreamsTotal, &b.StreamsDone,
-			&b.SongsCreated, &b.SongsReview, &b.AIAsked, &b.Message, &b.StartedAt, &b.FinishedAt,
-			&b.StartedByName); err != nil {
+			&b.SongsCreated, &b.SongsReview, &b.SongsGap, &b.AIAsked, &b.Message,
+			&b.StartedAt, &b.FinishedAt, &b.StartedByName); err != nil {
 			return nil, fmt.Errorf("scan batch fill run: %w", err)
 		}
 		out = append(out, b)

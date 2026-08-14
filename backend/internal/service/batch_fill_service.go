@@ -218,6 +218,11 @@ func (s *BatchFillService) ListRuns(limit int) ([]repository.BatchFillRun, error
 	return s.runRepo.ListRuns(limit)
 }
 
+// ListGaps は実行が見つけた「DB にあるが源に無い」歌唱を返す。
+func (s *BatchFillService) ListGaps(runID uuid.UUID) ([]repository.BatchFillGap, error) {
+	return s.runRepo.ListGaps(runID)
+}
+
 // RevertRun は実行が作った歌唱をまとめて消す。
 func (s *BatchFillService) RevertRun(runID uuid.UUID) (int64, error) {
 	n, err := s.runRepo.DeleteByRun(runID)
@@ -301,25 +306,30 @@ func (s *BatchFillService) run(runID uuid.UUID, mode string, singerIDs []string,
 
 	// ---- 第 3 段：書くか、審査へ回すか ----
 	s.update(func(st *dto.BatchFillStatus) { st.Phase = "write" })
-	created, review := 0, 0
+	created, review, gaps := 0, 0, 0
 	for streamID, rows := range byStream {
 		if s.isCancelled() {
 			break
 		}
-		c, r := s.applyStream(runID, streamID, rows, mode)
-		created += c
-		review += r
+		res := s.applyStream(runID, streamID, rows, mode)
+		created += res.created
+		review += res.review
+		gaps += res.gaps
 		s.update(func(st *dto.BatchFillStatus) {
 			st.Created = created
 			st.Review = review
+			st.Gaps = gaps
 			st.AIAsked = asked
 		})
-		if err := s.runRepo.UpdateProgress(runID, len(streams), s.Status().Done, created, review, asked); err != nil {
+		if err := s.runRepo.UpdateProgress(runID, len(streams), s.Status().Done, created, review, gaps, asked); err != nil {
 			logger.Warnf("[batch-fill] 進捗の保存に失敗: %v", err)
 		}
 	}
 
 	status, msg := "done", fmt.Sprintf("%d 曲を作成、%d 曲を審査へ", created, review)
+	if gaps > 0 {
+		msg += fmt.Sprintf("（源に無い既存 %d 曲）", gaps)
+	}
 	if s.isCancelled() {
 		status, msg = "cancelled", "キャンセルされました（途中まで反映済み）"
 	}
@@ -364,8 +374,15 @@ func (s *BatchFillService) loadRows(streamID string) []*fillRow {
 	return holodexRows
 }
 
-// applyStream は 1 配信ぶんを反映する。戻り値は (作成, 審査へ回した)。
-func (s *BatchFillService) applyStream(runID uuid.UUID, streamID string, rows []*fillRow, mode string) (int, int) {
+// applyResult は 1 配信を反映した結果。
+type applyResult struct {
+	created int // 自動で作った歌唱
+	review  int // 人の審査へ回した曲
+	gaps    int // DB にあるが源に無かった歌唱（force のみ）
+}
+
+// applyStream は 1 配信ぶんを反映する。
+func (s *BatchFillService) applyStream(runID uuid.UUID, streamID string, rows []*fillRow, mode string) applyResult {
 	// 配信に歌手が複数いるなら、誰が歌ったかを機械では埋められない。全行を審査へ。
 	multi := s.hasMultipleSingers(streamID)
 	singerIDs := s.perfService.defaultSingerIDs(streamID)
@@ -373,7 +390,7 @@ func (s *BatchFillService) applyStream(runID uuid.UUID, streamID string, rows []
 	existing, err := s.perfRepo.FindByStreamID(streamID)
 	if err != nil {
 		logger.Warnf("[batch-fill] 既存歌唱の取得に失敗 (%s): %v", streamID, err)
-		return 0, 0
+		return applyResult{}
 	}
 
 	var toCreate []dto.CreatePerformanceItem
@@ -447,30 +464,36 @@ func (s *BatchFillService) applyStream(runID uuid.UUID, streamID string, rows []
 		planned = append(planned, row)
 	}
 
-	// force で「既存にあるが源に無い」曲があれば記録に残す。
+	// force で「既存にあるが源に無い」曲があれば実行に紐づけて残す。
 	//
-	// これを提案として積むことはしない ── 源（Holodex のセットリストもコメントも）は
-	// 欠けているのが普通なので、欠落 1 件ごとに審査待ちを作ると人が処理できない量になり、
-	// しかも「源に無い」だけでは何をすべきか決まらない（消すべきとは限らない）。
-	// 審査の画面は配信ごとに既存の歌唱を並べて出すので、差分はそこで見える。
+	// **提案としては積まない** ── 源（Holodex のセットリストもコメントも）は欠けているのが
+	// 普通なので、欠落 1 件ごとに審査待ちを作ると人が処理できない量になり、しかも
+	// 「源に無い」だけでは何をすべきか決まらない（消すべきとは限らない）。
+	// かといってログに出すだけでは誰も気付けないので、実行履歴から辿れるようにする。
+	gaps := 0
 	if mode == BatchFillModeForce && len(existing) > 0 {
-		if n := countExistingNotInSource(existing, rows); n > 0 {
-			logger.Infof("[batch-fill] %s: 既存 %d 曲のうち %d 曲は源に無い（審査画面で突き合わせ可能）",
-				streamID, len(existing), n)
+		missing := existingNotInSource(existing, rows)
+		if len(missing) > 0 {
+			gaps = len(missing)
+			if err := s.runRepo.RecordGaps(runID, streamID, missing); err != nil {
+				logger.Warnf("[batch-fill] 源に無い歌唱の記録に失敗 (%s): %v", streamID, err)
+			}
+			logger.Infof("[batch-fill] %s: 既存 %d 曲のうち %d 曲は源に無い",
+				streamID, len(existing), gaps)
 		}
 	}
 
 	if len(toCreate) == 0 {
-		return 0, reviewCount
+		return applyResult{review: reviewCount, gaps: gaps}
 	}
 	if _, err := s.perfService.CreatePerformances(streamID, toCreate); err != nil {
 		logger.Warnf("[batch-fill] 歌唱の作成に失敗 (%s): %v", streamID, err)
-		return 0, reviewCount
+		return applyResult{review: reviewCount, gaps: gaps}
 	}
 	if err := s.runRepo.MarkOrigins(streamID, runID, origins); err != nil {
 		logger.Warnf("[batch-fill] 由来の記録に失敗 (%s): %v", streamID, err)
 	}
-	return len(origins), reviewCount
+	return applyResult{created: len(origins), review: reviewCount, gaps: gaps}
 }
 
 // resolveFromAI は AI の判定を行へ写す。確信度が足りなければ採用しない。
@@ -749,9 +772,9 @@ func findDuplicateRow(planned []*fillRow, row *fillRow) *fillRow {
 	return nil
 }
 
-// countExistingNotInSource は「DB にあるが源に無い」歌唱の数を返す（force の突き合わせ用）。
-func countExistingNotInSource(existing []repository.PerformanceWithDetails, rows []*fillRow) int {
-	n := 0
+// existingNotInSource は「DB にあるが源に無い」歌唱の ID を返す（force の突き合わせ用）。
+func existingNotInSource(existing []repository.PerformanceWithDetails, rows []*fillRow) []uuid.UUID {
+	var out []uuid.UUID
 	for _, e := range existing {
 		found := false
 		for _, row := range rows {
@@ -761,10 +784,10 @@ func countExistingNotInSource(existing []repository.PerformanceWithDetails, rows
 			}
 		}
 		if !found {
-			n++
+			out = append(out, e.ID)
 		}
 	}
-	return n
+	return out
 }
 
 func joinReasons(reasons []string) string {

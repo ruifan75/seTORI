@@ -128,15 +128,23 @@ func TestFindDuplicateRow(t *testing.T) {
 	}
 }
 
-func TestCountExistingNotInSource(t *testing.T) {
+func TestExistingNotInSource(t *testing.T) {
+	orphan := uuid.New()
 	existing := []repository.PerformanceWithDetails{
-		{Performance: models.Performance{StartSeconds: 600}},
-		{Performance: models.Performance{StartSeconds: 1200}},
-		{Performance: models.Performance{StartSeconds: 1800}},
+		{Performance: models.Performance{ID: uuid.New(), StartSeconds: 600}},
+		{Performance: models.Performance{ID: uuid.New(), StartSeconds: 1200}},
+		{Performance: models.Performance{ID: orphan, StartSeconds: 1800}},
 	}
 	rows := []*fillRow{{Start: 605}, {Start: 1200}}
-	if got := countExistingNotInSource(existing, rows); got != 1 {
-		t.Errorf("countExistingNotInSource() = %d, want 1", got)
+
+	got := existingNotInSource(existing, rows)
+	if len(got) != 1 || got[0] != orphan {
+		t.Errorf("existingNotInSource() = %v, want [%v]", got, orphan)
+	}
+	// 源が全部を含んでいれば空。ここが空でないと、実行のたびに
+	// 「源に無い」件数が水増しされて履歴が信用できなくなる。
+	if n := existingNotInSource(existing, []*fillRow{{Start: 600}, {Start: 1200}, {Start: 1800}}); len(n) != 0 {
+		t.Errorf("existingNotInSource() = %v, want empty", n)
 	}
 }
 

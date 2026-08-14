@@ -27,6 +27,7 @@ import type {
   BatchAnalyzeStatus,
   BatchFillStatus,
   BatchFillRun,
+  BatchFillGap,
   MissingSongPayload,
   SuccessResponse,
   LoadHolodexSongsResponse,
@@ -457,6 +458,12 @@ export const batchFillApi = {
   },
   revert: async (runId: string): Promise<{ deleted: number; message: string }> => {
     const { data } = await api.post(`/api/streams/batch-fill/runs/${runId}/revert`);
+    return data;
+  },
+  // その実行で「DB にあるが源に無い」と分かった既存の歌唱。
+  // 提案としては積まないので、実行履歴からここへ辿るのが唯一の入口。
+  gaps: async (runId: string): Promise<{ gaps: BatchFillGap[] }> => {
+    const { data } = await api.get(`/api/streams/batch-fill/runs/${runId}/gaps`);
     return data;
   },
 };
