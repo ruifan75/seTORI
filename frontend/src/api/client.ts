@@ -24,6 +24,8 @@ import type {
   SongSuggestion,
   MergeCandidate,
   SongIdentityCheck,
+  TagGap,
+  TagGapDismissal,
   AnalyzeCommentsResponse,
   BatchAnalyzeStatus,
   BatchFillStatus,
@@ -629,6 +631,31 @@ export const tagApi = {
   getPerformancesByTag: async (tagId: string, page = 1, limit = 20): Promise<TagPerformanceListResponse> => {
     const params = new URLSearchParams({ page: String(page), limit: String(limit) });
     const { data } = await api.get(`/api/performance-tags/${encodeURIComponent(tagId)}/performances?${params}`);
+    return data;
+  },
+};
+
+// ========== タグ漏れ API ==========
+//
+// 「解析キャッシュにタグがあるのに歌唱に無い」組のレビュー（要 content:edit）。
+// 付けるのは既存の performanceApi.update を使う（タグは総入れ替えなので、
+// 今のタグに足したものを送る）。
+
+export const tagGapApi = {
+  list: async (limit = 300): Promise<{ gaps: TagGap[]; dismissed: TagGapDismissal[] }> => {
+    const { data } = await api.get(`/api/tag-gaps?limit=${limit}`);
+    return data;
+  },
+
+  // このタグは付けない、と記録する（次回から一覧に出ない）
+  dismiss: async (performanceId: string, tagId: string): Promise<{ message: string }> => {
+    const { data } = await api.post('/api/tag-gaps/dismiss', { performance_id: performanceId, tag_id: tagId });
+    return data;
+  },
+
+  // 無視を取り消す（次回からまた出る）
+  undismiss: async (performanceId: string, tagId: string): Promise<{ message: string }> => {
+    const { data } = await api.post('/api/tag-gaps/undismiss', { performance_id: performanceId, tag_id: tagId });
     return data;
   },
 };

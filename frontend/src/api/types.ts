@@ -342,6 +342,39 @@ export interface SyncHolodexResponse {
   message?: string;
 }
 
+// ========== タグ漏れ（解析キャッシュ vs 歌唱） ==========
+//
+// 解析キャッシュ（コメント / Holodex）が付けた演奏バージョンのタグのうち、
+// 対応する歌唱に付いていないもの。差分は毎回計算される派生値で、保存されるのは
+// 「付けない」と判断した否定（dismissed）だけ。
+
+export interface TagGap {
+  performance_id: string;
+  stream_id: string;
+  stream_title: string;
+  start_seconds: number;
+  song_id: string;
+  song_name: string;
+  song_artist: string;
+  current_tags: string[];
+  missing_tags: string[];
+  sources: string[];   // comment / holodex
+  cached_name: string; // 解析側の曲名（原文のバージョン表記が残っている）
+  /** 解析側の曲名と歌唱の曲名が同じものを指していそうか。false は「同じ時刻に別の曲」の合図 */
+  name_matches: boolean;
+}
+
+export interface TagGapDismissal {
+  performance_id: string;
+  tag_id: string;
+  stream_id: string;
+  stream_title: string;
+  start_seconds: number;
+  song_name: string;
+  checked_by: string;
+  checked_at: string;
+}
+
 // ========== コメント解析 ==========
 
 export interface CommentSong {

@@ -394,6 +394,11 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("POST /api/performance-tags", r.handleCreatePerformanceTag)
 	r.mux.HandleFunc("DELETE /api/performance-tags/{id}", r.handleDeletePerformanceTag)
 
+	// タグ漏れ：解析キャッシュがタグを付けているのに歌唱に無い組のレビュー（content:edit）
+	r.mux.HandleFunc("GET /api/tag-gaps", r.handleListTagGaps)
+	r.mux.HandleFunc("POST /api/tag-gaps/dismiss", r.handleDismissTagGap)
+	r.mux.HandleFunc("POST /api/tag-gaps/undismiss", r.handleUndismissTagGap)
+
 	// タイトル自動タグ付けルール（stream tag をタイトルの文字列一致で付与）
 	r.mux.HandleFunc("GET /api/tag-keyword-rules", r.handleListTagKeywordRules)
 	r.mux.HandleFunc("POST /api/tag-keyword-rules", r.handleCreateTagKeywordRule)
@@ -2549,6 +2554,81 @@ func (r *Router) handleDeletePerformanceTag(w http.ResponseWriter, req *http.Req
 	respondJSON(w, http.StatusOK, map[string]string{"message": "タグを削除しました"})
 }
 
+// ========== タグ漏れ（解析キャッシュ vs 歌唱） ==========
+
+// handleListTagGaps は「解析キャッシュにタグがあるのに歌唱に無い」組と、
+// 「付けない」と判断して無視した組を返す（content:edit）。
+//
+// 差分は毎回計算する（保存しない）。付ければ次から消え、意図的に付けないものは
+// 無視して消す ── どちらも次の計算に効くので、一覧は放っておくと減る作りにしてある。
+func (r *Router) handleListTagGaps(w http.ResponseWriter, req *http.Request) {
+	limit, _ := strconv.Atoi(req.URL.Query().Get("limit"))
+	gaps, err := r.tagRepo.FindTagGaps(limit)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	dismissed, err := r.tagRepo.ListTagGapDismissals(limit)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"gaps": gaps, "dismissed": dismissed})
+}
+
+// tagGapKeyFromBody は {performance_id, tag_id} を読む（dismiss / undismiss で共用）。
+func tagGapKeyFromBody(req *http.Request) (uuid.UUID, string, error) {
+	var body struct {
+		PerformanceID string `json:"performance_id"`
+		TagID         string `json:"tag_id"`
+	}
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		return uuid.Nil, "", fmt.Errorf("リクエストの形式が不正です")
+	}
+	id, err := uuid.Parse(strings.TrimSpace(body.PerformanceID))
+	if err != nil {
+		return uuid.Nil, "", fmt.Errorf("performance_id が不正です")
+	}
+	tagID := strings.TrimSpace(body.TagID)
+	if tagID == "" {
+		return uuid.Nil, "", fmt.Errorf("tag_id が必要です")
+	}
+	return id, tagID, nil
+}
+
+// handleDismissTagGap は「この歌唱にこのタグは付けない」を記録する。
+func (r *Router) handleDismissTagGap(w http.ResponseWriter, req *http.Request) {
+	perfID, tagID, err := tagGapKeyFromBody(req)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	var by *uuid.UUID
+	if u := currentUser(req); u != nil {
+		id := u.ID
+		by = &id
+	}
+	if err := r.tagRepo.DismissTagGap(perfID, tagID, by); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"message": "このタグは付けないものとして記録しました"})
+}
+
+// handleUndismissTagGap は無視を取り消す（次の一覧からまた出る）。
+func (r *Router) handleUndismissTagGap(w http.ResponseWriter, req *http.Request) {
+	perfID, tagID, err := tagGapKeyFromBody(req)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := r.tagRepo.UndismissTagGap(perfID, tagID); err != nil {
+		respondError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]string{"message": "無視を取り消しました"})
+}
+
 // ========== Tag Keyword Rule Handlers ==========
 
 func (r *Router) handleListTagKeywordRules(w http.ResponseWriter, req *http.Request) {
@@ -3077,6 +3157,11 @@ func requiredPermission(method, path string) (perm string, needsAuth bool) {
 	// 統合候補はレビュー用の作業一覧なので、修正提案のレビューと同じ権限に揃える。
 	// 楽曲詳細に出す個別の候補（/api/songs/{id}/merge-candidates）は閲覧のまま。
 	if path == "/api/songs/merge-candidates" {
+		return auth.PermContentEdit, true
+	}
+
+	// タグ漏れもレビュー用の作業一覧。閲覧も編集と同じ権限に揃える。
+	if strings.HasPrefix(path, "/api/tag-gaps") {
 		return auth.PermContentEdit, true
 	}
 
