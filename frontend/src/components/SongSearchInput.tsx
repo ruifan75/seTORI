@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { songApi, itunesApi } from '../api/client';
-import type { Song, ITunesSearchResult } from '../api/types';
+import type { Song, ITunesSearchResult, ITunesQueryResult } from '../api/types';
 
 // 楽曲の検索入力（DB と iTunes を同時に引くオートコンプリート）。
 //
@@ -11,6 +11,10 @@ import type { Song, ITunesSearchResult } from '../api/types';
 //
 // onSelectSong に渡る Song の id が空文字なら「iTunes にはあるが DB に無い曲」で、
 // itunes_ids[0] に紐付けるべき iTunes ID が入っている。
+//
+// 数字だけを入れると iTunes ID の直引きになる。名前で当たらない曲
+// （表記が違う・iTunes 側の綴りが特殊）に手で辿り着くための逃げ道で、
+// 楽曲詳細ページの「iTunes ID 直接入力」と同じことをこの欄でできるようにしてある。
 
 // 楽曲検索入力コンポーネントの Props
 interface SongSearchInputProps {
@@ -20,6 +24,20 @@ interface SongSearchInputProps {
   placeholder?: string;
   showToast?: (message: string, type?: 'success' | 'error' | 'info') => void;
 }
+
+// iTunes ID とみなす条件。実在する track ID は 8 桁以上なので、
+// `39` `1925` `2525` のような数字だけの曲名を ID と誤認しない。
+const ITUNES_ID_PATTERN = /^\d{8,}$/;
+
+const toSearchResult = (q: ITunesQueryResult): ITunesSearchResult => ({
+  itunes_id: q.itunes_id,
+  collection_name: q.collection_name,
+  track_name: q.track_name,
+  artist_name: q.artist_name,
+  artwork_url: q.artwork_url,
+  country: q.country,
+  existing_song: q.existing_song,
+});
 
 // 楽曲検索入力コンポーネント（オートコンプリート付き）
 export default function SongSearchInput({ value, onChange, onSelectSong, placeholder, showToast }: SongSearchInputProps) {
@@ -42,13 +60,19 @@ export default function SongSearchInput({ value, onChange, onSelectSong, placeho
     const timer = setTimeout(async () => {
       setIsLoading(true);
       try {
-        // DB と iTunes を並行検索
-        const [dbResult, itunesResult] = await Promise.all([
+        // DB と iTunes を並行検索。数字だけなら iTunes ID の直引きも足す
+        const itunesId = ITUNES_ID_PATTERN.test(searchQuery.trim()) ? Number(searchQuery.trim()) : null;
+        const [dbResult, itunesResult, byId] = await Promise.all([
           songApi.list(1, 5, searchQuery).catch(() => ({ songs: [], pagination: { page: 1, limit: 5, total: 0, total_pages: 0 } })),
-          itunesApi.search(searchQuery).catch(() => ({ results: [] }))
+          itunesApi.search(searchQuery).catch(() => ({ results: [] })),
+          itunesId ? itunesApi.queryById(itunesId).catch(() => null) : Promise.resolve(null),
         ]);
         setDbSuggestions(dbResult.songs);
-        setItunesSuggestions(itunesResult.results.slice(0, 5)); // iTunes 結果数を制限
+        const results = itunesResult.results.slice(0, 5); // iTunes 結果数を制限
+        if (byId && !results.some((r) => r.itunes_id === byId.itunes_id)) {
+          results.unshift(toSearchResult(byId));
+        }
+        setItunesSuggestions(results);
       } catch {
         setDbSuggestions([]);
         setItunesSuggestions([]);

@@ -93,6 +93,8 @@ export interface ITunesQueryResult {
   track_time_millis: number;
   preview_url?: string;
   country: string;
+  /** その ID が既に DB の楽曲に紐づいていれば、その楽曲（検索結果と同じ意味） */
+  existing_song?: SongBrief;
 }
 
 // ========== 歌手 ==========

@@ -210,13 +210,16 @@ export default function PerformanceFields({
                       {/* Song Name with Search */}
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">
-                          楽曲名 <span className="text-gray-400 font-normal">(入力して検索)</span>
+                          楽曲名{' '}
+                          <span className="text-gray-400 font-normal">
+                            (入力して検索・iTunes ID も可)
+                          </span>
                         </label>
                         <SongSearchInput
                           value={value.name}
                           onChange={(value) => onChange({ name: value })}
                           onSelectSong={(selectedSong) => onSelectSong(selectedSong)}
-                          placeholder="楽曲名を入力して検索"
+                          placeholder="楽曲名、または iTunes ID を入力"
                           showToast={showToast}
                         />
                         <MatchStatus value={value} onClearItunes={onClearItunes} onClearSong={onClearSong} />

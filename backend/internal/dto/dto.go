@@ -1091,6 +1091,22 @@ type ItunesSearchResultWithSong struct {
 	ExistingSong   *SongBrief `json:"existing_song,omitempty"` // 如果已在 DB 中，回傳歌曲簡要資訊
 }
 
+// ItunesQueryResultWithSong は iTunes ID 直引きの結果。検索と同じく
+// 「その ID が既に DB の楽曲に紐づいているか」を併せて返す
+// ── 分からないと、既にある曲を新規として作ってしまう。
+type ItunesQueryResultWithSong struct {
+	ItunesID        int64      `json:"itunes_id"`
+	CollectionName  string     `json:"collection_name"`
+	TrackName       string     `json:"track_name"`
+	ArtistName      string     `json:"artist_name"`
+	ArtworkURL      string     `json:"artwork_url"`
+	TrackViewURL    string     `json:"track_view_url"`
+	TrackTimeMillis int64      `json:"track_time_millis"`
+	PreviewURL      string     `json:"preview_url"`
+	Country         string     `json:"country"`
+	ExistingSong    *SongBrief `json:"existing_song,omitempty"`
+}
+
 // SongBrief 歌曲簡要資訊（用於 iTunes 搜尋結果）
 type SongBrief struct {
 	ID                    uuid.UUID `json:"id"`

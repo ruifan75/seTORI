@@ -2667,47 +2667,7 @@ func (r *Router) handleItunesSearch(w http.ResponseWriter, req *http.Request) {
 			Country:        itunesItem.Country,
 		}
 
-		// 檢查是否已在資料庫中
-		existingSong, err := songRepo.FindByItunesID(itunesItem.ItunesID)
-		if err != nil {
-			logger.Warnf("Error checking iTunes ID %d: %v", itunesItem.ItunesID, err)
-		}
-
-		if existingSong != nil {
-			// 取得演唱次數
-			perfCount, err := songRepo.GetPerformanceCount(existingSong.ID)
-			if err != nil {
-				logger.Warnf("Error counting performances for song %s: %v", existingSong.ID, err)
-				perfCount = 0
-			}
-
-			// 轉換 sql.NullString 為 *string
-			var nameReading *string
-			if existingSong.NameReading.Valid {
-				nameReading = &existingSong.NameReading.String
-			}
-
-			var originalArtistReading *string
-			if existingSong.OriginalArtistReading.Valid {
-				originalArtistReading = &existingSong.OriginalArtistReading.String
-			}
-
-			var arts *string
-			if existingSong.Arts.Valid {
-				arts = &existingSong.Arts.String
-			}
-
-			enhanced.ExistingSong = &dto.SongBrief{
-				ID:                    existingSong.ID,
-				Name:                  existingSong.Name,
-				NameReading:           nameReading,
-				OriginalArtist:        existingSong.OriginalArtist,
-				OriginalArtistReading: originalArtistReading,
-				Arts:                  arts,
-				PerformanceCount:      perfCount,
-			}
-		}
-
+		enhanced.ExistingSong = existingSongBrief(songRepo, itunesItem.ItunesID)
 		enhancedResults = append(enhancedResults, enhanced)
 	}
 
@@ -2738,7 +2698,53 @@ func (r *Router) handleItunesQueryByID(w http.ResponseWriter, req *http.Request)
 		return
 	}
 
-	respondJSON(w, http.StatusOK, result)
+	respondJSON(w, http.StatusOK, dto.ItunesQueryResultWithSong{
+		ItunesID:        result.ItunesID,
+		CollectionName:  result.CollectionName,
+		TrackName:       result.TrackName,
+		ArtistName:      result.ArtistName,
+		ArtworkURL:      result.ArtworkURL,
+		TrackViewURL:    result.TrackViewURL,
+		TrackTimeMillis: result.TrackTimeMillis,
+		PreviewURL:      result.PreviewURL,
+		Country:         result.Country,
+		ExistingSong:    existingSongBrief(repository.NewSongRepository(r.db), result.ItunesID),
+	})
+}
+
+// existingSongBrief は iTunes ID に紐づく既存楽曲を返す。無ければ nil。
+// **検索と ID 直引きで同じものを通す** ── 片方だけが「もう DB にある」を
+// 知っている状態になると、同じ曲を二重に作る入口ができる。
+func existingSongBrief(songRepo *repository.SongRepository, itunesID int64) *dto.SongBrief {
+	song, err := songRepo.FindByItunesID(itunesID)
+	if err != nil {
+		logger.Warnf("Error checking iTunes ID %d: %v", itunesID, err)
+		return nil
+	}
+	if song == nil {
+		return nil
+	}
+	perfCount, err := songRepo.GetPerformanceCount(song.ID)
+	if err != nil {
+		logger.Warnf("Error counting performances for song %s: %v", song.ID, err)
+		perfCount = 0
+	}
+	brief := &dto.SongBrief{
+		ID:               song.ID,
+		Name:             song.Name,
+		OriginalArtist:   song.OriginalArtist,
+		PerformanceCount: perfCount,
+	}
+	if song.NameReading.Valid {
+		brief.NameReading = &song.NameReading.String
+	}
+	if song.OriginalArtistReading.Valid {
+		brief.OriginalArtistReading = &song.OriginalArtistReading.String
+	}
+	if song.Arts.Valid {
+		brief.Arts = &song.Arts.String
+	}
+	return brief
 }
 
 // ========== AI Provider Handlers ==========
