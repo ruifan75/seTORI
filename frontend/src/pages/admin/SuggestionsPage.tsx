@@ -13,6 +13,7 @@ import Loading from '../../components/ui/Loading';
 import Pagination from '../../components/ui/Pagination';
 import MergeSuggestionsDialog from '../../components/MergeSuggestionsDialog';
 import SetlistReviewCard from '../../components/SetlistReviewCard';
+import RawCommentsPanel from '../../components/RawCommentsPanel';
 import YoutubePlayer from '../../components/YoutubePlayer';
 import { useToast } from '../../components/ui/ToastContext';
 import {
@@ -316,6 +317,10 @@ function GroupCard({
   // 審査カードは一度に 1 枚だけ開く。開いた曲へプレイヤーが飛ぶ（セットリスト編集と同じ）
   const [openId, setOpenId] = useState<string | null>(null);
   const [playerTime, setPlayerTime] = useState<number | null>(null);
+  // 生コメントの ＋ から展開中のカードへ流し込む。nonce は「同じ行を二度押した」を
+  // 区別するため（値が同じでも作用させたい）
+  const [fill, setFill] = useState<{ start: number; name: string; artist: string; nonce: number } | null>(null);
+  const isStreamGroup = group.target_type === 'stream';
 
   const { data: perfTags = [] } = useQuery({
     queryKey: ['performance-tags'],
@@ -397,27 +402,59 @@ function GroupCard({
               onReady={playback.onReady}
             />
           </div>
-          {playback.existing.length > 0 && (
-            <details className="rounded-lg border p-3" open>
-              <summary className="text-sm font-medium text-gray-700 cursor-pointer">
-                この配信の既存セットリスト（{playback.existing.length} 曲）
-              </summary>
-              <ul className="mt-2 space-y-1">
-                {playback.existing.map((p) => (
-                  <li key={p.id} className="flex items-center gap-2 text-xs">
-                    <button
-                      onClick={() => youtubePlayerSeekTo(p.start_seconds)}
-                      className="font-mono text-indigo-600 hover:text-indigo-900"
-                      title="ここから再生"
-                    >
-                      {formatSeconds(p.start_seconds)}
-                    </button>
-                    <span className="text-gray-700">{p.song_name}</span>
-                    {p.original_artist && <span className="text-gray-400">/ {p.original_artist}</span>}
-                  </li>
-                ))}
-              </ul>
-            </details>
+          {/* 参考資料を左右に並べる。
+              左は**今 DB に何があるか**、右は**視聴者が実際に何と書いたか**。
+              抽出結果ではなく原文を出すのが要点 ── 審査に回っているのは機械が
+              決めきれなかった行なので、機械の出力をもう一度見ても答えは出ない。
+              原文には歌手名や絵文字による担当分けなど、抽出が落とした情報が残っている。 */}
+          {isStreamGroup && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+              <details className="rounded-lg border p-3" open>
+                <summary className="text-sm font-medium text-gray-700 cursor-pointer">
+                  この配信の既存セットリスト（{playback.existing.length} 曲）
+                </summary>
+                {playback.existing.length === 0 ? (
+                  <p className="mt-2 text-xs text-gray-400">まだ歌唱がありません</p>
+                ) : (
+                  <ul className="mt-2 space-y-1">
+                    {playback.existing.map((p) => (
+                      <li key={p.id} className="flex items-start gap-2 text-xs">
+                        {/* 開始だけでは重なりを判断できないので終了まで出す */}
+                        <button
+                          onClick={() => youtubePlayerSeekTo(p.start_seconds)}
+                          className="font-mono text-indigo-600 hover:text-indigo-900 shrink-0"
+                          title="ここから再生"
+                        >
+                          {formatSeconds(p.start_seconds)}
+                          {p.end_seconds > 0 && `–${formatSeconds(p.end_seconds)}`}
+                        </button>
+                        <span className="min-w-0">
+                          <span className="text-gray-700">{p.song_name}</span>
+                          {p.original_artist && (
+                            <span className="text-gray-400"> / {p.original_artist}</span>
+                          )}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </details>
+
+              <details className="rounded-lg border p-3" open>
+                <summary className="text-sm font-medium text-gray-700 cursor-pointer">
+                  生コメント（視聴者が書いた原文）
+                </summary>
+                <div className="mt-2 max-h-72 overflow-y-auto">
+                  <RawCommentsPanel
+                    videoId={group.target_key}
+                    onSeek={(sec) => youtubePlayerSeekTo(sec)}
+                    onAddSong={(input) =>
+                      setFill({ ...input, nonce: (fill?.nonce ?? 0) + 1 })
+                    }
+                  />
+                </div>
+              </details>
+            </div>
           )}
         </div>
       )}
@@ -433,6 +470,7 @@ function GroupCard({
                 performanceTags={performanceTags}
                 currentPlayerTime={playerTime}
                 expanded={openId === s.id}
+                fillRequest={openId === s.id ? fill : null}
                 onExpand={() => {
                   const next = openId === s.id ? null : s.id;
                   setOpenId(next);

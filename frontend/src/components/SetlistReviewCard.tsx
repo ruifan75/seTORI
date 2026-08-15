@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { MissingSongPayload, Singer, Song, Suggestion } from '../api/types';
 import PerformanceFields, {
   type PerformanceFieldValues,
@@ -66,6 +66,7 @@ export default function SetlistReviewCard({
   performanceTags,
   currentPlayerTime,
   expanded,
+  fillRequest,
   onExpand,
   busy,
   onApprove,
@@ -77,6 +78,8 @@ export default function SetlistReviewCard({
   performanceTags: PerformanceTagOption[];
   currentPlayerTime: number | null;
   expanded: boolean;
+  // 生コメントの ＋ から流し込まれた値（展開中のカードにだけ届く）
+  fillRequest?: { start: number; name: string; artist: string; nonce: number } | null;
   onExpand: () => void;
   busy: boolean;
   onApprove: (id: string, payload: MissingSongPayload) => void;
@@ -87,6 +90,18 @@ export default function SetlistReviewCard({
     toFieldValues(suggestion.id, base ?? ({} as MissingSongPayload))
   );
   const [error, setError] = useState('');
+
+  // 生コメントの行から曲名・歌手・開始秒を取り込む。原文にしか無い情報
+  // （歌手名など）を手で打ち直さずに済ませるための経路。
+  useEffect(() => {
+    if (!fillRequest) return;
+    setDraft((d) => ({
+      ...d,
+      start: fillRequest.start,
+      name: fillRequest.name || d.name,
+      artist: fillRequest.artist || d.artist,
+    }));
+  }, [fillRequest?.nonce]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!base) return null;
 
