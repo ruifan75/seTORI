@@ -1433,6 +1433,21 @@ export default function StreamDetailPage() {
                                 </span>
                               )}
                             </span>
+                            {/*
+                              正規化で付いた演奏バージョンのタグ（short / piano …）。
+                              追加すると EditableSong.tags にそのまま入るので、
+                              取り込む前にここで見えるようにしてある。
+                              PERFORMANCE_TAGS に無い ID は語彙のずれなので、
+                              そのまま灰色で出して気付けるようにする（黙って隠さない）。
+                            */}
+                            {(song.tags?.length ?? 0) > 0 && (
+                              <span className="shrink-0 flex items-center gap-1">
+                                {song.tags!.map((tagId) => {
+                                  const meta = PERFORMANCE_TAGS.find((t) => t.id === tagId);
+                                  return <Tag key={tagId} label={meta?.label || tagId} color={meta?.color || '#6B7280'} />;
+                                })}
+                              </span>
+                            )}
                             <span className="shrink-0 text-gray-300 group-hover:text-indigo-600 transition-colors">＋</span>
                           </div>
 
