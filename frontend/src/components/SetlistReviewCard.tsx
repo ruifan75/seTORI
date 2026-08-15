@@ -13,7 +13,16 @@ const REASON_LABELS: Record<string, string> = {
   conflict: '既存と食い違う',
   low_conf: 'AI の確信度が低い',
   source_gap: '源の取りこぼしの疑い',
+  addition: '既存歌単への追加',
   duplicate: '同じ曲が重複',
+};
+
+// 食い違いの中身。バックエンドの conflictSong … と対応させること。
+const CONFLICT_LABELS: Record<string, string> = {
+  song: '同じ時間帯に別の曲が登録されています',
+  start: '開始時間がずれています',
+  end: '終了時間がずれています',
+  addition: 'この配信には既にセットリストがあるため、追加は自動では行わず審査に回っています',
 };
 
 const SOURCE_LABELS: Record<string, string> = { holodex: 'Holodex', comment: 'コメント' };
@@ -148,6 +157,42 @@ export default function SetlistReviewCard({
           <span className="text-gray-400">提案: {suggestion.created_by_name}</span>
         )}
       </div>
+
+      {/* 食い違いの中身。「既存と食い違う」とだけ出していた頃は、
+          人が何を見ればいいか分からず既存歌単を自分で探すことになっていた。 */}
+      {base.conflict_kind && (
+        <div className="rounded border border-amber-200 bg-amber-50/60 px-2 py-1.5 text-xs">
+          <div className="text-amber-900">{CONFLICT_LABELS[base.conflict_kind] ?? base.conflict_kind}</div>
+          {base.existing && (
+            <div className="mt-1 space-y-0.5 text-gray-600">
+              <div>
+                <span className="text-gray-400 mr-1">既存</span>
+                <button
+                  onClick={() => youtubePlayerSeekTo(base.existing!.start_seconds)}
+                  className="font-mono text-indigo-600 hover:text-indigo-900"
+                  title="ここから再生"
+                >
+                  {formatSeconds(base.existing.start_seconds)}
+                  {base.existing.end_seconds > 0 && `–${formatSeconds(base.existing.end_seconds)}`}
+                </button>
+                <span className="ml-1">{base.existing.song_name}</span>
+                {base.existing.original_artist && (
+                  <span className="text-gray-400"> / {base.existing.original_artist}</span>
+                )}
+              </div>
+              <div>
+                <span className="text-gray-400 mr-1">提案</span>
+                <span className="font-mono">
+                  {formatSeconds(base.start_seconds)}
+                  {base.end_seconds > 0 && `–${formatSeconds(base.end_seconds)}`}
+                </span>
+                <span className="ml-1">{base.song_name}</span>
+                {base.original_artist && <span className="text-gray-400"> / {base.original_artist}</span>}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* 曲 */}
       <div>

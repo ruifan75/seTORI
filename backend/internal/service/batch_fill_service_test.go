@@ -49,56 +49,73 @@ func TestDiffAgainstExisting(t *testing.T) {
 	}}
 
 	tests := []struct {
-		name string
-		row  *fillRow
-		want existingDiff
+		name     string
+		row      *fillRow
+		want     existingDiff
+		wantKind string // differs のときだけ見る
 	}{
 		{
 			"完全に一致",
 			&fillRow{SongID: &songA, Start: 600, End: 840, EndSource: repository.EndSourceChat},
 			existingSame,
+			"",
 		},
 		{
 			"数秒の揺れは同じとみなす",
 			&fillRow{SongID: &songA, Start: 602, End: 841, EndSource: repository.EndSourceChat},
 			existingSame,
+			"",
 		},
 		{
 			// 直したかった穴：曲が同じなら開始が 25 秒ずれていても same 扱いで黙って飛ばしていた
 			"同じ曲だが開始が大きくずれる",
 			&fillRow{SongID: &songA, Start: 625, End: 840, EndSource: repository.EndSourceChat},
 			existingDiffers,
+			conflictStart,
 		},
 		{
 			"同じ曲だが終了がずれる",
 			&fillRow{SongID: &songA, Start: 600, End: 900, EndSource: repository.EndSourceChat},
 			existingDiffers,
+			conflictEnd,
 		},
 		{
 			"終了が推定値なら終了は比べない",
 			&fillRow{SongID: &songA, Start: 600, End: 900, EndSource: repository.EndSourceNextStart},
 			existingSame,
+			"",
 		},
 		{
 			"同じ時間帯に別の曲",
 			&fillRow{SongID: &songB, Start: 600, End: 840},
 			existingDiffers,
+			conflictSong,
 		},
 		{
 			"曲が決まっていない",
 			&fillRow{Start: 600, End: 840},
 			existingDiffers,
+			conflictSong,
 		},
 		{
 			"時間帯が離れている",
 			&fillRow{SongID: &songB, Start: 1800, End: 2000},
 			existingAbsent,
+			"",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := diffAgainstExisting(existing, tt.row); got != tt.want {
-				t.Errorf("diffAgainstExisting() = %v, want %v", got, tt.want)
+			got := diffAgainstExisting(existing, tt.row)
+			if got.diff != tt.want {
+				t.Errorf("diff = %v, want %v", got.diff, tt.want)
+			}
+			// 「食い違う」だけでは審査画面に何も出せないので、種類まで固定する
+			if tt.wantKind != "" && got.kind != tt.wantKind {
+				t.Errorf("kind = %q, want %q", got.kind, tt.wantKind)
+			}
+			if tt.want != existingAbsent && got.existing == nil {
+				t.Error("突き合わせた相手が返っていない（画面で並べられない）")
 			}
 		})
 	}

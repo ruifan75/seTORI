@@ -628,6 +628,21 @@ export interface MissingSongPayload {
 
   // 決めきれなかったときの候補（審査画面でそのまま選べる）
   candidates?: SongMatchCandidate[];
+
+  // 既存の歌唱と食い違った理由。「食い違う」だけでは何を見ればいいか分からないので、
+  // どこが違うのか（song / start / end）と相手を持ち越す。
+  // addition は「既にセットリストがある配信への追加」で、対応する既存の歌唱が無い。
+  conflict_kind?: string;
+  existing?: ExistingPerformance;
+}
+
+// 審査画面で「既存はこうなっている」と並べて見せるための最小限。
+export interface ExistingPerformance {
+  id: string;
+  song_name: string;
+  original_artist: string;
+  start_seconds: number;
+  end_seconds: number;
 }
 
 export interface CreateSuggestionRequest {

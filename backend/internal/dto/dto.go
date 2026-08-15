@@ -792,8 +792,25 @@ type MissingSongPayload struct {
 	RawName   string `json:"raw_name,omitempty"`
 	RawArtist string `json:"raw_artist,omitempty"`
 
+	// ConflictKind は既存の歌唱と食い違った理由（song / start / end / addition）。
+	// 「食い違う」とだけ言われても人は何を見ればいいか分からないので、
+	// **どこが違うのか**を持ち越す。addition は「既にセットリストがある配信への追加」で、
+	// 対応する既存の歌唱が無い（＝突き合わせる相手が居ない）ことを表す。
+	ConflictKind string `json:"conflict_kind,omitempty"`
+	// Existing は突き合わせた既存の歌唱（addition のときは入らない）。
+	Existing *ExistingPerformance `json:"existing,omitempty"`
+
 	// Candidates は決めきれなかったときの候補。審査画面でそのまま選べる。
 	Candidates []SongMatchCandidate `json:"candidates,omitempty"`
+}
+
+// ExistingPerformance は審査画面で「既存はこうなっている」と並べて見せるための最小限。
+type ExistingPerformance struct {
+	ID             string `json:"id"`
+	SongName       string `json:"song_name"`
+	OriginalArtist string `json:"original_artist"`
+	StartSeconds   int    `json:"start_seconds"`
+	EndSeconds     int    `json:"end_seconds"`
 }
 
 // SongSwapPayload 「この歌唱は別の曲だ」という指摘の中身。

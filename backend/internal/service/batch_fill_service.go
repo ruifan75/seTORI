@@ -62,6 +62,7 @@ const (
 	reviewConflict    = "conflict"     // 既存の歌唱と食い違う
 	reviewLowConf     = "low_conf"     // AI の確信度が足りない
 	reviewSourceGap   = "source_gap"   // 源が既存より少ない（取りこぼしを疑う）
+	reviewAddition    = "addition"     // 既にセットリストがある配信への追加
 	reviewDuplicate   = "duplicate"    // 同じ実行の中で同じ曲が重複している
 )
 
@@ -123,6 +124,11 @@ type fillRow struct {
 	Confidence float64
 	AIReason   string
 	Review     []string
+
+	// ConflictKind / Existing は既存の歌唱と突き合わせた結果。
+	// 「食い違う」だけでは何を見ればいいか分からないので、どこが違うのかと相手を持ち越す。
+	ConflictKind string
+	Existing     *repository.PerformanceWithDetails
 
 	ai *aiMatchRow // AI に回した行への参照（判定後に読む）
 }
@@ -421,13 +427,16 @@ func (s *BatchFillService) applyStream(runID uuid.UUID, streamID string, rows []
 			row.addReview(reviewDuplicate)
 		}
 
-		switch diff := diffAgainstExisting(existing, row); diff {
+		switch cmp := diffAgainstExisting(existing, row); cmp.diff {
 		case existingSame:
 			// 既にまったく同じ内容がある。何もしない（審査にも積まない）。
 			continue
 		case existingDiffers:
 			// 既にある歌唱は黙って書き換えない（force でも）。中身が違うので審査へ。
+			// どこが違うか（曲 / 開始 / 終了）と相手を持ち越す。
 			row.addReview(reviewConflict)
+			row.ConflictKind = cmp.kind
+			row.Existing = cmp.existing
 		case existingAbsent:
 			if len(existing) > 0 {
 				// 既にセットリストがある配信には**書き足さない**。
@@ -435,7 +444,11 @@ func (s *BatchFillService) applyStream(runID uuid.UUID, streamID string, rows []
 				// 書き足すには既存分も送り直すことになり、その過程で既存の歌唱が
 				// 曲名から引き直される（別の曲に付け替わりうる）。人の作ったものを
 				// 機械の都合で作り直さない ── 追加は提案として出す。
-				row.addReview(reviewConflict)
+				//
+				// これは「食い違い」ではなく「追加」。同じ徽章にまとめると、
+				// 突き合わせる相手を探しても見つからず人が混乱する。
+				row.addReview(reviewAddition)
+				row.ConflictKind = conflictAddition
 			}
 		}
 
@@ -558,6 +571,8 @@ func (s *BatchFillService) createReviewSuggestion(runID uuid.UUID, row *fillRow,
 		RawName:        row.RawName,
 		RawArtist:      row.RawArtist,
 		Candidates:     row.candidateDTOs(),
+		ConflictKind:   row.ConflictKind,
+		Existing:       existingDTO(row.Existing),
 	}
 	if row.SongID != nil {
 		payload.SongID = row.SongID.String()
@@ -602,6 +617,20 @@ func (r *fillRow) candidateDTOs() []dto.SongMatchCandidate {
 		})
 	}
 	return out
+}
+
+// existingDTO は突き合わせた既存の歌唱を審査画面用の形へ写す。
+func existingDTO(e *repository.PerformanceWithDetails) *dto.ExistingPerformance {
+	if e == nil {
+		return nil
+	}
+	return &dto.ExistingPerformance{
+		ID:             e.ID.String(),
+		SongName:       e.SongName,
+		OriginalArtist: e.OriginalArtist,
+		StartSeconds:   e.StartSeconds,
+		EndSeconds:     e.EndSeconds,
+	}
 }
 
 func containsReason(reasons []string, want string) bool {
@@ -736,24 +765,44 @@ const fillTimeTolerance = 3
 // 以前は「曲 ID が一致するか」しか見ておらず、開始・終了が何十秒ずれていても
 // same 扱いで黙って飛ばしていた。force は「既存と食い違う分を審査へ回す」ための
 // モードなので、歌単として比べられる要素（曲・開始・終了）をすべて見る。
-func diffAgainstExisting(existing []repository.PerformanceWithDetails, row *fillRow) existingDiff {
-	for _, e := range existing {
+// 食い違いの種類。審査画面にそのまま出すので、増やすときは表示側も見ること。
+const (
+	conflictSong     = "song"     // 同じ時間帯に別の曲がある（または曲が決まっていない）
+	conflictStart    = "start"    // 同じ曲だが開始がずれる
+	conflictEnd      = "end"      // 同じ曲だが終了がずれる
+	conflictAddition = "addition" // 既にセットリストがある配信への追加（相手が居ない）
+)
+
+// existingComparison は源の行と既存の歌唱を突き合わせた結果。
+//
+// **どこが違うのかまで返す。** 種類だけ返していた頃は、審査画面に
+// 「既存と食い違う」としか出せず、人は何を見ればいいのか分からなかった。
+// 判定した側は理由を知っているのだから、捨てずに持ち越す。
+type existingComparison struct {
+	diff     existingDiff
+	kind     string                             // conflictSong / conflictStart / conflictEnd
+	existing *repository.PerformanceWithDetails // 突き合わせた相手（absent のときは nil）
+}
+
+func diffAgainstExisting(existing []repository.PerformanceWithDetails, row *fillRow) existingComparison {
+	for i := range existing {
+		e := &existing[i]
 		if abs(e.StartSeconds-row.Start) > fillMatchWindow {
 			continue
 		}
 		if row.SongID == nil || e.SongID != *row.SongID {
-			return existingDiffers // 同じ時間帯に別の曲がある（または曲が決まっていない）
+			return existingComparison{existingDiffers, conflictSong, e}
 		}
 		if abs(e.StartSeconds-row.Start) > fillTimeTolerance {
-			return existingDiffers
+			return existingComparison{existingDiffers, conflictStart, e}
 		}
 		// 終了時間は源が持っているときだけ比べる。源に無いものを「食い違い」とは言えない。
 		if row.hasReliableEnd() && abs(e.EndSeconds-row.End) > fillTimeTolerance {
-			return existingDiffers
+			return existingComparison{existingDiffers, conflictEnd, e}
 		}
-		return existingSame
+		return existingComparison{diff: existingSame, existing: e}
 	}
-	return existingAbsent
+	return existingComparison{diff: existingAbsent}
 }
 
 // findDuplicateRow はこの実行が既に作る予定の行のうち、同じ曲で時間が重なるものを返す。
@@ -799,6 +848,7 @@ func joinReasons(reasons []string) string {
 		reviewConflict:    "既存と食い違う",
 		reviewLowConf:     "AI の確信度が低い",
 		reviewSourceGap:   "源の取りこぼしの疑い",
+		reviewAddition:    "既存歌単への追加",
 		reviewDuplicate:   "同じ曲が重複",
 	}
 	out := ""
