@@ -406,3 +406,27 @@ func TestMissingSongPayloadCoversEditorFields(t *testing.T) {
 		}
 	}
 }
+
+// Holodex 行のタグが審査へ渡ること。
+// 落としていたため、正規化が `そばかす (1 Chorus)` から Short Ver. を検出しても
+// 一括が積む提案には付かなかった（コメント経路だけは引き継いでいた）。
+func TestSuggestionToFillRowCarriesTags(t *testing.T) {
+	row := suggestionToFillRow("6mSJlqCaq7o", dto.SongSuggestion{
+		Name:           "そばかす (1 Chorus) / Sobakasu",
+		OriginalArtist: "JUDY AND MARY",
+		StartSeconds:   6270,
+		EndSeconds:     6400,
+		Tags:           []string{"short"},
+	})
+	if len(row.Tags) != 1 || row.Tags[0] != "short" {
+		t.Errorf("Tags = %v, want [short]", row.Tags)
+	}
+
+	// コメント経路と同じ形であること（片方だけ直されるのを防ぐ）
+	comment := commentSongToFillRow("6mSJlqCaq7o", dto.CommentSong{
+		Name: "そばかす", Start: 6270, End: 6400, Tags: []string{"short"},
+	})
+	if len(comment.Tags) != 1 || comment.Tags[0] != "short" {
+		t.Errorf("comment Tags = %v, want [short]", comment.Tags)
+	}
+}

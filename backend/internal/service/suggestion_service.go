@@ -417,7 +417,9 @@ func applyMissingSongEdits(base, edits dto.MissingSongPayload) (dto.MissingSongP
 		out.SingerIDs = edits.SingerIDs
 		changed = append(changed, "歌手")
 	}
-	if len(edits.Tags) > 0 && !sameStrings(edits.Tags, base.Tags) {
+	// len(edits.Tags) > 0 で守らないこと。守ると「最後の 1 つを外す」が効かず、
+	// 誤検出した short を審査で消せない（SingerIDs / CustomTags も守っていない）
+	if !sameStrings(edits.Tags, base.Tags) {
 		out.Tags = edits.Tags
 		changed = append(changed, "タグ")
 	}

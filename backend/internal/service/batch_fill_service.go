@@ -707,6 +707,9 @@ func suggestionToFillRow(streamID string, sg dto.SongSuggestion) *fillRow {
 		// 抽出したままの表記。no_artist の判定と審査画面の「元の値」に使う。
 		RawName: sg.Name, RawArtist: sg.OriginalArtist,
 		Start: sg.StartSeconds, End: sg.EndSeconds, ItunesID: sg.ItunesID, Source: "holodex",
+		// コメント経路と同じくタグを引き継ぐ。落としていたので、正規化が
+		// Short Ver. を検出しても審査へ渡る前に消えていた
+		Tags: sg.Tags,
 		// 由来は画面（StreamDetailPage）と同じ規則で決める。**"batch" のような
 		// 独自の値を入れないこと** ── end_source は「どれだけ信用できるか」を表す
 		// 語彙で、誰が書いたかを表す欄ではない（docs/DATA_COMPLETION.md）。

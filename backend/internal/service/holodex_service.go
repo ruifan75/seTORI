@@ -20,6 +20,7 @@ import (
 	"github.com/ruifan75/setori/pkg/ai"
 	"github.com/ruifan75/setori/pkg/holodex"
 	"github.com/ruifan75/setori/pkg/itunes"
+	"github.com/ruifan75/setori/pkg/perftag"
 	"github.com/ruifan75/setori/pkg/util"
 	"github.com/ruifan75/setori/pkg/youtube"
 )
@@ -839,6 +840,13 @@ func (s *HolodexService) analyzeHolodexSongs(videoID string, force, adjudicate b
 		if cachedHash.Valid && cachedHash.String == holodexHash && len(cached) > 0 {
 			var songs []dto.SongSuggestion
 			if err := json.Unmarshal(cached, &songs); err == nil && len(songs) > 0 {
+				// 曲名から導けるタグは AI を呼ばずに付け直す。
+				// 規則を足したとき、holodex_data が変わらない限りキャッシュは
+				// 命中し続けるので、ここで補わないと既存の配信は AI を
+				// 回し直すまで直らない（純粋な文字列判定なので安い）
+				for i := range songs {
+					songs[i].Tags = perftag.Normalize(songs[i].Tags, songs[i].Name)
+				}
 				// 照合は保存していないので、今の DB に対して計算して返す
 				s.normalizationService.ResolveSuggestionsForDisplay(songs)
 				if adjudicate {

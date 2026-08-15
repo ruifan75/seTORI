@@ -115,27 +115,6 @@ func TestParseAndNormalizeWithAI_逐字検証(t *testing.T) {
 	}
 }
 
-func TestFilterAllowedTags(t *testing.T) {
-	cases := []struct {
-		name string
-		in   []string
-		want int
-	}{
-		{"既知のタグは通す", []string{"piano", "short"}, 2},
-		{"語彙外は落とす", []string{"piano", "Piano ver.", "ピアノ", "instrumental"}, 1},
-		{"重複を除く", []string{"piano", "piano"}, 1},
-		{"空は落とす", []string{"", "  "}, 0},
-		{"nil は nil", nil, 0},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			if got := filterAllowedTags(c.in); len(got) != c.want {
-				t.Errorf("filterAllowedTags(%v) = %v, want %d 件", c.in, got, c.want)
-			}
-		})
-	}
-}
-
 func TestParseAndNormalizeWithAI_エラー処理(t *testing.T) {
 	t.Run("AI 呼び出しの失敗を伝える", func(t *testing.T) {
 		stub := &stubChatter{err: fmt.Errorf("boom")}

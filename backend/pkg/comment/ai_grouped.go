@@ -7,6 +7,7 @@ import (
 
 	"github.com/ruifan75/setori/internal/logger"
 	"github.com/ruifan75/setori/pkg/ai"
+	"github.com/ruifan75/setori/pkg/perftag"
 )
 
 // この経路は AI に「抽出＋正規化＋重複排除」まで一度にやらせる。
@@ -299,7 +300,7 @@ func buildSongsFromGrouped(selections []groupedSelection, lines []commentLine) [
 		merged.NormalizedArtist = strings.TrimSpace(sel.NormArt)
 		merged.NormalizedNameReading = strings.TrimSpace(sel.NormRead)
 		merged.NormalizedArtistReading = strings.TrimSpace(sel.NormArtRd)
-		merged.Tags = normalizeTags(sel.Tags, merged.Name)
+		merged.Tags = perftag.Normalize(sel.Tags, merged.Name)
 		merged.Confidence = sel.Confid
 
 		result = append(result, *merged)

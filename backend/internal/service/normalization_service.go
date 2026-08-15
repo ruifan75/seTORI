@@ -10,6 +10,7 @@ import (
 	"github.com/ruifan75/setori/internal/models"
 	"github.com/ruifan75/setori/internal/repository"
 	"github.com/ruifan75/setori/pkg/ai"
+	"github.com/ruifan75/setori/pkg/perftag"
 )
 
 type NormalizationService struct {
@@ -160,9 +161,12 @@ func (s *NormalizationService) BatchAINormalization(items []dto.AINormalizationI
 				NormalizedNameReading: aiSugg.NormalizedNameReading,
 				OriginalArtist:        artist,
 				OriginalArtistReading: aiSugg.OriginalArtistReading,
-				Tags:                  aiSugg.Tags,
-				Confidence:            aiSugg.Confidence,
-				Reasoning:             "",
+				// 逐字の曲名（item.Name）を渡すのが要点。正規化後の名前からは
+				// 「(1 Chorus)」のような版本の表記が既に削られているので、
+				// ここで拾わないと二度と復元できない
+				Tags:       perftag.Normalize(aiSugg.Tags, item.Name),
+				Confidence: aiSugg.Confidence,
+				Reasoning:  "",
 			}
 
 			// 既存楽曲とのマッチを試行（iTunes ID 優先 → 歌名 + アーティスト）
@@ -176,9 +180,10 @@ func (s *NormalizationService) BatchAINormalization(items []dto.AINormalizationI
 				NormalizedNameReading: "",
 				OriginalArtist:        item.OriginalArtist,
 				OriginalArtistReading: "",
-				Tags:                  []string{},
-				Confidence:            0,
-				Reasoning:             "",
+				// AI が落ちても、曲名に書いてある版本は拾える
+				Tags:       perftag.Normalize(nil, item.Name),
+				Confidence: 0,
+				Reasoning:  "",
 			}
 
 			// それでも DB マッチを試行
