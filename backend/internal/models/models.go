@@ -111,9 +111,9 @@ type Stream struct {
 	ChapterRaw   []byte    `json:"chapter_raw"`   // JSONB - yt-dlp が返した章節
 	ChapterSongs []byte    `json:"chapter_songs"` // JSONB - 章節から抽出した楽曲
 	IsProcessed  bool      `json:"is_processed"`  // 処理済み
-	IsHidden               bool      `json:"is_hidden"`     // 初回登録時に判定し、その後は手動編集のみ
-	CreatedAt              time.Time `json:"created_at"`
-	UpdatedAt              time.Time `json:"updated_at"`
+	IsHidden     bool      `json:"is_hidden"`     // 初回登録時に判定し、その後は手動編集のみ
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 // StreamSearchFilters 配信検索で組み合わせられる条件。
