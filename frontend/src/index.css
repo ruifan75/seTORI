@@ -42,6 +42,17 @@ body {
   }
 }
 
+/* 自動再生がブロックされたときに再生ボタンを指す吹き出し。上下にゆっくり漂わせる */
+@keyframes hint-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-5px);
+  }
+}
+
 /* Toast Animation */
 @keyframes slide-in {
   from {

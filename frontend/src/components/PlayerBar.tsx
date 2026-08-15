@@ -32,6 +32,8 @@ export default function PlayerBar() {
   const switchingRef = useRef(false);
   // 自動再生ブロック検知タイマー
   const blockedCheckRef = useRef<number | undefined>(undefined);
+  // 自動再生がブロックされた（＝ユーザーが再生ボタンを押すまで始まらない）
+  const [autoplayBlocked, setAutoplayBlocked] = useState(false);
   const [progress, setProgress] = useState(0); // 区間内の経過秒
   const [expanded, setExpanded] = useState(false);
   // 音量は自前 UI で管理（縮小時の iframe は小さすぎて操作できないためロックする）
@@ -77,19 +79,35 @@ export default function PlayerBar() {
     }
   }, []);
 
-  // 自動再生がブロックされたままなら UI を「再生」表示に合わせる（ワンタップで開始可能に）。
-  // 曲の読み込み（load/seek）のたびに仕掛け直す
+  // 自動再生がブロックされたままなら UI を「再生」表示に合わせ（ワンタップで開始可能に）、
+  // 再生ボタンを指す吹き出しを出す。iOS は「ユーザー操作から離れた play」を必ず拒むので、
+  // 初回だけは押してもらう以外に始める手が無く、黙って止まっていると壊れて見える。
+  //
+  // 単発の 1.5 秒チェックにしないのは、回線が遅いだけの UNSTARTED を
+  // 「ブロックされた」と読んで吹き出しを一瞬出してしまうため。0.5 秒ごとに見て
+  // 連続 2 回とも未開始のときだけ確定する（読み込み中なら途中で PLAYING/BUFFERING になる）。
   const scheduleBlockedCheck = () => {
-    window.clearTimeout(blockedCheckRef.current);
-    blockedCheckRef.current = window.setTimeout(() => {
+    window.clearInterval(blockedCheckRef.current);
+    let unstarted = 0;
+    let elapsed = 0;
+    blockedCheckRef.current = window.setInterval(() => {
       const p = playerRef.current;
       if (!p || !readyRef.current || typeof p.getPlayerState !== 'function') return;
+      elapsed += 500;
       const st = p.getPlayerState();
       // -1: UNSTARTED / 5: CUED（自動再生がブロックされた状態）
-      if ((st === -1 || st === 5) && usePlayerStore.getState().playing) {
+      const stalled = st === -1 || st === 5;
+      unstarted = stalled ? unstarted + 1 : 0;
+      if (elapsed < 1500) return;
+      if (stalled && unstarted >= 2 && usePlayerStore.getState().playing) {
+        window.clearInterval(blockedCheckRef.current);
         usePlayerStore.getState().setPlaying(false);
+        setAutoplayBlocked(true);
+      } else if (!stalled || elapsed >= 10000) {
+        // 始まった／10 秒待っても判断がつかない（再生不可など）なら見張りを畳む
+        window.clearInterval(blockedCheckRef.current);
       }
-    }, 1500);
+    }, 500);
   };
 
   const changeVolume = (v: number) => {
@@ -263,6 +281,9 @@ export default function PlayerBar() {
             // 同値なら zustand が再レンダーしないためループしない。
             if (e.data === window.YT?.PlayerState?.PLAYING) {
               switchingRef.current = false;
+              // 実際に音が出た時点で案内は役目を終える。押してもらえた場合も、
+              // 遅れて自動再生が通った場合も、ここ 1 か所で消える
+              setAutoplayBlocked(false);
               usePlayerStore.getState().setPlaying(true);
             } else if (e.data === window.YT?.PlayerState?.PAUSED) {
               // トラック切り替え中（load/seek 直後）に iOS が発する
@@ -305,16 +326,19 @@ export default function PlayerBar() {
     } catch {
       /* noop */
     }
+    window.clearInterval(blockedCheckRef.current);
     playerRef.current = null;
     readyRef.current = false;
     currentVideoRef.current = '';
     setPlayerBarInstance(null);
+    setAutoplayBlocked(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [!!track]);
 
   // アンマウントでインスタンス破棄
   useEffect(() => {
     return () => {
+      window.clearInterval(blockedCheckRef.current);
       try {
         playerRef.current?.destroy?.();
       } catch {
@@ -455,17 +479,34 @@ export default function PlayerBar() {
       >
         <svg className={size === 'lg' ? 'w-6 h-6' : 'w-5 h-5'} fill="currentColor" viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
       </button>
-      <button
-        onClick={() => setPlaying(!playing)}
-        className={`${size === 'lg' ? 'p-3.5' : 'p-2.5'} bg-indigo-600 text-white rounded-full hover:bg-indigo-700 transition-colors`}
-        title={playing ? '一時停止' : '再生'}
-      >
-        {playing ? (
-          <svg className={size === 'lg' ? 'w-6 h-6' : 'w-5 h-5'} fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
-        ) : (
-          <svg className={size === 'lg' ? 'w-6 h-6' : 'w-5 h-5'} fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+      <span className="relative">
+        <button
+          onClick={() => setPlaying(!playing)}
+          className={`${size === 'lg' ? 'p-3.5' : 'p-2.5'} bg-indigo-600 text-white rounded-full hover:bg-indigo-700 transition-colors ${
+            autoplayBlocked ? 'ring-4 ring-indigo-400/40' : ''
+          }`}
+          title={playing ? '一時停止' : '再生'}
+        >
+          {playing ? (
+            <svg className={size === 'lg' ? 'w-6 h-6' : 'w-5 h-5'} fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+          ) : (
+            <svg className={size === 'lg' ? 'w-6 h-6' : 'w-5 h-5'} fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+          )}
+        </button>
+        {/* 自動再生がブロックされたときだけ、再生ボタンの真上に吹き出しを出す。
+            pointer-events-none：吹き出しがボタンへのタップを遮らないように */}
+        {autoplayBlocked && (
+          <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 pointer-events-none">
+            <span className="relative block animate-[hint-bob_1.4s_ease-in-out_infinite]">
+              <span className="block whitespace-nowrap rounded-full bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white shadow-lg">
+                タップして再生
+              </span>
+              {/* 吹き出しの尻尾（下向きの三角） */}
+              <span className="absolute left-1/2 top-full -translate-x-1/2 h-0 w-0 border-x-[5px] border-x-transparent border-t-[6px] border-t-indigo-600" />
+            </span>
+          </span>
         )}
-      </button>
+      </span>
       <button
         onClick={next}
         disabled={index >= queue.length - 1}
