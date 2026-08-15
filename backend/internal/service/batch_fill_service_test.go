@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	"github.com/google/uuid"
@@ -370,4 +371,38 @@ func TestApplyMissingSongEditsItunesID(t *testing.T) {
 			t.Errorf("ItunesID = %v, want nil（その曲は自前の紐付けを持つ）", *out.ItunesID)
 		}
 	})
+}
+
+// 編集画面が運ぶ欄は、審査の payload もすべて運べなければならない。
+//
+// 承認は findOrCreateSong を通るので、運ばれなかった欄はそこで空のまま使われる
+// ── 審査から作った曲だけ封面も読みも付かない、という差になる。実際 iTunes ID と
+// 封面がこの落ち方をした。**CreatePerformanceItem に欄を足したらここが落ちる**ので、
+// そのとき MissingSongPayload と applyMissingSongEdits も直すこと。
+func TestMissingSongPayloadCoversEditorFields(t *testing.T) {
+	editor := reflect.TypeOf(dto.CreatePerformanceItem{})
+	payload := reflect.TypeOf(dto.MissingSongPayload{})
+
+	// 編集の欄名 → 審査の欄名（名前が違うものだけ書く）
+	renamed := map[string]string{
+		"Name": "SongName",
+		// EndConfirmed は運ばない。承認は「人が時間を見た」ことが前提なので
+		// 受け取った値ではなく承認側で決める（CreateFromMissingSong）。
+		"EndConfirmed": "",
+	}
+
+	for i := 0; i < editor.NumField(); i++ {
+		name := editor.Field(i).Name
+		want, ok := renamed[name]
+		if ok && want == "" {
+			continue // 意図して運ばない欄
+		}
+		if !ok {
+			want = name
+		}
+		if _, found := payload.FieldByName(want); !found {
+			t.Errorf("CreatePerformanceItem.%s に対応する欄が MissingSongPayload に無い（%s）"+
+				" ── 審査から作るとこの欄が空になる", name, want)
+		}
+	}
 }

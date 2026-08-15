@@ -429,6 +429,25 @@ func applyMissingSongEdits(base, edits dto.MissingSongPayload) (dto.MissingSongP
 		out.ItunesID = edits.ItunesID
 		changed = append(changed, "iTunes ID")
 	}
+	// 封面・読み・カスタムタグも画面が持っている値を正とする。
+	// **CreatePerformanceItem が運ぶ欄はすべてここを通す** ── 写し忘れた欄は
+	// 画面で入力しても黙って捨てられる（iTunes ID がその落ち方をした）。
+	if edits.ArtURL != base.ArtURL {
+		out.ArtURL = edits.ArtURL
+		changed = append(changed, "封面")
+	}
+	if edits.NameReading != base.NameReading {
+		out.NameReading = edits.NameReading
+		changed = append(changed, "曲名の読み")
+	}
+	if edits.OriginalArtistReading != base.OriginalArtistReading {
+		out.OriginalArtistReading = edits.OriginalArtistReading
+		changed = append(changed, "歌手名の読み")
+	}
+	if !sameStrings(edits.CustomTags, base.CustomTags) {
+		out.CustomTags = edits.CustomTags
+		changed = append(changed, "カスタムタグ")
+	}
 	return out, changed
 }
 

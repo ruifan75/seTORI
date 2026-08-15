@@ -55,6 +55,8 @@ export default function SetlistReviewCard({
   const [singerIds, setSingerIds] = useState<string[]>(base?.singer_ids ?? []);
   // iTunes ID は検索で選んだときだけ入る。承認時に新曲を作るならそれに紐づく
   const [itunesID, setItunesID] = useState<number | undefined>(base?.itunes_id);
+  // 封面。iTunes から選んだ新曲はこれが無いとアートワークが付かない
+  const [artURL, setArtURL] = useState<string | undefined>(base?.art_url);
   const [error, setError] = useState('');
 
   if (!base) return null;
@@ -73,6 +75,7 @@ export default function SetlistReviewCard({
     setSongName(song.name);
     setArtist(song.original_artist);
     setItunesID(song.itunes_ids?.[0]?.itunes_id);
+    setArtURL(song.arts || undefined);
   };
 
   // 候補ボタンから確定する。候補は DB の曲なので iTunes ID は持たない
@@ -82,6 +85,7 @@ export default function SetlistReviewCard({
     setSongName(name);
     setArtist(songArtist);
     setItunesID(undefined);
+    setArtURL(undefined);
   };
 
   // 照合を解除する。曲名はそのまま残し、承認時に findOrCreateSong で作り直す。
@@ -127,6 +131,7 @@ export default function SetlistReviewCard({
       end_seconds: end,
       singer_ids: singerIds,
       itunes_id: itunesID,
+      art_url: artURL,
     });
   };
 
@@ -209,6 +214,7 @@ export default function SetlistReviewCard({
                 // 曲名を手で書き換えたら、それはもう選んだ曲ではない
                 setSongId('');
                 setItunesID(undefined);
+                setArtURL(undefined);
               }}
               onSelectSong={pickSong}
               placeholder="曲名を入力して検索（DB と iTunes）"

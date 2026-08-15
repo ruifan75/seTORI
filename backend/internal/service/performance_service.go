@@ -375,6 +375,7 @@ func (s *PerformanceService) CreateFromMissingSong(p dto.MissingSongPayload) err
 		StartSeconds: p.StartSeconds,
 		EndSeconds:   p.EndSeconds,
 		OrderIndex:   0, // start_seconds で並べるため使わない
+		CustomTags:   p.CustomTags,
 		EndSource:    endSource,
 		EndConfirmed: endConfirmed,
 	}
@@ -427,11 +428,19 @@ func (s *PerformanceService) songForMissing(p dto.MissingSongPayload) (*models.S
 		}
 		logger.Warnf("missing song suggestion points at a song that no longer exists (%s); falling back to name lookup", id)
 	}
-	song, isNew, err := s.findOrCreateSong(dto.CreatePerformanceItem{
-		Name:           p.SongName,
-		OriginalArtist: p.OriginalArtist,
-		ItunesID:       p.ItunesID,
-	})
+	// **編集画面と同じ欄を渡す。** findOrCreateSong は封面と読みをここで使うので、
+	// 渡さないと審査から作った曲だけそれらが空になる。
+	item := dto.CreatePerformanceItem{
+		Name:                  p.SongName,
+		NameReading:           p.NameReading,
+		OriginalArtist:        p.OriginalArtist,
+		OriginalArtistReading: p.OriginalArtistReading,
+		ItunesID:              p.ItunesID,
+	}
+	if p.ArtURL != "" {
+		item.ArtURL = &p.ArtURL
+	}
+	song, isNew, err := s.findOrCreateSong(item)
 	if err != nil {
 		return nil, false, fmt.Errorf("find or create song: %w", err)
 	}

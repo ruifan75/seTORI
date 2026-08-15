@@ -777,6 +777,16 @@ type MissingSongPayload struct {
 	Tags      []string `json:"tags,omitempty"`
 	ItunesID  *int64   `json:"itunes_id,omitempty"`
 
+	// ここから下は **CreatePerformanceItem が運ぶ欄と揃えるためのもの**。
+	//
+	// 承認は findOrCreateSong を通り、その中で封面と読みが使われる。運ばなければ
+	// 空のまま渡り、審査から作った曲だけ封面も読みも付かない ── 編集画面から
+	// 作ったものとの差になる。**CreatePerformanceItem に欄を足したらここにも足すこと。**
+	ArtURL                string   `json:"art_url,omitempty"`
+	NameReading           string   `json:"name_reading,omitempty"`
+	OriginalArtistReading string   `json:"original_artist_reading,omitempty"`
+	CustomTags            []string `json:"custom_tags,omitempty"`
+
 	// ---- 監査（どういう経緯でこの提案になったか） ----
 
 	// ReviewReasons は審査へ回した理由（no_end / no_artist / unmatched / …）。

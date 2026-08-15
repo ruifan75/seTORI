@@ -613,6 +613,11 @@ export interface MissingSongPayload {
   end_source?: string;
   tags?: string[];
   itunes_id?: number;
+  // 編集画面が運ぶ欄と揃える。運ばないと承認から作った曲だけ封面も読みも付かない
+  art_url?: string;
+  name_reading?: string;
+  original_artist_reading?: string;
+  custom_tags?: string[];
 
   // 監査（どういう経緯でこの提案になったか）
   review_reasons?: string[]; // no_end / no_artist / unmatched / …
