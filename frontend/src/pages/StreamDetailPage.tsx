@@ -4,7 +4,7 @@ import { useParams, Link } from 'react-router-dom';
 import { streamApi, performanceApi, aiApi, itunesApi, holodexApi, commentApi, tagApi, artistApi } from '../api/client';
 import SingerSearchInput from '../components/SingerSearchInput';
 import PerformanceFields from '../components/PerformanceFields';
-import { formatTimeInput } from '../utils/timeFormat';
+import { formatTimeInput, parseTime } from '../utils/timeFormat';
 import type { Singer, CreatePerformanceItem, AINormalizationItem, Song, UpdateStreamRequest, CommentSong, SongSuggestion, EndSource, FieldChange, ArtistAliasProposal } from '../api/types';
 import Loading from '../components/ui/Loading';
 import Tag from '../components/ui/Tag';
@@ -144,26 +144,6 @@ function formatTime(seconds: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
-function parseTime(timeStr: string): number {
-  if (!timeStr || timeStr.trim() === '') {
-    return 0;
-  }
-  
-  const parts = timeStr.split(':').map(s => {
-    const num = parseInt(s, 10);
-    return isNaN(num) ? 0 : num;
-  });
-  
-  if (parts.length === 3) {
-    return parts[0] * 3600 + parts[1] * 60 + parts[2];
-  } else if (parts.length === 2) {
-    return parts[0] * 60 + parts[1];
-  } else if (parts.length === 1) {
-    // 数字のみの場合、秒数とみなす
-    return parts[0];
-  }
-  return 0;
-}
 
 
 // 長さをフォーマットし "+MM:SS" または "+H:MM:SS" で表示

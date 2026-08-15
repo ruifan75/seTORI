@@ -1,7 +1,7 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { performanceApi, songApi, streamApi, suggestionApi } from '../../api/client';
+import { performanceApi, songApi, streamApi, suggestionApi, tagApi } from '../../api/client';
 import type {
   MissingSongPayload,
   Suggestion,
@@ -26,7 +26,7 @@ import {
 import { OverlapWarning, SuggestionChanges } from '../../components/SuggestionChanges';
 import AutoApplySettingsPanel from '../../components/AutoApplySettingsPanel';
 import { formatSeconds } from '../../components/usePerformanceTiming';
-import { youtubePlayerSeekTo } from '../../components/youtubePlayerControl';
+import { youtubePlayerGetCurrentTime, youtubePlayerSeekTo } from '../../components/youtubePlayerControl';
 
 const STATUS_TABS: { value: SuggestionStatus; label: string }[] = [
   { value: 'pending', label: '未処理' },
@@ -313,6 +313,23 @@ function GroupCard({
   const { suggestions, current } = group;
   const multiple = suggestions.length > 1;
   const [merging, setMerging] = useState(false);
+  // 審査カードは一度に 1 枚だけ開く。開いた曲へプレイヤーが飛ぶ（セットリスト編集と同じ）
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [playerTime, setPlayerTime] = useState<number | null>(null);
+
+  const { data: perfTags = [] } = useQuery({
+    queryKey: ['performance-tags'],
+    queryFn: tagApi.listPerformanceTags,
+    staleTime: 60 * 60 * 1000,
+  });
+  const performanceTags = perfTags.map((t) => ({ id: t.id, label: t.display_name, color: t.color }));
+
+  // 展開中のカードが再生位置を使うので、開いている間だけ追う
+  useEffect(() => {
+    if (!open || !openId) return;
+    const timer = setInterval(() => setPlayerTime(youtubePlayerGetCurrentTime()), 1000);
+    return () => clearInterval(timer);
+  }, [open, openId]);
 
   const playback = usePlaybackSource(group, open);
 
@@ -408,10 +425,24 @@ function GroupCard({
       <div className="mt-3 divide-y">
         {suggestions.map((s) =>
           s.kind === 'perf.missing' ? (
-            <div key={s.id} className="py-2.5">
+            <div key={s.id} className="py-1">
               <SetlistReviewCard
                 suggestion={s}
                 participants={playback.participants}
+                channelOwner={playback.channelOwner}
+                performanceTags={performanceTags}
+                currentPlayerTime={playerTime}
+                expanded={openId === s.id}
+                onExpand={() => {
+                  const next = openId === s.id ? null : s.id;
+                  setOpenId(next);
+                  // 開いた曲の頭へ飛ぶ。プレイヤーが閉じていれば開く
+                  if (next) {
+                    if (!open) onToggleOpen();
+                    const start = s.payload?.start_seconds;
+                    if (start != null) youtubePlayerSeekTo(start);
+                  }
+                }}
                 busy={busy}
                 onApprove={onApproveMissing}
                 onReject={onRejectMissing}
@@ -524,6 +555,7 @@ function usePlaybackSource(group: SuggestionGroup, open: boolean) {
     videoId,
     onReady,
     participants: stream?.participants ?? [],
+    channelOwner: stream?.channel_owner ?? null,
     existing: isStream ? (stream?.performances ?? []) : [],
   };
 }
