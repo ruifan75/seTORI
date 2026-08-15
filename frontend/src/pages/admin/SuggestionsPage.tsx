@@ -403,12 +403,7 @@ function GroupCard({
       {open && playback.videoId && (
         <div className="mt-3 space-y-3">
           <div className="aspect-video w-full bg-black rounded overflow-hidden">
-            {/* key で作り直す。YoutubePlayer は一度初期化すると videoId の変更を拾わない */}
-            <YoutubePlayer
-              key={playback.videoId}
-              videoId={playback.videoId}
-              onReady={playback.onReady}
-            />
+            <YoutubePlayer videoId={playback.videoId} onReady={playback.onReady} />
           </div>
           {/* 参考資料を左右に並べる。
               左は**今 DB に何があるか**、右は**視聴者が実際に何と書いたか**。

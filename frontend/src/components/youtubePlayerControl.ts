@@ -2,7 +2,9 @@ import type { YouTubePlayerInstance } from '../types/youtube';
 
 let playerInstance: YouTubePlayerInstance | null = null;
 
-export function setYoutubePlayerInstance(player: YouTubePlayerInstance) {
+// null を渡すと参照を捨てる。壊れたプレイヤーを作り直すとき、古い参照を
+// 残したままにすると seek や getCurrentTime が死んだ iframe を触りにいく。
+export function setYoutubePlayerInstance(player: YouTubePlayerInstance | null) {
   playerInstance = player;
 }
 
@@ -12,7 +14,12 @@ export function youtubePlayerSeekTo(seconds: number) {
 }
 
 export function youtubePlayerGetCurrentTime(): number | null {
-  return playerInstance?.getCurrentTime() ?? null;
+  try {
+    return playerInstance?.getCurrentTime() ?? null;
+  } catch {
+    // 再生が止まった直後のプレイヤーは呼び出しで投げることがある
+    return null;
+  }
 }
 
 // グローバル再生バー（PlayerBar）の YT インスタンス。
