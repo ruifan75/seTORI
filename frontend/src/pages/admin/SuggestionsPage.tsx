@@ -13,6 +13,8 @@ import Loading from '../../components/ui/Loading';
 import Pagination from '../../components/ui/Pagination';
 import MergeSuggestionsDialog from '../../components/MergeSuggestionsDialog';
 import SetlistReviewCard from '../../components/SetlistReviewCard';
+import { toFieldValues } from '../../utils/reviewDraft';
+import type { PerformanceFieldValues } from '../../components/PerformanceFields';
 import RawCommentsPanel from '../../components/RawCommentsPanel';
 import YoutubePlayer from '../../components/YoutubePlayer';
 import { useToast } from '../../components/ui/ToastContext';
@@ -317,9 +319,11 @@ function GroupCard({
   // 審査カードは一度に 1 枚だけ開く。開いた曲へプレイヤーが飛ぶ（セットリスト編集と同じ）
   const [openId, setOpenId] = useState<string | null>(null);
   const [playerTime, setPlayerTime] = useState<number | null>(null);
-  // 生コメントの ＋ から展開中のカードへ流し込む。nonce は「同じ行を二度押した」を
-  // 区別するため（値が同じでも作用させたい）
-  const [fill, setFill] = useState<{ start: number; name: string; artist: string; nonce: number } | null>(null);
+  // 審査カードの編集値は親が持つ。生コメントの ＋ から直接書き換えるため
+  const [drafts, setDrafts] = useState<Record<string, PerformanceFieldValues>>({});
+  const draftOf = (s: Suggestion) => drafts[s.id] ?? toFieldValues(s.id, s.payload!);
+  const patchDraft = (s: Suggestion, patch: Partial<PerformanceFieldValues>) =>
+    setDrafts((d) => ({ ...d, [s.id]: { ...(d[s.id] ?? toFieldValues(s.id, s.payload!)), ...patch } }));
   const isStreamGroup = group.target_type === 'stream';
 
   const { data: perfTags = [] } = useQuery({
@@ -448,9 +452,17 @@ function GroupCard({
                   <RawCommentsPanel
                     videoId={group.target_key}
                     onSeek={(sec) => youtubePlayerSeekTo(sec)}
-                    onAddSong={(input) =>
-                      setFill({ ...input, nonce: (fill?.nonce ?? 0) + 1 })
-                    }
+                    onAddSong={(input) => {
+                      // 展開中のカードへ流し込む。原文にしか無い歌手名などを
+                      // 手で打ち直さずに済ませるための経路
+                      const target = suggestions.find((s) => s.id === openId);
+                      if (!target) return;
+                      patchDraft(target, {
+                        start: input.start,
+                        name: input.name || draftOf(target).name,
+                        artist: input.artist || draftOf(target).artist,
+                      });
+                    }}
                   />
                 </div>
               </details>
@@ -470,7 +482,8 @@ function GroupCard({
                 performanceTags={performanceTags}
                 currentPlayerTime={playerTime}
                 expanded={openId === s.id}
-                fillRequest={openId === s.id ? fill : null}
+                draft={draftOf(s)}
+                onDraftChange={(patch) => patchDraft(s, patch)}
                 onExpand={() => {
                   const next = openId === s.id ? null : s.id;
                   setOpenId(next);

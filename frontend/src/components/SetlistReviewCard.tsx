@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import type { MissingSongPayload, Singer, Song, Suggestion } from '../api/types';
 import PerformanceFields, {
   type PerformanceFieldValues,
@@ -31,24 +31,6 @@ const CONFLICT_LABELS: Record<string, string> = {
 const SOURCE_LABELS: Record<string, string> = { holodex: 'Holodex', comment: 'コメント' };
 const VIA_LABELS: Record<string, string> = { rule: '規則で照合', ai: 'AI が照合' };
 
-// payload を編集欄の値へ。編集画面と同じ形にすることで PerformanceFields を共用できる。
-function toFieldValues(id: string, p: MissingSongPayload): PerformanceFieldValues {
-  return {
-    id,
-    name: p.song_name ?? '',
-    nameReading: p.name_reading ?? '',
-    artist: p.original_artist ?? '',
-    artistReading: p.original_artist_reading ?? '',
-    start: p.start_seconds ?? 0,
-    end: p.end_seconds ?? 0,
-    tags: p.tags ?? [],
-    customTags: p.custom_tags ?? [],
-    singerIds: p.singer_ids ?? [],
-    matchedSongId: p.song_id || null,
-    artUrl: p.art_url ?? null,
-    itunesId: p.itunes_id ?? null,
-  };
-}
 
 // 審査 1 件ぶんのカード。
 //
@@ -66,7 +48,8 @@ export default function SetlistReviewCard({
   performanceTags,
   currentPlayerTime,
   expanded,
-  fillRequest,
+  draft,
+  onDraftChange,
   onExpand,
   busy,
   onApprove,
@@ -78,34 +61,22 @@ export default function SetlistReviewCard({
   performanceTags: PerformanceTagOption[];
   currentPlayerTime: number | null;
   expanded: boolean;
-  // 生コメントの ＋ から流し込まれた値（展開中のカードにだけ届く）
-  fillRequest?: { start: number; name: string; artist: string; nonce: number } | null;
+  // 編集中の値は親が持つ。生コメントの ＋ から直接書き換えられるようにするため
+  // ── カードの内部 state にしていた頃は effect で流し込むしかなく、
+  // React が勧めない形（setState in effect）になっていた。
+  draft: PerformanceFieldValues;
+  onDraftChange: (patch: Partial<PerformanceFieldValues>) => void;
   onExpand: () => void;
   busy: boolean;
   onApprove: (id: string, payload: MissingSongPayload) => void;
   onReject: (id: string, note: string, notThisSong: boolean) => void;
 }) {
   const base = suggestion.payload;
-  const [draft, setDraft] = useState<PerformanceFieldValues>(() =>
-    toFieldValues(suggestion.id, base ?? ({} as MissingSongPayload))
-  );
   const [error, setError] = useState('');
-
-  // 生コメントの行から曲名・歌手・開始秒を取り込む。原文にしか無い情報
-  // （歌手名など）を手で打ち直さずに済ませるための経路。
-  useEffect(() => {
-    if (!fillRequest) return;
-    setDraft((d) => ({
-      ...d,
-      start: fillRequest.start,
-      name: fillRequest.name || d.name,
-      artist: fillRequest.artist || d.artist,
-    }));
-  }, [fillRequest?.nonce]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!base) return null;
 
-  const patch = (p: Partial<PerformanceFieldValues>) => setDraft((d) => ({ ...d, ...p }));
+  const patch = onDraftChange;
 
   // 検索結果から曲を選ぶ。id が空文字なら「iTunes にはあるが DB に無い曲」で、
   // 照合先は無いまま曲名・歌手・iTunes ID・封面だけを受け取る。
