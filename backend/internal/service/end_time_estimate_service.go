@@ -20,12 +20,12 @@ func NewEndTimeEstimateService(itunesClient *itunes.Client) *EndTimeEstimateServ
 }
 
 const (
-	DefaultSongDuration = 240 // 4 分鐘
-	MaxSongDuration     = 600 // 10 分鐘
-	MinSongDuration     = 60  // 1 分鐘
+	DefaultSongDuration = 240 // 4 分
+	MaxSongDuration     = 600 // 10 分
+	MinSongDuration     = 60  // 1 分
 )
 
-// EstimateEndTimes 推算結束時間
+// EstimateEndTimes は終了時刻を推定する。
 func (s *EndTimeEstimateService) EstimateEndTimes(req *dto.EstimateEndTimesRequest) (*dto.EstimateEndTimesResponse, error) {
 	results := make([]dto.SongEndTimeEstimate, len(req.Songs))
 
@@ -36,7 +36,7 @@ func (s *EndTimeEstimateService) EstimateEndTimes(req *dto.EstimateEndTimesReque
 
 	return &dto.EstimateEndTimesResponse{
 		Estimates: results,
-		Message:   fmt.Sprintf("已推算 %d 首歌曲的結束時間", len(results)),
+		Message:   fmt.Sprintf("%d 曲の終了時刻を推定しました", len(results)),
 	}, nil
 }
 
@@ -47,49 +47,49 @@ func (s *EndTimeEstimateService) estimateSingleSongEndTime(
 	streamEnd int,
 ) dto.SongEndTimeEstimate {
 
-	// 如果已經有結束時間，直接返回
+	// 終了時刻が既にあればそのまま返す
 	if song.End > 0 {
 		return dto.SongEndTimeEstimate{
 			EstimatedEnd:       song.End,
 			IsEndTimeEstimated: false,
 			Method:             "from_comment",
-			Reason:             "歌曲已有結束時間",
+			Reason:             "楽曲には既に終了時刻があります",
 		}
 	}
 
-	// 策略 1: 優先使用 iTunes API（如果有 iTunes ID）
+	// 方針 1：iTunes ID があれば iTunes API を優先する
 	if song.ItunesID > 0 {
 		duration, err := s.queryItunesDuration(song.ItunesID)
 		if err == nil && duration > 0 {
 			estimatedEnd := song.Start + int(duration)
-			// 檢查是否超過下一首或影片結束
+			// 次の曲の開始または動画の終了を越えないか確認する
 			estimatedEnd = s.constrainEndTime(estimatedEnd, allSongs, index, streamEnd)
 			return dto.SongEndTimeEstimate{
 				EstimatedEnd:       estimatedEnd,
 				IsEndTimeEstimated: true,
 				Method:             "from_itunes",
 				OriginalItunesDur:  int(duration),
-				Reason:             fmt.Sprintf("使用 iTunes API 查詢到歌曲長度 %d 秒", int(duration)),
+				Reason:             fmt.Sprintf("iTunes API で取得した曲の長さ：%d 秒", int(duration)),
 			}
 		}
 	}
 
-	// 策略 2: 使用下一首歌的開始時間
+	// 方針 2：次の曲の開始時刻を使う
 	if index+1 < len(allSongs) {
 		nextStart := allSongs[index+1].Start
 		duration := nextStart - song.Start
 
-		// 檢查長度是否合理
+		// 長さが妥当か確認する
 		if duration >= MinSongDuration && duration <= MaxSongDuration {
 			return dto.SongEndTimeEstimate{
 				EstimatedEnd:       nextStart,
 				IsEndTimeEstimated: true,
 				Method:             "from_next_song",
-				Reason:             fmt.Sprintf("使用下一首歌的開始時間 (%d 秒的歌曲)", duration),
+				Reason:             fmt.Sprintf("次の曲の開始時刻を使用（曲の長さ：%d 秒）", duration),
 			}
 		}
 
-		// 如果太長或太短，使用預設長度
+		// 長すぎるか短すぎる場合は既定の長さを使う
 		estimatedEnd := song.Start + DefaultSongDuration
 		if estimatedEnd > nextStart {
 			estimatedEnd = nextStart
@@ -98,11 +98,11 @@ func (s *EndTimeEstimateService) estimateSingleSongEndTime(
 			EstimatedEnd:       estimatedEnd,
 			IsEndTimeEstimated: true,
 			Method:             "from_default",
-			Reason:             fmt.Sprintf("推算長度 %d 秒（已調整至合理範圍）", estimatedEnd-song.Start),
+			Reason:             fmt.Sprintf("推定した長さ：%d 秒（妥当な範囲に調整済み）", estimatedEnd-song.Start),
 		}
 	}
 
-	// 策略 3: 最後一首歌，使用影片結束時間
+	// 方針 3：最後の曲には動画の終了時刻を使う
 	if streamEnd > 0 && streamEnd > song.Start {
 		duration := streamEnd - song.Start
 		if duration <= MaxSongDuration {
@@ -110,38 +110,38 @@ func (s *EndTimeEstimateService) estimateSingleSongEndTime(
 				EstimatedEnd:       streamEnd,
 				IsEndTimeEstimated: true,
 				Method:             "from_stream_end",
-				Reason:             fmt.Sprintf("使用影片結束時間 (%d 秒的歌曲)", duration),
+				Reason:             fmt.Sprintf("動画の終了時刻を使用（曲の長さ：%d 秒）", duration),
 			}
 		}
 
-		// 如果太長，使用預設長度
+		// 長すぎる場合は既定の長さを使う
 		estimatedEnd := song.Start + DefaultSongDuration
 		return dto.SongEndTimeEstimate{
 			EstimatedEnd:       estimatedEnd,
 			IsEndTimeEstimated: true,
 			Method:             "from_default",
-			Reason:             fmt.Sprintf("影片剩餘時間過長，改用預設 %d 秒", DefaultSongDuration),
+			Reason:             fmt.Sprintf("動画の残り時間が長すぎるため、既定の %d 秒を使用", DefaultSongDuration),
 		}
 	}
 
-	// 策略 4: 使用預設長度
+	// 方針 4：既定の長さを使う
 	estimatedEnd := song.Start + DefaultSongDuration
 	return dto.SongEndTimeEstimate{
 		EstimatedEnd:       estimatedEnd,
 		IsEndTimeEstimated: true,
 		Method:             "from_default",
-		Reason:             fmt.Sprintf("無其他資訊，使用預設歌曲長度 %d 秒", DefaultSongDuration),
+		Reason:             fmt.Sprintf("他の情報がないため、既定の曲の長さ %d 秒を使用", DefaultSongDuration),
 	}
 }
 
-// constrainEndTime 確保結束時間在合理範圍內
+// constrainEndTime は終了時刻を妥当な範囲に収める。
 func (s *EndTimeEstimateService) constrainEndTime(
 	estimatedEnd int,
 	allSongs []dto.SongEndTimeEstimateRequest,
 	currentIndex int,
 	streamEnd int,
 ) int {
-	// 不應超過下一首歌的開始時間
+	// 次の曲の開始時刻を越えないようにする
 	if currentIndex+1 < len(allSongs) {
 		nextStart := allSongs[currentIndex+1].Start
 		if estimatedEnd > nextStart {
@@ -149,7 +149,7 @@ func (s *EndTimeEstimateService) constrainEndTime(
 		}
 	}
 
-	// 不應超過影片結束時間
+	// 動画の終了時刻を越えないようにする
 	if streamEnd > 0 && estimatedEnd > streamEnd {
 		estimatedEnd = streamEnd
 	}
@@ -157,13 +157,13 @@ func (s *EndTimeEstimateService) constrainEndTime(
 	return estimatedEnd
 }
 
-// queryItunesDuration 查詢 iTunes API 獲取歌曲長度（秒）
+// queryItunesDuration は iTunes API から曲の長さ（秒）を取得する。
 func (s *EndTimeEstimateService) queryItunesDuration(itunesID int64) (int, error) {
 	if s.itunesClient == nil {
 		return 0, fmt.Errorf("iTunes client not initialized")
 	}
 
-	// 使用 iTunes Lookup API 查詢
+	// iTunes Lookup API で照会する
 	result, err := s.itunesClient.QueryByID(itunesID)
 	if err != nil {
 		return 0, fmt.Errorf("query iTunes: %w", err)
@@ -178,19 +178,19 @@ func (s *EndTimeEstimateService) queryItunesDuration(itunesID int64) (int, error
 		return 0, fmt.Errorf("invalid track duration: %d", trackTime)
 	}
 
-	// 轉換為秒
+	// 秒に変換する
 	durationSeconds := int(trackTime / 1000)
 	return durationSeconds, nil
 }
 
-// ParseTimestamp 解析時間戳為秒數（用於後續擴展）
+// ParseTimestamp はタイムスタンプを秒数に変換する（今後の拡張用）。
 func ParseTimestamp(ts string) int {
 	parts := regexp.MustCompile(`(\d+):(\d+)(?::(\d+))?`).FindStringSubmatch(ts)
 	if len(parts) < 3 {
 		return 0
 	}
 
-	// 處理 HH:MM:SS 或 MM:SS 格式
+	// HH:MM:SS または MM:SS 形式を処理する
 	if len(parts) == 4 && parts[3] != "" {
 		// HH:MM:SS
 		hours := 0
@@ -210,7 +210,7 @@ func ParseTimestamp(ts string) int {
 	return minutes*60 + seconds
 }
 
-// AddRate limiting 避免過度查詢 iTunes API
+// AddRate limiting は iTunes API への過剰な問い合わせを防ぐ。
 func (s *EndTimeEstimateService) addRateLimit() {
 	time.Sleep(100 * time.Millisecond)
 }

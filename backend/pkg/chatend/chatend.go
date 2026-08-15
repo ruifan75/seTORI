@@ -1,11 +1,12 @@
-// Package chatend 從 YouTube live chat replay 偵測每首歌的結束時間。
+// Package chatend は YouTube live chat replay から各曲の終了時刻を検出する。
 //
-// 原理：歌回沒有現場掌聲，但歌一結束觀眾會在 chat 刷「純拍手」(888 / 拍手 / :clapping_hands: / 👏)。
-// 對每首歌（以 setlist 的 start 為輸入），在 (start+MinSong, next_start) 區間找「最大的純拍手群」，
-// 取該群的起拍時刻 − ReactionLag 當作結束。全庫 1445 首實證 MAE 2.18s / 99% 在 ±10s 內。
+// 原理：歌枠には会場の拍手はないが、歌が終わると視聴者が chat に「拍手だけ」
+// (888 / 拍手 / :clapping_hands: / 👏) を連投する。各曲について setlist の start を入力とし、
+// (start+MinSong, next_start) の区間で最大の拍手群を探し、その群の開始時刻 − ReactionLag を終了時刻とする。
+// 全 1,445 曲での実測は MAE 2.18 秒、99% が ±10 秒以内。
 //
-// 這是純文字邏輯（無外部依賴）。原型是一個獨立的 Python 工具（已不在本專案內），
-// 本實作沿用其預設參數。
+// これはテキストだけで完結するロジック（外部依存なし）。原型は独立した Python ツール
+// （現在はこのプロジェクトに含まれない）で、本実装はその既定パラメータを引き継いでいる。
 package chatend
 
 import (
@@ -18,54 +19,54 @@ import (
 	"sort"
 )
 
-// Event 一則 chat 留言（影片內秒數 + 文字）。
+// Event は chat の 1 コメント（動画内の秒数 + テキスト）。
 type Event struct {
 	T    float64
 	Text string
 }
 
-// EndEstimate 單首歌的結束時間估計。End 為 nil 表示找不到拍手。
+// EndEstimate は 1 曲の終了時刻の推定結果。End が nil なら拍手が見つからなかったことを示す。
 type EndEstimate struct {
 	Start      float64
 	End        *float64
 	Confidence float64
 }
 
-// Options 偵測參數（預設值見 DefaultOptions）。
+// Options は検出パラメータ（既定値は DefaultOptions を参照）。
 type Options struct {
-	BinS         float64 // 時間分箱大小
-	ReactionLagS float64 // 起拍時刻 − 此值 = 真實 end
-	MinSpike     int     // 一個 bin 至少幾則拍手才算「群」的一部分
-	MinSongS     float64 // 最短歌長，避免抓到開頭的拍手
-	GapMergeS    float64 // 相鄰拍手 bin 間隔 ≤ 此值併為同一群
+	BinS         float64 // 時間 bin の幅
+	ReactionLagS float64 // 拍手開始時刻 − この値 = 実際の終了時刻
+	MinSpike     int     // 1 つの bin に最低何件の拍手があれば「群」の一部とみなすか
+	MinSongS     float64 // 最短曲長。冒頭の拍手を拾わないため
+	GapMergeS    float64 // 隣接する拍手 bin の間隔がこの値以下なら同じ群にまとめる
 }
 
-// DefaultOptions 回傳經全庫調校的預設參數。
+// DefaultOptions は全データで調整した既定パラメータを返す。
 func DefaultOptions() Options {
 	return Options{BinS: 2.0, ReactionLagS: 2.0, MinSpike: 3, MinSongS: 45.0, GapMergeS: 8.0}
 }
 
-// 「純拍手」token；與 Python _APPLAUSE_TOKEN 對齊。
+// 「拍手のみ」のトークン。Python の _APPLAUSE_TOKEN と同じ定義にする。
 var applauseRe = regexp.MustCompile(`(?i)(8{3,}|ぱち|パチ|拍手|:clapping_hands:|:clap\w*:|👏|🎉|🥳)`)
 
-// 拿掉拍手 token 後，剩下的「可忽略字元」(空白/標點/笑)；與 Python _TRIVIAL 對齊。
+// 拍手トークンを除いた後に残る「無視できる文字」（空白・句読点・笑）。Python の _TRIVIAL と同じ定義にする。
 var trivialRe = regexp.MustCompile(`[\s：:、。!！?？~〜ーｗw♪…_\-]+`)
 
-// IsPureApplause 判斷整則留言是否「只含拍手」(沒有其他文字或非拍手 emote)。
+// IsPureApplause はコメント全体が「拍手だけ」か判定する（他の文字や拍手以外の emote がないこと）。
 func IsPureApplause(text string) bool {
 	stripped := applauseRe.ReplaceAllString(text, "")
 	if stripped == text {
-		return false // 完全沒有拍手 token
+		return false // 拍手 token が一つもない
 	}
-	return trivialRe.ReplaceAllString(stripped, "") == "" // 去掉拍手後沒剩別的
+	return trivialRe.ReplaceAllString(stripped, "") == "" // 拍手を除いた後に何も残らない
 }
 
-// DetectEnds 對每首歌（以 starts 為輸入）偵測拍手結束時間。
+// DetectEnds は各曲について starts を入力として拍手による終了時刻を検出する。
 func DetectEnds(starts []float64, events []Event, streamEnd float64, opt Options) []EndEstimate {
 	sorted := append([]float64(nil), starts...)
 	sort.Float64s(sorted)
 
-	// 純拍手事件時刻（排序）
+	// 拍手だけのイベント時刻（並び替え済み）
 	var apTimes []float64
 	for _, e := range events {
 		if IsPureApplause(e.Text) {
@@ -122,7 +123,7 @@ func DetectEnds(starts []float64, events []Event, streamEnd float64, opt Options
 
 		var end, conf float64
 		if maxC >= opt.MinSpike {
-			// 顯著 bin → 分群
+			// 有意な bin をグループ化する
 			var sigIdx []int
 			for k, c := range win {
 				if c >= opt.MinSpike {
@@ -147,7 +148,7 @@ func DetectEnds(starts []float64, events []Event, streamEnd float64, opt Options
 				}
 				return best
 			}
-			// select=peak：選峰值最大的群（=曲末集體拍手）
+			// select=peak：ピークが最大の群を選ぶ（＝曲末の集団拍手）
 			ci, bestPeak := 0, -1
 			for j, cl := range clusters {
 				if p := win[peakIdx(cl)]; p > bestPeak {
@@ -155,7 +156,7 @@ func DetectEnds(starts []float64, events []Event, streamEnd float64, opt Options
 				}
 			}
 			cl := clusters[ci]
-			// 該群的起拍時刻（精確到事件）
+			// その群の拍手開始時刻（イベント単位の精度）
 			tLo := float64(lo+cl[0]) * opt.BinS
 			tHi := float64(lo+cl[len(cl)-1]+1) * opt.BinS
 			onset := tLo
@@ -173,7 +174,7 @@ func DetectEnds(starts []float64, events []Event, streamEnd float64, opt Options
 				conf = 1
 			}
 		} else {
-			// 稀疏：用最早的一則拍手
+			// 疎な場合は最初の拍手を使う
 			var first float64
 			found := false
 			for _, t := range apTimes {
@@ -202,7 +203,7 @@ func DetectEnds(starts []float64, events []Event, streamEnd float64, opt Options
 	return results
 }
 
-// ---- live chat JSONL 解析（yt-dlp --write-subs --sub-langs live_chat 的輸出）----
+// ---- live chat JSONL の解析（yt-dlp --write-subs --sub-langs live_chat の出力）----
 
 type liveChatLine struct {
 	Replay struct {
@@ -229,10 +230,10 @@ type chatRenderer struct {
 	} `json:"message"`
 }
 
-// ParseLiveChat 解析 live_chat.json（JSONL，每行一個 replay action）。
+// ParseLiveChat は live_chat.json（1 行に 1 replay action の JSONL）を解析する。
 func ParseLiveChat(r io.Reader) ([]Event, error) {
 	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 0, 1024*1024), 16*1024*1024) // 單行可能很長
+	sc.Buffer(make([]byte, 0, 1024*1024), 16*1024*1024) // 1 行が長い場合がある
 	var events []Event
 	for sc.Scan() {
 		line := sc.Bytes()
@@ -241,7 +242,7 @@ func ParseLiveChat(r io.Reader) ([]Event, error) {
 		}
 		var lc liveChatLine
 		if err := json.Unmarshal(line, &lc); err != nil {
-			continue // 略過壞行
+			continue // 壊れた行をスキップする
 		}
 		if lc.Replay.OffsetMs == "" {
 			continue
@@ -278,7 +279,7 @@ func ParseLiveChat(r io.Reader) ([]Event, error) {
 	return events, nil
 }
 
-// ParseLiveChatFile 從檔案讀取並解析 live chat。
+// ParseLiveChatFile はファイルから live chat を読み込んで解析する。
 func ParseLiveChatFile(path string) ([]Event, error) {
 	f, err := os.Open(path)
 	if err != nil {

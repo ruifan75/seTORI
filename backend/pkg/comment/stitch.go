@@ -5,26 +5,26 @@ import (
 	"strings"
 )
 
-// 兩行式セトリの縫合前處理。
-// 有些留言會把時間戳和歌名拆成兩行：
+// 2 行形式のセットリストを結合する前処理。
+// コメントによってはタイムスタンプと曲名が 2 行に分かれている：
 //
 //	17:51    with 水科葵
 //	セブンティーン / YOASOBI
 //
-// 逐行解析會把沒有時間戳的歌名行丟掉，所以在進入正則/AI 解析之前，
-// 先把「時間戳行（後面只有合唱者資訊或空白）+ 緊接的無時間戳行」併成一行。
-// 合併時把歌名行放在時間戳後面、合唱者資訊移到最後一個 / 欄位，
-// 讓 parseSongAndArtist 的「取前兩欄」規則能直接解出正確的歌名/歌手。
+// 行単位で解析するとタイムスタンプのない曲名行が捨てられるため、正規表現／AI 解析の前に、
+// 「タイムスタンプ行（後ろはコラボ相手の情報または空白のみ）+ 直後のタイムスタンプなし行」を 1 行にまとめる。
+// 結合時は曲名行をタイムスタンプの後ろへ置き、コラボ相手の情報を最後の / フィールドへ移す。
+// これにより parseSongAndArtist の「先頭 2 フィールドを使う」規則で曲名と歌手を正しく解析できる。
 
-// collabMarkerRe 匹配「整段剩餘文字是合唱者資訊」的開頭標記（with ○○、feat. ○○ 等）
+// collabMarkerRe は「残りの文字列全体がコラボ相手の情報」であることを示す先頭マーカー（with ○○、feat. ○○ など）に一致する。
 var collabMarkerRe = regexp.MustCompile(`(?i)^(?:with\b|w/|feat(?:\.|\b)|ft(?:\.|\b)|[×✕✖]|コラボ|ゲスト)`)
 
-// stitchMinTimestampLines 留言內含時間戳的行數達到此值才視為セトリ並啟用縫合。
-// 避免「12:08 13:17 + 下一行歌詞引用」之類的單則感想留言被誤併成假歌曲。
+// stitchMinTimestampLines はコメント内のタイムスタンプ付き行がこの数以上ならセットリストとみなし、結合を有効にする。
+// 「12:08 13:17 + 次の行に歌詞の引用」のような単発の感想コメントが誤って楽曲に結合されるのを防ぐ。
 const stitchMinTimestampLines = 3
 
-// stitchTwoLineEntries 將兩行式歌曲條目併成一行，其他行原樣保留。
-// 輸入是單一留言拆行後的結果（縫合門檻以單一留言為單位計算）。
+// stitchTwoLineEntries は 2 行形式の楽曲項目を 1 行にまとめ、その他の行はそのまま残す。
+// 入力は一つのコメントを行分割した結果で、結合の閾値もコメント単位で計算する。
 func stitchTwoLineEntries(lines []string) []string {
 	if countTimestampLines(lines) < stitchMinTimestampLines {
 		return lines
@@ -42,12 +42,12 @@ func stitchTwoLineEntries(lines []string) []string {
 		remainder := trimLeadingSeparators(strings.TrimSpace(line[tsEnd:]))
 		collabOnly := remainder != "" && collabMarkerRe.MatchString(remainder)
 		if remainder != "" && !collabOnly {
-			// 時間戳後已有歌名 → 一般的一行式條目
+			// タイムスタンプの後ろに曲名があれば通常の 1 行形式
 			out = append(out, lines[i])
 			continue
 		}
 
-		// 只在「緊接的下一行」非空且沒有時間戳時合併，避免跨過空行誤抓無關文字
+		// 直後の行が空でなくタイムスタンプもない場合だけ結合し、空行をまたいで無関係な文を拾わない
 		if i+1 >= len(lines) {
 			out = append(out, lines[i])
 			continue
@@ -78,7 +78,7 @@ func countTimestampLines(lines []string) int {
 	return n
 }
 
-// lastTimestampEnd 回傳行內最後一個時間戳結束的位置，沒有時間戳則回傳 -1
+// lastTimestampEnd は行内で最後のタイムスタンプが終わる位置を返し、なければ -1 を返す。
 func lastTimestampEnd(line string) int {
 	locs := timestampRe.FindAllStringIndex(line, -1)
 	if len(locs) == 0 {

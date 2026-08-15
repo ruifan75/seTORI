@@ -249,7 +249,7 @@ func (s *BackupService) dumpToFile(name string) (string, error) {
 	closeErr := out.Close()
 	if runErr != nil {
 		os.Remove(tmp)
-		return "", fmt.Errorf("pg_dump 失敗: %v: %s", runErr, truncateStr(stderr.String(), 300))
+		return "", fmt.Errorf("pg_dump に失敗: %v: %s", runErr, truncateStr(stderr.String(), 300))
 	}
 	if closeErr != nil {
 		os.Remove(tmp)
@@ -536,7 +536,7 @@ func (s *BackupService) restore(path string) error {
 	cmd.Stdin = f
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("pg_restore 失敗: %v: %s", err, truncateStr(stderr.String(), 300))
+		return fmt.Errorf("pg_restore に失敗: %v: %s", err, truncateStr(stderr.String(), 300))
 	}
 
 	// 復元したダンプが古いスキーマでも、マイグレーションで最新に追いつかせる

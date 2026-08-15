@@ -106,7 +106,7 @@ const api = axios.create({
   },
 });
 
-// 認證：ログイン中のセッショントークンを保持。無い場合は環境変数 VITE_API_TOKEN
+// 認証：ログイン中のセッショントークンを保持。無い場合は環境変数 VITE_API_TOKEN
 // （旧来の静的トークン）にフォールバックする。auth store が setAuthToken で更新する。
 const ENV_API_TOKEN = import.meta.env.VITE_API_TOKEN as string | undefined;
 let authToken: string | null = null;
@@ -129,7 +129,7 @@ export function setUnauthorizedHandler(fn: (() => void) | null) {
   onUnauthorized = fn;
 }
 
-// 錯誤攔截器 - 提取後端錯誤訊息
+// エラーインターセプター：バックエンドのエラーメッセージを取り出す
 api.interceptors.response.use(
   (response) => response,
   (error) => {
@@ -138,7 +138,7 @@ api.interceptors.response.use(
     if (error.response?.status === 401 && !url.includes('/api/auth/login')) {
       onUnauthorized?.();
     }
-    // 提取後端回傳的錯誤訊息
+    // バックエンドから返されたエラーメッセージを取り出す
     if (error.response?.data?.error) {
       error.message = error.response.data.error;
     } else if (!error.response) {
@@ -148,7 +148,7 @@ api.interceptors.response.use(
   }
 );
 
-// ========== 歌曲 API ==========
+// ========== 楽曲 API ==========
 
 export const songApi = {
   list: async (page = 1, limit = 20, search?: string, sort?: string, dir?: string): Promise<SongListResponse> => {
@@ -239,7 +239,7 @@ export const songApi = {
 // どちらも照合の結果を左右するので content:edit が要る。
 
 
-// ========== 歌回 API ==========
+// ========== 歌枠 API ==========
 
 export const streamApi = {
   list: async (page = 1, limit = 20, sort?: string, dir?: string): Promise<StreamListResponse> => {
@@ -266,7 +266,7 @@ export const streamApi = {
   },
 };
 
-// ========== 演唱者 API ==========
+// ========== 歌手 API ==========
 
 export const singerApi = {
   // includeHidden は content:edit を持つ場合のみ有効（無ければサーバー側で無視される）
@@ -326,7 +326,7 @@ export const singerApi = {
     return data;
   },
 
-  // 新增 singer（優先 Holodex，找不到時 fallback 到 YouTube Data API）
+  // singer を追加する（Holodex を優先し、見つからなければ YouTube Data API へフォールバック）
   create: async (channelInput: string): Promise<CreateSingerResponse> => {
     const { data } = await api.post('/api/singers', { id: channelInput });
     return data;
@@ -376,7 +376,7 @@ export const organizationApi = {
   },
 };
 
-// ========== Holodex 同步 API ==========
+// ========== Holodex 同期 API ==========
 
 export const holodexApi = {
   syncChannel: async (req: SyncHolodexRequest): Promise<SyncHolodexResponse> => {
@@ -474,7 +474,7 @@ export const batchFillApi = {
     const { data } = await api.post(`/api/streams/batch-fill/runs/${runId}/revert`);
     return data;
   },
-  // その実行で「DB にあるが源に無い」と分かった既存の歌唱。
+  // その実行で「DB にあるが入力元に無い」と分かった既存の歌唱。
   // 提案としては積まないので、実行履歴からここへ辿るのが唯一の入口。
   gaps: async (runId: string): Promise<{ gaps: BatchFillGap[] }> => {
     const { data } = await api.get(`/api/streams/batch-fill/runs/${runId}/gaps`);
@@ -484,7 +484,7 @@ export const batchFillApi = {
 
 export const batchAnalyzeApi = {
   // 一括プレ分析を開始（背景ジョブ・singleton）
-  // mode: unanalyzed（未分析のみ）/ unprocessed（未処理すべて）/ refresh（コメント再取得）/ reanalyze（全部再分析）
+  // mode: unanalyzed（未分析のみ）/ unprocessed（未処理すべて）/ refresh（コメント再取得）/ reanalyze（すべて再分析）
   // singerId: 対象チャンネル（空なら全チャンネル）
   start: async (mode: string, singerId?: string): Promise<{ message: string }> => {
     const { data } = await api.post('/api/streams/batch-analyze', {
@@ -505,22 +505,22 @@ export const batchAnalyzeApi = {
   },
 };
 
-// ========== 演出 API ==========
+// ========== 歌唱 API ==========
 
 export const performanceApi = {
-  // 從 Holodex 載入歌曲（不加入正規化佇列）
+  // Holodex から楽曲を読み込む（正規化キューには追加しない）
   loadHolodexSongs: async (streamId: string): Promise<LoadHolodexSongsResponse> => {
     const { data } = await api.get(`/api/streams/${streamId}/holodex-songs`);
     return data;
   },
 
-  // 直接建立演出記錄
+  // 歌唱記録を直接作成する
   create: async (streamId: string, req: CreatePerformancesRequest): Promise<CreatePerformancesResponse> => {
     const { data } = await api.post(`/api/streams/${streamId}/performances`, req);
     return data;
   },
 
-  // 刪除指定 stream 的所有演出記錄
+  // 指定した配信の歌唱記録をすべて削除する
   deleteAll: async (streamId: string): Promise<SuccessResponse> => {
     const { data } = await api.delete(`/api/streams/${streamId}/performances`);
     return data;
@@ -543,7 +543,7 @@ export const performanceApi = {
 // ========== AI 正規化 API ==========
 
 export const aiApi = {
-  // 批量 AI 正規化
+  // AI 正規化を一括実行する
   normalize: async (req: BatchAINormalizationRequest): Promise<BatchAINormalizationResponse> => {
     const { data } = await api.post('/api/ai/normalize', req);
     return data;
@@ -553,14 +553,14 @@ export const aiApi = {
 // ========== iTunes API ==========
 
 export const itunesApi = {
-  // 搜尋 iTunes
+  // iTunes を検索する
   search: async (songName: string): Promise<ITunesSearchResponse> => {
     const params = new URLSearchParams({ term: songName });
     const { data } = await api.get(`/api/itunes/search?${params}`);
     return data;
   },
 
-  // 查詢 iTunes ID 取得詳細資訊
+  // iTunes ID で詳細情報を取得する
   queryById: async (itunesId: number): Promise<ITunesQueryResult> => {
     const { data } = await api.get(`/api/itunes/${itunesId}`);
     return data;
@@ -633,7 +633,7 @@ export const tagApi = {
   },
 };
 
-// ========== 首頁（おすすめ） API ==========
+// ========== ホーム（おすすめ）API ==========
 
 export const homeApi = {
   // 曲単位で重複しないランダムな歌唱。追加読み込み時は既出の曲 ID を除外する。
@@ -691,13 +691,13 @@ export const aiProviderApi = {
     await api.delete(`/api/ai-providers/${id}`);
   },
 
-  // 透過 provider 已儲存的 API key 查詢可用 model 清單
+  // プロバイダーに保存済みの API key で利用可能なモデル一覧を取得する
   listModels: async (id: number): Promise<AIModelInfo[]> => {
     const { data } = await api.get(`/api/ai-providers/${id}/models`);
     return data.models ?? [];
   },
 
-  // 用尚未儲存的 base_url + api_key 查詢可用 model（新增表單用）
+  // 未保存の base_url と api_key で利用可能なモデルを取得する（新規追加フォーム用）
   previewModels: async (input: { base_url: string; api_key: string }): Promise<AIModelInfo[]> => {
     const { data } = await api.post('/api/ai-providers/models/preview', input);
     return data.models ?? [];
@@ -987,7 +987,7 @@ export const searchApi = {
   },
 };
 
-// ========== 認證 API ==========
+// ========== 認証 API ==========
 
 export const authApi = {
   login: async (username: string, password: string): Promise<LoginResponse> => {

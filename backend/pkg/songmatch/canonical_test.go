@@ -101,7 +101,7 @@ func TestParseArtist(t *testing.T) {
 	}
 }
 
-// TestCompareArtists_RealMisses は逐字一致で落ちていたアーティスト表記。
+// TestCompareArtists_RealMisses は文字列の完全一致で落ちていたアーティスト表記。
 func TestCompareArtists_RealMisses(t *testing.T) {
 	tests := []struct {
 		comment string

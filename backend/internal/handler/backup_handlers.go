@@ -151,7 +151,7 @@ func (r *Router) handleGDriveAuthPoll(w http.ResponseWriter, req *http.Request) 
 // handleGDriveDisconnect は連携を解除する。
 func (r *Router) handleGDriveDisconnect(w http.ResponseWriter, req *http.Request) {
 	if err := r.backupService.DisconnectDrive(); err != nil {
-		respondError(w, http.StatusInternalServerError, fmt.Sprintf("連携解除失敗: %v", err))
+		respondError(w, http.StatusInternalServerError, fmt.Sprintf("連携解除に失敗: %v", err))
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"message": "Google Drive 連携を解除しました"})

@@ -24,7 +24,7 @@ const BATCH_MODES = [
   },
   {
     value: 'reanalyze',
-    label: '全部再分析（force）',
+    label: 'すべて再分析（force）',
     description:
       '対象のすべての配信を最新の解析ロジックで作り直す（分析済みも含む）。誤検出フィルタ強化後に古いキャッシュを更新したいとき用。AI を呼び直すため時間がかかります。',
   },
@@ -56,7 +56,7 @@ export default function SyncPage() {
   // ゲスト参加した他人の配信まで巻き込まないようにしてある。
   const [fillSingerIds, setFillSingerIds] = useState<string[]>([]);
   const [fillIncludeCollabs, setFillIncludeCollabs] = useState(false);
-  // 「源に無い」の内訳を開いている実行（一度に 1 つ）
+  // 「入力元に無い」の内訳を開いている実行（一度に 1 つ）
   const [openGapRun, setOpenGapRun] = useState<string | null>(null);
 
   const { data: fillStatus } = useQuery({
@@ -176,7 +176,7 @@ export default function SyncPage() {
 
           <div>
             <label htmlFor="syncMode" className="block text-sm font-medium text-gray-700 mb-1">
-              同步模式
+              同期モード
             </label>
             <select
               id="syncMode"
@@ -184,8 +184,8 @@ export default function SyncPage() {
               onChange={(e) => setSyncMode(e.target.value as 'new' | 'all')}
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
             >
-              <option value="new">只同步新的影片</option>
-              <option value="all">同步所有影片（包含更新）</option>
+              <option value="new">新しい動画のみ同期</option>
+              <option value="all">すべての動画を同期（更新を含む）</option>
             </select>
           </div>
 
@@ -198,7 +198,7 @@ export default function SyncPage() {
           </button>
         </form>
 
-        {/* Progress - 由於 API 是同步的，無法顯示即時進度 */}
+        {/* 進捗：API が同期処理のため、リアルタイムの進捗は表示できない */}
         {syncChannelMutation.isPending && (
           <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
             <h3 className="font-medium text-blue-800 mb-2">同期中...</h3>
@@ -399,7 +399,7 @@ export default function SyncPage() {
               className="border border-gray-300 rounded-lg px-3 py-2"
             >
               <option value="unprocessed">歌唱がまだ無い配信だけ</option>
-              <option value="force">源を持つ配信すべて（既存と違う分は審査へ）</option>
+              <option value="force">入力元を持つ配信すべて（既存と違う分は審査へ）</option>
             </select>
           </label>
           <label className="text-sm">
@@ -485,8 +485,8 @@ export default function SyncPage() {
                   <th className="py-2 pr-3">対象</th>
                   <th className="py-2 pr-3">作成</th>
                   <th className="py-2 pr-3">審査</th>
-                  <th className="py-2 pr-3" title="DB にあるが、今回の源には出てこなかった歌唱">
-                    源に無い
+                  <th className="py-2 pr-3" title="DB にあるが、今回の入力元には出てこなかった歌唱">
+                    入力元に無い
                   </th>
                   <th className="py-2 pr-3">状態</th>
                   <th className="py-2"></th>
@@ -521,7 +521,7 @@ export default function SyncPage() {
                           <button
                             onClick={() => setOpenGapRun(openGapRun === run.id ? null : run.id)}
                             className="text-gray-600 underline hover:text-gray-900"
-                            title="DB にあるが、今回の源には出てこなかった歌唱を一覧する"
+                            title="DB にあるが、今回の入力元には出てこなかった歌唱を一覧する"
                           >
                             {run.songs_gap}
                           </button>
@@ -563,11 +563,11 @@ export default function SyncPage() {
   );
 }
 
-// GapList は「DB にあるが、その実行の源には出てこなかった」歌唱を並べる。
+// GapList は「DB にあるが、その実行の入力元には出てこなかった」歌唱を並べる。
 //
 // **これらは審査待ちとして積んでいない。** 源（Holodex のセットリストもコメントも）は
 // 欠けているのが普通なので、欠落 1 件ごとに待ち行列を作ると人が処理できない量になり、
-// しかも「源に無い」だけでは何をすべきか決まらない（消すべきとは限らない）。
+// しかも「入力元に無い」だけでは何をすべきか決まらない（消すべきとは限らない）。
 // 気付けるようにはしておきたいので、実行履歴から辿れる形にだけしてある。
 function GapList({ runId }: { runId: string }) {
   const { data, isLoading } = useQuery({
@@ -593,8 +593,8 @@ function GapList({ runId }: { runId: string }) {
   return (
     <div className="space-y-2">
       <p className="text-xs text-gray-500">
-        すでに登録されている歌唱のうち、この実行で読んだ源には出てこなかったものです。
-        源の取りこぼしのことも、登録が誤っていることもあるので、自動では何もしていません。
+        すでに登録されている歌唱のうち、この実行で読んだ入力元には出てこなかったものです。
+        入力元の取りこぼしのことも、登録が誤っていることもあるので、自動では何もしていません。
       </p>
       {[...byStream.entries()].map(([streamId, list]) => (
         <div key={streamId} className="text-xs">

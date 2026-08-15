@@ -2,7 +2,7 @@ package comment
 
 import "testing"
 
-// qvoNHajaMlg のセトリ留言：合唱曲は「時間戳+with ○○」と「歌名/歌手」の兩行式
+// qvoNHajaMlg のセットリストコメント：コラボ曲は「タイムスタンプ+with ○○」と「曲名/歌手」の 2 行形式。
 const qvoNHajaMlgSetlist = `お誕生日おめでとうございます
 セトリです
 /
@@ -46,7 +46,7 @@ func TestParseCommentsTwoLineEntries(t *testing.T) {
 	}
 
 	if len(songs) != len(want) {
-		t.Fatalf("ParseComments 解析出 %d 首，期望 %d 首: %+v", len(songs), len(want), songs)
+		t.Fatalf("ParseComments が %d 曲を解析、期待値は %d 曲: %+v", len(songs), len(want), songs)
 	}
 	for i, w := range want {
 		got := songs[i]
@@ -57,7 +57,7 @@ func TestParseCommentsTwoLineEntries(t *testing.T) {
 	}
 }
 
-// 時間戳單獨一行、歌名在下一行的格式也要能縫合
+// タイムスタンプだけの行に曲名の行が続く形式も結合できること。
 func TestStitchTimestampOnlyLines(t *testing.T) {
 	songs := ParseComments([]string{`セトリ
 5:27
@@ -68,14 +68,14 @@ vivid / 花鋏キョウ
 mist / 花鋏キョウ`})
 
 	if len(songs) != 3 {
-		t.Fatalf("解析出 %d 首，期望 3 首: %+v", len(songs), songs)
+		t.Fatalf("%d 曲を解析、期待値は 3 曲: %+v", len(songs), songs)
 	}
 	if songs[1].Name != "セブンティーン" || songs[1].OriginalArtist != "YOASOBI" || songs[1].Start != 17*60+51 {
-		t.Errorf("songs[1] = %+v，期望 セブンティーン / YOASOBI @17:51", songs[1])
+		t.Errorf("songs[1] = %+v、期待値は セブンティーン / YOASOBI @17:51", songs[1])
 	}
 }
 
-// 時間戳行數不足門檻的留言（如歌詞引用感想）不可縫合出假歌曲
+// タイムスタンプ行が閾値未満のコメント（歌詞引用の感想など）から偽の楽曲を結合してはならない。
 func TestStitchSkipsNonSetlistComments(t *testing.T) {
 	songs := ParseComments([]string{`12:08 13:17
 "You are between Light and Shadow
@@ -84,11 +84,11 @@ Dance between Light and Shadow"
 These 2 point are same in original, But I feel like it have slightly difference here !  So good`})
 
 	if len(songs) != 0 {
-		t.Errorf("感想留言不應縫合出歌曲，got %+v", songs)
+		t.Errorf("感想コメントから楽曲を結合すべきではない, got %+v", songs)
 	}
 }
 
-// 一行式セトリ內、歌名恰好以 with/feat 開頭的曲目不可觸發合併
+// 1 行形式のセットリストで曲名が with/feat から始まっていても、結合を発動してはならない。
 func TestStitchDoesNotMergeAcrossBlankLines(t *testing.T) {
 	lines := []string{
 		"5:27 vivid / 花鋏キョウ",
@@ -98,13 +98,13 @@ func TestStitchDoesNotMergeAcrossBlankLines(t *testing.T) {
 		"41:08 ルーマー / ポリスピカデリー",
 	}
 	out := stitchTwoLineEntries(lines)
-	// 下一行是空行 → 不合併，原樣保留
+	// 次の行が空行なら結合せず、そのまま残す
 	if len(out) != len(lines) {
-		t.Errorf("空行後不應合併，got %d 行: %q", len(out), out)
+		t.Errorf("空行の後を結合すべきではない, got %d 行: %q", len(out), out)
 	}
 }
 
-// AI 把縫合行的合唱資訊照抄進 artist 時，應被裁回純歌手名
+// AI が結合行のコラボ情報まで artist にコピーした場合は、歌手名だけに切り戻す。
 func TestParseCommentsWithAICleansStitchedArtist(t *testing.T) {
 	fake := fakeChatter{response: `[
   {"line":1,"is_song":true,"start_ts":"5:27","end_ts":"","name":"vivid","artist":"花鋏キョウ"},
@@ -123,13 +123,13 @@ func TestParseCommentsWithAICleansStitchedArtist(t *testing.T) {
 		t.Fatalf("ParseCommentsWithAI error: %v", err)
 	}
 	if len(songs) != 3 {
-		t.Fatalf("解析出 %d 首，期望 3 首: %+v", len(songs), songs)
+		t.Fatalf("%d 曲を解析、期待値は 3 曲: %+v", len(songs), songs)
 	}
 	if songs[1].OriginalArtist != "YOASOBI" {
-		t.Errorf("songs[1].artist = %q，期望裁掉合唱資訊後為 YOASOBI", songs[1].OriginalArtist)
+		t.Errorf("songs[1].artist = %q, コラボ情報を除いた YOASOBI を期待", songs[1].OriginalArtist)
 	}
 	if songs[2].OriginalArtist != "" {
-		t.Errorf("songs[2].artist = %q，整段是合唱資訊時應視為未知", songs[2].OriginalArtist)
+		t.Errorf("songs[2].artist = %q, 全体がコラボ情報なら不明として扱うことを期待", songs[2].OriginalArtist)
 	}
 }
 
@@ -142,6 +142,6 @@ func TestExtractTimestampLinesStitches(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Errorf("AI 前置過濾應包含縫合後的行，got %q", lines)
+		t.Errorf("AI の前処理には結合後の行を含めること, got %q", lines)
 	}
 }

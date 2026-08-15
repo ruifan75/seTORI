@@ -83,8 +83,8 @@ const groupedAISystemPrompt = `あなたはYouTubeのコメントから歌枠の
 | src | まとめた元の行番号の配列（1始まり）。1行だけなら要素1つ |
 | ts | 開始時刻の文字列（原文のまま） |
 | te | 終了時刻の文字列（原文のまま。無ければ ""） |
-| nv | 曲名（原文のまま・逐字） |
-| av | アーティスト（原文のまま・逐字。書かれていなければ空） |
+| nv | 曲名（原文のまま） |
+| av | アーティスト（原文のまま。書かれていなければ空） |
 | n  | 正規化後の曲名 |
 | nr | 曲名の平仮名読み |
 | a  | **照合用アーティスト（行に書かれているものだけ。無ければ空）** |
@@ -100,7 +100,7 @@ const groupedAISystemPrompt = `あなたはYouTubeのコメントから歌枠の
   まとめないこと
 - メドレーで曲が連続する場合、それぞれ別の曲として扱う
 
-## 逐字フィールド（nv / av）
+## 原文フィールド（nv / av）
 
 **src に挙げたいずれかの行に書かれている文字をそのままコピー**してください。
 翻訳・補完・表記修正は禁止です。複数行をまとめた場合、最も情報量の多い行から採ってかまいません。
@@ -241,7 +241,7 @@ func buildGroupedMessage(lines []commentLine) string {
 // buildSongsFromGrouped は AI のグループ提案を ParsedSong へ落とす。
 //
 // 統合そのものは Go 側で行う：src に挙がった各行を確定的にパースして
-// mergeParsedSong で畳み込み、その上に AI の指摘（時刻・逐字・正規化）を重ねる。
+// mergeParsedSong で畳み込み、その上に AI の指摘（時刻・原文表記・正規化）を重ねる。
 // AI が値を合成することはないので、幻覚が数値や名称に混ざる余地が無い。
 func buildSongsFromGrouped(selections []groupedSelection, lines []commentLine) []ParsedSong {
 	result := make([]ParsedSong, 0, len(selections))
@@ -280,7 +280,7 @@ func buildSongsFromGrouped(selections []groupedSelection, lines []commentLine) [
 			}
 		}
 
-		// 逐字検証は src に挙がった行すべてを対象にする
+		// 原文検証は src に挙がった行すべてを対象にする
 		// （まとめた結果、歌手名は別の行から来ることがあるため）
 		joined := strings.Join(srcLines, "\n")
 		if name := firstSlashField(sel.NameVerb); name != "" && isVerbatim(name, joined) {

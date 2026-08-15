@@ -47,7 +47,7 @@ func (s *SongService) syncArtistMapping(song *models.Song) {
 	}
 }
 
-// GetAll 取得歌曲列表
+// GetAll は楽曲一覧を取得する。
 func (s *SongService) GetAll(page, limit int, search, sort, dir string) (*dto.SongListResponse, error) {
 	if page < 1 {
 		page = 1
@@ -62,7 +62,7 @@ func (s *SongService) GetAll(page, limit int, search, sort, dir string) (*dto.So
 		return nil, fmt.Errorf("get songs: %w", err)
 	}
 
-	// 批次取得演出次數與 iTunes 關聯，避免 N+1
+	// 歌唱回数と iTunes 関連を一括取得し、N+1 を避ける
 	songIDs := make([]uuid.UUID, len(songs))
 	for i, song := range songs {
 		songIDs[i] = song.ID
@@ -80,7 +80,7 @@ func (s *SongService) GetAll(page, limit int, search, sort, dir string) (*dto.So
 		return nil, fmt.Errorf("get song artists: %w", err)
 	}
 
-	// 轉換為 DTO
+	// DTO に変換する
 	songResponses := make([]dto.SongResponse, len(songs))
 	for i, song := range songs {
 		songResponses[i] = buildSongResponse(song, counts[song.ID], itunesMap[song.ID])
@@ -100,7 +100,7 @@ func (s *SongService) GetAll(page, limit int, search, sort, dir string) (*dto.So
 	}, nil
 }
 
-// GetByID 取得單首歌曲
+// GetByID は楽曲を 1 件取得する。
 func (s *SongService) GetByID(id uuid.UUID) (*dto.SongResponse, error) {
 	song, err := s.songRepo.FindByID(id)
 	if err != nil {
@@ -115,7 +115,7 @@ func (s *SongService) GetByID(id uuid.UUID) (*dto.SongResponse, error) {
 	return &resp, nil
 }
 
-// GetPerformances 取得歌曲的所有演出（反向查詢）
+// GetPerformances は楽曲のすべての歌唱を取得する（逆引き）。
 func (s *SongService) GetPerformances(songID uuid.UUID, page, limit int) (*dto.SongPerformanceListResponse, error) {
 	song, err := s.songRepo.FindByID(songID)
 	if err != nil {
@@ -138,7 +138,7 @@ func (s *SongService) GetPerformances(songID uuid.UUID, page, limit int) (*dto.S
 		return nil, fmt.Errorf("get performances: %w", err)
 	}
 
-	// 轉換為 DTO
+	// DTO に変換する
 	perfResponses := make([]dto.SongPerformanceResponse, len(performances))
 	for i, perf := range performances {
 		perfResponses[i] = s.toSongPerformanceResponse(perf)
@@ -160,9 +160,9 @@ func (s *SongService) GetPerformances(songID uuid.UUID, page, limit int) (*dto.S
 	}, nil
 }
 
-// Create 建立新歌曲
+// Create は新しい楽曲を作成する。
 func (s *SongService) Create(req *dto.CreateSongRequest) (*dto.SongResponse, error) {
-	// 檢查是否已存在
+	// 既に存在するか確認する
 	existing, err := s.songRepo.FindByNameAndArtist(req.Name, req.OriginalArtist)
 	if err != nil {
 		return nil, fmt.Errorf("check existing song: %w", err)
@@ -192,10 +192,10 @@ func (s *SongService) Create(req *dto.CreateSongRequest) (*dto.SongResponse, err
 	}
 	s.syncArtistMapping(song)
 
-	// 處理 iTunes IDs - 如果只有一個，自動設為 Primary
+	// iTunes ID を処理する。一つだけなら自動で Primary にする
 	if len(req.ItunesIds) > 0 {
 		for i, itunesItem := range req.ItunesIds {
-			// 如果只有一個 iTunes ID，設為 Primary；否則遵循請求中的設定
+			// 一つだけなら Primary にし、複数ならリクエストの設定に従う
 			isPrimary := itunesItem.IsPrimary
 			if len(req.ItunesIds) == 1 {
 				isPrimary = true
@@ -216,7 +216,7 @@ func (s *SongService) Create(req *dto.CreateSongRequest) (*dto.SongResponse, err
 	return &resp, nil
 }
 
-// Update 更新歌曲
+// Update は楽曲を更新する。
 func (s *SongService) Update(id uuid.UUID, req *dto.UpdateSongRequest) (*dto.SongResponse, error) {
 	song, err := s.songRepo.FindByID(id)
 	if err != nil {
@@ -248,12 +248,12 @@ func (s *SongService) Update(id uuid.UUID, req *dto.UpdateSongRequest) (*dto.Son
 	}
 	s.syncArtistMapping(song)
 
-	// 處理 iTunes IDs - 先刪除舊的，再添加新的
+	// iTunes ID は古い関連を削除してから新しいものを追加する
 	if len(req.ItunesIds) > 0 {
-		// 刪除現有的 iTunes 關聯
+		// 既存の iTunes 関連を削除する
 		_ = s.songItunesRepo.DeleteBySongID(song.ID)
 
-		// 添加新的 iTunes 關聯
+		// 新しい iTunes 関連を追加する
 		for _, item := range req.ItunesIds {
 			songItunes := &models.SongITunes{
 				SongID:    song.ID,
@@ -263,7 +263,7 @@ func (s *SongService) Update(id uuid.UUID, req *dto.UpdateSongRequest) (*dto.Son
 			_ = s.songItunesRepo.Create(songItunes)
 		}
 	} else {
-		// 如果沒有傳送 iTunes IDs，也要刪除現有的
+		// iTunes ID が送られていない場合も既存の関連を削除する
 		_ = s.songItunesRepo.DeleteBySongID(song.ID)
 	}
 
@@ -272,7 +272,7 @@ func (s *SongService) Update(id uuid.UUID, req *dto.UpdateSongRequest) (*dto.Son
 	return &resp, nil
 }
 
-// Delete 刪除歌曲
+// Delete は楽曲を削除する。
 func (s *SongService) Delete(id uuid.UUID) error {
 	return s.songRepo.Delete(id)
 }
@@ -338,7 +338,7 @@ func (s *SongService) ApplyEditableFields(id uuid.UUID, fields map[string]string
 	return nil
 }
 
-// MergeSongs 將來源歌曲合併至目標歌曲
+// MergeSongs は統合元楽曲を統合先楽曲へまとめる。
 //
 // 統合は「この 2 つは同じ曲だ」という人の確定した判断なので、照合の学習にも使う。
 // 統合元の表記は消える前に控えておく必要がある。
@@ -369,7 +369,7 @@ func (s *SongService) MergeSongs(sourceSongID, targetSongID uuid.UUID) error {
 	return nil
 }
 
-// SearchSimilar 搜尋相似歌曲（用於 AI 正規化建議）
+// SearchSimilar は類似楽曲を検索する（AI 正規化候補用）。
 func (s *SongService) SearchSimilar(name string, limit int) ([]dto.SongResponse, error) {
 	songs, err := s.songRepo.SearchSimilar(name, limit)
 	if err != nil {
@@ -384,7 +384,7 @@ func (s *SongService) SearchSimilar(name string, limit int) ([]dto.SongResponse,
 	return responses, nil
 }
 
-// toSongResponse 轉換 Model 到 DTO（單筆查詢時即時抓取 iTunes 關聯）
+// toSongResponse は Model を DTO に変換する（単件取得時に iTunes 関連を都度取得）。
 func (s *SongService) toSongResponse(song models.Song, count int) dto.SongResponse {
 	var itunesRecords []models.SongITunes
 	if s.songItunesRepo != nil {
@@ -406,7 +406,7 @@ func toArtistReferences(artists []models.ArtistReference) []dto.ArtistReference 
 	return refs
 }
 
-// buildSongResponse 由已備妥的資料組裝 DTO（供批次列表與單筆查詢共用）
+// buildSongResponse は準備済みのデータから DTO を組み立てる（一括一覧と単件取得で共用）。
 func buildSongResponse(song models.Song, count int, itunesRecords []models.SongITunes) dto.SongResponse {
 	resp := dto.SongResponse{
 		ID:               song.ID,
@@ -447,7 +447,7 @@ func buildSongResponse(song models.Song, count int, itunesRecords []models.SongI
 	return resp
 }
 
-// toSongPerformanceResponse 轉換演出到 DTO
+// toSongPerformanceResponse は歌唱を DTO に変換する。
 func (s *SongService) toSongPerformanceResponse(perf repository.PerformanceWithDetails) dto.SongPerformanceResponse {
 	resp := dto.SongPerformanceResponse{
 		ID:             perf.ID,
@@ -468,7 +468,7 @@ func (s *SongService) toSongPerformanceResponse(perf repository.PerformanceWithD
 		resp.ThumbnailURL = &perf.ThumbnailURL.String
 	}
 
-	// 轉換標籤
+	// タグを変換する
 	resp.Tags = make([]dto.PerformanceTagResponse, len(perf.Tags))
 	for i, tag := range perf.Tags {
 		resp.Tags[i] = dto.PerformanceTagResponse{
@@ -485,7 +485,7 @@ func (s *SongService) toSongPerformanceResponse(perf repository.PerformanceWithD
 		resp.CustomTags = []string{}
 	}
 
-	// 轉換演唱者
+	// 歌手を変換する
 	resp.Singers = make([]dto.SingerResponse, len(perf.Singers))
 	for i, singer := range perf.Singers {
 		resp.Singers[i] = dto.SingerResponse{

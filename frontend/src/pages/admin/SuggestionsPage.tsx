@@ -157,7 +157,7 @@ export default function SuggestionsPage() {
       showToast(`${r.succeeded}件を却下しました`, 'success');
       invalidate();
     },
-    onError: (err: Error) => showToast(`却下失敗: ${err.message}`, 'error'),
+    onError: (err: Error) => showToast(`却下に失敗: ${err.message}`, 'error'),
   });
 
   const busy =

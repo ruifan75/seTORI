@@ -352,9 +352,9 @@ export interface CommentSong {
   original_comment: string;
   is_end_time_estimated: boolean;
 
-  // Chat 拍手偵測結果（用來跟 comment explicit end 比較）
+  // Chat の拍手検出結果（コメントに明記された終了時刻との比較用）
   chat_end?: number;
-  end_diff?: number; // |end - chat_end|，只有兩邊都有值時才會有
+  end_diff?: number; // |end - chat_end|。両方に値がある場合のみ設定される
 
   // 分析時に折り込んだ正規化結果（あれば）
   normalized_name?: string;
@@ -425,11 +425,11 @@ export interface SongSuggestion {
   tags: string[];
   singer_ids: string[];
   art_url?: string;
-  itunes_id?: number; // Holodex 提供的 iTunes ID
+  itunes_id?: number; // Holodex が提供する iTunes ID
 
-  // Chat 拍手偵測結果（Holodex 明示 end との比較用。CommentSong と対称）
+  // Chat の拍手検出結果（Holodex に明記された end との比較用。CommentSong と対称）
   chat_end?: number;
-  end_diff?: number; // |end - chat_end|，只有兩邊都有值時才會有
+  end_diff?: number; // |end - chat_end|。両方に値がある場合のみ設定される
 
   // analyzeSongs 時に折り込んだ正規化結果（あれば）
   normalized_name?: string;
@@ -454,7 +454,7 @@ export interface LoadHolodexSongsResponse {
   stream_id: string;
   stream_title: string;
   channel_owner: Singer;
-  participants: Singer[];  // 所有參與者（包含頻道擁有者）
+  participants: Singer[];  // すべての参加者（チャンネル所有者を含む）
   songs: SongSuggestion[];
 }
 
@@ -468,7 +468,7 @@ export interface CreatePerformanceItem {
   tags: string[];
   singer_ids: string[];
   art_url?: string;
-  itunes_id?: number; // Holodex 提供的 iTunes ID
+  itunes_id?: number; // Holodex が提供する iTunes ID
   custom_tags?: string[];
   /** 終了時間の由来。省略すると unknown 扱い（docs/DATA_COMPLETION.md） */
   end_source?: EndSource;
@@ -617,7 +617,7 @@ export interface MissingSongPayload {
   end_source?: string;
   tags?: string[];
   itunes_id?: number;
-  // 編集画面が運ぶ欄と揃える。運ばないと承認から作った曲だけ封面も読みも付かない
+  // 編集画面が運ぶ欄と揃える。運ばないと承認から作った曲だけジャケット画像も読みも付かない
   art_url?: string;
   name_reading?: string;
   original_artist_reading?: string;
@@ -794,7 +794,7 @@ export interface TagPerformanceListResponse {
   pagination: PaginationResponse;
 }
 
-// 首頁のランダム再生用（ページングなし）
+// ホームのランダム再生用（ページングなし）
 export interface PerformanceListResponse {
   performances: Performance[];
 }
@@ -1161,13 +1161,13 @@ export interface BatchFillStatus {
   current?: string;
   created: number;
   review: number;
-  /** 「DB にあるが源に無い」歌唱の件数（force 実行のみ） */
+  /** 「DB にあるが入力元に無い」歌唱の件数（force 実行のみ） */
   gaps: number;
   ai_asked: number;
   message?: string;
 }
 
-// force 実行が見つけた「DB にあるが源に無い」歌唱 1 件。
+// force 実行が見つけた「DB にあるが入力元に無い」歌唱 1 件。
 // 提案としては積まないので、実行履歴からここへ辿るのが唯一の入口。
 export interface BatchFillGap {
   stream_id: string;
@@ -1186,7 +1186,7 @@ export interface BatchFillRun {
   streams_done: number;
   songs_created: number;
   songs_review: number;
-  /** 「DB にあるが源に無い」と分かった既存の歌唱の件数（force 実行のみ） */
+  /** 「DB にあるが入力元に無い」と分かった既存の歌唱の件数（force 実行のみ） */
   songs_gap: number;
   ai_asked: number;
   message: string;

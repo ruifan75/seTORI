@@ -23,7 +23,7 @@ export default function QueueAddButton({ track, className = '' }: { track: Playe
   const MENU_WIDTH = 256;
 
   // メニューはビューポート基準（fixed）で body 直下に描く。
-  // このボタンは首頁の横スクロール列（overflow-x-auto）の中にも置かれるため、
+  // このボタンはホームの横スクロール列（overflow-x-auto）の中にも置かれるため、
   // 通常の absolute だと祖先に切り取られて見えなくなる。
   const updatePosition = useCallback(() => {
     const rect = buttonRef.current?.getBoundingClientRect();

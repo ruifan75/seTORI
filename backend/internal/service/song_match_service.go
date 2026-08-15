@@ -61,7 +61,7 @@ const (
 // MatchReason は判定の根拠。UI とログに出すので安定した文字列にしておく。
 const (
 	ReasonITunes         = "itunes_id"       // iTunes Track ID が一致
-	ReasonExact          = "exact"           // 曲名・アーティストが逐字一致
+	ReasonExact          = "exact"           // 曲名・アーティストが文字列で完全一致
 	ReasonTitleArtist    = "title_artist"    // 曲名キー一致 + アーティストも一致
 	ReasonTitlePrimary   = "title_primary"   // 曲名キー一致 + アーティストの主体が一致
 	ReasonTitleOverlap   = "title_overlap"   // 曲名キー一致 + アーティスト名が部分的に共通
@@ -176,7 +176,7 @@ func scoreHits(hits []repository.KeyedSong, name, artist string, queryArtist son
 	out := make([]MatchCandidate, 0, len(hits))
 
 	for _, h := range hits {
-		// 逐字一致は文句なし
+		// 文字列の完全一致は文句なし
 		if h.Song.Name == name && h.Song.OriginalArtist == artist {
 			out = append(out, MatchCandidate{Song: h.Song, Score: 1.0, Reason: ReasonExact})
 			continue
@@ -429,7 +429,7 @@ func (s *SongMatchService) DeleteSongRejection(pairKey string) error {
 // CandidatesForAI は AI に見せる候補を集める。
 //
 // FindCandidates と分けているのは、**求めるものが違う**から。
-// 照合は精度が要る（誤ると歌唱が別の曲にぶら下がる）が、こちらは召回でよい
+// 照合は精度が要る（誤ると歌唱が別の曲にぶら下がる）が、こちらは候補抽出でよい
 // ── 後ろに AI という裁き手が居るので、外れが混ざっても捨てられるだけ。
 // 実測でも接頭辞で拾うと同じ曲を指す率は 2 割だったが、裁き手が居るなら十分。
 func (s *SongMatchService) CandidatesForAI(name, artist string) ([]MatchCandidate, error) {
@@ -473,7 +473,7 @@ func (s *SongMatchService) CandidatesForAI(name, artist string) ([]MatchCandidat
 // 当たり過ぎるキー（「恋」で 10 件など）はここで頭打ちになる。
 const identityPrefixLimit = 3
 
-// ---------- AI に見せる曲庫 ----------
+// ---------- AI に見せる楽曲カタログ ----------
 
 // AICatalog は登録曲の一覧を AI へ渡すためのスナップショット。
 //
@@ -509,7 +509,7 @@ func (s *SongMatchService) CatalogForAI() (*AICatalog, error) {
 // Len は一覧に載っている曲数。
 func (c *AICatalog) Len() int { return len(c.IDs) }
 
-// Prompt は曲庫つきの問いを組み立てる。
+// Prompt は楽曲カタログ付きの問いを組み立てる。
 // **一覧を先頭に置くこと。** 呼び出しごとに変わらない部分を前に固めておくと、
 // provider の prefix cache が効いて 2 回目以降の入力が桁で安くなる。
 func (c *AICatalog) Prompt(rows []*aiMatchRow) string {

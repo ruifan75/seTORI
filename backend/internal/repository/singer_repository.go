@@ -20,7 +20,7 @@ func NewSingerRepository(db *sql.DB) *SingerRepository {
 // 手動指定（organization_override）があればそれ、無ければ Holodex の値。
 const effectiveOrg = `COALESCE(s.organization_override, s.organization)`
 
-// singerColumns は演唱者の全カラム（SELECT と scanSinger で対にして使う）。
+// singerColumns は歌手の全カラム（SELECT と scanSinger で対にして使う）。
 // organization は Holodex の値、organization_override は手動指定で、
 // JOIN しているのは実効値のほう。呼び出し側は必ず singerFrom で組み立てる。
 const singerColumns = `s.id, s.name, s.english_name, s.photo_url,
@@ -49,7 +49,7 @@ func hiddenClause(includeHidden bool, keyword string) string {
 	return " " + keyword + " s.is_hidden = FALSE"
 }
 
-// FindAll 取得所有演唱者。includeHidden=false なら非表示チャンネルを除く。
+// FindAll はすべての歌手を取得する。includeHidden=false なら非表示チャンネルを除く。
 func (r *SingerRepository) FindAll(limit, offset int, sort, dir string, includeHidden bool) ([]models.Singer, int, error) {
 	where := hiddenClause(includeHidden, "WHERE")
 
@@ -178,7 +178,7 @@ func (r *SingerRepository) SetOrganizationOverride(id, org string) (bool, error)
 	return affected > 0, nil
 }
 
-// FindByID 根據 Channel ID 取得演唱者
+// FindByID はチャンネル ID で歌手を取得する。
 func (r *SingerRepository) FindByID(id string) (*models.Singer, error) {
 	query := `
 		SELECT ` + singerColumns + `
@@ -218,7 +218,7 @@ func (r *SingerRepository) ensureOrganization(org sql.NullString) error {
 	return nil
 }
 
-// Create 建立新演唱者
+// Create は新しい歌手を作成する。
 func (r *SingerRepository) Create(s *models.Singer) error {
 	if err := r.ensureOrganization(s.Organization); err != nil {
 		return err
@@ -238,7 +238,7 @@ func (r *SingerRepository) Create(s *models.Singer) error {
 	return nil
 }
 
-// Update 更新演唱者
+// Update は歌手を更新する。
 func (r *SingerRepository) Update(s *models.Singer) error {
 	if err := r.ensureOrganization(s.Organization); err != nil {
 		return err
@@ -259,7 +259,7 @@ func (r *SingerRepository) Update(s *models.Singer) error {
 	return nil
 }
 
-// Upsert 建立或更新演唱者（用於 Holodex 同步）。
+// Upsert は歌手を作成または更新する（Holodex 同期用）。
 // is_hidden は意図的に触らない：同期は繰り返し走るので、ここで書き戻すと
 // 手動で非表示にしたチャンネルが次の同期で一覧に戻ってしまう。
 func (r *SingerRepository) Upsert(s *models.Singer) error {
@@ -311,7 +311,7 @@ func (r *SingerRepository) UpdateManualMetadata(s *models.Singer) error {
 	return nil
 }
 
-// Delete 刪除演唱者
+// Delete は歌手を削除する。
 func (r *SingerRepository) Delete(id string) error {
 	_, err := r.db.Exec("DELETE FROM singers WHERE id = $1", id)
 	if err != nil {
@@ -320,7 +320,7 @@ func (r *SingerRepository) Delete(id string) error {
 	return nil
 }
 
-// GetStreamCount 取得演唱者參與的直播數量（只計算非隱藏的 Stream）
+// GetStreamCount は歌手が参加した配信数を取得する（非表示でない配信だけを集計）。
 func (r *SingerRepository) GetStreamCount(singerID string) (int, error) {
 	var count int
 	err := r.db.QueryRow(`
@@ -335,7 +335,7 @@ func (r *SingerRepository) GetStreamCount(singerID string) (int, error) {
 	return count, nil
 }
 
-// GetPerformanceCount 取得演唱者的演出數量（只計算非隱藏的 Stream）
+// GetPerformanceCount は歌手の歌唱数を取得する（非表示でない配信だけを集計）。
 func (r *SingerRepository) GetPerformanceCount(singerID string) (int, error) {
 	var count int
 	err := r.db.QueryRow(`
@@ -351,7 +351,7 @@ func (r *SingerRepository) GetPerformanceCount(singerID string) (int, error) {
 	return count, nil
 }
 
-// Search 搜尋演唱者。
+// Search は歌手を検索する。
 // 非表示チャンネルも返す：名前で探すのは「そのチャンネルを見に行く」意図の操作で、
 // 詳細ページ自体は非表示でも開けるため、ここで隠すと辿り着く手段だけを塞ぐことになる。
 func (r *SingerRepository) Search(query string, limit int) ([]models.Singer, error) {
@@ -381,7 +381,7 @@ func (r *SingerRepository) Search(query string, limit int) ([]models.Singer, err
 	return singers, nil
 }
 
-// FindByOrganization 根據組織取得演唱者
+// FindByOrganization は事務所別に歌手を取得する。
 func (r *SingerRepository) FindByOrganization(org string) ([]models.Singer, error) {
 	query := `
 		SELECT ` + singerColumns + `

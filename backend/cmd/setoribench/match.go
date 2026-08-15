@@ -157,7 +157,7 @@ func newMatchService(db *sql.DB, withAliases bool) *service.SongMatchService {
 	)
 }
 
-// newResolver は本番が留言経路で使うのと同じ NormalizationService を組む。
+// newResolver は本番がコメント経路で使うのと同じ NormalizationService を組む。
 // AI クライアントは nil でよい ── ResolveMatch は AI を呼ばない約束の経路。
 func newResolver(db *sql.DB, ms *service.SongMatchService) *service.NormalizationService {
 	return service.NewNormalizationService(nil, repository.NewSongItunesRepository(db), ms)
@@ -166,7 +166,7 @@ func newResolver(db *sql.DB, ms *service.SongMatchService) *service.Normalizatio
 // evalMatch は 1 件を **本番と同じ関数** に通し、結果の曲 ID を正解と突き合わせる。
 //
 // 照合入力は service.MatchInputs、照合そのものは NormalizationService.ResolveMatch
-// （留言経路の reresolveMatches / backfill-matches が呼ぶのと同じもの）。
+// （コメント経路の reresolveMatches / backfill-matches が呼ぶのと同じもの）。
 // 閾値の判定をベンチ側で書き直さないのが要点 ── 書き直すと、本番の線引きを変えたときに
 // ベンチだけが古い線引きで「改善した」と言い続ける。
 //
@@ -211,7 +211,7 @@ func evalMatch(ns *service.NormalizationService, sid string, p comment.ParsedSon
 	return o
 }
 
-// isVerbatim は「照合に渡した表記が DB の表記と逐字で同じ」か。
+// isVerbatim は「照合に渡した表記が DB の表記と文字列として同じ」か。
 //
 // この組は当たって当然なので主指標から外す。GT の楽曲の一部はそのコメント自身から
 // findOrCreateSong で作られていて、DB の表記＝コメントの表記になっている。

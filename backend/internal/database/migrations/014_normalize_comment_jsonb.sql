@@ -1,9 +1,9 @@
 -- 014_normalize_comment_jsonb.sql
--- 修復舊資料中可能出現的 [null]、null 或空陣列形式的 comment_songs / comment_raw
--- 這些值在 lib/pq 往返時容易導致 "invalid input syntax for type json"
--- 我們希望舊資料與新資料行為一致（空值統一為 []）
+-- 古いデータにあり得る [null]、null、空配列形式の comment_songs / comment_raw を修正する
+-- これらの値は lib/pq との往復で "invalid input syntax for type json" を起こしやすい
+-- 古いデータと新しいデータの挙動を揃えるため、空値は [] に統一する
 
--- 針對 comment_songs
+-- comment_songs を対象にする
 UPDATE streams
 SET comment_songs = '[]'::jsonb
 WHERE 
@@ -13,7 +13,7 @@ WHERE
     OR comment_songs::text ~ '^\s*\[\s*null\s*\]\s*$'
     OR comment_songs::text = '[null]';
 
--- 針對 comment_raw（雖然比較少見，但為了安全）
+-- comment_raw も対象にする（頻度は低いが安全のため）
 UPDATE streams
 SET comment_raw = '[]'::jsonb
 WHERE 
@@ -23,7 +23,7 @@ WHERE
     OR comment_raw::text ~ '^\s*\[\s*null\s*\]\s*$'
     OR comment_raw::text = '[null]';
 
--- holodex_data 比較少有這種問題，但也一併處理
+-- holodex_data では少ない問題だが、併せて処理する
 UPDATE streams
 SET holodex_data = '{}'::jsonb
 WHERE 

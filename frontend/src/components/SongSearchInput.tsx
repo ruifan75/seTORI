@@ -241,7 +241,7 @@ export default function SongSearchInput({ value, onChange, onSelectSong, placeho
                 </div>
               )}
 
-              {/* iTunes 結果（已在資料庫中）*/}
+              {/* iTunes の結果（DB 登録済み）*/}
               {itunesSuggestions.filter(i => i.existing_song).length > 0 && (
                 <div>
                   <div className="px-4 py-2 bg-green-50 text-xs font-semibold text-green-700 sticky top-0 flex items-center gap-1">
@@ -276,7 +276,7 @@ export default function SongSearchInput({ value, onChange, onSelectSong, placeho
                             <div className="font-medium text-gray-900 truncate">{song.name}</div>
                             <div className="text-sm text-gray-500 truncate">{song.original_artist}</div>
                             <div className="text-xs text-gray-400 truncate">
-                              {song.performance_count}回演唱 · iTunes ID: {itunes.itunes_id}
+                              歌唱回数 {song.performance_count} 回 · iTunes ID: {itunes.itunes_id}
                             </div>
                           </div>
                         </div>
@@ -286,7 +286,7 @@ export default function SongSearchInput({ value, onChange, onSelectSong, placeho
                 </div>
               )}
 
-              {/* iTunes 結果（新歌曲）*/}
+              {/* iTunes の結果（新規楽曲）*/}
               {itunesSuggestions.filter(i => !i.existing_song).length > 0 && (
                 <div>
                   <div className="px-4 py-2 bg-blue-50 text-xs font-semibold text-blue-700 sticky top-0 flex items-center gap-1">

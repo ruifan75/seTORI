@@ -88,7 +88,7 @@ export default function ArtistDetailPage() {
         onClick: () => withdrawSuggestion(r.id, showToast),
       });
     } catch (err) {
-      showToast(`送信失敗: ${(err as Error).message}`, 'error');
+      showToast(`送信に失敗: ${(err as Error).message}`, 'error');
       throw err;
     }
   };

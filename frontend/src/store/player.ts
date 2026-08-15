@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { ArtistReference, Singer } from '../api/types';
 
-// 再生キューの1トラック＝1演唱記録（配信内の start〜end 区間）
+// 再生キューの1トラック＝1歌唱記録（配信内の start〜end 区間）
 export interface PlayerTrack {
   performanceId: string;
   streamId: string; // YouTube video ID
@@ -35,7 +35,7 @@ export interface PerformanceLike {
 }
 
 // 配信横断の歌唱を再生トラックへ変換する。
-// 首頁・タグ・歌手・プレイリストで同じ形を使う（曲詳細だけは曲側の情報を優先するため独自）。
+// ホーム・タグ・歌手・プレイリストで同じ形を使う（曲詳細だけは曲側の情報を優先するため独自）。
 export function performanceToTrack(p: PerformanceLike): PlayerTrack {
   return {
     performanceId: p.id,

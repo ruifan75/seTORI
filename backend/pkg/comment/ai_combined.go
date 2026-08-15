@@ -26,7 +26,7 @@ import (
 
 // combinedAISystemPrompt は抽出と正規化を一度に行わせる指示。
 //
-// 設計の要点は「逐字」と「正規化後」を別フィールドに分けること。
+// 設計の要点は「原文表記」と「正規化後」を別フィールドに分けること。
 // 抽出の安全性は "原文に逐語で現れること" を Go 側で検証することで担保しているが、
 // 正規化はその文字列を意図的に変える作業なので、同じフィールドでは両立しない。
 const combinedAISystemPrompt = `あなたはYouTubeのコメントから歌枠のセットリストを抽出し、同時に楽曲名を正規化するアシスタントです。
@@ -43,8 +43,8 @@ const combinedAISystemPrompt = `あなたはYouTubeのコメントから歌枠�
 | s  | 歌唱行なら true |
 | ts | 開始時刻の文字列（原文のまま） |
 | te | 終了時刻の文字列（原文のまま。無ければ ""） |
-| nv | 曲名（原文のまま・逐字） |
-| av | アーティスト（原文のまま・逐字） |
+| nv | 曲名（原文のまま） |
+| av | アーティスト（原文のまま） |
 | n  | 正規化後の曲名 |
 | nr | 曲名の平仮名読み |
 | a  | 正規化後のアーティスト |
@@ -62,7 +62,7 @@ const combinedAISystemPrompt = `あなたはYouTubeのコメントから歌枠�
 - **s が false の行は l・s・ts の3つだけを返してください。**
   他のキーは書かないこと（出力量を抑えるため）。
 
-## 逐字フィールド（nv / av）
+## 原文フィールド（nv / av）
 
 **入力行に書かれている文字をそのままコピー**してください。翻訳・補完・表記修正・並べ替えは禁止です。
 入力に存在しない文字を書いてはいけません。artist が書かれていなければ空文字列にします。
@@ -130,7 +130,7 @@ type combinedSelection struct {
 
 // ParseAndNormalizeWithAI は抽出と正規化を 1 回の呼び出しで行う。
 //
-// 返す ParsedSong には逐字フィールド（Name / OriginalArtist）と
+// 返す ParsedSong には原文フィールド（Name / OriginalArtist）と
 // 正規化フィールド（NormalizedName ほか）の両方が入るため、
 // 呼び出し側は後段の AI 正規化を省いて DB 照合だけを行えばよい。
 func ParseAndNormalizeWithAI(aiClient ai.Chatter, comments []string) ([]ParsedSong, error) {
@@ -187,9 +187,9 @@ func parseCombinedSelections(response string) ([]combinedSelection, error) {
 
 // buildSongsFromCombined は AI の選択を ParsedSong へ落とす。
 //
-// 逐字フィールドは 2 段階経路と同じ検証（原文に逐語で現れること）を通す。
+// 原文フィールドは 2 段階経路と同じ検証（原文に逐語で現れること）を通す。
 // 正規化フィールドは「意図的に原文と違う」ので逐語検証にかけないが、
-// 空なら逐字の値へ、タグは既知の語彙へ丸めることで、AI の逸脱が
+// 空なら原文の値へ、タグは既知の語彙へ丸めることで、AI の逸脱が
 // そのまま DB へ流れ込まないようにしている。
 func buildSongsFromCombined(selections []combinedSelection, lines []string) []ParsedSong {
 	result := make([]ParsedSong, 0, len(selections))
@@ -220,7 +220,7 @@ func buildSongsFromCombined(selections []combinedSelection, lines []string) []Pa
 			}
 		}
 
-		// 逐字フィールド：原文に現れる場合のみ採用（幻覺による書き換えを防ぐ）
+		// 原文フィールド：原文に現れる場合のみ採用（幻覚による書き換えを防ぐ）
 		if name := firstSlashField(sel.NameVerb); name != "" && isVerbatim(name, originalLine) {
 			parsed.Name = name
 		}
@@ -231,7 +231,7 @@ func buildSongsFromCombined(selections []combinedSelection, lines []string) []Pa
 			parsed.OriginalArtist = artist
 		}
 
-		// 正規化フィールド：空なら逐字側にフォールバックする
+		// 正規化フィールド：空なら原文側にフォールバックする
 		parsed.NormalizedName = strings.TrimSpace(sel.NormName)
 		if parsed.NormalizedName == "" {
 			parsed.NormalizedName = parsed.Name

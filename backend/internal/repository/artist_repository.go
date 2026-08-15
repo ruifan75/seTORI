@@ -134,7 +134,7 @@ func (r *ArtistRepository) Rename(id uuid.UUID, newName string) error {
 }
 
 // MergeArtists は source を target に統合する。
-//  1. 両者に同名楽曲がある場合はその楽曲も統合（演唱記録を target 側へ移動、重複は除去）
+//  1. 両者に同名楽曲がある場合はその楽曲も統合（歌唱記録を target 側へ移動、重複は除去）
 //  2. 残りの source 楽曲は original_artist テキストを target 名に書き換え
 //  3. マッピングを target に付け替え、source アーティストを削除
 func (r *ArtistRepository) MergeArtists(sourceID, targetID uuid.UUID) error {
@@ -177,7 +177,7 @@ func (r *ArtistRepository) MergeArtists(sourceID, targetID uuid.UUID) error {
 		return err
 	}
 
-	// 衝突した楽曲を統合：演唱記録を移動（同一配信・同一開始秒の重複は削除）→ source 曲を削除
+	// 衝突した楽曲を統合：歌唱記録を移動（同一配信・同一開始秒の重複は削除）→ source 曲を削除
 	for _, p := range pairs {
 		if _, err := tx.Exec(`
 			DELETE FROM performances p1 WHERE p1.song_id = $1 AND EXISTS (
@@ -223,7 +223,7 @@ func (r *ArtistRepository) MergeArtists(sourceID, targetID uuid.UUID) error {
 	return tx.Commit()
 }
 
-// FindSongsByArtist はアーティストに紐づく楽曲を演唱回数付きで返す。
+// FindSongsByArtist はアーティストに紐づく楽曲を歌唱回数付きで返す。
 func (r *ArtistRepository) FindSongsByArtist(artistID uuid.UUID, limit, offset int, sort, dir string) ([]models.Song, map[uuid.UUID]int, int, error) {
 	var total int
 	if err := r.db.QueryRow(`SELECT COUNT(*) FROM song_artists WHERE artist_id = $1`, artistID).Scan(&total); err != nil {

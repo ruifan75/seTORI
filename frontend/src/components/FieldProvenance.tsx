@@ -3,7 +3,7 @@ import { matchReasonLabel } from '../utils/matchReason';
 
 // 入力欄の下に「元の値が、どの処理でどう変わったか」を出す。
 //
-// 編集画面に並ぶ曲名・歌手名は、留言に書かれていた文字そのままではない。
+// 編集画面に並ぶ曲名・歌手名は、コメントに書かれていた文字そのままではない。
 // AI の正規化と DB の照合がそれぞれ書き換えうる。どちらの仕業かを言わずに
 // 結果だけ見せると、利用者は「自分が入れた覚えのない名前」を前にして
 // 直すべきかどうか判断できない。
@@ -49,7 +49,7 @@ export default function FieldProvenance({ changes, field }: Props) {
           >
             {STEP_LABELS[c.by] ?? c.by}
           </span>
-          {/* 元が空＝留言に書かれていなかったもの。ここを黙って埋めると出所が分からなくなる */}
+          {/* 元が空＝コメントに書かれていなかったもの。ここを黙って埋めると出所が分からなくなる */}
           {c.from ? (
             <span className="text-gray-400 line-through">{c.from}</span>
           ) : (

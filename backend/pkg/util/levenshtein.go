@@ -27,13 +27,13 @@ func LevenshteinDistance(s1, s2 string) int {
 		return len1
 	}
 
-	// 建立 2D 矩陣
+	// 2 次元行列を作成する
 	matrix := make([][]int, len1+1)
 	for i := range matrix {
 		matrix[i] = make([]int, len2+1)
 	}
 
-	// 初始化第一列和第一行
+	// 先頭の列と行を初期化する
 	for i := 0; i <= len1; i++ {
 		matrix[i][0] = i
 	}
@@ -41,7 +41,7 @@ func LevenshteinDistance(s1, s2 string) int {
 		matrix[0][j] = j
 	}
 
-	// 填充矩陣
+	// 行列を埋める
 	for i := 1; i <= len1; i++ {
 		for j := 1; j <= len2; j++ {
 			cost := 1
@@ -50,9 +50,9 @@ func LevenshteinDistance(s1, s2 string) int {
 			}
 
 			matrix[i][j] = min(
-				matrix[i-1][j]+1,      // 刪除
-				matrix[i][j-1]+1,      // 插入
-				matrix[i-1][j-1]+cost, // 替換
+				matrix[i-1][j]+1,      // 削除
+				matrix[i][j-1]+1,      // 挿入
+				matrix[i-1][j-1]+cost, // 置換
 			)
 		}
 	}
@@ -60,8 +60,8 @@ func LevenshteinDistance(s1, s2 string) int {
 	return matrix[len1][len2]
 }
 
-// Similarity 計算兩個字串的相似度 (0.0 - 1.0)
-// 比較前先做 NFKC 正規化（如 Ⅱ → II）
+// Similarity は 2 つの文字列の類似度（0.0〜1.0）を計算する。
+// 比較前に NFKC 正規化を行う（例：Ⅱ → II）。
 func Similarity(s1, s2 string) float64 {
 	s1 = NormalizeUnicode(s1)
 	s2 = NormalizeUnicode(s2)
@@ -85,7 +85,7 @@ func Similarity(s1, s2 string) float64 {
 	return 1.0 - float64(distance)/float64(maxLen)
 }
 
-// min 返回三個數的最小值
+// min は 3 つの数の最小値を返す。
 func min(a, b, c int) int {
 	if a < b {
 		if a < c {
@@ -99,8 +99,8 @@ func min(a, b, c int) int {
 	return c
 }
 
-// SanitizeJSONB 清理可能導致 JSONB 寫入錯誤的值
-// 例如將 "null" 或 "[null]" 轉為 "[]" （空陣列），避免部份舊資料在 metadata update 時觸發 invalid input syntax for type json
+// SanitizeJSONB は JSONB の書き込みエラーを起こし得る値を除去する。
+// 例えば "null" や "[null]" を "[]"（空配列）へ変換し、古いデータの metadata 更新時に invalid input syntax for type json が発生するのを防ぐ。
 func SanitizeJSONB(b []byte) []byte {
 	if b == nil {
 		return nil

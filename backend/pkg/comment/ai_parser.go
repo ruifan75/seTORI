@@ -13,19 +13,19 @@ import (
 	"github.com/ruifan75/setori/pkg/util"
 )
 
-// aiLineSelection AI 回傳的單行解析結果
-// 我們優先讓 AI 回傳「原文中出現的時間字串」（start_ts / end_ts），
-// 後端再用確定性的 parseTimestampString 轉成秒數。
-// 這樣即使留言格式很特殊，AI 也能準確指出「這一段文字是時間」。
+// aiLineSelection は AI が返す 1 行分の解析結果。
+// AI には「原文に現れた時刻文字列」（start_ts / end_ts）を優先して返させる。
+// バックエンドで決定的な parseTimestampString を使い、後から秒数へ変換する。
+// これにより特殊なコメント形式でも、AI は「この部分が時刻」と正確に示せる。
 type aiLineSelection struct {
 	LineIndex int             `json:"line"`     // 1-based index of the input line
 	Start     json.RawMessage `json:"start"`    // legacy: numeric seconds or old format
 	End       json.RawMessage `json:"end"`      // legacy
-	StartTS   string          `json:"start_ts"` // 推薦：原文裡的時間字串，例如 "01:12:42" 或 "1:12:42"
-	EndTS     string          `json:"end_ts"`   // 推薦：如果行內有第二個時間
+	StartTS   string          `json:"start_ts"` // 推奨：原文内の時刻文字列。例："01:12:42" または "1:12:42"
+	EndTS     string          `json:"end_ts"`   // 推奨：行内に二つ目の時刻がある場合
 	IsSong    bool            `json:"is_song"`
-	Name      string          `json:"name"`   // 曲名（必須逐字出現在原始行）
-	Artist    string          `json:"artist"` // 歌手（必須逐字出現在原始行）
+	Name      string          `json:"name"`   // 曲名（元の行に原文どおり存在すること）
+	Artist    string          `json:"artist"` // 歌手（元の行に原文どおり存在すること）
 }
 
 // ErrNoTimestampLines はコメントにタイムスタンプらしき行が 1 つも無かったことを示す。
@@ -48,7 +48,7 @@ const commentAISystemPrompt = `あなたはYouTubeのコメントから歌枠の
 - **必須**: 配列の要素数は入力行数と一致すること。行の省略・統合・スキップは厳禁。
 - 各要素は {"line":行番号,"is_song":true/false,"start_ts":"...","end_ts":"...","name":"曲名","artist":"歌手名"}
 - line は入力の行番号（1始まり）。1から入力行数まで、欠番なくすべて含めること。
-- is_song: 歌曲なら true、雑談・開演・幕開け・終了・閉幕・告知・スパチャ読みなどは false
+- is_song: 楽曲なら true、雑談・開演・幕開け・終了・閉幕・告知・スパチャ読みなどは false
   - **特に注意（すべて is_song=false）**:
     - 「トピック 「発言内容」」のような実況・トークのメモ行（例: 挨拶運動「みんな、ただいまー!」、"祝福"後「YOASOBIさん合うね」）。行内に曲名が引用されていても、それは歌唱ではなく話題なので false。
     - 絵文字・記号だけの行（📸 🎸 🦋🌹 ??? など）。
@@ -63,7 +63,7 @@ const commentAISystemPrompt = `あなたはYouTubeのコメントから歌枠の
 - is_song=false のとき: name と artist は空文字列にする
 - artist が不明なら artist は空文字列にする
 
-正しい出力例（3行入力 → 3要素。非歌曲行も省略せず返す）:
+正しい出力例（3行入力 → 3要素。楽曲でない行も省略せず返す）:
 [
   {"line":1,"is_song":false,"start_ts":"0:00:00","end_ts":"","name":"","artist":""},
   {"line":2,"is_song":true,"start_ts":"0:13:25","end_ts":"","name":"Stand By You","artist":"Official髭男dism"},
@@ -71,9 +71,9 @@ const commentAISystemPrompt = `あなたはYouTubeのコメントから歌枠の
 ]
 `
 
-// aiTimestampRe 用來預先篩選「可能包含時間戳」的行，減少送給 AI 的 token 量。
-// 故意寫得比較寬鬆（包含常見變形），但仍然不是萬能。
-// 如果某種極端格式還是漏掉，後續我們可以繼續放寬，或考慮直接把更多 raw lines 餵給 AI。
+// aiTimestampRe は「タイムスタンプを含む可能性がある」行を事前に絞り込み、AI へ送る token 量を減らす。
+// 一般的な表記揺れを含めるため意図的に緩くしているが、万能ではない。
+// 極端な形式を取りこぼす場合はさらに緩めるか、AI に渡す raw lines を増やすことを検討する。
 var aiTimestampRe = regexp.MustCompile(`(\d{1,2}:\d{2}:\d{2})|(\d{1,2}:\d{2})|\[\s*\d{1,2}:\d{2}|\d{1,2}[:：]\d{2}`)
 
 // ParseCommentsWithAI uses an LLM to intelligently select song lines and identify
@@ -110,7 +110,7 @@ func ParseCommentsWithAI(aiClient ai.Chatter, comments []string) ([]ParsedSong, 
 	if err != nil {
 		return nil, err
 	}
-	// 為了方便比對，完整記錄 AI 原始回覆（如果太長會被 console 截，但至少有）
+	// 比較しやすいよう AI の元レスポンスをすべて記録する（長すぎると console で切れるが、記録は残る）
 	logger.Debugf("AI comment raw response (len=%d): %s", len(response), response)
 
 	selections, err := parseAILineSelections(response)
@@ -138,14 +138,14 @@ func ParseCommentsWithAI(aiClient ai.Chatter, comments []string) ([]ParsedSong, 
 
 		originalLine := lines[sel.LineIndex-1]
 
-		// 先用全文 ParseComment 做 baseline（處理大部分常見格式 + 歌曲拆分）
+		// まず行全体を ParseComment に渡して基準結果を作る（一般的な形式と楽曲分割の大半を処理）
 		parsed := ParseComment(originalLine)
 		if parsed == nil {
 			parsed = &ParsedSong{OriginalComment: originalLine, IsEndTimeEstimated: true}
 		}
 
-		// 優先採用 AI 指出的「原文原始時間字串」（這是針對特殊格式的主要改善點）
-		// AI 會把留言裡實際出現的時間文字（例如 "1:12:42" 或 "0:13:24 ; 0:17:28" 的片段）抄給我們
+		// AI が示した「原文の時刻文字列」を優先する（特殊形式に対する主な改善点）
+		// AI はコメントに実際にある時刻文字列（例："1:12:42" や "0:13:24 ; 0:17:28" の一部）をそのまま返す
 		if sel.StartTS != "" {
 			if ts := parseTimestampString(sel.StartTS); ts > 0 {
 				parsed.Start = ts
@@ -158,7 +158,7 @@ func ParseCommentsWithAI(aiClient ai.Chatter, comments []string) ([]ParsedSong, 
 			}
 		}
 
-		// Legacy fallback：如果新欄位沒有值，才試舊的 numeric start/end
+		// 旧形式へのフォールバック：新フィールドが空の場合だけ numeric start/end を試す
 		if parsed.Start == 0 {
 			if start := parseAISeconds(sel.Start); start > 0 {
 				parsed.Start = start
@@ -171,12 +171,12 @@ func ParseCommentsWithAI(aiClient ai.Chatter, comments []string) ([]ParsedSong, 
 			}
 		}
 
-		// AI 抽取的歌名/歌手：僅在「逐字出現在原始行」時才採用，杜絕幻覺竄改
+		// AI が抽出した曲名／歌手は、元の行に原文どおり存在する場合だけ採用し、幻覚による改変を防ぐ
 		if name := firstSlashField(sel.Name); name != "" && isVerbatim(name, originalLine) {
 			parsed.Name = name
 		}
 		if artist := firstSlashField(sel.Artist); artist != "" && isVerbatim(artist, originalLine) {
-			// AI 可能把縫合行尾端的合唱者資訊（with ○○ 等）當成歌手 → 視為未知
+			// AI が結合行末尾のコラボ情報（with ○○ など）を歌手とみなした場合は不明として扱う
 			if collabMarkerRe.MatchString(artist) {
 				artist = ""
 			}
@@ -191,16 +191,16 @@ func ParseCommentsWithAI(aiClient ai.Chatter, comments []string) ([]ParsedSong, 
 
 	logger.Infof("AI comment parse succeeded, extracted %d songs from %d timestamp lines", len(result), len(lines))
 
-	// 額外記錄每首歌的來源，方便對照 AI 輸出 vs 實際結果
+	// AI の出力と実際の結果を比較しやすいよう、各曲の由来も記録する
 	for i, p := range result {
 		logger.Debugf("AI parsed song %d: start=%d name=%q artist=%q from line=%s", i, p.Start, p.Name, p.OriginalArtist, p.OriginalComment)
 	}
 	return result, nil
 }
 
-// firstSlashField 把 AI 回傳的欄位裁到第一個斜線欄位為止，
-// 與 parseSongAndArtist 的「歌名/歌手/其餘欄位忽略」語意保持一致。
-// 縫合行的合唱者資訊掛在最後一個斜線欄位，AI 若整段照抄也會在這裡被裁掉。
+// firstSlashField は AI が返したフィールドを最初のスラッシュ区切りまでに切り詰める。
+// parseSongAndArtist の「曲名/歌手/その他のフィールドは無視」という意味と揃える。
+// 結合行のコラボ情報は最後のスラッシュ区切りにあるため、AI が全体をコピーしてもここで除かれる。
 func firstSlashField(s string) string {
 	s = strings.ReplaceAll(strings.TrimSpace(s), "／", "/")
 	if i := strings.Index(s, "/"); i >= 0 {
@@ -209,8 +209,8 @@ func firstSlashField(s string) string {
 	return strings.TrimSpace(s)
 }
 
-// isVerbatim 判斷 candidate 是否「逐字」出現在 source 中（NFKC + 去空白 + lower 後比對子字串）。
-// 用來確保 AI 回傳的歌名/歌手確實來自原文，而非模型自行生成/竄改。
+// isVerbatim は candidate が source に原文どおり存在するかを判定する（NFKC 正規化、空白除去、小文字化の後に部分文字列を比較）。
+// AI が返した曲名／歌手がモデルの生成や改変ではなく、確実に原文由来であることを保証する。
 func isVerbatim(candidate, source string) bool {
 	c := normalizeForMatch(candidate)
 	if c == "" {
@@ -233,7 +233,7 @@ func normalizeForMatch(s string) string {
 func extractTimestampLines(comments []string) []string {
 	var lines []string
 	for _, comment := range comments {
-		// 先縫合兩行式條目，讓沒有時間戳的歌名行不會在這裡被過濾掉
+		// 先に 2 行形式の項目を結合し、タイムスタンプのない曲名行がここで除外されないようにする
 		for _, line := range stitchTwoLineEntries(strings.Split(comment, "\n")) {
 			trimmed := strings.TrimSpace(line)
 			if trimmed == "" {

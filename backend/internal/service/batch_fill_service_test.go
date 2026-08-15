@@ -160,8 +160,8 @@ func TestExistingNotInSource(t *testing.T) {
 	if len(got) != 1 || got[0] != orphan {
 		t.Errorf("existingNotInSource() = %v, want [%v]", got, orphan)
 	}
-	// 源が全部を含んでいれば空。ここが空でないと、実行のたびに
-	// 「源に無い」件数が水増しされて履歴が信用できなくなる。
+	// 入力元がすべてを含んでいれば空。ここが空でないと、実行のたびに
+	// 「入力元に無い」件数が水増しされて履歴が信用できなくなる。
 	if n := existingNotInSource(existing, []*fillRow{{Start: 600}, {Start: 1200}, {Start: 1800}}); len(n) != 0 {
 		t.Errorf("existingNotInSource() = %v, want empty", n)
 	}
@@ -304,7 +304,7 @@ func TestSongVerdictOf(t *testing.T) {
 	})
 }
 
-// Holodex を源に採るときも、コメントにしか無い曲を落としてはいけない。
+// Holodex を入力元に採るときも、コメントにしか無い曲を落としてはいけない。
 //
 // 実例：6SOyUVuOq9k は Holodex 5 曲・コメント 6 曲で、最後の `Snow halation` が
 // コメントにしか無かった。曲数の比（1.5 倍以上かつ 3 曲差）で見ていたので素通りし、
@@ -376,8 +376,8 @@ func TestApplyMissingSongEditsItunesID(t *testing.T) {
 // 編集画面が運ぶ欄は、審査の payload もすべて運べなければならない。
 //
 // 承認は findOrCreateSong を通るので、運ばれなかった欄はそこで空のまま使われる
-// ── 審査から作った曲だけ封面も読みも付かない、という差になる。実際 iTunes ID と
-// 封面がこの落ち方をした。**CreatePerformanceItem に欄を足したらここが落ちる**ので、
+// ── 審査から作った曲だけジャケット画像も読みも付かない、という差になる。実際 iTunes ID と
+// ジャケット画像がこの落ち方をした。**CreatePerformanceItem に欄を足したらここが落ちる**ので、
 // そのとき MissingSongPayload と applyMissingSongEdits も直すこと。
 func TestMissingSongPayloadCoversEditorFields(t *testing.T) {
 	editor := reflect.TypeOf(dto.CreatePerformanceItem{})

@@ -210,10 +210,10 @@ const AI_PRESETS: { label: string; name: string; base_url: string; model: string
   { label: 'Google Gemini', name: 'Gemini', base_url: 'https://generativelanguage.googleapis.com/v1beta/openai', model: 'gemini-2.5-flash' },
   { label: 'Cerebras', name: 'Cerebras', base_url: 'https://api.cerebras.ai/v1', model: 'llama-3.3-70b' },
   { label: 'OpenRouter', name: 'OpenRouter', base_url: 'https://openrouter.ai/api/v1', model: '' },
-  { label: 'Ollama (本機)', name: 'Ollama', base_url: 'http://localhost:11434/v1', model: 'llama3.1' },
+  { label: 'Ollama（ローカル）', name: 'Ollama', base_url: 'http://localhost:11434/v1', model: 'llama3.1' },
 ];
 
-// ModelPicker モデル選択用の ▾ ボタン + 下拉清單。
+// ModelPicker モデル選択用の ▾ ボタン + ドロップダウンリスト。
 // 開いたタイミングで fetcher を呼び、取得中はスピナーを表示する。
 function ModelPicker({ fetcher, current, onSelect, disabled, disabledTitle }: {
   fetcher: () => Promise<AIModelInfo[]>;
@@ -252,7 +252,7 @@ function ModelPicker({ fetcher, current, onSelect, disabled, disabledTitle }: {
       >▾</button>
       {open && (
         <>
-          {/* backdrop：點擊外部關閉 */}
+          {/* 背景：外側をクリックして閉じる */}
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
           <div className="absolute right-0 top-full mt-1 z-20 w-80 max-h-72 overflow-auto bg-white border border-gray-200 rounded-lg shadow-lg py-1 text-sm">
             {loading && (
@@ -458,7 +458,7 @@ function AIProviderSection() {
     <div className="bg-white rounded-lg shadow-sm border p-6">
       <h2 className="text-xl font-bold text-gray-900 mb-2">AIプロバイダー管理</h2>
       <p className="text-gray-500 mb-6">
-        歌名の正規化・コメント解析に使う OpenAI 互換 LLM プロバイダーを設定します。
+        曲名の正規化・コメント解析に使う OpenAI 互換 LLM プロバイダーを設定します。
         上にあるもの（優先度が高いもの）から使い、失敗・レート制限時に次へ自動で切り替えます（▲▼ で並び替え）。
         各 provider の timeout（秒）は個別に調整可能。OpenRouter など遅いものは 90〜180 に設定するとタイムアウトしにくくなります。
         API キーは保存後は表示されません（末尾のみ）。
@@ -813,7 +813,7 @@ export default function SettingsPage() {
       <div className="bg-white rounded-lg shadow-sm border p-6">
         <h2 className="text-xl font-bold text-gray-900 mb-2">フィルターキーワード管理</h2>
         <p className="text-gray-500 mb-6">
-          コメントから歌曲を読み込む際に、除外・保持するキーワードを管理します。
+          コメントから楽曲を読み込む際に、除外・保持するキーワードを管理します。
         </p>
 
         {isLoadingKeywords ? (
@@ -822,7 +822,7 @@ export default function SettingsPage() {
           <div className="space-y-8">
             <KeywordSection
               title="除外キーワード"
-              description="このキーワードを含む項目は歌曲として認識されません（例: トーク、休憩、BGM）"
+              description="このキーワードを含む項目は楽曲として認識されません（例: トーク、休憩、BGM）"
               type="filter"
               keywords={filterKeywords}
               onAdd={(keyword, type) => createKeywordMutation.mutate({ keyword, type })}
@@ -834,7 +834,7 @@ export default function SettingsPage() {
 
             <KeywordSection
               title="保持キーワード"
-              description="除外キーワードより優先され、このキーワードを含む項目は歌曲として保持されます（例: cover、piano）"
+              description="除外キーワードより優先され、このキーワードを含む項目は楽曲として保持されます（例: cover、piano）"
               type="keep"
               keywords={keepKeywords}
               onAdd={(keyword, type) => createKeywordMutation.mutate({ keyword, type })}

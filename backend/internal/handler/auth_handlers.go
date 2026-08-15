@@ -50,12 +50,12 @@ func userHasPermission(req *http.Request, perm string) bool {
 //
 // 優先順位：
 //  1. CF-Connecting-IP … Cloudflare が必ず上書きする単一値。プロキシ経由なら常にこれが正しい
-//  2. X-Forwarded-For の先頭 … Cloudflare を挟まない構成（原站直結・他の CDN）向け
+//  2. X-Forwarded-For の先頭 … Cloudflare を挟まない構成（オリジンサーバー直結・他の CDN）向け
 //  3. RemoteAddr … プロキシが無いローカル開発
 //
 // ⚠️ 2 と 3 の間には信頼の断絶がある。ヘッダーは送信側が自由に詐称できるので、
-// これらが信用できるのは「原站に直接到達できない」ことが前提。
-// つまり VPS のファイアウォールで 80/443 を Cloudflare の網段だけに絞ること
+// これらが信用できるのは「オリジンサーバーに直接到達できない」ことが前提。
+// つまり VPS のファイアウォールで 80/443 を Cloudflare の IP レンジだけに絞ること
 // （TODO 30）とセットで初めて成立する。片方だけでは絞り込みは回避できてしまう。
 //
 // 実際、Cloudflare を挟んだ直後は X-Forwarded-For の先頭が安定せず、

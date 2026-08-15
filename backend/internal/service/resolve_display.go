@@ -51,7 +51,7 @@ func (s *NormalizationService) resolveOne(rawName, rawArtist, normName, normArti
 
 	var changes []dto.FieldChange
 	add := func(field, by, from, to, reason string, score float64) {
-		// from が空でも記録する。「留言に歌手が書かれていなかったのに、
+		// from が空でも記録する。「コメントに歌手が書かれていなかったのに、
 		// 照合で埋まった」は利用者がいちばん確かめたい変化で、
 		// これを落とすと画面に理由なく名前が現れたように見える。
 		if to == "" || from == to {
@@ -175,7 +175,7 @@ func stripMatchFromSuggestions(songs []dto.SongSuggestion) []dto.SongSuggestion 
 // AdjudicateCommentSongs は未照合の行を AI に判定させ、決まったものを書き戻す。
 // 戻り値は (AI に回した行数, 照合できた行数)。
 //
-// 呼ぶのは「源を編集フォームへ読み込む」ときだけ。
+// 呼ぶのは「入力元を編集フォームへ読み込む」ときだけ。
 func (s *NormalizationService) AdjudicateCommentSongs(songs []dto.CommentSong) (asked, resolved int) {
 	rows := make([]*aiMatchRow, 0, len(songs))
 	idx := make([]int, 0, len(songs))
@@ -312,7 +312,7 @@ func (s *NormalizationService) aiMatchResult(row *aiMatchRow) (dto.AISuggestionR
 }
 
 // newAIMatchRowFromCandidates は表記から候補を引いて AI 用の行を作る。
-// 一括はまだ候補を持っていない状態から始まるので、ここで召回まで済ませる。
+// 一括はまだ候補を持っていない状態から始まるので、ここで候補抽出まで済ませる。
 func (s *NormalizationService) newAIMatchRowFromCandidates(name, artist string) *aiMatchRow {
 	row := &aiMatchRow{Name: name, Artist: artist}
 	if s.matchService == nil {

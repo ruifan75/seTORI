@@ -59,7 +59,7 @@ func (s *StreamService) Exists(id string) (bool, error) {
 	return st != nil, nil
 }
 
-// GetAll 取得歌回列表（預設不顯示隱藏的）
+// GetAll は歌枠一覧を取得する（既定では非表示を除外）。
 func (s *StreamService) GetAll(page, limit int, sort, dir string) (*dto.StreamListResponse, error) {
 	if page < 1 {
 		page = 1
@@ -69,13 +69,13 @@ func (s *StreamService) GetAll(page, limit int, sort, dir string) (*dto.StreamLi
 	}
 	offset := (page - 1) * limit
 
-	// 預設不顯示隱藏的歌回
+	// 既定では非表示の歌枠を除外する
 	streams, total, err := s.streamRepo.FindAll(limit, offset, false, sort, dir)
 	if err != nil {
 		return nil, fmt.Errorf("get streams: %w", err)
 	}
 
-	// 批次取得標籤與參與者，避免 N+1
+	// タグと参加者を一括取得し、N+1 を避ける
 	streamIDs := make([]string, len(streams))
 	for i, stream := range streams {
 		streamIDs[i] = stream.ID
@@ -89,7 +89,7 @@ func (s *StreamService) GetAll(page, limit int, sort, dir string) (*dto.StreamLi
 		return nil, fmt.Errorf("get stream singers: %w", err)
 	}
 
-	// 轉換為 DTO
+	// DTO に変換する
 	streamResponses := make([]dto.StreamResponse, len(streams))
 	for i, stream := range streams {
 		streamResponses[i] = s.toStreamResponse(stream, tagsMap[stream.ID], participantsMap[stream.ID], ownersMap[stream.ID])
@@ -207,7 +207,7 @@ func (s *StreamService) GetPerformancesByTag(tagID string, page, limit int) (*dt
 	}, nil
 }
 
-// GetByID 取得歌回詳情（含歌單）
+// GetByID は歌枠の詳細（セットリストを含む）を取得する。
 func (s *StreamService) GetByID(id string) (*dto.StreamDetailResponse, error) {
 	stream, err := s.streamRepo.FindByID(id)
 	if err != nil {
@@ -222,7 +222,7 @@ func (s *StreamService) GetByID(id string) (*dto.StreamDetailResponse, error) {
 	channelOwner, _ := s.streamRepo.GetChannelOwner(stream.ID)
 	streamResp := s.toStreamResponse(*stream, tags, participants, channelOwner)
 
-	// 取得演出清單
+	// 歌唱一覧を取得する
 	performances, err := s.perfRepo.FindByStreamID(id)
 	if err != nil {
 		return nil, fmt.Errorf("get performances: %w", err)
@@ -239,7 +239,7 @@ func (s *StreamService) GetByID(id string) (*dto.StreamDetailResponse, error) {
 	}, nil
 }
 
-// toStreamResponse 轉換 Model 到 DTO。**照合はしない**（理由は下の comment_songs の節）。
+// toStreamResponse は Model を DTO に変換する。**照合はしない**（理由は下の comment_songs の節）。
 func (s *StreamService) toStreamResponse(stream models.Stream, tags []models.StreamTag, participants []models.Singer, channelOwner *models.Singer) dto.StreamResponse {
 	resp := dto.StreamResponse{
 		ID:          stream.ID,
@@ -268,7 +268,7 @@ func (s *StreamService) toStreamResponse(stream models.Stream, tags []models.Str
 		}
 	}
 
-	// 轉換參與者
+	// 参加者を変換する
 	resp.Participants = make([]dto.SingerResponse, len(participants))
 	for i, singer := range participants {
 		resp.Participants[i] = dto.SingerResponse{
@@ -288,7 +288,7 @@ func (s *StreamService) toStreamResponse(stream models.Stream, tags []models.Str
 		}
 	}
 
-	// 轉換頻道擁有者
+	// チャンネル所有者を変換する
 	if channelOwner != nil {
 		ownerResp := dto.SingerResponse{
 			ID:        channelOwner.ID,
@@ -308,9 +308,9 @@ func (s *StreamService) toStreamResponse(stream models.Stream, tags []models.Str
 		resp.ChannelOwner = &ownerResp
 	}
 
-	// 解析並加入 Holodex timeline 資料（從完整的 Video JSON 中提取 songs）
+	// Holodex の timeline データを解析して追加する（完全な Video JSON から songs を抽出）
 	if len(stream.HolodexData) > 0 {
-		// HolodexData 存的是完整的 holodex.Video 物件
+		// HolodexData には完全な holodex.Video オブジェクトが保存されている
 		var video struct {
 			Songs []struct {
 				Name           string `json:"name"`
@@ -339,7 +339,7 @@ func (s *StreamService) toStreamResponse(stream models.Stream, tags []models.Str
 					itunesID := song.ITunesID
 					holodexSongs[i].ItunesID = &itunesID
 				}
-				// 如果沒有結束時間，使用下一首的開始時間
+				// 終了時刻がなければ次の曲の開始時刻を使う
 				if holodexSongs[i].EndSeconds == 0 && i+1 < len(video.Songs) {
 					holodexSongs[i].EndSeconds = video.Songs[i+1].Start
 				}
@@ -348,9 +348,9 @@ func (s *StreamService) toStreamResponse(stream models.Stream, tags []models.Str
 		}
 	}
 
-	// 從 comment_songs 載入已分析的快取結果。
+	// comment_songs から分析済みのキャッシュ結果を読み込む。
 	//
-	// **ここでは照合しない。** 照合するのは「どの源から取り込むか」を決めて
+	// **ここでは照合しない。** 照合するのは「どの入力元から取り込むか」を決めて
 	// 編集フォームへ読み込む操作（POST /comments/analyze、/holodex-songs/analyze）
 	// だけで、配信を開いただけの読み取りでは何も引かない。Holodex 側も同じ扱い
 	// （このメソッドは holodex_data をそのまま組み立てるだけ）。
@@ -369,13 +369,13 @@ func (s *StreamService) toStreamResponse(stream models.Stream, tags []models.Str
 		resp.CommentSongsAnalyzedAt = &t
 	}
 
-	// comment_raw に留言があれば分析ボタンを有効化できる（comment_songs 未生成でも分析可能）
+	// comment_raw にコメントがあれば分析ボタンを有効化できる（comment_songs が未生成でも分析可能）
 	resp.HasCommentRaw = len(stream.CommentRaw) > 0 && string(stream.CommentRaw) != "null" && string(stream.CommentRaw) != "[]"
 
 	return resp
 }
 
-// toPerformanceResponse 轉換演出到 DTO
+// toPerformanceResponse は歌唱を DTO に変換する。
 func (s *StreamService) toPerformanceResponse(perf repository.PerformanceWithDetails) dto.PerformanceResponse {
 	resp := dto.PerformanceResponse{
 		ID:             perf.ID,
@@ -400,7 +400,7 @@ func (s *StreamService) toPerformanceResponse(perf repository.PerformanceWithDet
 		resp.ItunesID = &perf.ItunesID.Int64
 	}
 
-	// 轉換標籤
+	// タグを変換する
 	resp.Tags = make([]dto.PerformanceTagResponse, len(perf.Tags))
 	for i, tag := range perf.Tags {
 		resp.Tags[i] = dto.PerformanceTagResponse{
@@ -417,7 +417,7 @@ func (s *StreamService) toPerformanceResponse(perf repository.PerformanceWithDet
 		resp.CustomTags = []string{}
 	}
 
-	// 轉換演唱者
+	// 歌手を変換する
 	resp.Singers = make([]dto.SingerResponse, len(perf.Singers))
 	for i, singer := range perf.Singers {
 		resp.Singers[i] = dto.SingerResponse{
@@ -440,7 +440,7 @@ func (s *StreamService) toPerformanceResponse(perf repository.PerformanceWithDet
 	return resp
 }
 
-// Update 更新歌回資訊
+// Update は歌枠の情報を更新する。
 func (s *StreamService) Update(id string, req *dto.UpdateStreamRequest) (*dto.StreamDetailResponse, error) {
 	stream, err := s.streamRepo.FindByID(id)
 	if err != nil {
@@ -450,17 +450,17 @@ func (s *StreamService) Update(id string, req *dto.UpdateStreamRequest) (*dto.St
 		return nil, nil
 	}
 
-	// 更新標題
+	// タイトルを更新する
 	if req.Title != nil && *req.Title != "" {
 		stream.Title = *req.Title
 	}
 
-	// 更新日期
+	// 日付を更新する
 	if req.StreamDate != nil && *req.StreamDate != "" {
-		// 嘗試解析 RFC3339 格式（完整時間），失敗則嘗試日期格式
+		// RFC3339 形式（完全な日時）を試し、失敗したら日付形式を試す
 		date, err := time.Parse(time.RFC3339, *req.StreamDate)
 		if err != nil {
-			// 如果不是 RFC3339，嘗試解析為日期格式
+			// RFC3339 でなければ日付形式として解析する
 			date, err = time.Parse("2006-01-02", *req.StreamDate)
 			if err != nil {
 				return nil, fmt.Errorf("parse stream date: %w", err)
@@ -469,7 +469,7 @@ func (s *StreamService) Update(id string, req *dto.UpdateStreamRequest) (*dto.St
 		stream.StreamDate = date
 	}
 
-	// 更新處理狀態
+	// 処理状態を更新する
 	if req.IsProcessed != nil {
 		stream.IsProcessed = *req.IsProcessed
 	}
@@ -479,21 +479,21 @@ func (s *StreamService) Update(id string, req *dto.UpdateStreamRequest) (*dto.St
 		stream.IsHidden = *req.IsHidden
 	}
 
-	// 更新 Stream metadata（只更新可變欄位，不重寫大型 JSONB）
+	// 配信の metadata を更新する（変更可能なフィールドだけを更新し、大きな JSONB は書き戻さない）
 	if err := s.streamRepo.UpdateMetadata(id, stream.Title, stream.StreamDate, stream.IsProcessed, stream.IsHidden); err != nil {
 		return nil, fmt.Errorf("update stream: %w", err)
 	}
 
-	// 更新標籤
+	// タグを更新する
 	if req.TagIDs != nil {
 		if err := s.streamRepo.SetTags(id, req.TagIDs); err != nil {
 			return nil, fmt.Errorf("set tags: %w", err)
 		}
 	}
 
-	// 更新參與者
+	// 参加者を更新する
 	if req.ParticipantIDs != nil {
-		// 找出頻道擁有者（第一個參與者通常是擁有者）
+		// チャンネル所有者を探す（通常は最初の参加者）
 		ownerID := ""
 		if len(req.ParticipantIDs) > 0 {
 			ownerID = req.ParticipantIDs[0]
@@ -503,11 +503,11 @@ func (s *StreamService) Update(id string, req *dto.UpdateStreamRequest) (*dto.St
 		}
 	}
 
-	// 返回更新後的資料
+	// 更新後のデータを返す
 	return s.GetByID(id)
 }
 
-// ========== 首頁（ランダム再生） ==========
+// ========== ホーム（ランダム再生） ==========
 
 // ComposePerformanceList は配信横断の歌唱一覧をレスポンスへ変換する（配信の文脈付き）。
 // プレイリストなど他サービスからも同じ形で返せるよう公開している。

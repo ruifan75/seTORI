@@ -30,7 +30,7 @@ type BatchFillRun struct {
 	StreamsDone  int       `json:"streams_done"`
 	SongsCreated int       `json:"songs_created"`
 	SongsReview  int       `json:"songs_review"`
-	// SongsGap は「DB にあるが源に無い」歌唱の件数（force 実行のみ）。
+	// SongsGap は「DB にあるが入力元に無い」歌唱の件数（force 実行のみ）。
 	// 提案としては積まないので、ここが唯一の入口になる。
 	SongsGap      int        `json:"songs_gap"`
 	AIAsked       int        `json:"ai_asked"`
@@ -40,7 +40,7 @@ type BatchFillRun struct {
 	StartedByName *string    `json:"started_by_name,omitempty"`
 }
 
-// BatchFillGap は「DB にあるが源に無い」歌唱 1 件（表示用に曲名と時間を添えて返す）。
+// BatchFillGap は「DB にあるが入力元に無い」歌唱 1 件（表示用に曲名と時間を添えて返す）。
 type BatchFillGap struct {
 	StreamID      string `json:"stream_id"`
 	StreamTitle   string `json:"stream_title"`
@@ -82,10 +82,10 @@ func (r *BatchFillRepository) UpdateProgress(id uuid.UUID, total, done, created,
 	return nil
 }
 
-// RecordGaps は「DB にあるが源に無い」歌唱を実行に紐づけて残す。
+// RecordGaps は「DB にあるが入力元に無い」歌唱を実行に紐づけて残す。
 //
-// 提案としては積まない（源は欠けているのが普通で、欠落 1 件ごとに待ち行列を作ると
-// 人が処理できない量になるうえ、「源に無い」だけでは何をすべきか決まらない）。
+// 提案としては積まない（入力元は欠けているのが普通で、欠落 1 件ごとに待ち行列を作ると
+// 人が処理できない量になるうえ、「入力元に無い」だけでは何をすべきか決まらない）。
 // それでもログだけでは誰も気付けないので、実行履歴から辿れるようにここへ書く。
 func (r *BatchFillRepository) RecordGaps(runID uuid.UUID, streamID string, perfIDs []uuid.UUID) error {
 	for _, pid := range perfIDs {
@@ -98,7 +98,7 @@ func (r *BatchFillRepository) RecordGaps(runID uuid.UUID, streamID string, perfI
 	return nil
 }
 
-// ListGaps は実行が見つけた「源に無い既存の歌唱」を返す。
+// ListGaps は実行が見つけた「入力元に無い既存の歌唱」を返す。
 // 歌唱が後から消されていれば CASCADE で行ごと消えるので、ここには出てこない。
 func (r *BatchFillRepository) ListGaps(runID uuid.UUID) ([]BatchFillGap, error) {
 	rows, err := r.db.Query(`

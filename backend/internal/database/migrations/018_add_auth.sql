@@ -1,5 +1,5 @@
--- 認證・認可（RBAC / ACL）
--- users … 登入帳號、roles … 権限セット（編集可能）、sessions … Bearer トークン
+-- 認証・認可（RBAC / ACL）
+-- users … ログインアカウント、roles … 権限セット（編集可能）、sessions … Bearer トークン
 -- 匿名（未ログイン）は閲覧のみ。編集は role の permissions で制御する。
 
 -- 旧スキャフォールドの users テーブル（role VARCHAR 列・未使用・どのマイグレーションも作成していない）が

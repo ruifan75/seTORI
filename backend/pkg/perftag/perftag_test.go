@@ -18,7 +18,7 @@ func TestNormalize(t *testing.T) {
 		{"重複を除く", []string{"piano", "piano"}, "曲名", []string{"piano"}},
 		{"空は落とす", []string{"", "  "}, "曲名", nil},
 
-		// 報告された実データ。Holodex の曲名にだけ版本が書かれていて、
+		// 報告された実データ。Holodex の曲名にだけバージョン表記があり、
 		// AI がタグを返さなくても曲名から拾えること
 		{
 			"Holodex の (1 Chorus) から short を導く",
@@ -29,7 +29,7 @@ func TestNormalize(t *testing.T) {
 		{"1chorus（空白なし）", nil, "Junky(1Chorus)", []string{"short"}},
 		{"全角のコーラス表記", nil, "炉心融解（1コーラス）", []string{"short"}},
 		{"既に short があれば増やさない", []string{"short"}, "そばかす (1 Chorus)", []string{"short"}},
-		{"版本の表記が無ければ何も足さない", nil, "そばかす", nil},
+		{"バージョン表記が無ければ何も足さない", nil, "そばかす", nil},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

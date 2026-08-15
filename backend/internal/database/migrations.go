@@ -41,7 +41,7 @@ func RunMigrations(db *sql.DB) error {
 
 		version := entry.Name()
 
-		// 檢查是否已執行
+		// 実行済みか確認する
 		var exists bool
 		err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version = $1)", version).Scan(&exists)
 		if err != nil {
@@ -59,12 +59,12 @@ func RunMigrations(db *sql.DB) error {
 			return fmt.Errorf("マイグレーションファイル %s の読み込み失敗: %w", version, err)
 		}
 
-		// 執行遷移
+		// マイグレーションを実行する
 		if _, err := db.Exec(string(content)); err != nil {
 			return fmt.Errorf("マイグレーション %s の実行失敗: %w", version, err)
 		}
 
-		// 記錄遷移
+		// マイグレーションを記録する
 		if _, err := db.Exec("INSERT INTO schema_migrations (version) VALUES ($1)", version); err != nil {
 			return fmt.Errorf("マイグレーション %s の記録失敗: %w", version, err)
 		}

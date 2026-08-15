@@ -17,7 +17,7 @@ func NewTagRepository(db *sql.DB) *TagRepository {
 
 // ========== Stream Tags ==========
 
-// FindAllStreamTags 取得所有 stream tags
+// FindAllStreamTags はすべての stream tag を取得する。
 func (r *TagRepository) FindAllStreamTags() ([]models.StreamTag, error) {
 	rows, err := r.db.Query(`SELECT id, display_name, color, created_at FROM stream_tags ORDER BY id`)
 	if err != nil {
@@ -36,7 +36,7 @@ func (r *TagRepository) FindAllStreamTags() ([]models.StreamTag, error) {
 	return tags, nil
 }
 
-// CreateStreamTag 新增 stream tag
+// CreateStreamTag は stream tag を追加する。
 func (r *TagRepository) CreateStreamTag(id, displayName, color string) (*models.StreamTag, error) {
 	var t models.StreamTag
 	err := r.db.QueryRow(
@@ -49,7 +49,7 @@ func (r *TagRepository) CreateStreamTag(id, displayName, color string) (*models.
 	return &t, nil
 }
 
-// DeleteStreamTag 刪除 stream tag
+// DeleteStreamTag は stream tag を削除する。
 func (r *TagRepository) DeleteStreamTag(id string) error {
 	result, err := r.db.Exec(`DELETE FROM stream_tags WHERE id = $1`, id)
 	if err != nil {
@@ -67,7 +67,7 @@ func (r *TagRepository) DeleteStreamTag(id string) error {
 
 // ========== Performance Tags ==========
 
-// FindAllPerformanceTags 取得所有 performance tags
+// FindAllPerformanceTags はすべての performance tag を取得する。
 func (r *TagRepository) FindAllPerformanceTags() ([]models.PerformanceTag, error) {
 	rows, err := r.db.Query(`SELECT id, display_name, color, created_at FROM performance_tags ORDER BY id`)
 	if err != nil {
@@ -86,7 +86,7 @@ func (r *TagRepository) FindAllPerformanceTags() ([]models.PerformanceTag, error
 	return tags, nil
 }
 
-// CreatePerformanceTag 新增 performance tag
+// CreatePerformanceTag は performance tag を追加する。
 func (r *TagRepository) CreatePerformanceTag(id, displayName, color string) (*models.PerformanceTag, error) {
 	var t models.PerformanceTag
 	err := r.db.QueryRow(
@@ -99,7 +99,7 @@ func (r *TagRepository) CreatePerformanceTag(id, displayName, color string) (*mo
 	return &t, nil
 }
 
-// DeletePerformanceTag 刪除 performance tag
+// DeletePerformanceTag は performance tag を削除する。
 func (r *TagRepository) DeletePerformanceTag(id string) error {
 	result, err := r.db.Exec(`DELETE FROM performance_tags WHERE id = $1`, id)
 	if err != nil {
@@ -178,9 +178,9 @@ func (r *TagRepository) SearchPerformanceTags(query string, limit int) ([]TagWit
 	return tags, rows.Err()
 }
 
-// ========== Tag Keyword Rules（標題自動標籤規則）==========
+// ========== Tag Keyword Rules（タイトルへの自動タグ付け規則）==========
 
-// FindAllTagKeywordRules 取得所有自動標籤規則
+// FindAllTagKeywordRules はすべての自動タグ付け規則を取得する。
 func (r *TagRepository) FindAllTagKeywordRules() ([]models.TagKeywordRule, error) {
 	rows, err := r.db.Query(`SELECT id, tag_id, keyword, created_at FROM tag_keyword_rules ORDER BY tag_id, keyword`)
 	if err != nil {
@@ -199,7 +199,7 @@ func (r *TagRepository) FindAllTagKeywordRules() ([]models.TagKeywordRule, error
 	return rules, rows.Err()
 }
 
-// CreateTagKeywordRule 新增自動標籤規則（tag_id 必須是既有 stream_tag）
+// CreateTagKeywordRule は自動タグ付け規則を追加する（tag_id は既存の stream_tag に限る）。
 func (r *TagRepository) CreateTagKeywordRule(tagID, keyword string) (*models.TagKeywordRule, error) {
 	var rule models.TagKeywordRule
 	err := r.db.QueryRow(
@@ -213,7 +213,7 @@ func (r *TagRepository) CreateTagKeywordRule(tagID, keyword string) (*models.Tag
 	return &rule, nil
 }
 
-// DeleteTagKeywordRule 刪除自動標籤規則
+// DeleteTagKeywordRule は自動タグ付け規則を削除する。
 func (r *TagRepository) DeleteTagKeywordRule(id int) error {
 	result, err := r.db.Exec(`DELETE FROM tag_keyword_rules WHERE id = $1`, id)
 	if err != nil {

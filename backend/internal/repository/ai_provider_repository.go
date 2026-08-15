@@ -64,7 +64,7 @@ func scanAIProvider(rows *sql.Rows) (models.AIProvider, error) {
 	return p, err
 }
 
-// FindAll 取得所有 provider（依優先序）
+// FindAll はすべてのプロバイダーを優先順に取得する。
 func (r *AIProviderRepository) FindAll() ([]models.AIProvider, error) {
 	rows, err := r.db.Query("SELECT " + aiProviderColumns + " FROM ai_providers ORDER BY priority ASC, id ASC")
 	if err != nil {
@@ -84,7 +84,7 @@ func (r *AIProviderRepository) FindAll() ([]models.AIProvider, error) {
 	return providers, rows.Err()
 }
 
-// FindEnabled 取得啟用中的 provider（依優先序）
+// FindEnabled は有効なプロバイダーを優先順に取得する。
 func (r *AIProviderRepository) FindEnabled() ([]models.AIProvider, error) {
 	rows, err := r.db.Query("SELECT " + aiProviderColumns + " FROM ai_providers WHERE enabled = TRUE ORDER BY priority ASC, id ASC")
 	if err != nil {
@@ -104,7 +104,7 @@ func (r *AIProviderRepository) FindEnabled() ([]models.AIProvider, error) {
 	return providers, rows.Err()
 }
 
-// FindByID 取得單一 provider
+// FindByID はプロバイダーを 1 件取得する。
 func (r *AIProviderRepository) FindByID(id int) (*models.AIProvider, error) {
 	var p models.AIProvider
 	err := r.db.QueryRow("SELECT "+aiProviderColumns+" FROM ai_providers WHERE id = $1", id).
@@ -119,7 +119,7 @@ func (r *AIProviderRepository) FindByID(id int) (*models.AIProvider, error) {
 	return &p, nil
 }
 
-// Create 建立 provider
+// Create はプロバイダーを作成する。
 func (r *AIProviderRepository) Create(p *models.AIProvider) error {
 	query := `
 		INSERT INTO ai_providers (name, base_url, model, api_key, enabled, priority, timeout_seconds)
@@ -138,7 +138,7 @@ func (r *AIProviderRepository) Create(p *models.AIProvider) error {
 	return nil
 }
 
-// Update 更新 provider
+// Update はプロバイダーを更新する。
 func (r *AIProviderRepository) Update(p *models.AIProvider) error {
 	query := `
 		UPDATE ai_providers
@@ -154,7 +154,7 @@ func (r *AIProviderRepository) Update(p *models.AIProvider) error {
 	return nil
 }
 
-// Delete 刪除 provider
+// Delete はプロバイダーを削除する。
 func (r *AIProviderRepository) Delete(id int) error {
 	_, err := r.db.Exec("DELETE FROM ai_providers WHERE id = $1", id)
 	if err != nil {

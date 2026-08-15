@@ -217,12 +217,12 @@ type StreamResponse struct {
 	ThumbnailURL         *string             `json:"thumbnail_url,omitempty"`
 	Tags                 []StreamTagResponse `json:"tags"`
 	Participants         []SingerResponse    `json:"participants"`
-	ChannelOwner         *SingerResponse     `json:"channel_owner,omitempty"` // 頻道擁有者
+	ChannelOwner         *SingerResponse     `json:"channel_owner,omitempty"` // チャンネル所有者
 	IsProcessed          bool                `json:"is_processed"`
 	IsHidden             bool                `json:"is_hidden"`
-	HolodexTimelineSongs []SongSuggestion    `json:"holodex_timeline_songs,omitempty"` // 從 holodex_data 解析
-	CommentTimelineSongs []CommentSong       `json:"comment_timeline_songs,omitempty"` // 從 comment_songs 解析（已分析快取）
-	HasCommentRaw        bool                `json:"has_comment_raw"`                  // comment_raw 是否有留言可供分析
+	HolodexTimelineSongs []SongSuggestion    `json:"holodex_timeline_songs,omitempty"` // holodex_data から解析
+	CommentTimelineSongs []CommentSong       `json:"comment_timeline_songs,omitempty"` // comment_songs から解析（分析済みキャッシュ）
+	HasCommentRaw        bool                `json:"has_comment_raw"`                  // comment_raw に解析可能なコメントがあるか
 	// CommentSongsAnalyzedAt は解析を最後に走らせた時刻。updated_at では代用できない
 	// （毎日回る Holodex 同期が全配信の updated_at を今日に押し上げる）。
 	CommentSongsAnalyzedAt *string   `json:"comment_songs_analyzed_at,omitempty"`
@@ -249,7 +249,7 @@ type UpdateStreamRequest struct {
 	IsHidden       *bool    `json:"is_hidden,omitempty"`
 }
 
-// ========== 演出 ==========
+// ========== 歌唱 ==========
 
 type PerformanceTagResponse struct {
 	ID          string `json:"id"`
@@ -287,7 +287,7 @@ type PerformanceResponse struct {
 	ThumbnailURL *string `json:"thumbnail_url,omitempty"`
 }
 
-// 用於歌曲詳情頁的反向查詢
+// 楽曲詳細ページで使う逆引き。
 type SongPerformanceResponse struct {
 	ID             uuid.UUID                `json:"id"`
 	StreamID       string                   `json:"stream_id"`
@@ -317,23 +317,23 @@ type SongPerformanceListResponse struct {
 	Pagination   PaginationResponse        `json:"pagination"`
 }
 
-// ========== Holodex 同步 ==========
+// ========== Holodex 同期 ==========
 
 type SyncHolodexRequest struct {
 	ChannelID   string `json:"channel_id"`
-	Limit       int    `json:"limit,omitempty"`        // 同步多少筆（預設 50）
-	ForceUpdate bool   `json:"force_update,omitempty"` // 強制更新所有資料
+	Limit       int    `json:"limit,omitempty"`        // 同期件数（既定 50）
+	ForceUpdate bool   `json:"force_update,omitempty"` // すべてのデータを強制更新
 }
 
 type SyncHolodexResponse struct {
 	SyncedCount  int      `json:"synced_count"`
-	TotalStreams int      `json:"total_streams"` // 總共要處理的 stream 數量
-	Processed    int      `json:"processed"`     // 已處理的數量
+	TotalStreams int      `json:"total_streams"` // 処理対象の配信総数
+	Processed    int      `json:"processed"`     // 処理済み件数
 	NewStreams   []string `json:"new_streams"`
 	Updated      []string `json:"updated"`
 	Skipped      []string `json:"skipped"`
-	InProgress   bool     `json:"in_progress"`       // 是否還在進行中
-	Message      string   `json:"message,omitempty"` // 狀態訊息
+	InProgress   bool     `json:"in_progress"`       // 処理中か
+	Message      string   `json:"message,omitempty"` // 状態メッセージ
 }
 
 // ========== Comment 分析 ==========
@@ -341,14 +341,14 @@ type SyncHolodexResponse struct {
 type CommentSong struct {
 	Start              int    `json:"start"`
 	End                int    `json:"end"`
-	Name               string `json:"name"`            // 抽出した歌名（逐字。正規化前）
-	OriginalArtist     string `json:"original_artist"` // 抽出した歌手（逐字。正規化前）
+	Name               string `json:"name"`            // 抽出した曲名（原文どおり。正規化前）
+	OriginalArtist     string `json:"original_artist"` // 抽出した歌手（原文どおり。正規化前）
 	OriginalComment    string `json:"original_comment"`
 	IsEndTimeEstimated bool   `json:"is_end_time_estimated"`
 
-	// Chat 拍手偵測相關（用來跟 comment explicit end 比較）
-	ChatEnd int `json:"chat_end,omitempty"` // chat 偵測出的結束秒數（如果有）
-	EndDiff int `json:"end_diff,omitempty"` // |end - chat_end|，只有兩邊都有值時才填
+	// Chat の拍手検出関連（コメントに明記された終了時刻との比較用）
+	ChatEnd int `json:"chat_end,omitempty"` // Chat が検出した終了秒数（ある場合）
+	EndDiff int `json:"end_diff,omitempty"` // |end - chat_end|。両方に値がある場合のみ設定
 
 	// ↓ 折り込んだ正規化結果（分析時に AI 正規化＋DB 照合まで実行し、ここに保存・再利用する）
 	NormalizedName          string   `json:"normalized_name,omitempty"`
@@ -394,7 +394,7 @@ type FieldChange struct {
 // ArtistAliasProposal は「歌手名が DB と違うが、AI は同一人物だと言っている」ことの
 // 申し送り。編集フォームでチェックボックスとして出し、**保存したときだけ**登録する。
 //
-// 作曲者と原唱の取り違え（メルト / 初音ミク に対し DB は ryo (supercell)）は
+// 作曲者と原曲歌手の取り違え（メルト / 初音ミク に対し DB は ryo (supercell)）は
 // 「同じ曲だが別人」なので SameArtist=false になる。これを混同すると、
 // その人の全楽曲に効く別名義が誤って作られる。
 type ArtistAliasProposal struct {
@@ -418,7 +418,7 @@ type BatchFillStatus struct {
 	Current        string   `json:"current,omitempty"`
 	Created        int      `json:"created"`
 	Review         int      `json:"review"`
-	// Gaps は「DB にあるが源に無い」歌唱の件数（force 実行のみ）。
+	// Gaps は「DB にあるが入力元に無い」歌唱の件数（force 実行のみ）。
 	Gaps    int    `json:"gaps"`
 	AIAsked int    `json:"ai_asked"`
 	Message string `json:"message,omitempty"`
@@ -474,22 +474,22 @@ type BatchAnalyzeRequest struct {
 	SingerID string `json:"singer_id"` // 対象チャンネル（空なら全チャンネル）
 }
 
-// ========== 直接建立演出 ==========
+// ========== 歌唱記録の直接作成 ==========
 
-// 從 Holodex 或 Comment 讀取後的歌曲建議
+// Holodex またはコメントから読み込んだ楽曲候補。
 type SongSuggestion struct {
 	Name           string   `json:"name"`
 	OriginalArtist string   `json:"original_artist"`
 	StartSeconds   int      `json:"start_seconds"`
 	EndSeconds     int      `json:"end_seconds"`
-	Tags           []string `json:"tags"`       // 正規化で検出した版本タグ
-	SingerIDs      []string `json:"singer_ids"` // 預設為頻道擁有者
+	Tags           []string `json:"tags"`       // 正規化で検出したバージョンタグ
+	SingerIDs      []string `json:"singer_ids"` // 既定はチャンネル所有者
 	ArtURL         *string  `json:"art_url,omitempty"`
-	ItunesID       *int64   `json:"itunes_id,omitempty"` // Holodex 提供的 iTunes ID
+	ItunesID       *int64   `json:"itunes_id,omitempty"` // Holodex が提供する iTunes ID
 
-	// Chat 拍手偵測結果（Holodex 明示 end との比較用。CommentSong と対称）
-	ChatEnd int `json:"chat_end,omitempty"` // chat 偵測出的結束秒數（如果有）
-	EndDiff int `json:"end_diff,omitempty"` // |end - chat_end|，只有兩邊都有值時才填
+	// Chat の拍手検出結果（Holodex に明記された end との比較用。CommentSong と対称）
+	ChatEnd int `json:"chat_end,omitempty"` // Chat が検出した終了秒数（ある場合）
+	EndDiff int `json:"end_diff,omitempty"` // |end - chat_end|。両方に値がある場合のみ設定
 
 	// ↓ 折り込んだ正規化結果（AnalyzeHolodexSongs 時に AI 正規化＋DB 照合し埋め込む。CommentSong と対称）
 	NormalizedName           string  `json:"normalized_name,omitempty"`
@@ -513,16 +513,16 @@ type SongSuggestion struct {
 	Changes []FieldChange `json:"changes,omitempty"`
 }
 
-// 載入 Holodex 歌曲的回應
+// LoadHolodexSongsResponse は Holodex 楽曲の読み込みレスポンス。
 type LoadHolodexSongsResponse struct {
 	StreamID     string           `json:"stream_id"`
 	StreamTitle  string           `json:"stream_title"`
-	ChannelOwner SingerResponse   `json:"channel_owner"` // 頻道擁有者
-	Participants []SingerResponse `json:"participants"`  // 所有參與者（包含頻道擁有者）
+	ChannelOwner SingerResponse   `json:"channel_owner"` // チャンネル所有者
+	Participants []SingerResponse `json:"participants"`  // すべての参加者（チャンネル所有者を含む）
 	Songs        []SongSuggestion `json:"songs"`
 }
 
-// 建立演出請求
+// CreatePerformancesRequest は歌唱記録の作成リクエスト。
 type CreatePerformanceItem struct {
 	Name                  string   `json:"name"`
 	NameReading           string   `json:"name_reading,omitempty"`
@@ -533,7 +533,7 @@ type CreatePerformanceItem struct {
 	Tags                  []string `json:"tags"`
 	SingerIDs             []string `json:"singer_ids"`
 	ArtURL                *string  `json:"art_url,omitempty"`
-	ItunesID              *int64   `json:"itunes_id,omitempty"` // Holodex 提供的 iTunes ID
+	ItunesID              *int64   `json:"itunes_id,omitempty"` // Holodex が提供する iTunes ID
 	CustomTags            []string `json:"custom_tags,omitempty"`
 
 	// 終了時間の由来と確認状態（詳細は docs/DATA_COMPLETION.md）。
@@ -555,7 +555,7 @@ type CreatePerformancesResponse struct {
 
 // ========== AI 正規化 ==========
 
-// AI 正規化用的輸入項目
+// AINormalizeInput は AI 正規化への入力項目。
 type AINormalizationItem struct {
 	Name           string  `json:"name"`
 	OriginalArtist string  `json:"original_artist"`
@@ -563,25 +563,25 @@ type AINormalizationItem struct {
 	ItunesID       *int64  `json:"itunes_id,omitempty"`
 }
 
-// 批量 AI 正規化請求
+// BatchAINormalizeRequest は AI 正規化の一括リクエスト。
 type BatchAINormalizationRequest struct {
 	Items []AINormalizationItem `json:"items"`
 }
 
-// AI 建議結果
+// AINormalizeResult は AI の提案結果。
 type AISuggestionResult struct {
-	Index                 int      `json:"index"` // 對應原本的索引
+	Index                 int      `json:"index"` // 元のインデックスに対応
 	NormalizedName        string   `json:"normalized_name"`
-	NormalizedNameReading string   `json:"normalized_name_reading"` // 歌名平假名讀音
+	NormalizedNameReading string   `json:"normalized_name_reading"` // 曲名の平仮名読み
 	OriginalArtist        string   `json:"original_artist"`
-	OriginalArtistReading string   `json:"original_artist_reading"` // 藝人名平假名讀音
+	OriginalArtistReading string   `json:"original_artist_reading"` // アーティスト名の平仮名読み
 	Tags                  []string `json:"tags"`
 	Confidence            float64  `json:"confidence"`
 	Reasoning             string   `json:"reasoning"`
-	MatchedSongID         *string  `json:"matched_song_id,omitempty"` // 如果匹配到現有歌曲
-	MatchReason           string   `json:"match_reason,omitempty"`    // 匹配原因（title_primary, itunes_id …）
+	MatchedSongID         *string  `json:"matched_song_id,omitempty"` // 既存楽曲に一致した場合
+	MatchReason           string   `json:"match_reason,omitempty"`    // 一致理由（title_primary, itunes_id …）
 	MatchScore            float64  `json:"match_score,omitempty"`     // 確信度 0.0〜1.0
-	// DB 歌曲資訊（匹配到時回傳）
+	// DB の楽曲情報（一致した場合に返す）
 	MatchedSongName          *string `json:"matched_song_name,omitempty"`
 	MatchedSongNameReading   *string `json:"matched_song_name_reading,omitempty"`
 	MatchedSongArtist        *string `json:"matched_song_artist,omitempty"`
@@ -669,13 +669,13 @@ type SongMatchCandidate struct {
 	IsMatch bool    `json:"is_match"` // 自動採用された候補か
 }
 
-// 批量 AI 正規化回應
+// BatchAINormalizeResponse は AI 正規化の一括レスポンス。
 type BatchAINormalizationResponse struct {
 	Suggestions []AISuggestionResult `json:"suggestions"`
 	Warning     string               `json:"warning,omitempty"`
 }
 
-// ========== 認證 ==========
+// ========== 認証 ==========
 
 type LoginRequest struct {
 	Username string `json:"username"`
@@ -783,8 +783,8 @@ type MissingSongPayload struct {
 
 	// ここから下は **CreatePerformanceItem が運ぶ欄と揃えるためのもの**。
 	//
-	// 承認は findOrCreateSong を通り、その中で封面と読みが使われる。運ばなければ
-	// 空のまま渡り、審査から作った曲だけ封面も読みも付かない ── 編集画面から
+	// 承認は findOrCreateSong を通り、その中でジャケットと読みが使われる。運ばなければ
+	// 空のまま渡り、審査から作った曲だけジャケットも読みも付かない ── 編集画面から
 	// 作ったものとの差になる。**CreatePerformanceItem に欄を足したらここにも足すこと。**
 	ArtURL                string   `json:"art_url,omitempty"`
 	NameReading           string   `json:"name_reading,omitempty"`
@@ -1030,12 +1030,12 @@ type TagPerformanceListResponse struct {
 	Pagination   PaginationResponse    `json:"pagination"`
 }
 
-// PerformanceListResponse ページングなしの歌唱一覧（首頁のおすすめ・ランダム再生用）
+// PerformanceListResponse ページングなしの歌唱一覧（ホームのおすすめ・ランダム再生用）
 type PerformanceListResponse struct {
 	Performances []PerformanceResponse `json:"performances"`
 }
 
-// ========== 通用回應 ==========
+// ========== 共通レスポンス ==========
 
 type ErrorResponse struct {
 	Error   string `json:"error"`
@@ -1047,7 +1047,7 @@ type SuccessResponse struct {
 	Message string `json:"message,omitempty"`
 }
 
-// ========== 推算結束時間 ==========
+// ========== 終了時刻の推定 ==========
 
 type SongEndTimeEstimateRequest struct {
 	Start     int    `json:"start"`
@@ -1078,9 +1078,9 @@ type EstimateEndTimesResponse struct {
 	Message   string                `json:"message,omitempty"`
 }
 
-// ========== iTunes 搜尋增強 ==========
+// ========== iTunes 検索の拡張 ==========
 
-// ItunesSearchResultWithSong iTunes 搜尋結果（可能已在資料庫中）
+// ItunesSearchResultWithSong は iTunes の検索結果（DB 登録済みの可能性あり）。
 type ItunesSearchResultWithSong struct {
 	ItunesID       int64      `json:"itunes_id"`
 	CollectionName string     `json:"collection_name"`
@@ -1088,7 +1088,7 @@ type ItunesSearchResultWithSong struct {
 	ArtistName     string     `json:"artist_name"`
 	ArtworkURL     string     `json:"artwork_url"`
 	Country        string     `json:"country"`
-	ExistingSong   *SongBrief `json:"existing_song,omitempty"` // 如果已在 DB 中，回傳歌曲簡要資訊
+	ExistingSong   *SongBrief `json:"existing_song,omitempty"` // DB 登録済みなら楽曲の要約を返す
 }
 
 // ItunesQueryResultWithSong は iTunes ID 直引きの結果。検索と同じく
@@ -1107,7 +1107,7 @@ type ItunesQueryResultWithSong struct {
 	ExistingSong    *SongBrief `json:"existing_song,omitempty"`
 }
 
-// SongBrief 歌曲簡要資訊（用於 iTunes 搜尋結果）
+// SongBrief は iTunes 検索結果で使う楽曲の要約。
 type SongBrief struct {
 	ID                    uuid.UUID `json:"id"`
 	Name                  string    `json:"name"`
@@ -1124,7 +1124,7 @@ type ItunesSearchResponseWithSongs struct {
 
 // ========== AI Provider ==========
 
-// AIProviderResponse AI provider 設定（不含 API key，僅回傳末四碼提示）
+// AIProviderResponse は AI プロバイダーの設定（API key を含まず、末尾 4 桁のヒントだけを返す）。
 type AIProviderResponse struct {
 	ID             int    `json:"id"`
 	Name           string `json:"name"`

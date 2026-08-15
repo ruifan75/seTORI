@@ -20,7 +20,7 @@ type CommentService struct {
 	holodexService       *HolodexService
 	streamRepo           *repository.StreamRepository
 	filterKeywordRepo    *repository.FilterKeywordRepository
-	aiClient             ai.Chatter // 留言 AI hybrid 解析用（多 provider 輪替）
+	aiClient             ai.Chatter // コメントの AI ハイブリッド解析用（複数プロバイダーを順番に使用）
 	normalizationService *NormalizationService
 	chatEndService       *ChatEndService
 	// 候補の確定（人の判断）を別表記として学習させるために要る。
@@ -55,8 +55,8 @@ var (
 	ErrUnlearnableName     = errors.New("この曲名からは照合キーを作れないため確定できません")
 )
 
-// AnalyzeComments 從留言分析歌曲：AI 抽取 → 正規化 → live chat 拍手 end → 存 DB。
-// 以 comment_raw 的 hash 為快取鍵：資料沒變且非強制時，直接回傳已存的 comment_songs（不打 AI）。
+// AnalyzeComments はコメントから楽曲を分析する：AI 抽出 → 正規化 → live chat の拍手 end → DB 保存。
+// comment_raw のハッシュをキャッシュキーとし、データが未変更かつ強制実行でなければ保存済みの comment_songs をそのまま返す（AI は呼ばない）。
 //
 // 利用者が「読み込む」を押した経路。抽出に加えて、決着しなかった行の
 // AI 判定（別名義・楽曲の同一性）まで行う ── 押した人はどのみち待っているし、
@@ -71,7 +71,7 @@ func (s *CommentService) AnalyzeComments(videoID string, force bool) (*dto.Analy
 // 照合とその判定は、人がその配信を開いて読み込むときの仕事なので分ける。
 //
 // 混ぜると、724 本を回すだけで 1 本あたり最大 3 回の AI 呼び出しになり、
-// 誰も見ていない配信のために別名義の学習（全站の照合に効く）が進んでしまう。
+// 誰も見ていない配信のために別名義の学習（システム全体の照合に効く）が進んでしまう。
 func (s *CommentService) AnalyzeCommentsForBatch(videoID string, force bool) (*dto.AnalyzeCommentsResponse, error) {
 	return s.analyzeComments(videoID, force, false, false)
 }
@@ -99,7 +99,7 @@ func (s *CommentService) analyzeComments(videoID string, force, dryRun, adjudica
 
 	rawHash := hashStoredComments(stream.CommentRaw)
 
-	// 快取命中：comment_songs 是用「現在這份 comment_raw」算出來的 → 直接回傳，不打 AI
+	// キャッシュ命中：comment_songs は現在の comment_raw から計算済みなので、そのまま返して AI は呼ばない
 	if !force && rawHash != "" && len(stream.CommentSongs) > 0 {
 		cachedHash, _ := s.streamRepo.GetCommentSongsHash(videoID)
 		if cachedHash.Valid && cachedHash.String == rawHash {
@@ -125,19 +125,19 @@ func (s *CommentService) analyzeComments(videoID string, force, dryRun, adjudica
 		}
 	}
 
-	// 1. 取得原始留言（DB 優先，否則 YouTube/Holodex 抓取）
+	// 1. 元コメントを取得する（DB を優先し、なければ YouTube/Holodex から取得）
 	logger.Infof("starting comment analysis for %s (force=%v, raw len=%d)", videoID, force, len(stream.CommentRaw))
 	comments, err := s.getComments(videoID, stream, dryRun)
 	if err != nil {
 		return nil, err
 	}
-	// 遠端から取り直した場合も、分析結果は実際に使ったコメント内容の hash に結び付ける。
+	// リモートから再取得した場合も、分析結果は実際に使ったコメント内容の hash に結び付ける。
 	rawHash = hashComments(comments)
 
 	// 2. AI で抽出（統合経路では正規化と重複排除もここで済む）。失敗時は段階的に退避
 	parsedSongs, preNormalized, extractWarning, path := s.parseComments(comments)
 
-	// 3. 過濾 + 去重 + 驗證（先過濾避免非歌曲項目影響去重）
+	// 3. 除外 + 重複排除 + 検証（楽曲以外の項目が重複排除へ影響しないよう先に除外）
 	//
 	// 統合経路では AI が既に重複をまとめているが、DeduplicateSongs は通しておく。
 	// 開始時刻が離れていれば別の歌唱として残るので取りこぼしは増えず、
@@ -150,7 +150,7 @@ func (s *CommentService) analyzeComments(videoID string, force, dryRun, adjudica
 	deduped := comment.DeduplicateSongs(filteredSongs)
 	validSongs := comment.ValidateSongs(deduped)
 
-	// 4. 轉成 CommentSong（統合経路なら正規化結果も一緒に運ぶ）
+	// 4. CommentSong へ変換する（統合経路なら正規化結果も一緒に運ぶ）
 	songs := make([]dto.CommentSong, len(validSongs))
 	for i, song := range validSongs {
 		songs[i] = dto.CommentSong{
@@ -206,7 +206,7 @@ func (s *CommentService) analyzeComments(videoID string, force, dryRun, adjudica
 		songs, _, _ = s.chatEndService.DetectEndsForSongs(videoID, duration, songs)
 	}
 
-	// 7. 永続化（comment_songs + 來源 hash）→ 次回からはキャッシュを直接読む
+	// 7. 永続化（comment_songs + 由来のハッシュ）→ 次回からはキャッシュを直接読む
 	//
 	// AI が失敗した回は保存しない。劣化結果（正規表現のみ・読みやタグ無し）を
 	// キャッシュに載せると、既存の良い分析結果を上書きしてしまううえ、
@@ -298,7 +298,7 @@ func MatchInputs(rawName, rawArtist, normName, normArtist string) (name, artist 
 	return name, artist
 }
 
-// normalizeInto 對 songs 跑 AI 正規化＋DB 照合，把結果填回每首 song（in-place）。
+// normalizeInto は songs を AI 正規化して DB と照合し、各 song に結果を書き戻す（in-place）。
 // AI が失敗して抽出のみになった場合は warning 文字列を返す（成功時は空）。
 func (s *CommentService) normalizeInto(songs []dto.CommentSong) string {
 	if s.normalizationService == nil || len(songs) == 0 {
@@ -342,7 +342,7 @@ func (s *CommentService) normalizeInto(songs []dto.CommentSong) string {
 	return resp.Warning
 }
 
-// hashBytes 計算 JSONB 內容的 sha256（空內容回傳空字串）。
+// hashBytes は JSONB 内容の sha256 を計算する（空なら空文字列を返す）。
 func hashBytes(b []byte) string {
 	if len(b) == 0 {
 		return ""
@@ -420,7 +420,7 @@ func (s *CommentService) SyncYouTubeCommentRaw(videoID string) (int, error) {
 	return len(comments), nil
 }
 
-// BackfillCommentSongs 補填所有有 comment_raw 但沒有 comment_songs 的 stream
+// BackfillCommentSongs は comment_raw があり comment_songs がない配信をすべて補完する。
 func (s *CommentService) BackfillCommentSongs() (int, error) {
 	streams, err := s.streamRepo.FindWithoutCommentSongs()
 	if err != nil {
@@ -458,17 +458,17 @@ func (s *CommentService) BackfillCommentSongs() (int, error) {
 
 // HashBackfillResult は comment_songs_hash 補正の結果内訳。
 type HashBackfillResult struct {
-	Total     int `json:"total"`      // comment_songs を持つ歌回数
+	Total     int `json:"total"`      // comment_songs を持つ歌枠の数
 	Migrated  int `json:"migrated"`   // 旧アルゴリズム hash → 正規化 hash へ書き換えた数
-	AlreadyOK int `json:"already_ok"` // 既に正規化 hash（快取が既に効く）
+	AlreadyOK int `json:"already_ok"` // 既に正規化 hash（キャッシュが有効）
 	Skipped   int `json:"skipped"`    // comment_raw が空 / hash 未設定 / 未知形式で触らなかった数
 }
 
 // BackfillCommentSongsHashes は comment_songs_hash を現行の正規化アルゴリズムへ移行する。
 //
-// 背景: 以前は生の JSONB bytes の sha256 を保存していたが、現在の快取判定は
+// 背景: 以前は生の JSONB bytes の sha256 を保存していたが、現在のキャッシュ判定は
 // 「unmarshal → json.Marshal → sha256」の正規化 hash を使う。旧形式で保存された
-// 歌回は hash が永遠に一致せず、force=false でも毎回 AI 再分析されていた。
+// 歌枠は hash が永遠に一致せず、force=false でも毎回 AI 再分析されていた。
 //
 // comment_raw は不変なので AI は一切呼ばない。安全のため、保存済み hash が
 // 旧アルゴリズム（生bytes sha）と一致する場合のみ正規化 hash へ差し替える。
@@ -483,7 +483,7 @@ func (s *CommentService) BackfillCommentSongsHashes() (HashBackfillResult, error
 	res := HashBackfillResult{Total: len(rows)}
 	for _, row := range rows {
 		canonical := hashStoredComments(row.CommentRaw)
-		// comment_raw が空 / 壊れている、または hash 未設定なら快取対象外 → 触らない
+		// comment_raw が空／壊れている、または hash 未設定ならキャッシュ対象外なので触らない
 		if canonical == "" || !row.Hash.Valid || row.Hash.String == "" {
 			res.Skipped++
 			continue
@@ -512,7 +512,7 @@ func (s *CommentService) BackfillCommentSongsHashes() (HashBackfillResult, error
 	return res, nil
 }
 
-// loadFilterKeywords 從 DB 載入 filter/keep keywords
+// loadFilterKeywords は DB から filter/keep キーワードを読み込む。
 func (s *CommentService) loadFilterKeywords() (filterKW, keepKW []string, err error) {
 	keywords, err := s.filterKeywordRepo.FindAll()
 	if err != nil {
@@ -531,11 +531,11 @@ func (s *CommentService) loadFilterKeywords() (filterKW, keepKW []string, err er
 	return filterKW, keepKW, nil
 }
 
-// parseComments 於 edit-time 解析留言。3 段階で退避する：
+// parseComments は編集時にコメントを解析する。3 段階で退避する：
 //
 //	統合経路（抽出＋正規化＋重複排除を 1 回で）
 //	  → 2 段階（抽出のみ。正規化は呼び出し側）
-//	    → 純正則
+//	    → 正規表現のみ
 //
 // 返り値：
 //   - 抽出結果
@@ -575,7 +575,7 @@ func (s *CommentService) parseComments(comments []string) (songs []comment.Parse
 	return comment.ParseComments(comments), false, "", "regex"
 }
 
-// getComments 從 DB 讀取非空的原始留言，若無則從 YouTube/Holodex 抓取並保存。
+// getComments は DB から空でない元コメントを読み込み、なければ YouTube/Holodex から取得して保存する。
 // saveRaw=false のとき、遠隔から取り直したコメントを DB に書かない（dry-run 用）。
 func (s *CommentService) getComments(videoID string, stream *models.Stream, dryRun bool) ([]string, error) {
 	if stream != nil && len(stream.CommentRaw) > 0 {

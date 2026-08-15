@@ -12,12 +12,12 @@ func TestFilterSongsStructuralNonSong(t *testing.T) {
 		filtered bool // true = 非曲として除外されるべき
 	}{
 		{
-			name:     "絵文字のみの歌名",
+			name:     "絵文字だけの曲名",
 			song:     ParsedSong{Start: 1058, Name: "📸", OriginalComment: "┗ 0:17:38 📸"},
 			filtered: true,
 		},
 		{
-			name:     "記号のみの歌名",
+			name:     "記号だけの曲名",
 			song:     ParsedSong{Start: 1580, Name: "???", OriginalComment: "26:20 ???"},
 			filtered: true,
 		},
@@ -32,7 +32,7 @@ func TestFilterSongsStructuralNonSong(t *testing.T) {
 			filtered: true,
 		},
 		{
-			name:     "過長な歌名（感想文の丸ごと取り込み）",
+			name:     "長すぎる曲名（感想文の丸ごと取り込み）",
 			song:     ParsedSong{Start: 100, Name: "ここの高音が綺麗すぎて痺れて涙が出そうになったこの瞬間を一生忘れないと思う本当にありがとう", OriginalComment: "1:40 ここの高音が…"},
 			filtered: true,
 		},
@@ -43,12 +43,12 @@ func TestFilterSongsStructuralNonSong(t *testing.T) {
 		},
 		// --- 正しい曲は残すこと（false negative を出さない）---
 		{
-			name:     "通常の曲（歌名/歌手）",
+			name:     "通常の曲（曲名/歌手）",
 			song:     ParsedSong{Start: 603, Name: "Lemon", OriginalArtist: "米津玄師", OriginalComment: "0:10:03 Lemon / 米津玄師"},
 			filtered: false,
 		},
 		{
-			name:     "作品情報の『』は歌名欄に無いので残す",
+			name:     "作品情報の『』は曲名欄にないので残す",
 			song:     ParsedSong{Start: 910, Name: "風になる", OriginalArtist: "つじあやの", OriginalComment: "0:15:10 風になる / つじあやの\t「映画 猫の恩返し」"},
 			filtered: false,
 		},

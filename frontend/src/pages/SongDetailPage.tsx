@@ -564,7 +564,7 @@ export default function SongDetailPage() {
         onClick: () => withdrawSuggestion(r.id, showToast),
       });
     } catch (err) {
-      showToast(`送信失敗: ${(err as Error).message}`, 'error');
+      showToast(`送信に失敗: ${(err as Error).message}`, 'error');
       throw err;
     }
   };
@@ -672,17 +672,17 @@ export default function SongDetailPage() {
                   )}
                 </div>
 
-                {/* iTunes 編輯 */}
+                {/* iTunes の編集 */}
                 <div className="border-t pt-4">
                   <h3 className="text-sm font-semibold text-gray-900 mb-3">iTunes ID 管理</h3>
 
-                  {/* 既有的 iTunes */}
+                  {/* 既存の iTunes */}
                   {(editedSong.itunes_ids || []).length > 0 && (
                     <div className="mb-4 space-y-2">
                       {(editedSong.itunes_ids || []).map((itunes) => {
                         const detail = itunesDetails[itunes.itunes_id];
                         return (
-                          // 長い曲名・歌手名で容器が横に伸びないようにする。
+                          // 長い曲名・歌手名でコンテナが横に伸びないようにする。
                           // truncate は flex の子では min-w-0 が無いと効かない（既定の
                           // min-width:auto が内容より小さくなるのを拒むため）。画像と
                           // ボタンには shrink-0 を付けて、縮むのは文字側だけにする。

@@ -17,7 +17,7 @@ func NewSongItunesRepository(db *sql.DB) *SongItunesRepository {
 	return &SongItunesRepository{db: db}
 }
 
-// Create 建立新的 iTunes ID 關聯
+// Create は新しい iTunes ID の関連を作成する。
 func (r *SongItunesRepository) Create(si *models.SongITunes) error {
 	si.ID = uuid.New()
 	query := `
@@ -38,7 +38,7 @@ func (r *SongItunesRepository) Create(si *models.SongITunes) error {
 	return nil
 }
 
-// FindBySongID 根據歌曲 ID 取得所有 iTunes ID 關聯
+// FindBySongID は楽曲 ID に紐付くすべての iTunes ID を取得する。
 func (r *SongItunesRepository) FindBySongID(songID uuid.UUID) ([]models.SongITunes, error) {
 	query := `
 		SELECT id, song_id, itunes_id, collection_name, country, is_primary, created_at
@@ -66,7 +66,7 @@ func (r *SongItunesRepository) FindBySongID(songID uuid.UUID) ([]models.SongITun
 	return results, nil
 }
 
-// FindBySongIDs 批次取得多首歌曲的 iTunes 關聯，避免 N+1
+// FindBySongIDs は複数楽曲の iTunes 関連を一括取得し、N+1 を避ける。
 func (r *SongItunesRepository) FindBySongIDs(songIDs []uuid.UUID) (map[uuid.UUID][]models.SongITunes, error) {
 	result := make(map[uuid.UUID][]models.SongITunes, len(songIDs))
 	if len(songIDs) == 0 {
@@ -101,7 +101,7 @@ func (r *SongItunesRepository) FindBySongIDs(songIDs []uuid.UUID) (map[uuid.UUID
 	return result, rows.Err()
 }
 
-// FindByItunesID 根據 iTunes ID 取得關聯的歌曲 ID
+// FindByItunesID は iTunes ID に紐付く楽曲 ID を取得する。
 func (r *SongItunesRepository) FindByItunesID(itunesID int64) (*models.SongITunes, error) {
 	query := `
 		SELECT id, song_id, itunes_id, collection_name, country, is_primary, created_at
@@ -121,7 +121,7 @@ func (r *SongItunesRepository) FindByItunesID(itunesID int64) (*models.SongITune
 	return &si, nil
 }
 
-// Exists 檢查 iTunes ID 是否已存在
+// Exists は iTunes ID が既に存在するか確認する。
 func (r *SongItunesRepository) Exists(itunesID int64) (bool, error) {
 	var exists bool
 	err := r.db.QueryRow("SELECT EXISTS(SELECT 1 FROM song_itunes WHERE itunes_id = $1)", itunesID).Scan(&exists)
@@ -131,7 +131,7 @@ func (r *SongItunesRepository) Exists(itunesID int64) (bool, error) {
 	return exists, nil
 }
 
-// Delete 刪除 iTunes ID 關聯
+// Delete は iTunes ID の関連を削除する。
 func (r *SongItunesRepository) Delete(id uuid.UUID) error {
 	_, err := r.db.Exec("DELETE FROM song_itunes WHERE id = $1", id)
 	if err != nil {
@@ -140,7 +140,7 @@ func (r *SongItunesRepository) Delete(id uuid.UUID) error {
 	return nil
 }
 
-// DeleteBySongID 刪除某歌曲的所有 iTunes ID 關聯
+// DeleteBySongID は指定した楽曲の iTunes ID 関連をすべて削除する。
 func (r *SongItunesRepository) DeleteBySongID(songID uuid.UUID) error {
 	_, err := r.db.Exec("DELETE FROM song_itunes WHERE song_id = $1", songID)
 	if err != nil {
@@ -149,7 +149,7 @@ func (r *SongItunesRepository) DeleteBySongID(songID uuid.UUID) error {
 	return nil
 }
 
-// SetPrimary 設定主要 iTunes ID（會先將同歌曲的其他設為非主要）
+// SetPrimary は primary iTunes ID を設定する（同じ楽曲の他の ID は先に非 primary にする）。
 func (r *SongItunesRepository) SetPrimary(songID uuid.UUID, itunesID int64) error {
 	tx, err := r.db.Begin()
 	if err != nil {
@@ -157,13 +157,13 @@ func (r *SongItunesRepository) SetPrimary(songID uuid.UUID, itunesID int64) erro
 	}
 	defer tx.Rollback()
 
-	// 先將所有設為非主要
+	// 先にすべて非 primary にする
 	_, err = tx.Exec("UPDATE song_itunes SET is_primary = FALSE WHERE song_id = $1", songID)
 	if err != nil {
 		return fmt.Errorf("unset primary: %w", err)
 	}
 
-	// 設定指定的為主要
+	// 指定した ID を primary にする
 	_, err = tx.Exec("UPDATE song_itunes SET is_primary = TRUE WHERE song_id = $1 AND itunes_id = $2",
 		songID, itunesID)
 	if err != nil {

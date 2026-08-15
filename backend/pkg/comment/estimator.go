@@ -6,11 +6,11 @@ import (
 
 const (
 	// デフォルト楽曲長（秒）- 推定できない場合に使用
-	DefaultSongDuration = 240 // 4 分鐘
+	DefaultSongDuration = 240 // 4 分
 	// 最大楽曲長（秒）
-	MaxSongDuration = 600 // 10 分鐘
+	MaxSongDuration = 600 // 10 分
 	// 最小楽曲長（秒）
-	MinSongDuration = 60 // 1 分鐘
+	MinSongDuration = 60 // 1 分
 )
 
 // EstimateEndTimes 欠落した終了時間を推定
@@ -87,17 +87,17 @@ func ValidateSongs(songs []ParsedSong) []ParsedSong {
 	var valid []ParsedSong
 
 	for _, song := range songs {
-		// 跳過開始時間為負的
+		// 開始時刻が負の項目はスキップする
 		if song.Start < 0 {
 			continue
 		}
 
-		// 跳過結束時間早於開始時間的
+		// 終了時刻が開始時刻より前の項目はスキップする
 		if song.End > 0 && song.End <= song.Start {
 			continue
 		}
 
-		// 跳過沒有歌名的
+		// 曲名がない項目はスキップする
 		if song.Name == "" {
 			continue
 		}

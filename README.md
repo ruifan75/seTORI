@@ -28,12 +28,12 @@ seTORI は VTuber の歌枠で歌われた楽曲を収集・識別・管理す�
 | # | 機能 | 説明 |
 |---|------|------|
 | 1 | **楽曲管理 (Songs)** | CRUD、GIN trigram あいまい検索、重複楽曲のマージ、全履歴の歌唱記録。一意キー `(name + original_artist)` |
-| 2 | **配信管理 (Streams)** | YouTube 動画 ID を主キー；`is_processed` / `is_hidden` ステータス；Holodex topic とタイトル規則から配信タグ・既定表示を決定；JSONB カラム `holodex_data` / `comment_raw` / `comment_songs` |
-| 3 | **歌手管理 (Singers)** | YouTube チャンネル ID を主キー；所属事務所、アバター、英語名；複数人コラボ歌枠対応 |
+| 2 | **配信管理 (Streams)** | YouTube 動画 ID を主キーに使用。`is_processed` / `is_hidden` ステータス、Holodex topic とタイトル規則から配信タグ・既定表示を決定。JSONB カラム `holodex_data` / `comment_raw` / `comment_songs` |
+| 3 | **歌手管理 (Singers)** | YouTube チャンネル ID を主キーに使用。所属事務所、アバター、英語名、複数人コラボ歌枠に対応 |
 | 4 | **歌唱記録 (Performances)** | 開始/終了秒数、歌唱タグ、複数歌手コラボ。一意キー `(stream_id + song_id + start_seconds)` |
 | 5 | **Holodex 双方向同期** | チャンネルの配信とセットリストの取得、seTORI セットリストの Holodex へのアップロード、SHA256 ハッシュキャッシュによる重複防止 |
 | 6 | **コメント分析** | YouTube/Holodex からコメントを取得、正規表現でタイムスタンプ（HH:MM:SS / MM:SS）を解析 + 区切り文字で曲名/アーティストを分解 |
-| 7 | **AI 識別と正規化** | バッチでの曲名正規化、バージョンタグ検出、コメントのハイブリッド解析；**管理画面で複数の OpenAI 互換プロバイダー（Groq/Gemini/Cerebras…）を設定し優先度順に failover**、使用制限に達したら自動で次に切り替え |
+| 7 | **AI 識別と正規化** | バッチでの曲名正規化、バージョンタグ検出、コメントのハイブリッド解析。**管理画面で複数の OpenAI 互換プロバイダー（Groq/Gemini/Cerebras…）を設定し優先度順に failover**、使用制限に達したら自動で次に切り替え |
 | 8 | **iTunes 連携** | 検索と Track ID 紐付けで再生時間/アルバム情報を取得し、再生時間から歌唱終了時間を推定 |
 | 9 | **認証・認可** | DB セッション（Bearer）+ ロールごとの権限キー。匿名は閲覧のみ、編集はログイン + `content:edit`。管理画面でユーザー/ロールを調整 |
 | 10 | **修正提案** | 権限のない利用者が曲・アーティスト・歌唱の修正を提案。対象ごとに集約してレビュー、値が割れたら「まとめて反映」。条件を満たす timing 提案は自動適用 |
@@ -262,11 +262,11 @@ cd frontend && npm run build                          # dist/ に出力
 主なテーブル（完全な定義は `backend/internal/database/migrations/` を参照）：
 
 - `singers` — VTuber、PK は YouTube チャンネル ID。`metadata_source=holodex` は Holodex 管理、`youtube` は手動編集可能な fallback 登録
-- `songs` — 楽曲マスター、一意キー `(name, original_artist)`；`song_itunes` で iTunes Track と 1:N 紐付け
-- `streams` — 歌枠、PK は YouTube 動画 ID；`holodex_data` / `comment_raw` / `comment_songs` は JSONB。自動表示判定と手動固定は [`docs/STREAM_VISIBILITY.md`](./docs/STREAM_VISIBILITY.md) を参照
+- `songs` — 楽曲マスター。一意キー `(name, original_artist)`。`song_itunes` で iTunes Track と 1:N 紐付け
+- `streams` — 歌枠。PK は YouTube 動画 ID。`holodex_data` / `comment_raw` / `comment_songs` は JSONB。自動表示判定と手動固定は [`docs/STREAM_VISIBILITY.md`](./docs/STREAM_VISIBILITY.md) を参照
 - `performances` — 歌唱記録、一意キー `(stream_id, song_id, start_seconds)`
 - 多対多：`stream_singers`（`is_owner` 含む）、`performance_singers`、`stream_stream_tags`、`performance_performance_tags`
-- `performance_tags` / `stream_tags` — ビルトインタグをプリロード；`filter_keywords` — コメントの除外/保持キーワード（seed 含む）
+- `performance_tags` / `stream_tags` — ビルトインタグをプリロード。`filter_keywords` — コメントの除外/保持キーワード（seed 含む）
 - `users` / `roles` / `sessions` / `oauth_identities` — 認証。セッションはトークンの SHA-256 ハッシュのみ保存
 - `playlists` / `playlist_items` — プレイリスト。項目は `performances(id)` を参照（`ON DELETE CASCADE`）
 - `edit_suggestions` — 修正提案。承認時に「提案時点のスナップショット vs 現在値」を突き合わせ、ズレていれば `conflict` で停止
@@ -294,7 +294,7 @@ ParsedSong[]  (comment_songs、未重複排除)
 - 上記とは別に、**live chat の拍手から終了時間を検出する経路**があります（`pkg/chatend`）。
   歌が終わると観客が「純粋な拍手」（888 / 拍手 / :clapping_hands: / 👏）を流すので、
   各曲の `(start+MinSong, next_start)` 区間で最大の拍手群を探し、その起点 − ReactionLag を終了とみなします。
-  1445 首の実測で MAE 2.18 秒、99% が ±10 秒以内。
+  1,445 曲の実測で MAE 2.18 秒、99% が ±10 秒以内。
   入口は `/api/streams/{id}/chat-end-estimate`（試算）と `/api/streams/{id}/analyze-chat-ends`（保存）。
 - AI は純粋な正規表現が失敗したときのフォールバックとして機能し、曲名正規化とバージョンタグ（acoustic/piano/short…）の検出を担当。
   プロバイダーは管理画面で複数登録でき、優先度順に failover します。

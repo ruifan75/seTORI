@@ -9,12 +9,12 @@ Holodex の分類もタイトルキーワード規則も自動判定であり、
 配信を初めて登録するときだけ、Holodex topic のタグとタイトルキーワードのタグを
 すべて付けたあと、次の順で判定する。
 
-1. `shorts` の訊号があり、動画長が **180 秒以下**なら非表示
-2. `shorts` の訊号があるが動画長を取得できない場合も、保守的に非表示
+1. `shorts` のシグナルがあり、動画長が **180 秒以下**なら非表示
+2. `shorts` のシグナルがあるが動画長を取得できない場合も、保守的に非表示
 3. それ以外で音楽系タグを 1 つでも持てば表示
 4. どれにも該当しなければ非表示
 
-`shorts` の訊号とは、Holodex の `topic_id = shorts` または seTORI の `shorts` タグを指す。
+`shorts` のシグナルとは、Holodex の `topic_id = shorts` または seTORI の `shorts` タグを指す。
 音楽系タグは次の 6 種である。
 
 - `concert`（ライブ）
@@ -26,9 +26,9 @@ Holodex の分類もタイトルキーワード規則も自動判定であり、
 
 短い MV がすべて Shorts とは限らないため、**動画長だけでは隠さない**。
 反対に `shorts` という文字だけで隠すと、タイトルに `#shorts` を含む長時間の歌枠まで
-消えるため、shorts の訊号と動画長を組み合わせる。
+消えるため、shorts のシグナルと動画長を組み合わせる。
 
-| Video ID | 自動訊号 | 長さ | 結果 | 理由 |
+| Video ID | 自動シグナル | 長さ | 結果 | 理由 |
 |---|---|---:|---|---|
 | `Slm8v4XYzy4` | `shorts`, `original_song` | 25 秒 | 非表示 | 短尺判定が音楽タグより優先 |
 | `CKppP9S5ZPA` | `shorts`, `singing` | 5,773 秒 | 表示 | shorts の文字はあるが長い歌枠 |
@@ -60,12 +60,12 @@ Holodex の分類もタイトルキーワード規則も自動判定であり、
 
 `039_fix_shorts_visibility.sql` は次を行う。
 
-- 三態案のため `visibility_override` を一時的に追加（最終的には 041 で削除）
+- 3 状態案のため `visibility_override` を一時的に追加（最終的には 041 で削除）
 - 新しい DB でも `shorts` タグとタイトルキーワード規則が必ず存在するよう補完
 - `038` が表示した既存の短尺 Shorts を一度だけ再び非表示にする
 - 180 秒を超える `CKppP9S5ZPA` のような長い歌枠は変更しない
 
-039 は一度 `visibility_override` も追加したが、三態設計を採用しないことにしたため、
-`041_remove_stream_visibility_override.sql` がこの列を削除する。039 の期間中に人工設定が
+039 は一度 `visibility_override` も追加したが、3 状態の設計を採用しないことにしたため、
+`041_remove_stream_visibility_override.sql` がこの列を削除する。039 の期間中に手動設定が
 あった場合も、その実効値は既に `is_hidden` に書かれているので表示状態は失われない。
 041 適用後は `is_hidden` だけが正となる。

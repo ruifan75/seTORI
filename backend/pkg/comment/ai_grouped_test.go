@@ -92,9 +92,9 @@ func TestBuildSongsFromGrouped_不正なsrc(t *testing.T) {
 	})
 }
 
-func TestParseNormalizeAndDedupWithAI_逐字検証はsrc全体が対象(t *testing.T) {
+func TestParseNormalizeAndDedupWithAI_原文検証はsrc全体が対象(t *testing.T) {
 	// まとめた結果、歌手名は別の行から来ることがあるので、
-	// 逐字チェックは src に挙がった行の集合に対して行う必要がある。
+	// 原文チェックは src に挙がった行の集合に対して行う必要がある。
 	resp := `[
   {"src":[1,3],"ts":"9:26","te":"","nv":"さよなら、花泥棒さん","av":"ナノウ","n":"さよなら、花泥棒さん","nr":"","a":"ナノウ","ar":"","t":[],"c":0.9}
 ]`
@@ -176,7 +176,7 @@ func TestParseNormalizeAndDedupWithAI_空配列は正常(t *testing.T) {
 // 得られたのは確認を省けたこと（42 行）だけ。代わりに 7 行で
 // 誤った歌手が入り、0.95 の自動採用として**人の確認を通らずに保存**された。
 //
-// 誤りは冷門曲に集中していた（Re:AcT の原創曲に有名な同名曲の歌手を当てる）。
+// 誤りはマイナーな曲に集中していた（Re:AcT のオリジナル曲に有名な同名曲の歌手を当てる）。
 // 空のままなら title_only 0.80 に落ちて人の確認に回るので、
 // 「確認が要る」ことが可視化される。
 func TestGroupedPromptDoesNotInventArtist(t *testing.T) {

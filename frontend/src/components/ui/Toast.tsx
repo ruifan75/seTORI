@@ -9,7 +9,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     const id = Date.now() + toastIdCounter.current++;
     setToasts((prev) => [...prev, { id, message, type, action }]);
 
-    // 自動移除
+    // 自動で消す
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
     }, 5000);

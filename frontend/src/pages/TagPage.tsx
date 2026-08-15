@@ -43,7 +43,7 @@ export default function TagPage() {
     setSearchParams(newPage <= 1 ? {} : { page: String(newPage) }, { replace: true });
   };
 
-  // このページの演唱一覧をキューに載せて startIndex から連続再生
+  // このページの歌唱一覧をキューに載せて startIndex から連続再生
   const playFrom = (startIndex: number) => {
     const tracks: PlayerTrack[] = performancesToTracks(perfData?.performances ?? []);
     usePlayerStore.getState().playTracks(tracks, startIndex);

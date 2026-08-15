@@ -40,13 +40,13 @@ func NewPerformanceService(
 	}
 }
 
-// CreatePerformances 直接從前端編輯結果建立演出記錄
+// CreatePerformances はフロントエンドの編集結果から歌唱記録を直接作成する。
 // 既存記録は全削除せず差分更新する（performance ID を保つため。ID はプレイリストから参照される）
 func (s *PerformanceService) CreatePerformances(streamID string, items []dto.CreatePerformanceItem) (*dto.CreatePerformancesResponse, error) {
 	desired := make([]models.Performance, 0, len(items))
 
 	for _, item := range items {
-		// 1. 尋找或建立歌曲（優先使用 iTunes ID 配對）
+		// 1. 楽曲を検索または作成する（iTunes ID の一致を優先）
 		song, isNewSong, err := s.findOrCreateSong(item)
 		if err != nil {
 			return nil, fmt.Errorf("find or create song: %w", err)
@@ -68,7 +68,7 @@ func (s *PerformanceService) CreatePerformances(streamID string, items []dto.Cre
 			SongID:       song.ID,
 			StartSeconds: item.StartSeconds,
 			EndSeconds:   item.EndSeconds,
-			OrderIndex:   0, // 不再使用，改用 start_seconds 排序
+			OrderIndex:   0, // 使用せず、start_seconds で並べる
 			CustomTags:   item.CustomTags,
 			EndSource:    item.EndSource,
 			EndConfirmed: endConfirmed,
@@ -128,7 +128,7 @@ func (s *PerformanceService) linkItunesID(song *models.Song, itunesID *int64, is
 	}
 }
 
-// findOrCreateSong 尋找或建立歌曲
+// findOrCreateSong は楽曲を検索または作成する。
 //
 // 照合は SongMatchService（曲名キー主導）に任せ、確信度で 3 通りに分ける。
 //
@@ -141,7 +141,7 @@ func (s *PerformanceService) linkItunesID(song *models.Song, itunesID *int64, is
 // 静かに増え、次からはもっと当たらなくなるという悪循環になっていた。
 // ここで記録しておけば、既存の統合機能で人が畳める。
 //
-// 返回：歌曲, 是否為新建立的, 錯誤
+// 戻り値：楽曲、新規作成したか、エラー。
 func (s *PerformanceService) findOrCreateSong(item dto.CreatePerformanceItem) (*models.Song, bool, error) {
 	var candidates []MatchCandidate
 	if s.matchService != nil {
@@ -155,7 +155,7 @@ func (s *PerformanceService) findOrCreateSong(item dto.CreatePerformanceItem) (*
 	// 1. 自動採用できる候補があればそれを使う
 	if len(candidates) > 0 && candidates[0].Auto() {
 		song := &candidates[0].Song
-		// 歌曲已存在，檢查是否需要補上封面圖
+		// 楽曲が既に存在する場合、ジャケット画像の補完が必要か確認する
 		if (!song.Arts.Valid || song.Arts.String == "") && item.ArtURL != nil && *item.ArtURL != "" {
 			song.Arts = sql.NullString{String: *item.ArtURL, Valid: true}
 			if err := s.songRepo.Update(song); err != nil {
@@ -165,19 +165,19 @@ func (s *PerformanceService) findOrCreateSong(item dto.CreatePerformanceItem) (*
 		return song, false, nil
 	}
 
-	// 2. 建立新歌曲
+	// 2. 新しい楽曲を作成する
 	song := &models.Song{
 		Name:           item.Name,
 		OriginalArtist: item.OriginalArtist,
 	}
-	// 設定讀音（如果有提供）
+	// 読みが指定されていれば設定する
 	if item.NameReading != "" {
 		song.NameReading = sql.NullString{String: item.NameReading, Valid: true}
 	}
 	if item.OriginalArtistReading != "" {
 		song.OriginalArtistReading = sql.NullString{String: item.OriginalArtistReading, Valid: true}
 	}
-	// 設定封面圖（如果有提供）
+	// ジャケット画像が指定されていれば設定する
 	if item.ArtURL != nil && *item.ArtURL != "" {
 		song.Arts = sql.NullString{String: *item.ArtURL, Valid: true}
 	}
@@ -428,7 +428,7 @@ func (s *PerformanceService) songForMissing(p dto.MissingSongPayload) (*models.S
 		}
 		logger.Warnf("missing song suggestion points at a song that no longer exists (%s); falling back to name lookup", id)
 	}
-	// **編集画面と同じ欄を渡す。** findOrCreateSong は封面と読みをここで使うので、
+	// **編集画面と同じ欄を渡す。** findOrCreateSong はジャケットと読みをここで使うので、
 	// 渡さないと審査から作った曲だけそれらが空になる。
 	item := dto.CreatePerformanceItem{
 		Name:                  p.SongName,
@@ -554,16 +554,16 @@ func (s *PerformanceService) ApplyEditableFields(id uuid.UUID, fields map[string
 	return err
 }
 
-// DeleteByStreamID 刪除指定 stream 的所有演出記錄（セットリストの明示的な全削除用）
+// DeleteByStreamID は指定した配信の歌唱記録をすべて削除する（セットリストを明示的に全削除する場合に使用）。
 // 編集時の保存は ReconcilePerformances による差分更新を使い、ここは通らない。
 func (s *PerformanceService) DeleteByStreamID(streamID string) error {
-	// 取得所有演出
+	// すべての歌唱を取得する
 	performances, err := s.perfRepo.FindByStreamID(streamID)
 	if err != nil {
 		return fmt.Errorf("find performances: %w", err)
 	}
 
-	// 逐一刪除
+	// 1 件ずつ削除する
 	for _, perf := range performances {
 		if err := s.perfRepo.Delete(perf.ID); err != nil {
 			return fmt.Errorf("delete performance: %w", err)

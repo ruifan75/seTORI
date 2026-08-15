@@ -6,14 +6,14 @@ import (
 	"strings"
 )
 
-// ParsedSong 解析後的歌曲資訊
+// ParsedSong は解析後の楽曲情報。
 type ParsedSong struct {
-	Start              int    `json:"start"`                 // 開始秒數
-	End                int    `json:"end"`                   // 結束秒數（0 表示未知）
-	Name               string `json:"name"`                  // 歌曲名稱（逐字：原文に現れる形のまま）
-	OriginalArtist     string `json:"original_artist"`       // 原唱藝人（逐字）
-	OriginalComment    string `json:"original_comment"`      // 原始 comment 文本
-	IsEndTimeEstimated bool   `json:"is_end_time_estimated"` // 結束時間是否為估計值
+	Start              int    `json:"start"`                 // 開始秒数
+	End                int    `json:"end"`                   // 終了秒数（0 は不明）
+	Name               string `json:"name"`                  // 曲名（原文に現れる形のまま）
+	OriginalArtist     string `json:"original_artist"`       // 原曲アーティスト（原文のまま）
+	OriginalComment    string `json:"original_comment"`      // 元のコメント本文
+	IsEndTimeEstimated bool   `json:"is_end_time_estimated"` // 終了時刻が推定値か
 
 	// 以下は抽出と正規化を 1 回の AI 呼び出しで行う経路（ParseAndNormalizeWithAI）でのみ埋まる。
 	// 2 段階の経路では空のままで、後段の BatchAINormalization が担当する。
@@ -25,28 +25,28 @@ type ParsedSong struct {
 	Confidence              float64  `json:"confidence,omitempty"`
 }
 
-// 時間戳正則表達式
+// タイムスタンプの正規表現
 var (
-	// 匹配時間戳格式: HH:MM:SS, H:MM:SS, MM:SS, M:SS
+	// タイムスタンプ形式に一致：HH:MM:SS, H:MM:SS, MM:SS, M:SS
 	timestampRe = regexp.MustCompile(`(\d{1,2}):(\d{2}):(\d{2})|(\d{1,2}):(\d{2})`)
 
-	// 行首曲序編號樣式：[01] / (1) / （1） / 01. / 01) / 01、 / ① 等
+	// 行頭の曲番号形式：[01] / (1) / （1） / 01. / 01) / 01、 / ① など
 	leadingNumberRe = regexp.MustCompile(`^\s*(?:\[\s*\d{1,3}\s*\]|[(（]\s*\d{1,3}\s*[)）]|\d{1,3}\s*[.．、)）]|[\x{2460}-\x{2473}])\s*`)
 )
 
-// stripLeadingNumber 移除歌名前的曲序編號（如 [01]、01.、①）
+// stripLeadingNumber は曲名の前にある曲番号（[01]、01.、① など）を取り除く。
 func stripLeadingNumber(s string) string {
 	return leadingNumberRe.ReplaceAllString(s, "")
 }
 
-// ParseComment 解析單行評論
+// ParseComment はコメントを 1 行解析する。
 func ParseComment(line string) *ParsedSong {
 	line = strings.TrimSpace(line)
 	if line == "" {
 		return nil
 	}
 
-	// 先以時間戳為主解析（不依賴分隔符）
+	// まずタイムスタンプを軸に解析する（区切り文字には依存しない）
 	matchIndexes := timestampRe.FindAllStringIndex(line, -1)
 	if len(matchIndexes) >= 2 {
 		startTime := parseTimestamp(line[matchIndexes[0][0]:matchIndexes[0][1]])
@@ -88,12 +88,12 @@ func ParseComment(line string) *ParsedSong {
 	return nil
 }
 
-// ParseComments 解析多行評論
+// ParseComments は複数行のコメントを解析する。
 func ParseComments(comments []string) []ParsedSong {
 	var songs []ParsedSong
 
 	for _, comment := range comments {
-		// 按行分割，並先縫合「時間戳行 + 歌名行」的兩行式條目
+		// 行ごとに分割し、先に「タイムスタンプ行 + 曲名行」の 2 行形式を結合する
 		lines := stitchTwoLineEntries(strings.Split(comment, "\n"))
 		for _, line := range lines {
 			song := ParseComment(line)
@@ -106,7 +106,7 @@ func ParseComments(comments []string) []ParsedSong {
 	return songs
 }
 
-// parseTimestamp 解析時間戳為秒數
+// parseTimestamp はタイムスタンプを秒数に変換する。
 func parseTimestamp(ts string) int {
 	parts := strings.Split(ts, ":")
 	if len(parts) == 2 {
@@ -124,12 +124,12 @@ func parseTimestamp(ts string) int {
 	return 0
 }
 
-// parseSongAndArtist 從歌曲部分提取歌名和藝人
-// 優先以斜線（/ 或 ／）切成欄位：歌名/歌手/[作品資訊]/[年份]，取前兩欄，其餘忽略。
+// parseSongAndArtist は楽曲部分から曲名とアーティストを取り出す。
+// スラッシュ（/ または ／）を優先して「曲名/歌手/[作品情報]/[年]」のフィールドに分け、先頭の二つだけを使う。
 func parseSongAndArtist(songPart string) (name, artist string) {
 	songPart = stripLeadingNumber(strings.TrimSpace(songPart))
 
-	// 斜線分隔（半形/全形）→ 丟棄年份、作品註記等後續欄位
+	// スラッシュ区切り（半角／全角）では年や作品注記など後続フィールドを捨てる
 	normalized := strings.ReplaceAll(songPart, "／", "/")
 	if strings.Contains(normalized, "/") {
 		fields := strings.Split(normalized, "/")
@@ -140,7 +140,7 @@ func parseSongAndArtist(songPart string) (name, artist string) {
 		return name, artist
 	}
 
-	// 其他分隔符（破折號、括號）
+	// その他の区切り文字（ダッシュ、括弧）
 	for _, sep := range []string{" - ", " ー ", "（", " ("} {
 		if idx := strings.Index(songPart, sep); idx != -1 {
 			name = strings.TrimSpace(songPart[:idx])
@@ -151,7 +151,7 @@ func parseSongAndArtist(songPart string) (name, artist string) {
 		}
 	}
 
-	// 沒有分隔符，整個都是歌名
+	// 区切り文字がなければ全体を曲名として扱う
 	return strings.TrimSpace(songPart), ""
 }
 
@@ -159,7 +159,7 @@ func trimLeadingSeparators(text string) string {
 	return strings.TrimLeft(text, " \t;:：-–→~〜～")
 }
 
-// FormatTimestamp 將秒數格式化為時間戳
+// FormatTimestamp は秒数をタイムスタンプ形式に整える。
 func FormatTimestamp(seconds int) string {
 	if seconds < 0 {
 		return "0:00"

@@ -12,6 +12,6 @@ CREATE TABLE IF NOT EXISTS stream_singers (
     PRIMARY KEY (stream_id, singer_id)
 );
 
--- 索引
+-- インデックス
 CREATE INDEX IF NOT EXISTS idx_stream_singers_stream_id ON stream_singers(stream_id);
 CREATE INDEX IF NOT EXISTS idx_stream_singers_singer_id ON stream_singers(singer_id);

@@ -18,7 +18,7 @@ var visibleMusicStreamTagIDs = []string{
 }
 
 // initialStreamHidden は Holodex topic と seTORI 側のタグをどちらも「初回判定の
-// 訊号」として扱う。どちらか一方を常に正しいとはみなさず、shorts は動画長と
+// シグナル」として扱う。どちらか一方を常に正しいとはみなさず、shorts は動画長と
 // 組み合わせて判定する。
 func initialStreamHidden(topicID string, durationSeconds int, durationKnown bool, tagIDs []string) bool {
 	tags := make(map[string]struct{}, len(tagIDs))

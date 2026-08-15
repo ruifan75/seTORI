@@ -14,7 +14,7 @@
 //	（comment.ParseNormalizeAndDedupWithAI）。コメント境界を見せ、
 //	AI に「どの行をまとめたか」を src で申告させる。
 //
-// AI を使うモードは本機 DB の ai_providers を使う。呼び出しは高いので -cache で
+// AI を使うモードはローカル DB の ai_providers を使う。呼び出しは高コストなので -cache で
 // ディスクに保存し、-struct の on/off 再実行は同じ AI 結果を使い回す。
 //
 // ⚠️ キャッシュは stream ID だけをキーにしている。モードが違えば結果も違うので、
@@ -234,7 +234,7 @@ func main() {
 				if resolver != nil {
 					o := evalMatch(resolver, sid, ex, gt[mi])
 					matchAll.add(o)
-					// DB の表記と抽出の表記が逐字で同じ組は、その曲がこのコメントから
+					// DB の表記と抽出の表記が文字列として同じ組は、その曲がこのコメントから
 					// 作られた（＝当たって当然）可能性が高い。主指標からは外す。
 					if !isVerbatim(o) {
 						matchNonVerbatim.add(o)
@@ -317,8 +317,8 @@ func main() {
 
 	if resolver != nil {
 		matchNonVerbatim.print("MATCHING（主指標：DB 表記と抽出表記が食い違う組）")
-		matchAll.print("MATCHING（参考：逐字一致の組を含む全件）")
-		fmt.Println("\n※ 主指標から逐字一致を外すのは、GT の楽曲の一部がそのコメント自身から")
+		matchAll.print("MATCHING（参考：文字列完全一致の組を含む全件）")
+		fmt.Println("\n※ 主指標から文字列完全一致を外すのは、GT の楽曲の一部がそのコメント自身から")
 		fmt.Println("   findOrCreateSong で作られており、当たって当然の組が数字を押し上げるため。")
 	}
 

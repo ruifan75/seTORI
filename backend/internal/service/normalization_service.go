@@ -38,13 +38,13 @@ const batchSystemPrompt = `**最重要: 応答は純粋なJSON配列「のみ」
 あなたは日本語楽曲データの正規化を専門とするアシスタントです。複数の楽曲を受け取り、一度にすべて処理してください。
 
 タスク：
-1. 元の楽曲名から正規化された歌名を抽出
+1. 元の楽曲名から正規化された曲名を抽出
    - 「演奏バージョンの表記」（Acoustic Ver., Short Ver. など、演奏方法を示すタグ）を除去
    - 「楽曲バージョンの表記」（Remix, Cover など）は異なる楽曲を表すため保持
-   - 歌名に日本語と英語/ローマ字の両方が含まれる場合（例：「ぼくらのレットイットビー / Bokura no Let It Be」）、日本語の原名のみ保持
+   - 曲名に日本語と英語/ローマ字の両方が含まれる場合（例：「ぼくらのレットイットビー / Bokura no Let It Be」）、日本語の元の名前だけを保持
    - 元の曲名が英語の場合（「First Love」「Lemon」「KICK BACK」）は英語のまま保持し、カタカナに変換しない
    - 余分なスペースや記号を除去
-2. 歌名とアーティスト名に平仮名ふりがなを提供
+2. 曲名とアーティスト名に平仮名の読みを付与
 3. 演奏バージョンタグを識別
 
 【重要】tags フィールドは以下の7種のタグIDのみ使用可能：
@@ -56,12 +56,12 @@ const batchSystemPrompt = `**最重要: 応答は純粋なJSON配列「のみ」
 - full（原曲名に Full, フル などを含む）
 - medley（原曲名に Medley, メドレー などを含む）
 
-注意：Remix、Cover、Live バージョンなどは異なる楽曲なので、歌名に保持してください。除去しないでください。
+注意：Remix、Cover、Live バージョンなどは異なる楽曲なので、曲名に保持してください。除去しないでください。
 
 JSON配列形式で応答してください。各要素：
 - index: 入力楽曲の番号 (number, 0から開始)
-- normalized_name: 正規化後の歌名 (string)
-- normalized_name_reading: 歌名の平仮名読み (string)
+- normalized_name: 正規化後の曲名 (string)
+- normalized_name_reading: 曲名の平仮名読み (string)
 - original_artist: 照合に使うアーティスト (string)。**入力に書かれているものだけを返すこと。**
   入力が空なら空のまま返す（推測で埋めない）。
   原曲を知っていても書き換えない（DB はカバーした歌手を持っていることが多く、外れる）
@@ -161,15 +161,15 @@ func (s *NormalizationService) BatchAINormalization(items []dto.AINormalizationI
 				NormalizedNameReading: aiSugg.NormalizedNameReading,
 				OriginalArtist:        artist,
 				OriginalArtistReading: aiSugg.OriginalArtistReading,
-				// 逐字の曲名（item.Name）を渡すのが要点。正規化後の名前からは
-				// 「(1 Chorus)」のような版本の表記が既に削られているので、
+				// 原文の曲名（item.Name）を渡すのが要点。正規化後の名前からは
+				// 「(1 Chorus)」のようなバージョン表記が既に削られているので、
 				// ここで拾わないと二度と復元できない
 				Tags:       perftag.Normalize(aiSugg.Tags, item.Name),
 				Confidence: aiSugg.Confidence,
 				Reasoning:  "",
 			}
 
-			// 既存楽曲とのマッチを試行（iTunes ID 優先 → 歌名 + アーティスト）
+			// 既存楽曲とのマッチを試行（iTunes ID 優先 → 曲名 + アーティスト）
 			s.matchAndPopulateSong(&suggestions[i], &item, normalizedName, artist)
 		} else {
 			// AI がこの項目を返さなかった、または失敗した場合は元データを使用
@@ -180,7 +180,7 @@ func (s *NormalizationService) BatchAINormalization(items []dto.AINormalizationI
 				NormalizedNameReading: "",
 				OriginalArtist:        item.OriginalArtist,
 				OriginalArtistReading: "",
-				// AI が落ちても、曲名に書いてある版本は拾える
+				// AI が落ちても、曲名に書いてあるバージョン表記は拾える
 				Tags:       perftag.Normalize(nil, item.Name),
 				Confidence: 0,
 				Reasoning:  "",
@@ -280,7 +280,7 @@ func (s *NormalizationService) populateMatchedSong(result *dto.AISuggestionResul
 		result.MatchedSongArtURL = &matchedSong.Arts.String
 	}
 
-	// 取得 primary iTunes ID
+	// primary iTunes ID を取得する
 	if s.songItunesRepo != nil {
 		itunesRecords, err := s.songItunesRepo.FindBySongID(matchedSong.ID)
 		if err == nil && len(itunesRecords) > 0 {

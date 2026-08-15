@@ -55,8 +55,8 @@ type Song struct {
 	Name                  string         `json:"name"`                    // 楽曲名
 	NameReading           sql.NullString `json:"name_reading"`            // 読み（平仮名）
 	OriginalArtist        string         `json:"original_artist"`         // 原曲アーティスト
-	OriginalArtistReading sql.NullString `json:"original_artist_reading"` // 原唱藝人讀音
-	Arts                  sql.NullString `json:"arts"`                    // 封面圖 URL
+	OriginalArtistReading sql.NullString `json:"original_artist_reading"` // 原曲アーティストの読み
+	Arts                  sql.NullString `json:"arts"`                    // ジャケット画像 URL
 	CreatedAt             time.Time      `json:"created_at"`
 	UpdatedAt             time.Time      `json:"updated_at"`
 }
@@ -75,24 +75,24 @@ type Artist struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// ArtistReference は楽曲・演唱 API に埋め込む安定したアーティスト参照。
+// ArtistReference は楽曲・歌唱 API に埋め込む安定したアーティスト参照。
 type ArtistReference struct {
 	ID   uuid.UUID `json:"id"`
 	Name string    `json:"name"`
 }
 
-// SongITunes 歌曲的 iTunes ID
+// SongITunes は楽曲の iTunes ID。
 type SongITunes struct {
 	ID             uuid.UUID      `json:"id"`
 	SongID         uuid.UUID      `json:"song_id"`
 	ITunesID       int64          `json:"itunes_id"`
-	CollectionName sql.NullString `json:"collection_name"` // 專輯名稱
-	Country        sql.NullString `json:"country"`         // 國家代碼
+	CollectionName sql.NullString `json:"collection_name"` // アルバム名
+	Country        sql.NullString `json:"country"`         // 国コード
 	IsPrimary      bool           `json:"is_primary"`
 	CreatedAt      time.Time      `json:"created_at"`
 }
 
-// Stream 歌回直播
+// Stream は歌枠の配信。
 type Stream struct {
 	ID              string         `json:"id"` // YouTube Video ID
 	Title           string         `json:"title"`
@@ -106,7 +106,7 @@ type Stream struct {
 	// FindByID でのみ読む（一覧では使わないので他の SELECT には含めていない）。
 	CommentSongsAnalyzedAt sql.NullTime
 	CommentSongs           []byte    `json:"comment_songs"` // JSONB - Parsed songs (undeduped)
-	IsProcessed            bool      `json:"is_processed"`  // 處理完成
+	IsProcessed            bool      `json:"is_processed"`  // 処理済み
 	IsHidden               bool      `json:"is_hidden"`     // 初回登録時に判定し、その後は手動編集のみ
 	CreatedAt              time.Time `json:"created_at"`
 	UpdatedAt              time.Time `json:"updated_at"`
@@ -123,7 +123,7 @@ type StreamSearchFilters struct {
 	PerformanceTagIDs []string
 }
 
-// Performance 演出紀錄
+// Performance は歌唱記録。
 type Performance struct {
 	ID            uuid.UUID      `json:"id"`
 	StreamID      string         `json:"stream_id"`
@@ -142,17 +142,17 @@ type Performance struct {
 	EndConfirmed bool   `json:"end_confirmed"`
 }
 
-// PerformanceTag 演出版本標籤
+// PerformanceTag は歌唱バージョンのタグ。
 type PerformanceTag struct {
-	ID          string    `json:"id"` // 標籤代碼
+	ID          string    `json:"id"` // タグ ID
 	DisplayName string    `json:"display_name"`
 	Color       string    `json:"color"`
 	CreatedAt   time.Time `json:"created_at"`
 }
 
-// StreamTag 直播類型標籤
+// StreamTag は配信種別のタグ。
 type StreamTag struct {
-	ID          string    `json:"id"` // 標籤代碼
+	ID          string    `json:"id"` // タグ ID
 	DisplayName string    `json:"display_name"`
 	Color       string    `json:"color"`
 	CreatedAt   time.Time `json:"created_at"`
@@ -174,16 +174,16 @@ type TagKeywordRule struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// AIProvider AI provider 設定（OpenAI 相容端點）
+// AIProvider は AI プロバイダーの設定（OpenAI 互換エンドポイント）。
 type AIProvider struct {
 	ID             int       `json:"id"`
 	Name           string    `json:"name"`
 	BaseURL        string    `json:"base_url"`
 	Model          string    `json:"model"`
-	APIKey         string    `json:"-"` // 不輸出 API key
+	APIKey         string    `json:"-"` // API key は出力しない
 	Enabled        bool      `json:"enabled"`
 	Priority       int       `json:"priority"`
-	TimeoutSeconds int       `json:"timeout_seconds"` // 單次 AI 呼叫的超時秒數（不同 provider 可不同）
+	TimeoutSeconds int       `json:"timeout_seconds"` // AI 呼び出し 1 回のタイムアウト秒数（プロバイダーごとに指定可能）
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 }
@@ -199,14 +199,14 @@ type Role struct {
 	UpdatedAt   time.Time      `json:"updated_at"`
 }
 
-// User 使用者
+// User は利用者。
 type User struct {
 	ID            uuid.UUID  `json:"id"`
 	Username      string     `json:"username"`
 	DisplayName   string     `json:"display_name"`
 	Email         *string    `json:"email"` // 自助登録・外部連携で設定。管理者が作った旧アカウントは null
 	EmailVerified bool       `json:"email_verified"`
-	PasswordHash  string     `json:"-"` // 不輸出密碼 hash。外部アカウントのみの利用者は空
+	PasswordHash  string     `json:"-"` // パスワードハッシュは出力しない。外部アカウントのみの利用者は空
 	RoleID        uuid.UUID  `json:"role_id"`
 	RoleName      string     `json:"role"`        // roles.name（表示用、JOIN で補完）
 	Permissions   []string   `json:"permissions"` // role の permissions（認証時に補完）

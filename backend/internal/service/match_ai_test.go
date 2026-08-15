@@ -106,11 +106,11 @@ func TestRejectionPairKeyMatchesLookupKey(t *testing.T) {
 func TestRecallHasNoLengthCutoff(t *testing.T) {
 	for _, name := range []string{"唱", "空", "燈", "怪獣", "深昏睡"} {
 		if key := songmatch.TitleKey(name); key == "" {
-			t.Errorf("%q の照合キーが空。これでは召回できない", name)
+			t.Errorf("%q の照合キーが空。これでは候補を抽出できない", name)
 		}
 	}
 	if identityPrefixLimit <= 0 || identityPrefixLimit > 5 {
-		t.Errorf("identityPrefixLimit = %d。0 だと召回が死に、大きすぎるとプロンプトが膨らむ", identityPrefixLimit)
+		t.Errorf("identityPrefixLimit = %d。0 だと候補抽出が機能せず、大きすぎるとプロンプトが膨らむ", identityPrefixLimit)
 	}
 }
 

@@ -21,7 +21,7 @@ import (
 	"github.com/ruifan75/setori/pkg/chatend"
 )
 
-// ChatEndService 從 live chat 的「拍手」偵測每首歌的結束時間，並更新 comment_songs。
+// ChatEndService は live chat の「拍手」から各曲の終了時刻を検出し、comment_songs を更新する。
 type ChatEndService struct {
 	streamRepo *repository.StreamRepository
 	ytdlp      string
@@ -38,7 +38,7 @@ func NewChatEndService(streamRepo *repository.StreamRepository, ytdlpPath, cache
 	if cacheDir == "" {
 		cacheDir = "data/chat_cache"
 	}
-	// yt-dlp が無いと全配信が「live chat 不可用」になる。配信ごとの警告からは
+	// yt-dlp が無いと全配信で live chat が利用できなくなる。配信ごとの警告からは
 	// 「その配信にチャットが無い」のか「そもそも実行できていない」のか読み取れないので、
 	// 起動時に一度だけ切り分けて残す。
 	if _, err := exec.LookPath(ytdlpPath); err != nil {
@@ -100,8 +100,8 @@ type AnalyzeResult struct {
 	Changed int `json:"changed"` // 実際に書き換わった曲数（ChatEnd の記録だけの曲も含む）
 }
 
-// AnalyzeStream 下載 live chat → 偵測拍手結束時間 → 更新 comment_songs 的 end。
-// 以 comment_songs 既有的 start 為輸入，找出每首歌的曲末拍手作為 end。
+// AnalyzeStream は live chat をダウンロードし、拍手による終了時刻を検出して comment_songs の end を更新する。
+// comment_songs にある start を入力とし、各曲の曲末拍手を end として探す。
 func (s *ChatEndService) AnalyzeStream(videoID string) (AnalyzeResult, error) {
 	var res AnalyzeResult
 
@@ -145,20 +145,20 @@ func (s *ChatEndService) AnalyzeStream(videoID string) (AnalyzeResult, error) {
 	return res, nil
 }
 
-// DetectEnds 用 live chat 拍手為給定的 start 秒數偵測曲末 end，回傳 start→end 對應。
-// 不寫 DB —— comment / holodex 兩個分析流程共用。live chat 不可用時回傳空 map。
+// DetectEnds は指定された start 秒数に対して live chat の拍手から曲末 end を検出し、start→end の対応を返す。
+// DB には書かず、comment / holodex の両分析フローで共用する。live chat を使えなければ空の map を返す。
 func (s *ChatEndService) DetectEnds(videoID string, durationSeconds int, starts []int) map[int]int {
 	if len(starts) == 0 {
 		return nil
 	}
 	chatPath, err := s.fetchLiveChat(videoID)
 	if err != nil {
-		logger.Warnf("[chatend] %s: live chat 不可用、end 推定をスキップ: %v", videoID, err)
+		logger.Warnf("[chatend] %s: live chat を利用できないため、end の推定をスキップ: %v", videoID, err)
 		return nil
 	}
 	events, err := chatend.ParseLiveChatFile(chatPath)
 	if err != nil {
-		logger.Warnf("[chatend] %s: parse live chat 失敗: %v", videoID, err)
+		logger.Warnf("[chatend] %s: live chat の解析に失敗: %v", videoID, err)
 		return nil
 	}
 
@@ -176,13 +176,13 @@ func (s *ChatEndService) DetectEnds(videoID string, durationSeconds int, starts 
 	return endByStart
 }
 
-// DetectEndsForSongs 對 comment songs 套用拍手 end 偵測。
-// 策略（配合使用者偏好）：
-// - 如果原本就有 explicit end（comment 提供的 range 時間），則保留它，並把 chat 偵測值放到 ChatEnd。
-// - 只有原本沒有 explicit end 時，才使用 chat 偵測的值。
-// - 同時計算 EndDiff，方便前端在差異大時提醒使用者檢查。
+// DetectEndsForSongs は comment songs に拍手による end 検出を適用する。
+// 方針（利用者の希望に合わせる）：
+// - 元から explicit end（コメントにある範囲の終了時刻）があれば保持し、Chat の検出値を ChatEnd に入れる。
+// - 元の explicit end がない場合だけ Chat の検出値を使う。
+// - EndDiff も計算し、差が大きい場合にフロントエンドで確認を促せるようにする。
 //
-// 回傳値は (songs, filled, changed)。filled は end を埋めた曲数、
+// 戻り値は (songs, filled, changed)。filled は end を埋めた曲数、
 // changed は ChatEnd/EndDiff だけの記録も含めた「実際に書き換わった」曲数で、
 // 呼び出し側が保存の要否を判断するのに使う。
 func (s *ChatEndService) DetectEndsForSongs(videoID string, durationSeconds int, songs []dto.CommentSong) ([]dto.CommentSong, int, int) {
@@ -205,19 +205,19 @@ func (s *ChatEndService) DetectEndsForSongs(videoID string, durationSeconds int,
 		hasExplicitEnd := songs[i].End > 0 && !songs[i].IsEndTimeEstimated
 
 		if hasExplicitEnd {
-			// 保留 comment 的 explicit end，只記錄 chat 建議值
+			// コメントの explicit end は保持し、Chat の提案値だけを記録する
 			diff := abs(songs[i].End - chatEnd)
 			if songs[i].ChatEnd != chatEnd || songs[i].EndDiff != diff {
 				changed++ // 同じ値なら書き戻さない（再実行しても無駄な UPDATE を出さない）
 			}
 			songs[i].ChatEnd = chatEnd
 			songs[i].EndDiff = diff
-			// 不改 End 和 IsEndTimeEstimated
+			// End と IsEndTimeEstimated は変更しない
 		} else {
-			// 原本沒有明確 end，用 chat 的
+			// 元に明確な end がなければ Chat の値を使う
 			songs[i].End = chatEnd
 			songs[i].IsEndTimeEstimated = false
-			songs[i].ChatEnd = chatEnd // 讓前端知道這是 chat 值
+			songs[i].ChatEnd = chatEnd // フロントエンドへ Chat の値だと伝える
 			filled++
 			changed++
 		}
@@ -232,8 +232,8 @@ func abs(x int) int {
 	return x
 }
 
-// Backfill 對所有有 comment_songs 的歌回跑拍手 end 偵測（bounded concurrency）。
-// 適合對既有資料補跑；已下載的 live chat 會用快取，所以重跑很便宜。
+// Backfill は comment_songs を持つすべての歌枠で拍手 end を検出する（同時実行数に上限あり）。
+// 既存データの補完向け。ダウンロード済みの live chat はキャッシュを使うため、再実行は軽い。
 func (s *ChatEndService) Backfill(concurrency int) {
 	ids, err := s.streamRepo.FindIDsWithCommentSongs()
 	if err != nil {
@@ -243,7 +243,7 @@ func (s *ChatEndService) Backfill(concurrency int) {
 	if concurrency < 1 {
 		concurrency = 1
 	}
-	logger.Infof("[chatend] backfill 開始: %d 件 (concurrency=%d)", len(ids), concurrency)
+	logger.Infof("[chatend] backfill を開始: %d 件 (concurrency=%d)", len(ids), concurrency)
 
 	sem := make(chan struct{}, concurrency)
 	var wg sync.WaitGroup
@@ -258,15 +258,15 @@ func (s *ChatEndService) Backfill(concurrency int) {
 				logger.Warnf("[chatend] backfill %s: %v", id, err)
 			}
 			if n := atomic.AddInt64(&done, 1); n%10 == 0 || int(n) == len(ids) {
-				logger.Infof("[chatend] backfill 進捗: %d/%d", n, len(ids))
+				logger.Infof("[chatend] backfill の進捗: %d/%d", n, len(ids))
 			}
 		}(id)
 	}
 	wg.Wait()
-	logger.Infof("[chatend] backfill 完了: %d 件", len(ids))
+	logger.Infof("[chatend] backfill が完了: %d 件", len(ids))
 }
 
-// fetchLiveChat 用 yt-dlp 下載 live chat replay（已下載則用快取）。
+// fetchLiveChat は yt-dlp で live chat replay をダウンロードする（取得済みならキャッシュを使う）。
 func (s *ChatEndService) fetchLiveChat(videoID string) (string, error) {
 	if err := os.MkdirAll(s.cacheDir, 0o755); err != nil {
 		return "", fmt.Errorf("create cache dir: %w", err)
@@ -322,7 +322,7 @@ func (s *ChatEndService) fetchLiveChat(videoID string) (string, error) {
 		}
 		return "", fmt.Errorf("YouTube に BOT 判定されました: 管理→設定の「YouTube cookie」に cookies.txt を登録してください")
 	case runErr != nil:
-		return "", fmt.Errorf("yt-dlp 失敗 (%v): %s", runErr, ytdlpErrorLine(stderr.String()))
+		return "", fmt.Errorf("yt-dlp に失敗 (%v): %s", runErr, ytdlpErrorLine(stderr.String()))
 	}
 	return "", fmt.Errorf("この配信に live chat replay がありません")
 }

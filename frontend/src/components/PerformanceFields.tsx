@@ -234,7 +234,7 @@ export default function PerformanceFields({
                             <span className="text-blue-600 font-medium">{value.name}</span>
                           </div>
                         ) : null}
-                        {/* 合併元顯示 */}
+                        {/* 統合元の表示 */}
                         {value.mergedFrom && value.mergedFrom.length > 0 && (
                           <div className="mt-1 text-sm">
                             <span className="text-orange-600">統合:</span>{' '}
@@ -278,7 +278,7 @@ export default function PerformanceFields({
                           読み込んだだけでは登録せず、保存したときにだけ書く。
                           既定でチェックが入るのは AI が「同一人物」と言った場合だけ
                           ── メルト / 初音ミク に対し DB が ryo (supercell) のような
-                          作曲者と原唱の取り違えは「同じ曲だが別人」で、こちらの方が多い。
+                          作曲者と原曲歌手の取り違えは「同じ曲だが別人」で、こちらの方が多い。
                         */}
                         {value.artistAlias && (
                           <label className="mt-2 flex items-start gap-2 rounded border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-900">
@@ -374,9 +374,9 @@ export default function PerformanceFields({
                             className={`w-32 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent font-mono ${
                               value.end === 0 ? 'border-red-400 bg-red-50' : value.isEndTimeEstimated ? 'border-orange-300 bg-orange-50' : 'border-gray-300'
                             }`}
-                            placeholder={value.end === 0 ? "歌曲長度ボタンで自動設定" : "0:00"}
+                            placeholder={value.end === 0 ? "曲の長さボタンで自動設定" : "0:00"}
                           />
-                          {/* 時長按鈕 */}
+                          {/* 曲の長さを設定するボタン */}
                           <button
                             onClick={() => {
                               if (trackDuration) {
@@ -389,7 +389,7 @@ export default function PerformanceFields({
                                 ? 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200'
                                 : 'bg-gray-100 text-gray-400 cursor-not-allowed'
                             }`}
-                            title={trackDuration ? 'iTunes歌曲長度を適用' : '歌曲長度情報なし'}
+                            title={trackDuration ? 'iTunes の曲の長さを適用' : '曲の長さ情報なし'}
                           >
                             {formatDuration(trackDuration)}
                           </button>
@@ -440,7 +440,7 @@ export default function PerformanceFields({
                             onChange={(v) => onChange({ end: v })}
                           />
                         )}
-                        {/* 沒有結束時間的提示 */}
+                        {/* 終了時刻がない場合の案内 */}
                         {value.end === 0 && (
                           <div className="mt-1 flex items-center gap-1 text-xs text-red-500">
                             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
@@ -449,7 +449,7 @@ export default function PerformanceFields({
                             <span>終了時間は必須です</span>
                           </div>
                         )}
-                        {/* 估計時間警告 */}
+                        {/* 推定時刻の警告 */}
                         {value.end > 0 && value.isEndTimeEstimated && (
                           <div className="mt-1 flex items-center gap-1 text-xs text-orange-600">
                             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
@@ -458,7 +458,7 @@ export default function PerformanceFields({
                             <span>推定時間 - 要確認</span>
                           </div>
                         )}
-                        {/* Chat 與 Comment end 差異過大警告 + 套用按鈕 */}
+                        {/* Chat とコメントの end の差が大きい場合の警告 + 適用ボタン */}
                         {value.endDiff !== undefined && value.endDiff >= 10 && (
                           <div className="mt-1 flex items-center gap-2 text-xs text-amber-700 bg-amber-50 px-2 py-1 rounded">
                             <div className="flex items-center gap-1">
@@ -479,7 +479,7 @@ export default function PerformanceFields({
                           </div>
                         )}
 
-                        {/* 還原為 Comment 原始 end 的按鈕 */}
+                        {/* コメントに記載された元の終了時刻へ戻すボタン */}
                         {value.originalCommentEnd !== undefined && value.end !== value.originalCommentEnd && (
                           <button
                             onClick={() => onApplyEndSource('comment')}

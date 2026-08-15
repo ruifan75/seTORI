@@ -17,7 +17,7 @@ func NewPerformanceRepository(db *sql.DB) *PerformanceRepository {
 	return &PerformanceRepository{db: db}
 }
 
-// PerformanceWithDetails 包含演出及相關資訊的結構
+// PerformanceWithDetails は歌唱と関連情報を含む構造。
 type PerformanceWithDetails struct {
 	models.Performance
 	StreamTitle    string                   `json:"stream_title"`
@@ -35,7 +35,7 @@ type PerformanceWithDetails struct {
 	Singers  []models.Singer         `json:"singers"`
 }
 
-// attachArtistReferences は演唱一覧に song_artists の安定した UUID 参照を一括で付与する。
+// attachArtistReferences は歌唱一覧に song_artists の安定した UUID 参照を一括で付与する。
 func (r *PerformanceRepository) attachArtistReferences(performances []PerformanceWithDetails) error {
 	if len(performances) == 0 {
 		return nil
@@ -81,7 +81,7 @@ func (r *PerformanceRepository) attachArtistReferences(performances []Performanc
 	return nil
 }
 
-// FindByStreamID 根據 Stream ID 取得所有演出（用於歌回詳情頁）
+// FindByStreamID は配信 ID に紐付くすべての歌唱を取得する（歌枠詳細ページ用）。
 func (r *PerformanceRepository) FindByStreamID(streamID string) ([]PerformanceWithDetails, error) {
 	query := `
 		SELECT p.id, p.stream_id, p.song_id, p.start_seconds, p.end_seconds, p.order_index,
@@ -108,14 +108,14 @@ func (r *PerformanceRepository) FindByStreamID(streamID string) ([]PerformanceWi
 			return nil, fmt.Errorf("scan performance: %w", err)
 		}
 
-		// 取得標籤
+		// タグを取得する
 		tags, err := r.GetTags(p.ID)
 		if err != nil {
 			return nil, err
 		}
 		p.Tags = tags
 
-		// 取得演唱者
+		// 歌手を取得する
 		singers, err := r.GetSingers(p.ID)
 		if err != nil {
 			return nil, err
@@ -134,8 +134,8 @@ func (r *PerformanceRepository) FindByStreamID(streamID string) ([]PerformanceWi
 	return performances, nil
 }
 
-// FindBySongID 根據 Song ID 取得所有演出（反向查詢核心功能）
-// 只顯示非隱藏的 Stream 中的演出
+// FindBySongID は楽曲 ID に紐付くすべての歌唱を取得する（逆引きの中核機能）。
+// 非表示でない配信の歌唱だけを表示する。
 func (r *PerformanceRepository) FindBySongID(songID uuid.UUID, limit, offset int) ([]PerformanceWithDetails, int, error) {
 	var total int
 	err := r.db.QueryRow(`
@@ -177,14 +177,14 @@ func (r *PerformanceRepository) FindBySongID(songID uuid.UUID, limit, offset int
 			return nil, 0, fmt.Errorf("scan performance: %w", err)
 		}
 
-		// 取得標籤
+		// タグを取得する
 		tags, err := r.GetTags(p.ID)
 		if err != nil {
 			return nil, 0, err
 		}
 		p.Tags = tags
 
-		// 取得演唱者
+		// 歌手を取得する
 		singers, err := r.GetSingers(p.ID)
 		if err != nil {
 			return nil, 0, err
@@ -271,7 +271,7 @@ func (r *PerformanceRepository) FindByTagID(tagID string, limit, offset int) ([]
 	return performances, total, nil
 }
 
-// Create 建立新演出
+// Create は新しい歌唱記録を作成する。
 func (r *PerformanceRepository) Create(p *models.Performance) error {
 	p.ID = uuid.New()
 	query := `
@@ -346,9 +346,9 @@ func (r *PerformanceRepository) Update(p *models.Performance) error {
 	return nil
 }
 
-// Delete 刪除演出
+// Delete は歌唱記録を削除する。
 func (r *PerformanceRepository) Delete(id uuid.UUID) error {
-	// 先刪除關聯
+	// 先に関連を削除する
 	_, err := r.db.Exec("DELETE FROM performance_performance_tags WHERE performance_id = $1", id)
 	if err != nil {
 		return fmt.Errorf("delete performance tags: %w", err)
@@ -366,7 +366,7 @@ func (r *PerformanceRepository) Delete(id uuid.UUID) error {
 	return nil
 }
 
-// GetTags 取得演出的所有標籤
+// GetTags は歌唱に付いたすべてのタグを取得する。
 func (r *PerformanceRepository) GetTags(performanceID uuid.UUID) ([]models.PerformanceTag, error) {
 	query := `
 		SELECT pt.id, pt.display_name, pt.color, pt.created_at
@@ -393,7 +393,7 @@ func (r *PerformanceRepository) GetTags(performanceID uuid.UUID) ([]models.Perfo
 	return tags, nil
 }
 
-// AddTag 為演出添加標籤
+// AddTag は歌唱にタグを追加する。
 func (r *PerformanceRepository) AddTag(performanceID uuid.UUID, tagID string) error {
 	query := `INSERT INTO performance_performance_tags (performance_id, tag_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`
 	_, err := r.db.Exec(query, performanceID, tagID)
@@ -403,7 +403,7 @@ func (r *PerformanceRepository) AddTag(performanceID uuid.UUID, tagID string) er
 	return nil
 }
 
-// RemoveTag 移除演出標籤
+// RemoveTag は歌唱からタグを外す。
 func (r *PerformanceRepository) RemoveTag(performanceID uuid.UUID, tagID string) error {
 	_, err := r.db.Exec("DELETE FROM performance_performance_tags WHERE performance_id = $1 AND tag_id = $2", performanceID, tagID)
 	if err != nil {
@@ -412,13 +412,13 @@ func (r *PerformanceRepository) RemoveTag(performanceID uuid.UUID, tagID string)
 	return nil
 }
 
-// GetValidTagIDs 取得有效的標籤 ID（過濾掉不存在的標籤）
+// GetValidTagIDs は有効なタグ ID を取得する（存在しないタグを除外）。
 func (r *PerformanceRepository) GetValidTagIDs(tagIDs []string) ([]string, error) {
 	if len(tagIDs) == 0 {
 		return []string{}, nil
 	}
 
-	// 查詢所有有效的標籤 ID
+	// 有効なタグ ID をすべて照会する
 	query := `SELECT id FROM performance_tags WHERE id = ANY($1)`
 	rows, err := r.db.Query(query, pq.Array(tagIDs))
 	if err != nil {
@@ -438,14 +438,14 @@ func (r *PerformanceRepository) GetValidTagIDs(tagIDs []string) ([]string, error
 	return validTags, nil
 }
 
-// SetTags 設定演出的所有標籤（先刪除再新增，自動過濾無效標籤）
+// SetTags は歌唱のタグをすべて設定する（先に削除してから追加し、無効なタグは自動で除外）。
 func (r *PerformanceRepository) SetTags(performanceID uuid.UUID, tagIDs []string) error {
 	_, err := r.db.Exec("DELETE FROM performance_performance_tags WHERE performance_id = $1", performanceID)
 	if err != nil {
 		return fmt.Errorf("clear performance tags: %w", err)
 	}
 
-	// 過濾出有效的標籤
+	// 有効なタグだけを残す
 	validTags, err := r.GetValidTagIDs(tagIDs)
 	if err != nil {
 		return err
@@ -460,7 +460,7 @@ func (r *PerformanceRepository) SetTags(performanceID uuid.UUID, tagIDs []string
 	return nil
 }
 
-// GetSingers 取得演出的所有演唱者
+// GetSingers は歌唱の歌手をすべて取得する。
 func (r *PerformanceRepository) GetSingers(performanceID uuid.UUID) ([]models.Singer, error) {
 	query := `
 		SELECT s.id, s.name, s.english_name, s.photo_url, COALESCE(s.organization_override, s.organization), o.display_name, COALESCE(o.is_unaffiliated, FALSE), s.metadata_source, s.created_at, s.updated_at
@@ -488,7 +488,7 @@ func (r *PerformanceRepository) GetSingers(performanceID uuid.UUID) ([]models.Si
 	return singers, nil
 }
 
-// AddSinger 為演出添加演唱者
+// AddSinger は歌唱に歌手を追加する。
 func (r *PerformanceRepository) AddSinger(performanceID uuid.UUID, singerID string) error {
 	query := `INSERT INTO performance_singers (performance_id, singer_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`
 	_, err := r.db.Exec(query, performanceID, singerID)
@@ -498,7 +498,7 @@ func (r *PerformanceRepository) AddSinger(performanceID uuid.UUID, singerID stri
 	return nil
 }
 
-// SetSingers 設定演出的所有演唱者
+// SetSingers は歌唱の歌手をすべて設定する。
 func (r *PerformanceRepository) SetSingers(performanceID uuid.UUID, singerIDs []string) error {
 	_, err := r.db.Exec("DELETE FROM performance_singers WHERE performance_id = $1", performanceID)
 	if err != nil {
@@ -662,9 +662,9 @@ func (r *PerformanceRepository) ReconcilePerformances(streamID string, desired [
 	return result, nil
 }
 
-// DeleteByStreamID 刪除指定 Stream 的所有演出記錄
+// DeleteByStreamID は指定した配信の歌唱記録をすべて削除する。
 func (r *PerformanceRepository) DeleteByStreamID(streamID string) error {
-	// 先取得所有 performance ID
+	// 先にすべての performance ID を取得する
 	rows, err := r.db.Query("SELECT id FROM performances WHERE stream_id = $1", streamID)
 	if err != nil {
 		return fmt.Errorf("query performances: %w", err)
@@ -680,7 +680,7 @@ func (r *PerformanceRepository) DeleteByStreamID(streamID string) error {
 		ids = append(ids, id)
 	}
 
-	// 刪除每個演出的關聯資料
+	// 各歌唱の関連データを削除する
 	for _, id := range ids {
 		if err := r.Delete(id); err != nil {
 			return err
@@ -690,8 +690,8 @@ func (r *PerformanceRepository) DeleteByStreamID(streamID string) error {
 	return nil
 }
 
-// FindBySingerID 根據演唱者 ID 取得所有演出（支援分頁）
-// 只顯示非隱藏的 Stream 中的演出
+// FindBySingerID は歌手 ID に紐付くすべての歌唱を取得する（ページング対応）。
+// 非表示でない配信の歌唱だけを表示する。
 func (r *PerformanceRepository) FindBySingerID(singerID string, limit, offset int, sort, dir string) ([]PerformanceWithDetails, int, error) {
 	var total int
 	err := r.db.QueryRow(`
@@ -744,14 +744,14 @@ func (r *PerformanceRepository) FindBySingerID(singerID string, limit, offset in
 			return nil, 0, fmt.Errorf("scan performance: %w", err)
 		}
 
-		// 取得標籤
+		// タグを取得する
 		tags, err := r.GetTags(p.ID)
 		if err != nil {
 			return nil, 0, err
 		}
 		p.Tags = tags
 
-		// 取得演唱者
+		// 歌手を取得する
 		singers, err := r.GetSingers(p.ID)
 		if err != nil {
 			return nil, 0, err
@@ -770,7 +770,7 @@ func (r *PerformanceRepository) FindBySingerID(singerID string, limit, offset in
 	return performances, total, nil
 }
 
-// ========== 首頁：ランダム再生 ==========
+// ========== ホーム：ランダム再生 ==========
 
 // perfDetailSelect は配信・楽曲情報付きで歌唱を引く共通 SELECT（FindByTagID と同形）。
 const perfDetailSelect = `
@@ -855,7 +855,7 @@ func (r *PerformanceRepository) FindRandom(limit int, excludedSongIDs []string) 
 // EndSource の取りうる値。migration 030 の CHECK 制約と一致させること。
 const (
 	EndSourceManual    = "manual"     // 人が編集画面で入力・変更した
-	EndSourceHolodex   = "holodex"    // Holodex 提供
+	EndSourceHolodex   = "holodex"    // Holodex が提供
 	EndSourceComment   = "comment"    // コメントに明示されていた
 	EndSourceChat      = "chat"       // live chat の拍手検出
 	EndSourceItunes    = "itunes"     // iTunes の再生時間から逆算

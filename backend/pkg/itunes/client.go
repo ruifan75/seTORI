@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// SearchResult iTunes 搜尋結果
+// SearchResult は iTunes の検索結果。
 type SearchResult struct {
 	ItunesID       int64  `json:"itunes_id"`
 	CollectionName string `json:"collection_name"`
@@ -19,12 +19,12 @@ type SearchResult struct {
 	Country        string `json:"country"`
 }
 
-// SearchResponse iTunes 搜尋回應
+// SearchResponse は iTunes の検索レスポンス。
 type SearchResponse struct {
 	Results []SearchResult `json:"results"`
 }
 
-// QueryResponse iTunes 查詢回應
+// QueryResponse は iTunes の照会レスポンス。
 type QueryResponse struct {
 	ItunesID        int64  `json:"itunes_id"`
 	CollectionName  string `json:"collection_name"`
@@ -37,7 +37,7 @@ type QueryResponse struct {
 	Country         string `json:"country"`
 }
 
-// itunesSearchResponse Apple Music API 搜尋回應結構
+// itunesSearchResponse は Apple Music API の検索レスポンス構造。
 type itunesSearchResponse struct {
 	Results []itunesResult `json:"results"`
 }
@@ -58,12 +58,12 @@ type itunesResult struct {
 	PreviewUrl       string `json:"previewUrl"`
 }
 
-// Client iTunes API 客戶端
+// Client は iTunes API クライアント。
 type Client struct {
 	httpClient *http.Client
 }
 
-// NewClient 建立新的 iTunes 客戶端
+// NewClient は新しい iTunes クライアントを作成する。
 func NewClient() *Client {
 	return &Client{
 		httpClient: &http.Client{
@@ -72,9 +72,9 @@ func NewClient() *Client {
 	}
 }
 
-// Search 搜尋 iTunes
+// Search は iTunes を検索する。
 func (c *Client) Search(term string) (*SearchResponse, error) {
-	// 構建 URL 並正確編碼查詢參數
+	// URL を組み立て、クエリパラメータを正しくエンコードする
 	params := url.Values{}
 	params.Add("term", term)
 	params.Add("entity", "song")
@@ -99,10 +99,10 @@ func (c *Client) Search(term string) (*SearchResponse, error) {
 		return nil, fmt.Errorf("failed to decode iTunes response: %w", err)
 	}
 
-	// 轉換結果格式
+	// 結果の形式を変換する
 	results := make([]SearchResult, len(itunesResp.Results))
 	for i, r := range itunesResp.Results {
-		// 優先使用 600x600 的封面，降級為 100x100
+		// 600x600 のアートワークを優先し、なければ 100x100 にフォールバックする
 		artworkURL := r.ArtworkUrl600
 		if artworkURL == "" {
 			artworkURL = r.ArtworkUrl100
@@ -123,7 +123,7 @@ func (c *Client) Search(term string) (*SearchResponse, error) {
 	}, nil
 }
 
-// QueryByID 通過 iTunes ID 查詢詳細資訊
+// QueryByID は iTunes ID で詳細情報を照会する。
 func (c *Client) QueryByID(itunesID int64) (*QueryResponse, error) {
 	params := url.Values{}
 	params.Add("id", fmt.Sprintf("%d", itunesID))
@@ -155,7 +155,7 @@ func (c *Client) QueryByID(itunesID int64) (*QueryResponse, error) {
 
 	r := itunesResp.Results[0]
 
-	// 優先使用 600x600 的封面
+	// 600x600 のアートワークを優先する
 	artworkURL := r.ArtworkUrl600
 	if artworkURL == "" {
 		artworkURL = r.ArtworkUrl100

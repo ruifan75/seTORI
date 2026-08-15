@@ -2,7 +2,7 @@
 //
 // **コメント経路と Holodex 経路の両方が通る。** 元はコメント側の AI 応答を
 // 濾すためだけに書かれていたので、Holodex から来た曲にはタグの寄せも
-// 逐字からの補完も効かず、`そばかす (1 Chorus)` が Short Ver. にならなかった。
+// 原文からの補完も効かず、`そばかす (1 Chorus)` が Short Ver. にならなかった。
 // 語彙を 2 か所に持つと必ず片方だけ直されるので、ここへ出してある。
 package perftag
 
@@ -32,7 +32,7 @@ var tagSynonyms = map[string]string{
 	"メドレー":      "medley",
 }
 
-// shortMarkers は逐字の曲名から short を導ける語。
+// shortMarkers は原文の曲名から short を導ける語。
 // AI がタグを付け忘れても、原文に書いてあれば拾えるようにしておく。
 var shortMarkers = []string{"1chorus", "1 chorus", "1コーラス", "ワンコーラス", "1番のみ", "short ver", "ショートver"}
 
@@ -49,7 +49,7 @@ var allowedTags = map[string]bool{
 }
 
 // normalizeTags は AI が返したタグを正規の語彙へ寄せ、
-// 逐字の曲名からも導けるタグを補う。
+// 原文の曲名からも導けるタグを補う。
 func Normalize(tags []string, verbatim string) []string {
 	out := filterAllowedTags(tags)
 

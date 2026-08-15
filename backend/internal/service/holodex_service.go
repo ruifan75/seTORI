@@ -54,7 +54,7 @@ func (s *HolodexService) editor() string {
 	return s.editorToken
 }
 
-// SetAnalysisServices 注入正規化・拍手 end 偵測服務（AnalyzeHolodexSongs 用）。
+// SetAnalysisServices は正規化・拍手 end 検出サービスを注入する（AnalyzeHolodexSongs 用）。
 func (s *HolodexService) SetAnalysisServices(norm *NormalizationService, chatEnd *ChatEndService) {
 	s.normalizationService = norm
 	s.chatEndService = chatEnd
@@ -92,35 +92,35 @@ func (s *HolodexService) ApplyKeys(holodexKey, youtubeKey, editorToken string) {
 	s.SetEditorToken(editorToken)
 }
 
-// SetRepositories 設定額外的 repositories（用於 SyncSetoriToHolodex）
+// SetRepositories は追加の repository を設定する（SyncSetoriToHolodex 用）。
 func (s *HolodexService) SetRepositoriesWithSongItunes(perfRepo *repository.PerformanceRepository, songRepo *repository.SongRepository, songItunesRepo *repository.SongItunesRepository) {
 	s.perfRepo = perfRepo
 	s.songRepo = songRepo
 	s.songItunesRepo = songItunesRepo
 }
 
-// getChannelPhotoURL 嘗試從 YouTube 取得頻道大頭貼，若失敗則使用 Holodex，最後使用 Holodex 靜態圖片
+// getChannelPhotoURL は YouTube からチャンネルのアバター取得を試し、失敗したら Holodex、最後に Holodex の静的画像を使う。
 func (s *HolodexService) getChannelPhotoURL(channelID string, holodexPhoto string) string {
-	// 1. 如果 YouTube API 有設定，優先嘗試使用
+	// 1. YouTube API が設定済みなら優先して試す
 	if s.youtubeClient.IsConfigured() {
 		photo, err := s.youtubeClient.GetChannelPhoto(channelID)
 		if err == nil && photo != "" {
 			return photo
 		}
-		// YouTube 取得失敗，記錄並嘗試使用 Holodex
+		// YouTube からの取得に失敗したら記録し、Holodex を試す
 		logger.Warnf("YouTube photo fetch failed for %s: %v, falling back to Holodex", channelID, err)
 	}
 
-	// 2. 使用 Holodex API 提供的 photo URL
+	// 2. Holodex API が提供する photo URL を使う
 	if holodexPhoto != "" {
 		return holodexPhoto
 	}
 
-	// 3. 最後使用 Holodex 靜態圖片 URL 作為 fallback
+	// 3. 最後に Holodex の静的画像 URL へフォールバックする
 	return fmt.Sprintf("https://holodex.net/statics/channelImg/%s/50.png", channelID)
 }
 
-// SyncResult 同步結果
+// SyncResult は同期結果。
 type SyncResult struct {
 	SyncedCount int
 	NewStreams  []string
@@ -156,7 +156,7 @@ func streamTagIDForHolodexTopic(topicID string) (string, bool) {
 	return topicID, false
 }
 
-// SyncChannelInfo 只同步頻道資訊，不同步直播
+// SyncChannelInfo はチャンネル情報だけを同期し、配信は同期しない。
 func (s *HolodexService) SyncChannelInfo(channelInput string) (*models.Singer, error) {
 	lookup := youtube.ParseChannelLookup(channelInput)
 	var holodexErr error
@@ -282,7 +282,7 @@ func (s *HolodexService) singerFromHolodexChannel(channel *holodex.Channel) *mod
 	if channel.EnglishName != "" {
 		singer.EnglishName = sql.NullString{String: channel.EnglishName, Valid: true}
 	}
-	// 優先使用 YouTube 大頭貼
+	// YouTube のアバターを優先する
 	photoURL := s.getChannelPhotoURL(channel.ID, channel.Photo)
 	if photoURL != "" {
 		singer.PhotoURL = sql.NullString{String: photoURL, Valid: true}
@@ -294,11 +294,11 @@ func (s *HolodexService) singerFromHolodexChannel(channel *holodex.Channel) *mod
 	return singer
 }
 
-// SyncChannel 同步頻道的所有直播
+// SyncChannel はチャンネルのすべての配信を同期する。
 func (s *HolodexService) SyncChannel(channelID string, limit int, forceUpdate bool) (*dto.SyncHolodexResponse, error) {
 	logger.Infof("チャンネル同期開始: %s", channelID)
 
-	// 先同步頻道資訊
+	// 先にチャンネル情報を同期する
 	channel, err := s.client.GetChannel(channelID)
 	if err != nil {
 		return nil, fmt.Errorf("get channel: %w", err)
@@ -317,19 +317,19 @@ func (s *HolodexService) SyncChannel(channelID string, limit int, forceUpdate bo
 		InProgress: true,
 	}
 
-	// 分頁取得所有歌回
+	// ページングしてすべての歌枠を取得する
 	const pageSize = 50
 	offset := 0
 	totalVideos := 0
 
-	// 1) 自家頻道が投稿した歌枠（channel_id フィルタ）
+	// 1) 自チャンネルが投稿した歌枠（channel_id フィルタ）
 	for {
 		videos, err := s.client.GetAllStreams(channelID, pageSize, offset)
 		if err != nil {
 			return nil, fmt.Errorf("get all streams: %w", err)
 		}
 
-		// 沒有更多資料時結束
+		// 続きのデータがなければ終了する
 		if len(videos) == 0 {
 			break
 		}
@@ -338,7 +338,7 @@ func (s *HolodexService) SyncChannel(channelID string, limit int, forceUpdate bo
 		result.TotalStreams = totalVideos
 		s.applySyncedVideos(videos, channelID, forceUpdate, result)
 
-		// 如果返回的數量少於 pageSize，表示已經是最後一頁
+		// 返された件数が pageSize 未満なら最後のページ
 		if len(videos) < pageSize {
 			break
 		}
@@ -389,8 +389,8 @@ func (s *HolodexService) applySyncedVideos(videos []holodex.Video, channelID str
 
 		syncStatus, err := s.syncVideo(video, channelID, forceUpdate)
 		if err != nil {
-			// 記錄錯誤但繼續處理
-			logger.Warnf("同期失敗 (video: %s): %v", video.ID, err)
+			// エラーを記録して処理を続ける
+			logger.Warnf("同期に失敗 (video: %s): %v", video.ID, err)
 			result.Skipped = append(result.Skipped, video.ID)
 			continue
 		}
@@ -408,20 +408,20 @@ func (s *HolodexService) applySyncedVideos(videos []holodex.Video, channelID str
 	}
 }
 
-// syncVideo 同步單一影片
+// syncVideo は動画を 1 件同期する。
 func (s *HolodexService) syncVideo(video holodex.Video, channelID string, forceUpdate bool) (string, error) {
-	// 檢查是否已存在
+	// 既に存在するか確認する
 	existing, err := s.streamRepo.FindByID(video.ID)
 	if err != nil {
 		return "", fmt.Errorf("find stream: %w", err)
 	}
 
-	// 如果已存在且非強制更新模式，跳過
+	// 既に存在し、強制更新モードでなければスキップする
 	if existing != nil && !forceUpdate {
 		return "skipped", nil
 	}
 
-	// 計算 Holodex 資料的 hash
+	// Holodex データのハッシュを計算する
 	holodexJSON, err := json.Marshal(video)
 	if err != nil {
 		return "", fmt.Errorf("marshal video: %w", err)
@@ -429,7 +429,7 @@ func (s *HolodexService) syncVideo(video holodex.Video, channelID string, forceU
 	hash := sha256.Sum256(holodexJSON)
 	hashStr := hex.EncodeToString(hash[:])
 
-	// 解析日期
+	// 日付を解析する
 	var streamDate time.Time
 	if video.AvailableAt != "" {
 		streamDate, _ = time.Parse(time.RFC3339, video.AvailableAt)
@@ -453,7 +453,7 @@ func (s *HolodexService) syncVideo(video holodex.Video, channelID string, forceU
 		stream.DurationSeconds = sql.NullInt32{Int32: int32(video.Duration), Valid: true}
 	}
 
-	// 建立縮圖 URL
+	// サムネイル URL を作成する
 	thumbnailURL := fmt.Sprintf("https://i.ytimg.com/vi/%s/maxresdefault.jpg", video.ID)
 	stream.ThumbnailURL = sql.NullString{String: thumbnailURL, Valid: true}
 
@@ -493,27 +493,27 @@ func (s *HolodexService) syncVideo(video holodex.Video, channelID string, forceU
 		}
 	}
 
-	// 影片擁有者（上傳頻道）。collab 影片的擁有者是主辦頻道，不是被同步的頻道，
-	// 因此優先從 video 取得，取不到時才退回傳入的 channelID。
+	// 動画の所有者（アップロード元チャンネル）。コラボ動画の所有者は主催チャンネルであり、同期対象のチャンネルとは限らない。
+	// そのため video からの取得を優先し、取れない場合だけ渡された channelID に戻る。
 	ownerID := channelID
 	if video.Channel != nil && video.Channel.ID != "" {
 		ownerID = video.Channel.ID
 	} else if video.ChannelID != "" {
 		ownerID = video.ChannelID
 	}
-	// 擁有者與被同步的頻道不同（＝collab，主辦頻道是別人）時，
-	// stream_singers 有指向 singers 的外鍵，需先 upsert 擁有者頻道。
-	// （同步自家頻道時擁有者已在 SyncChannel/SyncVideo 先 upsert，故略過以免用較少的清單資料覆蓋）
+	// 所有者と同期対象のチャンネルが違う（＝コラボで、別のチャンネルが主催）場合、
+	// stream_singers には singers への外部キーがあるため、先に所有者チャンネルを upsert する。
+	// （自チャンネル同期では所有者を SyncChannel/SyncVideo で先に upsert 済み。情報量の少ない一覧データで上書きしないよう省略）
 	if ownerID != channelID && video.Channel != nil && video.Channel.ID == ownerID {
 		s.singerRepo.Upsert(s.singerFromHolodexChannel(video.Channel))
 	}
 
-	// 處理 mentions -> 同步參與者
-	// 先同步所有被提及的頻道，然後設定為此直播的參與者
-	singerIDs := []string{ownerID} // 頻道擁有者一定要包含
+	// mentions を処理して参加者を同期する
+	// 言及されたチャンネルをすべて先に同期し、この配信の参加者に設定する
+	singerIDs := []string{ownerID} // チャンネル所有者は必ず含める
 
 	for _, mention := range video.Mentions {
-		// 同步被提及的頻道為 Singer
+		// 言及されたチャンネルを Singer として同期する
 		singer := &models.Singer{
 			ID:   mention.ID,
 			Name: mention.Name,
@@ -521,7 +521,7 @@ func (s *HolodexService) syncVideo(video holodex.Video, channelID string, forceU
 		if mention.EnglishName != "" {
 			singer.EnglishName = sql.NullString{String: mention.EnglishName, Valid: true}
 		}
-		// 優先使用 YouTube 大頭貼
+		// YouTube のアバターを優先する
 		mentionPhoto := s.getChannelPhotoURL(mention.ID, mention.Photo)
 		if mentionPhoto != "" {
 			singer.PhotoURL = sql.NullString{String: mentionPhoto, Valid: true}
@@ -531,7 +531,7 @@ func (s *HolodexService) syncVideo(video holodex.Video, channelID string, forceU
 		}
 		s.singerRepo.Upsert(singer)
 
-		// 加入參與者列表（避免重複）
+		// 参加者一覧へ追加する（重複は避ける）
 		found := false
 		for _, id := range singerIDs {
 			if id == mention.ID {
@@ -544,16 +544,16 @@ func (s *HolodexService) syncVideo(video holodex.Video, channelID string, forceU
 		}
 	}
 
-	// 設定此直播的所有參與者
+	// この配信の全参加者を設定する
 	if err := s.streamRepo.SetSingers(video.ID, singerIDs, ownerID); err != nil {
-		// 記錄錯誤但不中斷同步
+		// エラーを記録するが同期は止めない
 		fmt.Printf("set stream singers error: %v\n", err)
 	}
 
-	// 同步時 HolodexData 已經包含完整的 video 資料（包括 songs）
-	// 不需要額外儲存，stream_service 會在需要時從 HolodexData 解析
+	// 同期時点で HolodexData には songs を含む完全な video データが入っている
+	// 別途保存する必要はなく、stream_service が必要に応じて HolodexData から解析する
 
-	// 同步時自動分析並儲存 Comment 資料
+	// 同期時にコメントデータを自動分析して保存する
 	if existing == nil || forceUpdate {
 		s.loadAndSaveComments(video.ID)
 		logger.Infof("[holodex] triggered comment analysis for %s", video.ID)
@@ -565,7 +565,7 @@ func (s *HolodexService) syncVideo(video holodex.Video, channelID string, forceU
 	return "updated", nil
 }
 
-// SyncVideo 同步單一影片（可用於手動添加）
+// SyncVideo は動画を 1 件同期する（手動追加にも使用可能）。
 func (s *HolodexService) SyncVideo(videoID string) (*dto.SyncHolodexResponse, error) {
 	video, err := s.client.GetVideoWithSongs(videoID)
 	if err != nil {
@@ -576,7 +576,7 @@ func (s *HolodexService) SyncVideo(videoID string) (*dto.SyncHolodexResponse, er
 	if video.Channel != nil {
 		channelID = video.Channel.ID
 
-		// 同步頻道資訊
+		// チャンネル情報を同期する
 		singer := &models.Singer{
 			ID:   video.Channel.ID,
 			Name: video.Channel.Name,
@@ -584,7 +584,7 @@ func (s *HolodexService) SyncVideo(videoID string) (*dto.SyncHolodexResponse, er
 		if video.Channel.EnglishName != "" {
 			singer.EnglishName = sql.NullString{String: video.Channel.EnglishName, Valid: true}
 		}
-		// 優先使用 YouTube 大頭貼
+		// YouTube のアバターを優先する
 		channelPhoto := s.getChannelPhotoURL(video.Channel.ID, video.Channel.Photo)
 		if channelPhoto != "" {
 			singer.PhotoURL = sql.NullString{String: channelPhoto, Valid: true}
@@ -601,7 +601,7 @@ func (s *HolodexService) SyncVideo(videoID string) (*dto.SyncHolodexResponse, er
 		Skipped:    []string{},
 	}
 
-	// 單一影片同步時，總是強制更新
+	// 動画 1 件の同期では常に強制更新する
 	syncStatus, err := s.syncVideo(*video, channelID, true)
 	if err != nil {
 		return nil, fmt.Errorf("sync video: %w", err)
@@ -621,14 +621,14 @@ func (s *HolodexService) SyncVideo(videoID string) (*dto.SyncHolodexResponse, er
 	return result, nil
 }
 
-// LoadHolodexSongs 從 Holodex 載入歌曲（不加入正規化佇列）
+// LoadHolodexSongs は Holodex から楽曲を読み込む（正規化キューには追加しない）。
 func (s *HolodexService) LoadHolodexSongs(videoID string) (*dto.LoadHolodexSongsResponse, error) {
 	video, err := s.client.GetVideoWithSongs(videoID)
 	if err != nil {
 		return nil, fmt.Errorf("get video: %w", err)
 	}
 
-	// 取得頻道擁有者資訊
+	// チャンネル所有者の情報を取得する
 	var channelOwner dto.SingerResponse
 	if video.Channel != nil {
 		channelOwner = dto.SingerResponse{
@@ -646,12 +646,12 @@ func (s *HolodexService) LoadHolodexSongs(videoID string) (*dto.LoadHolodexSongs
 		}
 	}
 
-	// 收集所有參與者（頻道擁有者 + mentions）
+	// すべての参加者を集める（チャンネル所有者 + mentions）
 	participants := []dto.SingerResponse{channelOwner}
 	allSingerIDs := []string{channelOwner.ID}
 
 	for _, mention := range video.Mentions {
-		// 避免重複
+		// 重複を避ける
 		found := false
 		for _, id := range allSingerIDs {
 			if id == mention.ID {
@@ -680,7 +680,7 @@ func (s *HolodexService) LoadHolodexSongs(videoID string) (*dto.LoadHolodexSongs
 		allSingerIDs = append(allSingerIDs, mention.ID)
 	}
 
-	// 轉換歌曲資料
+	// 楽曲データを変換する
 	songs := make([]dto.SongSuggestion, len(video.Songs))
 	for i, song := range video.Songs {
 		songs[i] = dto.SongSuggestion{
@@ -689,25 +689,25 @@ func (s *HolodexService) LoadHolodexSongs(videoID string) (*dto.LoadHolodexSongs
 			StartSeconds:   song.Start,
 			EndSeconds:     song.End,
 			Tags:           []string{},
-			SingerIDs:      allSingerIDs, // 預設為所有參與者
+			SingerIDs:      allSingerIDs, // 既定はすべての参加者
 		}
 		if song.ArtURL != "" {
 			songs[i].ArtURL = &song.ArtURL
 		}
-		// 加入 iTunes ID（如果有）
+		// iTunes ID があれば追加する
 		if song.ITunesID > 0 {
 			itunesID := song.ITunesID
 			songs[i].ItunesID = &itunesID
 		}
 
-		// 如果沒有結束時間，使用下一首的開始時間
+		// 終了時刻がなければ次の曲の開始時刻を使う
 		if songs[i].EndSeconds == 0 && i+1 < len(video.Songs) {
 			songs[i].EndSeconds = video.Songs[i+1].Start
 		}
 	}
 
-	// 注意：不再儲存到資料庫，因為 HolodexData 已在 sync 時儲存完整的 Video JSON
-	// 這個 API 主要用於即時載入和返回資料給前端
+	// 注意：HolodexData には同期時に完全な Video JSON が保存されるため、ここでは DB に再保存しない
+	// この API は主に都度読み込みとフロントエンドへの返却に使う
 
 	return &dto.LoadHolodexSongsResponse{
 		StreamID:     video.ID,
@@ -718,8 +718,8 @@ func (s *HolodexService) LoadHolodexSongs(videoID string) (*dto.LoadHolodexSongs
 	}, nil
 }
 
-// GetVideoComments 取得影片的公開留言（用於 Comment 分析）。
-// YouTube 是權威來源；未設定、請求失敗或沒有留言時，再嘗試 Holodex。
+// GetVideoComments は動画の公開コメントを取得する（コメント分析用）。
+// YouTube を正とし、未設定・リクエスト失敗・コメントなしの場合に Holodex を試す。
 func (s *HolodexService) GetVideoComments(videoID string) ([]string, error) {
 	var youtubeErr error
 	youtubeSucceeded := false
@@ -772,10 +772,10 @@ func (s *HolodexService) GetYouTubeVideoComments(videoID string) ([]string, erro
 	return comments, nil
 }
 
-// loadAndSaveComments 同步時只抓取並儲存「原始留言」（YouTube 優先、Holodex fallback），
-// 準備給之後的分析使用。
-// AI 抽取／正規化／拍手 end 偵測都不在同步時跑（避免大量同步時打爆 AI/yt-dlp），
-// 改在編輯頁手動觸發分析時才執行並快取（見 CommentService.AnalyzeComments）。
+// loadAndSaveComments は同期時に「元コメント」だけを取得して保存する（YouTube 優先、Holodex へフォールバック）。
+// 後続の分析で使えるよう準備する。
+// AI 抽出／正規化／拍手 end 検出は同期時には実行しない（大量同期で AI/yt-dlp に負荷を集中させないため）。
+// 編集ページで手動分析を実行したときだけ処理してキャッシュする（CommentService.AnalyzeComments を参照）。
 func (s *HolodexService) loadAndSaveComments(videoID string) {
 	comments, err := s.GetVideoComments(videoID)
 	if err != nil {
@@ -806,15 +806,15 @@ type holodexDataSong struct {
 	End            int    `json:"end"`
 }
 
-// AnalyzeHolodexSongs 從 stored holodex_data 解析歌曲，正規化＋DB 照合＋拍手 end 補完，並持久化。
-// 以既有の holodex_hash をキャッシュキーとし、Holodex 資料が変わっていなければ AI を再実行しない。
+// AnalyzeHolodexSongs は保存済み holodex_data から楽曲を解析し、正規化・DB 照合・拍手 end 補完を行って永続化する。
+// 既存の holodex_hash をキャッシュキーとし、Holodex のデータが変わっていなければ AI を再実行しない。
 // Holodex が明示的に end を持つ曲はそれを優先（人力キュレーションのため最も正確）。
 func (s *HolodexService) AnalyzeHolodexSongs(videoID string, force bool) ([]dto.SongSuggestion, error) {
 	return s.analyzeHolodexSongs(videoID, force, true)
 }
 
 // AnalyzeHolodexSongsForBatch は一括セットリスト作成用。**AI 判定は行わない。**
-// 一括は配信を跨いで 1 回にまとめて聞く（曲庫を配信の数だけ送らないため。
+// 一括は配信をまたいで 1 回にまとめて聞く（楽曲カタログを配信の数だけ送らないため。
 // 実測で 58 回 → 9 回。詳細は docs/SETLIST_FLOW.md）。
 func (s *HolodexService) AnalyzeHolodexSongsForBatch(videoID string, force bool) ([]dto.SongSuggestion, error) {
 	return s.analyzeHolodexSongs(videoID, force, false)
@@ -877,7 +877,7 @@ func (s *HolodexService) analyzeHolodexSongs(videoID string, force, adjudicate b
 			Tags:           []string{},
 			SingerIDs:      []string{},
 		}
-		hasExplicitEnd[i] = sg.End > 0 // Holodex 明示 end（人力）
+		hasExplicitEnd[i] = sg.End > 0 // Holodex に明記された end（人手）
 		if sg.ArtURL != "" {
 			art := sg.ArtURL
 			songs[i].ArtURL = &art
@@ -998,10 +998,10 @@ func (s *HolodexService) normalizeHolodexInto(songs []dto.SongSuggestion) {
 	}
 }
 
-// SyncSetoriToHolodex 將 seTORI 的資料同步到 Holodex（當 Holodex 沒有資料時）
-// 目前只印出 request 內容，不執行實際的 API 呼叫
+// SyncSetoriToHolodex は Holodex にデータがない場合、seTORI のデータを Holodex へ同期する。
+// 現在はリクエスト内容を表示するだけで、実際の API 呼び出しは行わない。
 func (s *HolodexService) SyncSetoriToHolodex(streamID string) (*dto.SyncHolodexResponse, error) {
-	// 1. 取得 stream 資訊
+	// 1. 配信情報を取得する
 	stream, err := s.streamRepo.FindByID(streamID)
 	if err != nil {
 		return nil, fmt.Errorf("find stream: %w", err)
@@ -1010,15 +1010,15 @@ func (s *HolodexService) SyncSetoriToHolodex(streamID string) (*dto.SyncHolodexR
 		return nil, fmt.Errorf("stream not found: %s", streamID)
 	}
 
-	// 2. 檢查 editor token 是否配置
+	// 2. editor token が設定済みか確認する
 	if tok := s.editor(); tok == "" || tok == "your-holodex-editor-token-here" {
 		return nil, fmt.Errorf("Holodex editor token not configured")
 	}
 
-	// 3. 取得頻道資訊（從 HolodexData 中解析，或使用第一個 singer 作為備用）
+	// 3. チャンネル情報を取得する（HolodexData から解析し、なければ最初の singer を予備として使う）
 	var channelID, channelName, channelEnglishName string
 
-	// 首先嘗試從 HolodexData 取得 channel ID
+	// まず HolodexData から channel ID の取得を試す
 	if len(stream.HolodexData) > 0 {
 		var video struct {
 			ChannelID string `json:"channel_id"`
@@ -1039,7 +1039,7 @@ func (s *HolodexService) SyncSetoriToHolodex(streamID string) (*dto.SyncHolodexR
 		}
 	}
 
-	// 如果沒有 channel name，從資料庫查詢
+	// channel name がなければ DB から取得する
 	if (channelName == "" || channelEnglishName == "") && channelID != "" {
 		if s.singerRepo != nil {
 			if singer, err := s.singerRepo.FindByID(channelID); err == nil && singer != nil {
@@ -1049,8 +1049,8 @@ func (s *HolodexService) SyncSetoriToHolodex(streamID string) (*dto.SyncHolodexR
 		}
 	}
 
-	// 4. 先從 Holodex 取得已存在的歌曲列表
-	existingSongs := make(map[int64]bool) // 用 iTunes ID 作為 key
+	// 4. 先に Holodex から既存の楽曲一覧を取得する
+	existingSongs := make(map[int64]bool) // iTunes ID をキーにする
 	holodexVideo, err := s.client.GetVideoWithSongs(streamID)
 	if err == nil && holodexVideo != nil {
 		for _, song := range holodexVideo.Songs {
@@ -1061,7 +1061,7 @@ func (s *HolodexService) SyncSetoriToHolodex(streamID string) (*dto.SyncHolodexR
 		}
 	}
 
-	// 6. 取得 performances 和對應的 song 資訊
+	// 6. performance と対応する楽曲情報を取得する
 	syncedCount := 0
 	skippedCount := 0
 	var errors []string
@@ -1073,7 +1073,7 @@ func (s *HolodexService) SyncSetoriToHolodex(streamID string) (*dto.SyncHolodexR
 				if s.songRepo != nil {
 					song, err := s.songRepo.FindByID(perf.SongID)
 					if err == nil && song != nil {
-						// 構造基本的 request 資料
+						// 基本のリクエストデータを組み立てる
 						requestData := map[string]interface{}{
 							"start":           perf.StartSeconds,
 							"end":             perf.EndSeconds,
@@ -1084,7 +1084,7 @@ func (s *HolodexService) SyncSetoriToHolodex(streamID string) (*dto.SyncHolodexR
 							"available_at":    stream.StreamDate.Format(time.RFC3339),
 						}
 
-						// 添加 channel 資訊
+						// チャンネル情報を追加する
 						if channelName != "" {
 							channelObj := map[string]interface{}{
 								"name":         channelName,
@@ -1093,12 +1093,12 @@ func (s *HolodexService) SyncSetoriToHolodex(streamID string) (*dto.SyncHolodexR
 							requestData["channel"] = channelObj
 						}
 
-						// 嘗試取得 iTunes 資訊（只使用 primary iTunes ID）
+						// iTunes 情報の取得を試す（primary iTunes ID だけを使う）
 						var primaryItunesID int64 = 0
 						if s.songItunesRepo != nil {
 							itunesRecords, err := s.songItunesRepo.FindBySongID(perf.SongID)
 							if err == nil && len(itunesRecords) > 0 {
-								// 只使用 primary iTunes ID
+								// primary iTunes ID だけを使う
 								var primaryItunes models.SongITunes
 								foundPrimary := false
 								for _, record := range itunesRecords {
@@ -1109,27 +1109,27 @@ func (s *HolodexService) SyncSetoriToHolodex(streamID string) (*dto.SyncHolodexR
 									}
 								}
 
-								// 如果沒有標記為 primary 的，使用第一筆
+								// primary の印がなければ最初のレコードを使う
 								if !foundPrimary {
 									primaryItunes = itunesRecords[0]
 								}
 
 								primaryItunesID = primaryItunes.ITunesID
 
-								// 檢查這首歌是否已經存在於 Holodex（僅當有 iTunes ID 時）
+								// iTunes ID がある場合だけ、この楽曲が Holodex に既に存在するか確認する
 								if existingSongs[primaryItunesID] {
 									logger.Debugf("⊘ Skipped: %s (iTunes: %d) - already exists in Holodex", song.Name, primaryItunesID)
 									skippedCount++
 									continue
 								}
 
-								// 從 iTunes 取得完整資訊
+								// iTunes から完全な情報を取得する
 								itunesInfo, err := s.itunesClient.QueryByID(primaryItunesID)
 
-								// 設定 iTunes ID
+								// iTunes ID を設定する
 								requestData["itunesid"] = primaryItunesID
 
-								// 如果有 iTunes 資訊，添加完整的 song 物件和 URL
+								// iTunes 情報があれば完全な song オブジェクトと URL を追加する
 								if err == nil && itunesInfo != nil {
 									songObj := map[string]interface{}{
 										"trackId":         itunesInfo.ItunesID,
@@ -1147,7 +1147,7 @@ func (s *HolodexService) SyncSetoriToHolodex(streamID string) (*dto.SyncHolodexR
 							}
 						}
 
-						// 如果沒有 iTunes ID，也要上傳（設定為 null 並添加 Musicdex source）
+						// iTunes ID がなくてもアップロードする（null にして Musicdex source を追加）
 						if primaryItunesID == 0 {
 							requestData["itunesid"] = nil
 							requestData["song"] = map[string]interface{}{
@@ -1163,8 +1163,8 @@ func (s *HolodexService) SyncSetoriToHolodex(streamID string) (*dto.SyncHolodexR
 							requestData["art"] = nil
 						}
 
-						// 發送請求到 Holodex API
-						// 發送請求到 Holodex API
+						// Holodex API へリクエストを送る
+						// Holodex API へリクエストを送る
 						requestJSON, err := json.Marshal(requestData)
 						if err != nil {
 							errors = append(errors, fmt.Sprintf("%s: marshal error: %v", song.Name, err))
@@ -1188,7 +1188,7 @@ func (s *HolodexService) SyncSetoriToHolodex(streamID string) (*dto.SyncHolodexR
 							continue
 						}
 
-						// 在迴圈內逐一關閉，避免 defer 累積導致連線洩漏
+						// defer の蓄積による接続リークを避けるため、ループ内で都度閉じる
 						body, _ := io.ReadAll(resp.Body)
 						resp.Body.Close()
 						if resp.StatusCode >= 200 && resp.StatusCode < 300 {
@@ -1209,12 +1209,12 @@ func (s *HolodexService) SyncSetoriToHolodex(streamID string) (*dto.SyncHolodexR
 		}
 	}
 
-	message := fmt.Sprintf("同期完了: %d 曲成功", syncedCount)
+	message := fmt.Sprintf("同期完了：%d 曲を同期しました", syncedCount)
 	if skippedCount > 0 {
-		message = fmt.Sprintf("同期完了: %d 曲成功、%d 曲既に存在", syncedCount, skippedCount)
+		message = fmt.Sprintf("同期完了：%d 曲を同期し、%d 曲は登録済みでした", syncedCount, skippedCount)
 	}
 	if len(errors) > 0 {
-		message = fmt.Sprintf("同期完了: %d 曲成功、%d 曲既に存在、%d 曲失敗", syncedCount, skippedCount, len(errors))
+		message = fmt.Sprintf("同期完了：%d 曲を同期、%d 曲は登録済み、%d 曲は失敗しました", syncedCount, skippedCount, len(errors))
 		logger.Warnf("Errors during sync: %v", errors)
 	}
 

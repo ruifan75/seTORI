@@ -105,7 +105,7 @@ function UserRow({
           </button>
           <button type="button" onClick={() => { setPwOpen(false); setNewPw(''); }}
             className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800">
-            取消
+            キャンセル
           </button>
         </form>
       )}

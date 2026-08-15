@@ -26,7 +26,7 @@
 - **コード位置**：`pkg/holodex/client.go`（認証ヘッダ `X-APIKEY`）、クライアント側 rate limiter は 75 req/2min に設定。
 - **実際に呼び出すエンドポイント**：
   - `GET /channels/{id}` — チャンネル情報（名前、英語名、アバター、所属）
-  - `GET /videos/{id}` — 動画詳細；`?c=1` は YouTube コメントが未設定・取得失敗・空の場合の fallback。パラメータなし時は `songs` + `channel` + `mentions` を含む
+  - `GET /videos/{id}` — 動画詳細。`?c=1` は YouTube コメントが未設定・取得失敗・空の場合の fallback。パラメータなし時は `songs` + `channel` + `mentions` を含む
   - `GET /videos?channel_id=&type=stream&status=past&include=songs,mentions` — ページング（50/ページ）でチャンネルの過去歌枠を取得
 - **呼び出しトリガー**：
   - `POST /api/sync/holodex`（チャンネル全体同期）

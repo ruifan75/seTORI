@@ -18,13 +18,13 @@ import (
 //
 //	              候補あり 212 行        候補ゼロ 43 行     input tokens
 //	候補を見せる    正解 209 (98.6%)      解けない (0%)      25k
-//	曲庫まるごと    正解 211 (99.5%)      正解 33 (76.7%)    441k
+//	楽曲カタログ全体 正解 211 (99.5%)      正解 33 (76.7%)    441k
 //
 // 誤答はどちらも 0。分からなければ null を返し、無理に近いものを選ばない。
 //
 // つまり候補があるうちは候補で足りる（18 倍の入力で +0.9% にしかならない）。
-// 候補がゼロのときだけ曲庫を丸ごと見せる ── そこは判断ではなく召回の問題で、
-// 候補の中に答えが無い以上、何を聞いても当たらないため。曲庫でしか解けない例：
+// 候補がゼロのときだけ楽曲カタログ全体を見せる ── そこは判断ではなく再現率の問題で、
+// 候補の中に答えが無い以上、何を聞いても当たらないため。楽曲カタログでしか解けない例：
 //
 //	Rumor / Police Piccadilly → ルーマー / ポリスピカデリー
 //	Plastic Love / 竹内まりや → プラスティック・ラブ
@@ -44,8 +44,8 @@ const matchAISystemPrompt = `あなたは楽曲データベースの照合を担
   例: 深昏睡 と 深昏睡 (Deep coma)、Plastic Love と プラスティック・ラブ
 - **カバー・歌ってみたでも、編曲が原曲と同じもの**
   誰が歌ったかは別に記録するので、楽曲としては原曲を指す
-- アーティスト欄が作曲者と原唱のどちらを書いたかの違い
-  例: 惑星ループ / ナユタン星人（作曲）と 惑星ループ / Eve（原唱）
+- アーティスト欄が作曲者と原曲歌手のどちらを書いたかの違い
+  例: 惑星ループ / ナユタン星人（作曲者）と 惑星ループ / Eve（原曲歌手）
 
 ## 別の曲とするもの
 
@@ -65,7 +65,7 @@ null は「新しい曲として登録し、人が確認する」だけで済み
 曲が同じで、かつアーティスト名が違うときだけ answer に same_artist を入れてください。
 
 - 同一人物の別名義なら true（例: 松任谷由実 と 荒井由実、中島愛 と ランカ・リー）
-- 別人なら false（例: 作曲者 ryo (supercell) と 原唱 初音ミク、カバーした VTuber と原曲歌手）
+- 別人なら false（例: 作曲者 ryo (supercell) と原曲歌手の初音ミク、カバーした VTuber と原曲歌手）
 - 判断できなければ省略
 
 ## 出力
@@ -104,7 +104,7 @@ const aiMatchBatchSize = 8
 // AdjudicateMatches は未照合の行を AI に判定させる。
 // 戻り値は (実際に AI へ送った行数, 照合できた行数)。
 //
-// 呼ぶのは「源を編集フォームへ読み込む」ときだけ。配信を開いただけの読み取りや
+// 呼ぶのは「入力元を編集フォームへ読み込む」ときだけ。配信を開いただけの読み取りや
 // 一括プレ分析からは呼ばない（誰も見ていない配信のために AI を焚かない）。
 func (s *NormalizationService) AdjudicateMatches(rows []*aiMatchRow) (asked, resolved int) {
 	if s.matchService == nil || s.aiClient == nil || len(rows) == 0 {
@@ -116,7 +116,7 @@ func (s *NormalizationService) AdjudicateMatches(rows []*aiMatchRow) (asked, res
 		return 0, 0
 	}
 
-	// 候補の有無で二手に分ける。曲庫を見せるのは候補ゼロの行だけ。
+	// 候補の有無で二手に分ける。楽曲カタログを見せるのは候補ゼロの行だけ。
 	var withCands, noCands []*aiMatchRow
 	for _, r := range pending {
 		if len(r.Candidates) > 0 {
@@ -225,7 +225,7 @@ func (s *NormalizationService) buildCandidatePrompt(batch []*aiMatchRow) (string
 }
 
 // dropRejected は「別の曲」と記録済みの候補を落とし、
-// 候補が全部消えた行は曲庫側へ回す（候補ゼロとして扱われる）。
+// 候補がすべて消えた行は楽曲カタログ側へ回す（候補ゼロとして扱われる）。
 func (s *NormalizationService) dropRejected(rows []*aiMatchRow) []*aiMatchRow {
 	var keys []string
 	for _, r := range rows {

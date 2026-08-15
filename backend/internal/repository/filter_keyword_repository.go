@@ -15,7 +15,7 @@ func NewFilterKeywordRepository(db *sql.DB) *FilterKeywordRepository {
 	return &FilterKeywordRepository{db: db}
 }
 
-// FindAll 取得所有 filter keywords
+// FindAll はすべての filter keyword を取得する。
 func (r *FilterKeywordRepository) FindAll() ([]models.FilterKeyword, error) {
 	query := `SELECT id, keyword, type, created_at FROM filter_keywords ORDER BY type, keyword`
 
@@ -37,7 +37,7 @@ func (r *FilterKeywordRepository) FindAll() ([]models.FilterKeyword, error) {
 	return keywords, nil
 }
 
-// Create 新增 filter keyword
+// Create は filter keyword を追加する。
 func (r *FilterKeywordRepository) Create(keyword, keywordType string) (*models.FilterKeyword, error) {
 	query := `INSERT INTO filter_keywords (keyword, type) VALUES ($1, $2) RETURNING id, keyword, type, created_at`
 
@@ -50,7 +50,7 @@ func (r *FilterKeywordRepository) Create(keyword, keywordType string) (*models.F
 	return &kw, nil
 }
 
-// Delete 刪除 filter keyword
+// Delete はフィルターキーワードを削除する。
 func (r *FilterKeywordRepository) Delete(id int) error {
 	result, err := r.db.Exec(`DELETE FROM filter_keywords WHERE id = $1`, id)
 	if err != nil {

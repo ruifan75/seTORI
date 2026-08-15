@@ -12,23 +12,23 @@ import (
 	"github.com/ruifan75/setori/pkg/ai"
 )
 
-// rate limit / 伺服器錯誤後，暫時跳過該 provider 的冷卻時間
+// rate limit／サーバーエラー後にそのプロバイダーを一時的にスキップするクールダウン時間。
 const aiCooldownDuration = 60 * time.Second
 
-// AIService 以多個 OpenAI 相容 provider 進行「嚴格優先序 + failover」。
-// 永遠優先用 priority 最小（最前）的 provider，失敗 / 被冷卻時才換下一個。
-// 遇到 429 / 5xx 的 provider 會被短暫冷卻跳過，避免反覆戳到 usage limit。
-// 未設定任何 DB provider 時，退回環境變數的 Groq key（向後相容、零設定可用）。
+// AIService は複数の OpenAI 互換プロバイダーを「厳密な優先順 + failover」で使う。
+// priority が最小（先頭）のプロバイダーを常に優先し、失敗またはクールダウン中の場合だけ次へ進む。
+// 429 / 5xx を返したプロバイダーは短時間スキップし、usage limit へ繰り返し到達するのを防ぐ。
+// DB にプロバイダーがなければ環境変数の Groq key に戻る（後方互換、設定なしでも利用可能）。
 type AIService struct {
 	repo        *repository.AIProviderRepository
 	fallbackMu  sync.RWMutex // fallbackKey は管理画面から実行中に差し替えられる
 	fallbackKey string
 
 	mu        sync.Mutex
-	cooldowns map[int]time.Time // providerID -> 冷卻到期時間
+	cooldowns map[int]time.Time // providerID -> クールダウン終了時刻
 }
 
-// 確保 AIService 實作 ai.Chatter
+// AIService が ai.Chatter を実装していることを保証する。
 var _ ai.Chatter = (*AIService)(nil)
 
 // SetFallbackKey は provider 未設定時に使う Groq キーを差し替える。
@@ -52,28 +52,28 @@ func NewAIService(repo *repository.AIProviderRepository, fallbackGroqKey string)
 	}
 }
 
-// SimpleChat 實作 ai.Chatter：依序嘗試啟用的 provider，遇錯就換下一個。
+// SimpleChat は ai.Chatter を実装し、有効なプロバイダーを順番に試してエラーなら次へ進む。
 func (s *AIService) SimpleChat(systemPrompt, userMessage string) (string, error) {
 	providers, err := s.repo.FindEnabled()
 	if err != nil {
 		return "", fmt.Errorf("load ai providers: %w", err)
 	}
 
-	// 沒有設定任何 provider → 退回環境變數的 Groq key
+	// プロバイダーが一つもなければ環境変数の Groq key に戻る
 	if len(providers) == 0 {
 		if s.fallback() == "" {
 			return "", errors.New("no AI provider configured")
 		}
-		// fallback 使用較長的預設 timeout（60s）
+		// フォールバックには長めの既定 timeout（60 秒）を使う
 		return ai.NewClientWithTimeout("", "", s.fallback(), 60*time.Second).SimpleChat(systemPrompt, userMessage)
 	}
 
-	// 依 priority 順序嘗試（providers 已由 repo 依 priority ASC 排序）：
-	// 永遠先試最前面的，失敗 / 冷卻才換下一個。
+	// priority 順に試す（providers は repo で priority ASC に並び替え済み）：
+	// 常に先頭から試し、失敗またはクールダウン中の場合だけ次へ進む。
 	var lastErr error
 	attempted := 0
 
-	// 第一輪：跳過冷卻中的 provider
+	// 1 周目：クールダウン中のプロバイダーをスキップする
 	for _, p := range providers {
 		if s.inCooldown(p.ID) {
 			continue
@@ -87,7 +87,7 @@ func (s *AIService) SimpleChat(systemPrompt, userMessage string) (string, error)
 		lastErr = err
 	}
 
-	// 第二輪：若全部都在冷卻中，仍依優先序嘗試一次（總比直接失敗好）
+	// 2 周目：すべてクールダウン中でも優先順に一度試す（即座に失敗するよりよい）
 	if attempted == 0 {
 		for _, p := range providers {
 			resp, err := s.tryProvider(p, systemPrompt, userMessage)
@@ -99,7 +99,7 @@ func (s *AIService) SimpleChat(systemPrompt, userMessage string) (string, error)
 		}
 	}
 
-	// 全部 provider 失敗 → 最後再試環境變數 fallback
+	// すべてのプロバイダーが失敗したら、最後に環境変数のフォールバックを試す
 	if s.fallback() != "" {
 		if resp, err := ai.NewClientWithTimeout("", "", s.fallback(), 60*time.Second).SimpleChat(systemPrompt, userMessage); err == nil {
 			logger.Infof("AI fallback (env key) succeeded")
@@ -113,7 +113,7 @@ func (s *AIService) SimpleChat(systemPrompt, userMessage string) (string, error)
 	return "", lastErr
 }
 
-// tryProvider 呼叫單一 provider，並在 429/5xx 時設定冷卻
+// tryProvider は一つのプロバイダーを呼び出し、429/5xx ならクールダウンを設定する。
 func (s *AIService) tryProvider(p models.AIProvider, systemPrompt, userMessage string) (string, error) {
 	timeout := 60 * time.Second
 	if p.TimeoutSeconds > 0 {
@@ -134,7 +134,7 @@ func (s *AIService) tryProvider(p models.AIProvider, systemPrompt, userMessage s
 	return "", fmt.Errorf("provider %q: %w", p.Name, err)
 }
 
-// shouldCooldown 判斷錯誤是否為 rate limit / 伺服器錯誤（值得暫時跳過該 provider）
+// shouldCooldown は一時的にプロバイダーを飛ばすべき rate limit／サーバーエラーか判定する。
 func shouldCooldown(err error) bool {
 	var apiErr *ai.APIError
 	if errors.As(err, &apiErr) {

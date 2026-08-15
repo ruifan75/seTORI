@@ -35,7 +35,7 @@ func NewSingerService(
 	}
 }
 
-// GetAll 取得所有演唱者。includeHidden は content:edit を持つ場合のみ true を渡す。
+// GetAll はすべての歌手を取得する。includeHidden は content:edit を持つ場合のみ true を渡す。
 func (s *SingerService) GetAll(page, limit int, sort, dir string, includeHidden bool) (*dto.SingerListResponse, error) {
 	offset := (page - 1) * limit
 
@@ -44,7 +44,7 @@ func (s *SingerService) GetAll(page, limit int, sort, dir string, includeHidden 
 		return nil, fmt.Errorf("get singers: %w", err)
 	}
 
-	// 轉換為 DTO
+	// DTO に変換する
 	singerResponses := make([]dto.SingerResponse, len(singers))
 	for i, singer := range singers {
 		singerResponses[i] = s.toSingerResponse(singer)
@@ -119,7 +119,7 @@ func (s *SingerService) SetHidden(id string, hidden bool) (bool, error) {
 	return found, nil
 }
 
-// Search 搜尋演唱者
+// Search は歌手を検索する。
 func (s *SingerService) Search(query string, limit int) ([]dto.SingerResponse, error) {
 	if limit <= 0 {
 		limit = 10
@@ -138,7 +138,7 @@ func (s *SingerService) Search(query string, limit int) ([]dto.SingerResponse, e
 	return singerResponses, nil
 }
 
-// GetByID 取得演唱者詳情
+// GetByID は歌手の詳細を取得する。
 func (s *SingerService) GetByID(id string) (*dto.SingerDetailResponse, error) {
 	singer, err := s.singerRepo.FindByID(id)
 	if err != nil {
@@ -148,7 +148,7 @@ func (s *SingerService) GetByID(id string) (*dto.SingerDetailResponse, error) {
 		return nil, nil
 	}
 
-	// 取得統計資料
+	// 統計データを取得する
 	streamCount, _ := s.singerRepo.GetStreamCount(id)
 	performanceCount, _ := s.singerRepo.GetPerformanceCount(id)
 
@@ -195,11 +195,11 @@ func (s *SingerService) UpdateManualMetadata(id string, req *dto.UpdateSingerReq
 	return &resp, nil
 }
 
-// GetStreams 取得演唱者參與的歌回（支援篩選）
+// GetStreams は歌手が参加した歌枠を取得する（絞り込み対応）。
 func (s *SingerService) GetStreams(singerID string, page, limit int, processedFilter, hiddenFilter *bool) (*dto.StreamListResponse, error) {
 	offset := (page - 1) * limit
 
-	// 建構篩選條件
+	// 絞り込み条件を組み立てる
 	filter := &repository.StreamFilter{
 		ProcessedOnly: processedFilter,
 		HiddenFilter:  hiddenFilter,
@@ -210,7 +210,7 @@ func (s *SingerService) GetStreams(singerID string, page, limit int, processedFi
 		return nil, fmt.Errorf("get streams: %w", err)
 	}
 
-	// 轉換為 DTO
+	// DTO に変換する
 	streamResponses := make([]dto.StreamResponse, len(streams))
 	for i, stream := range streams {
 		tags, _ := s.streamRepo.GetTags(stream.ID)
@@ -231,11 +231,11 @@ func (s *SingerService) GetStreams(singerID string, page, limit int, processedFi
 	}, nil
 }
 
-// GetPerformances 取得演唱者的所有演出記錄
+// GetPerformances は歌手のすべての歌唱記録を取得する。
 func (s *SingerService) GetPerformances(singerID string, page, limit int, sort, dir string) (*dto.SingerPerformanceListResponse, error) {
 	offset := (page - 1) * limit
 
-	// 先取得演唱者資訊
+	// 先に歌手情報を取得する
 	singer, err := s.singerRepo.FindByID(singerID)
 	if err != nil {
 		return nil, fmt.Errorf("get singer: %w", err)
@@ -249,7 +249,7 @@ func (s *SingerService) GetPerformances(singerID string, page, limit int, sort, 
 		return nil, fmt.Errorf("get performances: %w", err)
 	}
 
-	// 轉換為 DTO
+	// DTO に変換する
 	perfResponses := make([]dto.SongPerformanceResponse, len(performances))
 	for i, perf := range performances {
 		perfResponses[i] = s.toPerformanceResponse(perf)
@@ -269,7 +269,7 @@ func (s *SingerService) GetPerformances(singerID string, page, limit int, sort, 
 	}, nil
 }
 
-// toSingerResponse 轉換 Model 到 DTO
+// toSingerResponse は Model を DTO に変換する。
 func (s *SingerService) toSingerResponse(singer models.Singer) dto.SingerResponse {
 	resp := dto.SingerResponse{
 		ID:              singer.ID,
@@ -330,7 +330,7 @@ func nullableTrimmedString(value *string) sql.NullString {
 	return sql.NullString{String: trimmed, Valid: true}
 }
 
-// toStreamResponse 轉換 Model 到 DTO
+// toStreamResponse は Model を DTO に変換する。
 func (s *SingerService) toStreamResponse(stream models.Stream, tags []models.StreamTag, participants []models.Singer) dto.StreamResponse {
 	resp := dto.StreamResponse{
 		ID:          stream.ID,
@@ -349,7 +349,7 @@ func (s *SingerService) toStreamResponse(stream models.Stream, tags []models.Str
 		resp.ThumbnailURL = &stream.ThumbnailURL.String
 	}
 
-	// 轉換標籤
+	// タグを変換する
 	resp.Tags = make([]dto.StreamTagResponse, len(tags))
 	for i, tag := range tags {
 		resp.Tags[i] = dto.StreamTagResponse{
@@ -359,7 +359,7 @@ func (s *SingerService) toStreamResponse(stream models.Stream, tags []models.Str
 		}
 	}
 
-	// 轉換參與者
+	// 参加者を変換する
 	resp.Participants = make([]dto.SingerResponse, len(participants))
 	for i, singer := range participants {
 		resp.Participants[i] = s.toSingerResponse(singer)
@@ -368,7 +368,7 @@ func (s *SingerService) toStreamResponse(stream models.Stream, tags []models.Str
 	return resp
 }
 
-// toPerformanceResponse 轉換演出到 DTO
+// toPerformanceResponse は歌唱を DTO に変換する。
 func (s *SingerService) toPerformanceResponse(perf repository.PerformanceWithDetails) dto.SongPerformanceResponse {
 	resp := dto.SongPerformanceResponse{
 		ID:             perf.ID,
@@ -389,7 +389,7 @@ func (s *SingerService) toPerformanceResponse(perf repository.PerformanceWithDet
 		resp.ThumbnailURL = &perf.ThumbnailURL.String
 	}
 
-	// 轉換標籤
+	// タグを変換する
 	resp.Tags = make([]dto.PerformanceTagResponse, len(perf.Tags))
 	for i, tag := range perf.Tags {
 		resp.Tags[i] = dto.PerformanceTagResponse{
@@ -406,7 +406,7 @@ func (s *SingerService) toPerformanceResponse(perf repository.PerformanceWithDet
 		resp.CustomTags = []string{}
 	}
 
-	// 轉換演唱者
+	// 歌手を変換する
 	resp.Singers = make([]dto.SingerResponse, len(perf.Singers))
 	for i, singer := range perf.Singers {
 		resp.Singers[i] = s.toSingerResponse(singer)

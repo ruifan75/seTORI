@@ -6,14 +6,14 @@ import (
 	"unicode/utf8"
 )
 
-// FilterSongs 過濾非歌曲項目（使用 DB 載入的關鍵字）。
+// FilterSongs は DB から読み込んだキーワードで楽曲以外の項目を除外する。
 // 構造的な非曲判定（絵文字のみ／引用符／罫線／過長）＋キーワード辞書の両方を適用する。
 func FilterSongs(songs []ParsedSong, filterKW, keepKW []string) []ParsedSong {
 	return FilterSongsWith(songs, filterKW, keepKW, true)
 }
 
 // FilterSongsWith は structural を切り替えられる評価用の入口。
-// structural=false のときは従来のキーワード辞書のみで過濾する（ベンチマークの
+// structural=false のときは従来のキーワード辞書だけで除外する（ベンチマークの
 // before/after 対照や、辞書だけの挙動を確認したいとき用）。production は常に true。
 func FilterSongsWith(songs []ParsedSong, filterKW, keepKW []string, structural bool) []ParsedSong {
 	var filtered []ParsedSong
@@ -25,8 +25,8 @@ func FilterSongsWith(songs []ParsedSong, filterKW, keepKW []string, structural b
 	return filtered
 }
 
-// shouldFilter 判斷是否應該過濾掉
-// 檢查整行原始留言（OriginalComment），避免關鍵字出現在 artist 等欄位時漏掉
+// shouldFilter は項目を除外すべきか判定する。
+// キーワードが artist などのフィールドにある場合も見落とさないよう、元コメント（OriginalComment）の行全体を調べる。
 func shouldFilter(song ParsedSong, filterKW, keepKW []string, structural bool) bool {
 	// 結構性の非曲判定は keep キーワードより優先する。
 	// 実況メモ（トピック「発言」）や絵文字マーカー、罫線のネスト注釈などは
@@ -42,21 +42,21 @@ func shouldFilter(song ParsedSong, filterKW, keepKW []string, structural bool) b
 		textLower = strings.ToLower(song.Name)
 	}
 
-	// 先檢查是否包含保留關鍵字
+	// 先に除外対象外のキーワードを含むか確認する
 	for _, keyword := range keepKW {
 		if containsKeyword(textLower, strings.ToLower(keyword)) {
 			return false
 		}
 	}
 
-	// 檢查是否包含過濾關鍵字
+	// 除外キーワードを含むか確認する
 	for _, keyword := range filterKW {
 		if containsKeyword(textLower, strings.ToLower(keyword)) {
 			return true
 		}
 	}
 
-	// 如果只有數字，可能不是歌曲
+	// 数字だけなら楽曲ではない可能性が高い
 	if isOnlyDigits(song.Name) {
 		return true
 	}
@@ -64,11 +64,11 @@ func shouldFilter(song ParsedSong, filterKW, keepKW []string, structural bool) b
 	return false
 }
 
-// 曲名として許容する最大文字數（rune 単位）。これを超える「歌名」は
+// 曲名として許容する最大文字数（rune 単位）。これを超える「曲名」は
 // 実況・雑談文の丸ごと取り込みとみなす。実在曲でこれを超えるものは稀。
 const maxSongNameRunes = 40
 
-// isStructurallyNonSong 以「曲名の形」而非關鍵字，判斷抽出項目是否根本不是歌曲。
+// isStructurallyNonSong はキーワードではなく「曲名の形」から、抽出項目がそもそも楽曲ではないか判定する。
 // これらはタイムスタンプ付きコメントに紛れ込む「非曲行」の典型パターンで、
 // キーワード辞書では捕まえきれない。ground truth との突き合わせで
 // 実在曲の巻き添え（false negative）が出ないことを確認した規則のみを採用している。
@@ -83,7 +83,7 @@ func isStructurallyNonSong(song ParsedSong) bool {
 
 	// 2. 曲名に日本語の引用符「」『』を含む
 	//    → 実況メモ（例: 挨拶運動「みんな、ただいまー!」）。
-	//    曲名欄は分隔符で切り出した後なので、作品情報の『』は通常ここには残らない。
+	//    曲名欄は区切り文字で切り出した後なので、作品情報の『』は通常ここには残らない。
 	if strings.ContainsAny(name, "「」『』") {
 		return true
 	}
@@ -162,7 +162,7 @@ func trimSentenceEnd(s string) string {
 	return strings.TrimRight(s, "!！?？ 　")
 }
 
-// hasWordChar 判斷字串是否含有至少一個「単語文字」（字母或数字）。
+// hasWordChar は文字列に「単語文字」（文字または数字）が一つ以上あるか判定する。
 // 絵文字・記号・句読点のみの文字列は false。
 func hasWordChar(s string) bool {
 	for _, r := range s {
@@ -173,7 +173,7 @@ func hasWordChar(s string) bool {
 	return false
 }
 
-// startsWithBoxDrawing 判斷行首（去除前導空白後）是否為罫線素片（Box Drawing, U+2500–U+257F）。
+// startsWithBoxDrawing は先頭の空白を除いた行頭が罫線素片（Box Drawing, U+2500–U+257F）か判定する。
 func startsWithBoxDrawing(line string) bool {
 	line = strings.TrimSpace(line)
 	if line == "" {
@@ -183,28 +183,28 @@ func startsWithBoxDrawing(line string) bool {
 	return r >= 0x2500 && r <= 0x257F
 }
 
-// containsKeyword 檢查 text 是否包含 keyword
-// 短 keyword（ASCII 3字以下）使用全字比對，避免 "op" 匹配到 "shop"
+// containsKeyword は text が keyword を含むか確認する。
+// 短い keyword（ASCII 3 文字以下）は単語全体で比較し、"op" が "shop" に一致するのを防ぐ。
 func containsKeyword(text, keyword string) bool {
 	kwRunes := []rune(keyword)
 
-	// 短 ASCII keyword → 全字比對（前後必須是非英數字元或邊界）
+	// 短い ASCII keyword → 単語全体で比較（前後が英数字以外または境界であること）
 	if len(kwRunes) <= 3 && isAllASCIIAlpha(keyword) {
 		return containsWholeWord(text, keyword)
 	}
 
-	// 長 keyword 或非 ASCII → 子字串比對
+	// 長い keyword または非 ASCII → 部分文字列で比較
 	return strings.Contains(text, keyword)
 }
 
-// containsWholeWord 全字比對：keyword 前後必須是邊界或非英數字元
+// containsWholeWord は単語全体を比較する。keyword の前後は境界または英数字以外でなければならない。
 func containsWholeWord(text, keyword string) bool {
 	textRunes := []rune(text)
 	kwRunes := []rune(keyword)
 	kwLen := len(kwRunes)
 
 	for i := 0; i <= len(textRunes)-kwLen; i++ {
-		// 比對 keyword
+		// keyword を比較する
 		match := true
 		for j := 0; j < kwLen; j++ {
 			if textRunes[i+j] != kwRunes[j] {
@@ -216,7 +216,7 @@ func containsWholeWord(text, keyword string) bool {
 			continue
 		}
 
-		// 檢查前後邊界
+		// 前後の境界を確認する
 		beforeOK := i == 0 || !isWordChar(textRunes[i-1])
 		afterOK := i+kwLen >= len(textRunes) || !isWordChar(textRunes[i+kwLen])
 
@@ -228,12 +228,12 @@ func containsWholeWord(text, keyword string) bool {
 	return false
 }
 
-// isWordChar 判斷是否為「單字內字元」（英數字）
+// isWordChar は「単語内の文字」（英数字）か判定する。
 func isWordChar(r rune) bool {
 	return unicode.IsLetter(r) && r < 0x3000 || unicode.IsDigit(r)
 }
 
-// isAllASCIIAlpha 判斷是否全為 ASCII 英文字母
+// isAllASCIIAlpha はすべて ASCII 英字か判定する。
 func isAllASCIIAlpha(s string) bool {
 	for _, r := range s {
 		if r < 'a' || r > 'z' {
@@ -243,7 +243,7 @@ func isAllASCIIAlpha(s string) bool {
 	return len(s) > 0
 }
 
-// isOnlyDigits 檢查字串是否只包含數字
+// isOnlyDigits は文字列が数字だけか確認する。
 func isOnlyDigits(s string) bool {
 	for _, r := range s {
 		if r < '0' || r > '9' {

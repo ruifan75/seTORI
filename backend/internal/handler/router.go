@@ -383,7 +383,7 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("GET /api/stream-tags/{id}/streams", r.handleGetStreamsByTag)
 	r.mux.HandleFunc("GET /api/performance-tags/{id}/performances", r.handleGetPerformancesByTag)
 
-	// 首頁：おすすめ
+	// ホーム：おすすめ
 	r.mux.HandleFunc("GET /api/performances/random", r.handleRandomPerformances)
 
 	// Tag management
@@ -403,7 +403,7 @@ func (r *Router) setupRoutes() {
 	// AI normalization (for direct editing flow)
 	r.mux.HandleFunc("POST /api/ai/normalize", r.handleBatchAINormalization)
 
-	// AI provider 設定（管理員）
+	// AI プロバイダー設定（管理者）
 	r.mux.HandleFunc("GET /api/ai-providers", r.handleListAIProviders)
 	r.mux.HandleFunc("POST /api/ai-providers", r.handleCreateAIProvider)
 	r.mux.HandleFunc("PUT /api/ai-providers/{id}", r.handleUpdateAIProvider)
@@ -744,9 +744,9 @@ func (r *Router) handleRevertBatchFill(w http.ResponseWriter, req *http.Request)
 	})
 }
 
-// handleListBatchFillGaps はその実行で「DB にあるが源に無い」と分かった歌唱を返す（content:edit）。
+// handleListBatchFillGaps はその実行で「DB にあるが入力元に無い」と分かった歌唱を返す（content:edit）。
 //
-// これらは提案として積んでいない（源は欠けているのが普通で、欠落 1 件ごとに待ち行列を
+// これらは提案として積んでいない（入力元は欠けているのが普通で、欠落 1 件ごとに待ち行列を
 // 作ると処理できない量になるため）。実行履歴からここへ辿るのが唯一の入口。
 func (r *Router) handleListBatchFillGaps(w http.ResponseWriter, req *http.Request) {
 	runID, err := uuid.Parse(req.PathValue("id"))
@@ -1557,7 +1557,7 @@ func (r *Router) handleUpdateSong(w http.ResponseWriter, req *http.Request) {
 	respondJSON(w, http.StatusOK, result)
 }
 
-// handleDeleteSong 刪除歌曲
+// handleDeleteSong は楽曲を削除する。
 func (r *Router) handleDeleteSong(w http.ResponseWriter, req *http.Request) {
 	idStr := req.PathValue("id")
 	id, err := uuid.Parse(idStr)
@@ -1566,7 +1566,7 @@ func (r *Router) handleDeleteSong(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// 檢查歌曲是否存在
+	// 楽曲が存在するか確認する
 	song, err := r.songService.GetByID(id)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
@@ -1577,7 +1577,7 @@ func (r *Router) handleDeleteSong(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// 刪除歌曲
+	// 楽曲を削除する
 	if err := r.songService.Delete(id); err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1589,7 +1589,7 @@ func (r *Router) handleDeleteSong(w http.ResponseWriter, req *http.Request) {
 	})
 }
 
-// handleMergeSong 將來源歌曲合併至目標歌曲
+// handleMergeSong は統合元楽曲を統合先楽曲へまとめる。
 func (r *Router) handleMergeSong(w http.ResponseWriter, req *http.Request) {
 	idStr := req.PathValue("id")
 	sourceSongID, err := uuid.Parse(idStr)
@@ -1612,13 +1612,13 @@ func (r *Router) handleMergeSong(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// 確保來源和目標是不同的歌曲
+	// 統合元と統合先が別の楽曲であることを確認する
 	if sourceSongID == targetSongID {
 		respondError(w, http.StatusBadRequest, "元の曲と対象の曲は同じにできません")
 		return
 	}
 
-	// 驗證兩首歌曲都存在
+	// 両方の楽曲が存在することを検証する
 	sourceSong, err := r.songService.GetByID(sourceSongID)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
@@ -1639,7 +1639,7 @@ func (r *Router) handleMergeSong(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// 執行合併
+	// 統合を実行する
 	if err := r.songService.MergeSongs(sourceSongID, targetSongID); err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1698,8 +1698,8 @@ func (r *Router) handleGetStream(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r *Router) handleCreateStream(w http.ResponseWriter, req *http.Request) {
-	// 直播只能透過 Holodex 同步建立（POST /api/sync/holodex/video/{id}），
-	// 尚未提供手動建立的入口。回傳 501 以避免讓呼叫端誤以為已建立成功。
+	// 配信は Holodex 同期（POST /api/sync/holodex/video/{id}）でのみ作成できる。
+	// 手動作成の入口はまだないため、呼び出し側が作成成功と誤認しないよう 501 を返す。
 	respondError(w, http.StatusNotImplemented, "ストリームの手動作成は未対応です。Holodex同期を使用してください")
 }
 
@@ -1887,7 +1887,7 @@ func (r *Router) handleGetSingerStreams(w http.ResponseWriter, req *http.Request
 		limit = 20
 	}
 
-	// 解析篩選參數
+	// 絞り込みパラメータを解析する
 	var processedFilter, hiddenFilter *bool
 
 	// processed: "all" (nil), "true", "false"
@@ -1896,10 +1896,10 @@ func (r *Router) handleGetSingerStreams(w http.ResponseWriter, req *http.Request
 		processedFilter = &processed
 	}
 
-	// hidden: "all", "true" (只看隱藏), "false" (不顯示隱藏，預設)
+	// hidden: "all", "true"（非表示のみ）, "false"（非表示を除外、既定）
 	hiddenStr := req.URL.Query().Get("hidden")
 	if hiddenStr == "" {
-		// 預設不顯示隱藏的
+		// 既定では非表示を除外する
 		hidden := false
 		hiddenFilter = &hidden
 	} else if hiddenStr == "true" {
@@ -1909,7 +1909,7 @@ func (r *Router) handleGetSingerStreams(w http.ResponseWriter, req *http.Request
 		hidden := false
 		hiddenFilter = &hidden
 	}
-	// hiddenStr == "all" 時，hiddenFilter 保持 nil
+	// hiddenStr == "all" の場合、hiddenFilter は nil のままにする
 
 	result, err := r.singerService.GetStreams(id, page, limit, processedFilter, hiddenFilter)
 	if err != nil {
@@ -1965,14 +1965,14 @@ func (r *Router) handleCreateSinger(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// 只同步頻道資訊，不同步直播
+	// チャンネル情報だけを同期し、配信は同期しない
 	singer, err := r.holodexService.SyncChannelInfo(singerReq.ID)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	// 返回成功訊息
+	// 成功メッセージを返す
 	respondJSON(w, http.StatusCreated, dto.CreateSingerResponse{
 		Message: "チャンネルを追加しました",
 		ID:      singer.ID,
@@ -2060,7 +2060,7 @@ func (r *Router) handleSyncHolodexVideo(w http.ResponseWriter, req *http.Request
 	respondJSON(w, http.StatusOK, result)
 }
 
-// 同步 seTORI 資料到 Holodex
+// seTORI のデータを Holodex へ同期する。
 func (r *Router) handleSyncSetoriToHolodex(w http.ResponseWriter, req *http.Request) {
 	streamID := req.PathValue("id")
 	if streamID == "" {
@@ -2265,7 +2265,7 @@ func (r *Router) handleAnalyzeComments(w http.ResponseWriter, req *http.Request)
 		return
 	}
 
-	// ?force=true で快取を無視して再分析（再正規化）する
+	// ?force=true でキャッシュを無視して再分析（再正規化）する
 	force := req.URL.Query().Get("force") == "true"
 
 	// ?dry_run=true は解析だけして何も書かない（計測用の読み取り専用の口）。
@@ -2333,7 +2333,7 @@ func (r *Router) handleEstimateChatEnds(w http.ResponseWriter, req *http.Request
 	respondJSON(w, http.StatusOK, map[string]interface{}{"ends": ends})
 }
 
-// handleAnalyzeChatEnds 手動觸發：用 live chat 拍手偵測該歌回各首歌的 end。
+// handleAnalyzeChatEnds は手動実行で、live chat の拍手から歌枠内の各曲の end を検出する。
 //
 // AI を一切呼ばず、既存の comment_songs の start だけを入力に end を取り直す。
 // 一括プレ分析はキャッシュ命中だと拍手 end まで飛ばすので、
@@ -2361,7 +2361,7 @@ func (r *Router) handleAnalyzeChatEnds(w http.ResponseWriter, req *http.Request)
 	})
 }
 
-// handleBackfillChatEnds 對所有有 comment_songs 的歌回補跑拍手 end 偵測（背景、限並發）
+// handleBackfillChatEnds は comment_songs を持つすべての歌枠で拍手 end 検出を補完する（バックグラウンド、同時実行数制限あり）。
 func (r *Router) handleBackfillChatEnds(w http.ResponseWriter, req *http.Request) {
 	concurrency := 3
 	if c := req.URL.Query().Get("concurrency"); c != "" {
@@ -2432,7 +2432,7 @@ func (r *Router) handleDeleteFilterKeyword(w http.ResponseWriter, req *http.Requ
 	respondJSON(w, http.StatusOK, map[string]string{"message": "キーワードを削除しました"})
 }
 
-// handleBackfillCommentSongs 補填所有有 comment_raw 但沒有 comment_songs 的 stream
+// handleBackfillCommentSongs は comment_raw があり comment_songs がない配信をすべて補完する。
 func (r *Router) handleBackfillCommentSongs(w http.ResponseWriter, req *http.Request) {
 	count, err := r.commentService.BackfillCommentSongs()
 	if err != nil {
@@ -2447,7 +2447,7 @@ func (r *Router) handleBackfillCommentSongs(w http.ResponseWriter, req *http.Req
 }
 
 // handleBackfillCommentSongsHashes は comment_songs_hash を現行の正規化アルゴリズムへ移行する
-// （旧: 生bytes sha → 新: 正規化 sha）。AI は呼ばず、快取が効かなくなっていた歌回を修復する。
+// （旧: 生bytes sha → 新: 正規化 sha）。AI は呼ばず、キャッシュが効かなくなっていた歌枠を修復する。
 func (r *Router) handleBackfillCommentSongsHashes(w http.ResponseWriter, req *http.Request) {
 	res, err := r.commentService.BackfillCommentSongsHashes()
 	if err != nil {
@@ -2644,7 +2644,7 @@ func (r *Router) handleItunesSearch(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// 1. 從 iTunes 搜尋
+	// 1. iTunes で検索する
 	itunesClient := itunes.NewClient()
 	itunesResult, err := itunesClient.Search(term)
 	if err != nil {
@@ -2652,7 +2652,7 @@ func (r *Router) handleItunesSearch(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// 2. 檢查每個 iTunes ID 是否已在資料庫中
+	// 2. 各 iTunes ID が DB に存在するか確認する
 	songRepo := repository.NewSongRepository(r.db)
 
 	enhancedResults := make([]dto.ItunesSearchResultWithSong, 0, len(itunesResult.Results))
@@ -2875,7 +2875,7 @@ func (r *Router) handleUpdateAIProvider(w http.ResponseWriter, req *http.Request
 	if body.TimeoutSeconds != nil && *body.TimeoutSeconds > 0 {
 		existing.TimeoutSeconds = *body.TimeoutSeconds
 	}
-	// API key 只有在有提供且非空時才更新（留空表示保持原值）
+	// API key は値が指定され、空でない場合だけ更新する（空欄なら元の値を保持）
 	if body.APIKey != nil && *body.APIKey != "" {
 		existing.APIKey = *body.APIKey
 	}
@@ -3126,14 +3126,14 @@ func readCookieFile(path string) string {
 	return string(b)
 }
 
-// respondJSON 回傳 JSON 回應
+// respondJSON は JSON レスポンスを返す。
 func respondJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(data)
 }
 
-// respondError 回傳錯誤回應
+// respondError はエラーレスポンスを返す。
 func respondError(w http.ResponseWriter, status int, message string) {
 	logger.Errorf("status=%d message=%s", status, message)
 	respondJSON(w, status, dto.ErrorResponse{Error: message})

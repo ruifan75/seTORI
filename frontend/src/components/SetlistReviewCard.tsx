@@ -16,7 +16,7 @@ const REASON_LABELS: Record<string, string> = {
   conflict: '既存と食い違う',
   low_conf: 'AI の確信度が低い',
   comment_only: 'コメントにのみ存在',
-  addition: '既存歌単への追加',
+  addition: '既存の歌唱への追加',
   duplicate: '同じ曲が重複',
 };
 
@@ -81,7 +81,7 @@ export default function SetlistReviewCard({
   const patch = onDraftChange;
 
   // 検索結果から曲を選ぶ。id が空文字なら「iTunes にはあるが DB に無い曲」で、
-  // 照合先は無いまま曲名・歌手・iTunes ID・封面だけを受け取る。
+  // 照合先は無いまま曲名・歌手・iTunes ID・ジャケット画像だけを受け取る。
   const selectSong = (song: Song) => {
     const itunesId = song.itunes_ids?.[0]?.itunes_id ?? null;
     patch({
@@ -160,7 +160,7 @@ export default function SetlistReviewCard({
             {REASON_LABELS[r] ?? r}
           </span>
         ))}
-        {base.source && <span className="text-gray-400">源: {SOURCE_LABELS[base.source] ?? base.source}</span>}
+        {base.source && <span className="text-gray-400">出典: {SOURCE_LABELS[base.source] ?? base.source}</span>}
         {base.via && (
           <span className="text-gray-400">
             {VIA_LABELS[base.via] ?? base.via}
@@ -199,12 +199,12 @@ export default function SetlistReviewCard({
         </div>
       )}
 
-      {/* 源の表記と AI の理由（照合で書き換わっているときの手がかり） */}
+      {/* 入力元の表記と AI の理由（照合で書き換わっているときの手がかり） */}
       {(base.raw_name || base.ai_reason) && (
         <div className="text-xs text-gray-500 space-y-0.5">
           {base.raw_name && (base.raw_name !== draft.name || base.raw_artist !== draft.artist) && (
             <div>
-              源の表記: {base.raw_name}
+              入力元の表記: {base.raw_name}
               {base.raw_artist ? ` / ${base.raw_artist}` : ''}
             </div>
           )}

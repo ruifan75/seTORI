@@ -23,10 +23,10 @@ func TestIsPureApplause(t *testing.T) {
 
 func TestDetectEnds(t *testing.T) {
 	var ev []Event
-	for i := 0; i < 20; i++ { // 第一首曲末拍手在 96s
+	for i := 0; i < 20; i++ { // 1 曲目の曲末拍手は 96 秒
 		ev = append(ev, Event{T: 96.0, Text: "888888"})
 	}
-	for i := 0; i < 15; i++ { // 第二首曲末拍手在 291s
+	for i := 0; i < 15; i++ { // 2 曲目の曲末拍手は 291 秒
 		ev = append(ev, Event{T: 291.0, Text: ":clapping_hands:"})
 	}
 	res := DetectEnds([]float64{0, 200}, ev, 320, DefaultOptions())
@@ -51,7 +51,7 @@ func TestNoApplauseReturnsNil(t *testing.T) {
 }
 
 // TestAgainstRealFile：CHATEND_SAMPLE=/abs/path/to/xxx.live_chat.json を設定した場合のみ実行、
-// 用來和 Python 版輸出對照（人工比對印出的 ends）。
+// Python 版の出力と照合するために使用する（出力された ends を目視で比較する）。
 func TestAgainstRealFile(t *testing.T) {
 	path := os.Getenv("CHATEND_SAMPLE")
 	if path == "" {
@@ -72,7 +72,7 @@ func TestAgainstRealFile(t *testing.T) {
 	for _, s := range os.Getenv("CHATEND_STARTS") {
 		_ = s
 	}
-	// starts 由環境帶入（逗號分隔秒數）；沒帶就只印 event/applause 統計
+	// starts は環境変数から受け取る（秒数をカンマ区切り）。未指定なら event/applause の統計だけを表示する
 	if ss := os.Getenv("CHATEND_STARTS"); ss != "" {
 		for _, tok := range splitComma(ss) {
 			var f float64

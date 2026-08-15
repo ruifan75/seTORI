@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// RateLimiter 提供 rate limiting 功能
+// RateLimiter は rate limiting 機能を提供する。
 type RateLimiter struct {
 	maxRequests int           // 最大リクエスト数
 	window      time.Duration // 時間ウィンドウ
@@ -44,7 +44,7 @@ func (rl *RateLimiter) Wait() {
 		oldestRequest := rl.requests[0]
 		waitDuration := oldestRequest.Add(rl.window).Sub(now)
 		if waitDuration > 0 {
-			time.Sleep(waitDuration + 100*time.Millisecond) // 加一點緩衝
+			time.Sleep(waitDuration + 100*time.Millisecond) // 少し余裕を持たせる
 		}
 		// 再クリーンアップ
 		now = time.Now()

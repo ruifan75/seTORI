@@ -23,7 +23,7 @@ export default function SingerSearchInput({ onSelectSinger, excludeIds = [], pla
   const inputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Debounce 搜尋
+  // 検索をデバウンスする
   useEffect(() => {
     if (searchQuery.length < 1) {
       setSuggestions([]);

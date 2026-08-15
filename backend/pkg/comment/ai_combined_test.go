@@ -96,8 +96,8 @@ func TestParseAndNormalizeWithAI(t *testing.T) {
 	})
 }
 
-func TestParseAndNormalizeWithAI_逐字検証(t *testing.T) {
-	// AI が原文に存在しない名前を返した場合、逐字フィールドは採用されない。
+func TestParseAndNormalizeWithAI_原文検証(t *testing.T) {
+	// AI が原文に存在しない名前を返した場合、原文フィールドは採用されない。
 	// 正規化フィールドは意図的に原文と異なるため、この検証の対象外。
 	resp := `[
   {"l":1,"s":true,"ts":"01:38:15","te":"","nv":"存在しない曲名","av":"","n":"幾億光年","nr":"","a":"","ar":"","t":[],"c":0.9}

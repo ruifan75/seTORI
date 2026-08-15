@@ -34,14 +34,14 @@ func songListOrder(sort, dir string) string {
 	}
 }
 
-// FindAll 取得所有歌曲（支援分頁、搜尋、排序）
+// FindAll はすべての楽曲を取得する（ページング、検索、並び替え対応）。
 func (r *SongRepository) FindAll(limit, offset int, search, sort, dir string) ([]models.Song, int, error) {
 	var total int
 	var rows *sql.Rows
 	var err error
 
 	if search != "" {
-		// 使用 pg_trgm 進行模糊搜尋
+		// pg_trgm であいまい検索する
 		countQuery := `
 			SELECT COUNT(*) FROM songs
 			WHERE name ILIKE $1 OR original_artist ILIKE $1 OR name_reading ILIKE $1`
@@ -91,7 +91,7 @@ func (r *SongRepository) FindAll(limit, offset int, search, sort, dir string) ([
 	return songs, total, nil
 }
 
-// FindByID 根據 ID 取得歌曲
+// FindByID は ID で楽曲を取得する。
 func (r *SongRepository) FindByID(id uuid.UUID) (*models.Song, error) {
 	query := `
 		SELECT id, name, name_reading, original_artist, original_artist_reading, arts, created_at, updated_at
@@ -110,11 +110,11 @@ func (r *SongRepository) FindByID(id uuid.UUID) (*models.Song, error) {
 	return &s, nil
 }
 
-// FindByNameAndArtist 根據歌名和藝人查詢（用於正規化時檢查是否已存在）
-// 先精確比對，找不到時用 lower + trim 模糊比對（處理大小寫、空格差異）
-// Go 側先做 NFKC 正規化（處理 Ⅱ→II 等 Unicode 差異）
+// FindByNameAndArtist は曲名とアーティストで検索する（正規化時の重複確認用）。
+// まず完全一致で比較し、見つからなければ lower + trim であいまい比較する（大文字小文字や空白の差を吸収）。
+// Go 側で先に NFKC 正規化を行う（Ⅱ→II など Unicode の差を吸収）。
 func (r *SongRepository) FindByNameAndArtist(name, artist string) (*models.Song, error) {
-	// 精確比對
+	// 完全一致で比較する
 	exactQuery := `
 		SELECT id, name, name_reading, original_artist, original_artist_reading, arts, created_at, updated_at
 		FROM songs WHERE name = $1 AND original_artist = $2`
@@ -130,7 +130,7 @@ func (r *SongRepository) FindByNameAndArtist(name, artist string) (*models.Song,
 		return nil, fmt.Errorf("find song by name and artist: %w", err)
 	}
 
-	// Fallback: NFKC 正規化 + lower + trim 模糊比對
+	// フォールバック：NFKC 正規化 + lower + trim によるあいまい比較
 	normalizedName := util.NormalizeUnicode(name)
 	normalizedArtist := util.NormalizeUnicode(artist)
 
@@ -152,7 +152,7 @@ func (r *SongRepository) FindByNameAndArtist(name, artist string) (*models.Song,
 	return &s, nil
 }
 
-// Create 建立新歌曲
+// Create は新しい楽曲を作成する。
 func (r *SongRepository) Create(s *models.Song) error {
 	s.ID = uuid.New()
 	query := `
@@ -173,7 +173,7 @@ func (r *SongRepository) Create(s *models.Song) error {
 	return nil
 }
 
-// Update 更新歌曲
+// Update は楽曲を更新する。
 func (r *SongRepository) Update(s *models.Song) error {
 	query := `
 		UPDATE songs
@@ -193,7 +193,7 @@ func (r *SongRepository) Update(s *models.Song) error {
 	return nil
 }
 
-// Delete 刪除歌曲
+// Delete は楽曲を削除する。
 func (r *SongRepository) Delete(id uuid.UUID) error {
 	_, err := r.db.Exec("DELETE FROM songs WHERE id = $1", id)
 	if err != nil {
@@ -202,7 +202,7 @@ func (r *SongRepository) Delete(id uuid.UUID) error {
 	return nil
 }
 
-// GetPerformanceCount 取得歌曲的演出次數（只計算非隱藏的 Stream）
+// GetPerformanceCount は楽曲の歌唱回数を取得する（非表示でない配信だけを集計）。
 func (r *SongRepository) GetPerformanceCount(songID uuid.UUID) (int, error) {
 	var count int
 	err := r.db.QueryRow(`
@@ -217,7 +217,7 @@ func (r *SongRepository) GetPerformanceCount(songID uuid.UUID) (int, error) {
 	return count, nil
 }
 
-// GetPerformanceCounts 批次取得多首歌曲的演出次數（只計算非隱藏的 Stream），避免 N+1
+// GetPerformanceCounts は複数楽曲の歌唱回数を一括取得し（非表示でない配信だけを集計）、N+1 を避ける。
 func (r *SongRepository) GetPerformanceCounts(songIDs []uuid.UUID) (map[uuid.UUID]int, error) {
 	counts := make(map[uuid.UUID]int, len(songIDs))
 	if len(songIDs) == 0 {
@@ -253,7 +253,7 @@ func (r *SongRepository) GetPerformanceCounts(songIDs []uuid.UUID) (map[uuid.UUI
 	return counts, rows.Err()
 }
 
-// FindByItunesID 根據 iTunes ID 查詢歌曲
+// FindByItunesID は iTunes ID で楽曲を検索する。
 func (r *SongRepository) FindByItunesID(itunesID int64) (*models.Song, error) {
 	query := `
 		SELECT s.id, s.name, s.name_reading, s.original_artist, s.original_artist_reading, s.arts, s.created_at, s.updated_at
@@ -275,7 +275,7 @@ func (r *SongRepository) FindByItunesID(itunesID int64) (*models.Song, error) {
 	return &s, nil
 }
 
-// SearchSimilar 使用 trigram 搜尋相似歌曲（用於 AI 正規化建議）
+// SearchSimilar は trigram で類似楽曲を検索する（AI 正規化候補用）。
 func (r *SongRepository) SearchSimilar(name string, limit int) ([]models.Song, error) {
 	query := `
 		SELECT id, name, name_reading, original_artist, original_artist_reading, arts, created_at, updated_at,
@@ -306,7 +306,7 @@ func (r *SongRepository) SearchSimilar(name string, limit int) ([]models.Song, e
 	return songs, nil
 }
 
-// MergeSong 將來源歌曲的所有 performances 合併至目標歌曲，然後刪除來源歌曲
+// MergeSong は統合元楽曲のすべての performance を統合先へ移し、統合元を削除する。
 func (r *SongRepository) MergeSong(sourceSongID, targetSongID uuid.UUID) error {
 	tx, err := r.db.Begin()
 	if err != nil {
@@ -314,7 +314,7 @@ func (r *SongRepository) MergeSong(sourceSongID, targetSongID uuid.UUID) error {
 	}
 	defer tx.Rollback()
 
-	// 1. 更新所有 performances，將 song_id 從來源改為目標
+	// 1. すべての performance の song_id を統合元から統合先へ更新する
 	updateQuery := `
 		UPDATE performances 
 		SET song_id = $1 
@@ -324,8 +324,8 @@ func (r *SongRepository) MergeSong(sourceSongID, targetSongID uuid.UUID) error {
 		return fmt.Errorf("update performances: %w", err)
 	}
 
-	// 2. 刪除來源歌曲（及其關聯的 song_itunes）
-	// song_itunes 設有 ON DELETE CASCADE，所以會自動刪除
+	// 2. 統合元楽曲と関連する song_itunes を削除する
+	// song_itunes には ON DELETE CASCADE があるため自動で削除される
 	deleteQuery := `DELETE FROM songs WHERE id = $1`
 	_, err = tx.Exec(deleteQuery, sourceSongID)
 	if err != nil {

@@ -39,7 +39,7 @@ interface EditableSong {
   // itunesId が既に DB（song_itunes）に紐付いているか。false は保存時に新規紐付けが作られることを示す
   // （primary な iTunes ID は Holodex へのアップロードにも使われるため、誤りは外部に伝播する）
   itunesFromDb?: boolean;
-  trackDuration: number | null; // iTunes 楽曲長（秒）
+  trackDuration: number | null; // iTunes の曲の長さ（秒）
   originalName: string; // 元の名称を追跡（変更判定用）
   originalArtist: string; // 元のアーティストを追跡
   // AI 正規化追跡
@@ -54,11 +54,11 @@ interface EditableSong {
   changes?: FieldChange[];
   // 時間推定マーク
   isEndTimeEstimated?: boolean; // 終了時間が推定値かどうか
-  // Chat 拍手偵測參考值（當與 comment explicit end 差異大時提醒）
+  // Chat の拍手検出による参考値（コメントに明記された終了時刻との差が大きい場合に警告）
   chatEnd?: number;
   endDiff?: number;
-  // 來源追蹤與還原
-  originalCommentEnd?: number; // 來自 comment 分析的原始明確 end（用於還原）
+  // 由来の追跡と復元
+  originalCommentEnd?: number; // コメント分析で明記されていた元の終了時刻（復元用）
   endSource?: EndSource;
   // マージ追跡
   mergedFrom?: string[]; // AI 正規化後にマージされた元の曲名
@@ -320,12 +320,12 @@ export default function StreamDetailPage() {
       // AI 結果を反映
       const updated: EditableSong[] = [...editableSongs];
 
-      // 先同步處理所有建議（不再需要逐首 API 呼叫）
+      // すべての候補をまとめて処理する（曲ごとの API 呼び出しは不要）
       for (const suggestion of data.suggestions) {
         if (suggestion.index >= updated.length) continue;
         const current = updated[suggestion.index];
 
-        // DB に既存歌曲がある場合はその情報を使用、なければ AI 結果を使用
+        // DB に既存楽曲がある場合はその情報を使用し、なければ AI の結果を使用する
         const hasMatch = !!suggestion.matched_song_id;
         const finalName = hasMatch && suggestion.matched_song_name
           ? suggestion.matched_song_name : suggestion.normalized_name;
@@ -358,16 +358,16 @@ export default function StreamDetailPage() {
           artUrl,
           itunesId,
           trackDuration,
-          // 保留正規化前の値
+          // 正規化前の値を保持する
           aiNormalizedName: nameChanged ? current.name : undefined,
           aiNormalizedArtist: artistChanged ? current.artist : undefined,
-          // 更新原始值以追蹤後續變更
+          // 以降の変更を追跡できるよう元の値を更新する
           originalName: finalName,
           originalArtist: finalArtist,
         };
       }
       
-      // 合併正規化後名稱相同的重複歌曲
+      // 正規化後の名前が同じ重複楽曲を統合する
       const merged = mergeDuplicateSongs(updated);
       const mergedCount = updated.length - merged.length;
       setEditableSongs(merged);
@@ -383,7 +383,7 @@ export default function StreamDetailPage() {
     },
   });
 
-  // 同步單一影片
+  // 動画を 1 件同期する
   const syncVideoMutation = useMutation({
     mutationFn: () => holodexApi.syncVideo(id!),
     onSuccess: (data) => {
@@ -415,7 +415,7 @@ export default function StreamDetailPage() {
     },
   });
 
-  // 同步 seTORI 資料到 Holodex
+  // seTORI のデータを Holodex へ同期する
   const syncToHolodexMutation = useMutation({
     mutationFn: () => holodexApi.syncSetoriToHolodex(id!),
     onSuccess: (data) => {
@@ -432,7 +432,7 @@ export default function StreamDetailPage() {
 
   const [holodexAnalyzeLoading, setHolodexAnalyzeLoading] = useState(false);
 
-  // force=true で快取を無視し AI 再分析（再正規化）。通常はキャッシュ済み結果を秒読みする。
+  // force=true でキャッシュを無視し AI 再分析（再正規化）。通常はキャッシュ済み結果を即座に読み込む。
   // 編集リストへ入れるときの既定ボーカル（参加者 → チャンネル主）
   const getDefaultSingerIds = () =>
     stream?.participants?.map((p) => p.id) || (channelOwner ? [channelOwner.id] : []);
@@ -482,7 +482,7 @@ export default function StreamDetailPage() {
       changes: song.changes,
       artistAlias: song.artist_alias,
       // AI が同一人物と言った場合だけ既定でチェックを入れる。
-      // 作曲者と原唱の取り違え（メルト / 初音ミク に対し DB は ryo (supercell)）は
+      // 作曲者と原曲歌手の取り違え（メルト / 初音ミク に対し DB は ryo (supercell)）は
       // 「同じ曲だが別人」なので入らない ── 本番ではこちらの方が多い。
       aliasChecked: song.artist_alias?.same_artist ?? false,
       isEndTimeEstimated: false,
@@ -534,13 +534,13 @@ export default function StreamDetailPage() {
       changes: song.changes,
       artistAlias: song.artist_alias,
       // AI が同一人物と言った場合だけ既定でチェックを入れる。
-      // 作曲者と原唱の取り違え（メルト / 初音ミク に対し DB は ryo (supercell)）は
+      // 作曲者と原曲歌手の取り違え（メルト / 初音ミク に対し DB は ryo (supercell)）は
       // 「同じ曲だが別人」なので入らない ── 本番ではこちらの方が多い。
       aliasChecked: song.artist_alias?.same_artist ?? false,
       isEndTimeEstimated: song.is_end_time_estimated,
       chatEnd: song.chat_end,
       endDiff: song.end_diff,
-      originalCommentEnd: song.end, // 載入時的 end 視為 comment 原始值
+      originalCommentEnd: song.end, // 読み込み時の終了時刻をコメント由来の元値として扱う
       endSource: song.end > 0 && !song.is_end_time_estimated ? 'comment' : undefined,
       customTags: [],
     };
@@ -579,7 +579,7 @@ export default function StreamDetailPage() {
 
   const [commentAnalyzeLoading, setCommentAnalyzeLoading] = useState(false);
 
-  // force=true で快取を無視し AI 再分析（再正規化）。通常は快取済みの結果を秒読みする。
+  // force=true でキャッシュを無視し AI 再分析（再正規化）。通常はキャッシュ済みの結果を即座に読み込む。
   const loadFromComments = async (force = false) => {
     if (!id) return;
     setCommentAnalyzeLoading(true);
@@ -703,19 +703,19 @@ export default function StreamDetailPage() {
 
   const toggleEditing = () => {
     if (isEditing) {
-      // 關閉編輯模式
+      // 編集モードを終了する
       setIsEditing(false);
       setEditableSongs([]);
     } else {
-      // 開啟編輯模式，自動載入現有セトリ
+      // 編集モードを開始し、既存のセットリストを自動で読み込む
       if (stream) {
-        // 設定參與者列表（包括表演中的所有歌唱者）
+        // 参加者一覧を設定する（歌唱に参加したすべての歌手を含む）
         const allSingers = new Map<string, Singer>();
         
-        // 先添加stream.participants
+        // 先に stream.participants を追加する
         (stream.participants || []).forEach(p => allSingers.set(p.id, p));
         
-        // 再添加所有performances中的歌唱者
+        // 続けてすべての performance の歌手を追加する
         if (stream.performances.length > 0) {
           stream.performances.forEach(perf => {
             perf.singers.forEach(singer => {
@@ -726,7 +726,7 @@ export default function StreamDetailPage() {
         
         setParticipants(Array.from(allSingers.values()));
 
-        // 載入現有セトリ
+        // 既存のセットリストを読み込む
         if (stream.performances.length > 0) {
           const songs: EditableSong[] = stream.performances.map((perf) => ({
             id: perf.id,
@@ -747,7 +747,7 @@ export default function StreamDetailPage() {
             trackDuration: null,
             originalName: perf.song_name,
             originalArtist: perf.original_artist,
-            // 現有資料沒有 AI 修改的標記
+            // 既存データには AI 変更の印がない
             aiNormalizedName: undefined,
             aiNormalizedArtist: undefined,
             isEndTimeEstimated: false,
@@ -779,7 +779,7 @@ export default function StreamDetailPage() {
       const updated = [...prev];
       const song = updated[index];
 
-      // 如果修改了名稱或藝人，且原本有配對的歌曲，則重設為新歌曲
+      // 曲名またはアーティストを変更し、元の行が既存曲と照合済みなら新規曲として扱い直す
       if ((field === 'name' || field === 'artist') && song.matchedSongId) {
         const newName = field === 'name' ? value as string : song.name;
         const newArtist = field === 'artist' ? value as string : song.artist;
@@ -796,7 +796,7 @@ export default function StreamDetailPage() {
 
       updated[index] = { ...song, [field]: value };
 
-      // 手動修改結束時間時，清除 chat 比較資訊並標記來源
+      // 終了時刻を手動変更したら、Chat の比較情報を消して由来を記録する
       if (field === 'end') {
         updated[index].chatEnd = undefined;
         updated[index].endDiff = undefined;
@@ -807,7 +807,7 @@ export default function StreamDetailPage() {
     });
   };
 
-  // 套用特定來源的結束時間
+  // 指定した由来の終了時刻を適用する
   const applyEndSource = (index: number, source: 'chat' | 'comment', newEnd?: number) => {
     setEditableSongs((prev) => {
       const updated = [...prev];
@@ -826,7 +826,7 @@ export default function StreamDetailPage() {
           end: s.originalCommentEnd,
           endSource: 'comment',
           isEndTimeEstimated: false,
-          chatEnd: undefined, // 清除比較狀態
+          chatEnd: undefined, // 比較状態を消す
           endDiff: undefined,
         };
       } else if (newEnd !== undefined) {
@@ -836,7 +836,7 @@ export default function StreamDetailPage() {
     });
   };
 
-  // 選擇搜尋到的歌曲
+  // 検索結果から楽曲を選ぶ
   const handleSelectExistingSong = async (index: number, song: Song) => {
     const selectedItunesId = song.itunes_ids && song.itunes_ids.length > 0 ? Number(song.itunes_ids[0].itunes_id) : null;
     const selectedTrackDuration = selectedItunesId ? await fetchTrackDurationByItunesId(selectedItunesId) : null;
@@ -853,9 +853,9 @@ export default function StreamDetailPage() {
       // trackDuration は採用した ID と対応させる（取得失敗時に別 ID の値を流用しない）
       const trackDuration = selectedItunesId != null ? selectedTrackDuration : current.trackDuration;
 
-      // 檢查是否是從 iTunes 選擇的（id 為空）
+      // iTunes から選択された項目か確認する（id が空）
       if (!song.id) {
-        // 從 iTunes 選擇：填入基本資訊和 iTunes ID
+        // iTunes から選択：基本情報と iTunes ID を設定する
         updated[index] = {
           ...updated[index],
           name: song.name,
@@ -864,12 +864,12 @@ export default function StreamDetailPage() {
           itunesId,
           itunesFromDb,
           trackDuration,
-          matchedSongId: null, // 這是新歌曲
+          matchedSongId: null, // 新規楽曲
           originalName: song.name,
           originalArtist: song.original_artist,
         };
       } else {
-        // 從 DB 選擇：填入完整資訊
+        // DB から選択：完全な情報を設定する
         updated[index] = {
           ...updated[index],
           name: song.name,
@@ -906,8 +906,8 @@ export default function StreamDetailPage() {
   };
 
   const handleTimeChange = (index: number, field: 'start' | 'end', timeStr: string) => {
-    // 允許用戶自由輸入，只在失去焦點時解析
-    // 直接更新顯示值，延遲解析
+    // 利用者の自由入力を許し、フォーカスが外れたときだけ解析する
+    // 表示値だけを先に更新し、解析は遅延させる
     const seconds = parseTime(timeStr);
     if (!isNaN(seconds)) {
       handleSongChange(index, field, seconds);
@@ -979,7 +979,7 @@ export default function StreamDetailPage() {
     // 配信情報（タグ・参加者・非表示など）は閲覧モードのクイック編集で即時保存されるため、
     // ここではセットリストのみ保存する。
 
-    // 如果沒有歌曲，刪除所有 performance
+    // 楽曲がなければ performance をすべて削除する
     if (editableSongs.length === 0) {
       try {
         await performanceApi.deleteAll(id!);
@@ -1008,7 +1008,7 @@ export default function StreamDetailPage() {
       return;
     }
 
-    // 更新 setlist
+    // セットリストを更新する
     const performances: CreatePerformanceItem[] = editableSongs.map((song) => ({
       name: song.name,
       name_reading: song.nameReading,
@@ -1066,7 +1066,7 @@ export default function StreamDetailPage() {
     if (proposed > 0) showToast(`${proposed}件の別名義を提案として登録しました`, 'info');
   };
 
-  // YouTube 播放器實例（必須在任何條件判斷之前）
+  // YouTube プレイヤーのインスタンス（条件分岐より前に必ず初期化する）
   const playerInstanceRef = useRef<YouTubePlayerInstance | null>(null);
 
   if (isLoading) {
@@ -2023,7 +2023,7 @@ export default function StreamDetailPage() {
                   {stream.performances.map((perf, index) => {
                     const singerCount = perf.singers?.length || 0;
                     const showCount = singerCount > 3;
-                    // 排序歌手：頻道所有者優先
+                    // 歌手を並べ替える：チャンネル所有者を優先
                     const sortedSingers = perf.singers?.sort((a, b) => {
                       if (channelOwner && a.id === channelOwner.id) return -1;
                       if (channelOwner && b.id === channelOwner.id) return 1;

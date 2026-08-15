@@ -208,7 +208,7 @@ func (r *SongMatchRepository) FindByNameKey(nameKey string) ([]KeyedSong, error)
 // 深昏睡 → 深昏睡deepcoma、革命道中 → 革命道中ontheway のように、
 // コメントの表記が DB のキーの接頭辞になっている型を拾う。
 // **これ単体では精度が出ない**（ダーリン → ダーリンダンス のような別曲も混ざる。
-// 実測で同じ曲を指すのは 2 割）。AI か人が裁く前提の召回専用。
+// 実測で同じ曲を指すのは 2 割）。AI か人が判断する前提の候補抽出専用。
 //
 // LIKE の右側にだけワイルドカードを置くので name_key の btree 索引が効く。
 func (r *SongMatchRepository) FindByNameKeyPrefix(nameKey string, limit int) ([]KeyedSong, error) {

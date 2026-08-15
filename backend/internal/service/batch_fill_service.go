@@ -44,7 +44,7 @@ type BatchFillService struct {
 const (
 	// BatchFillModeUnprocessed は歌唱がまだ 1 つも無い配信だけを埋める。
 	BatchFillModeUnprocessed = "unprocessed"
-	// BatchFillModeForce は源を持つ配信すべてを見る。既存と食い違う分は審査へ回す。
+	// BatchFillModeForce は入力元を持つ配信すべてを見る。既存と食い違う分は審査へ回す。
 	BatchFillModeForce = "force"
 
 	// 自動で歌唱を作ってよい AI の確信度。これ未満は人の審査へ回す。
@@ -56,7 +56,7 @@ const (
 // 審査へ回す理由。画面にそのまま出すので、増やすときは表示側も見ること。
 const (
 	reviewNoEnd       = "no_end"       // 終了時間が無い / 推定値でしかない
-	reviewNoArtist    = "no_artist"    // 源に歌手が書かれていない
+	reviewNoArtist    = "no_artist"    // 入力元に歌手が書かれていない
 	reviewUnmatched   = "unmatched"    // どの曲か決まらない
 	reviewMultiSinger = "multi_singer" // 配信に歌手が複数いる
 	reviewConflict    = "conflict"     // 既存の歌唱と食い違う
@@ -66,7 +66,7 @@ const (
 	reviewDuplicate   = "duplicate"    // 同じ実行の中で同じ曲が重複している
 )
 
-// reliableEndSources は「源が終了時間を持っていた」と言える確度。
+// reliableEndSources は「入力元が終了時間を持っていた」と言える確度。
 //
 // no_end の判定はここで行う。**end の有無ではなく確度で見る**のが要点で、
 // 以前は row.End <= row.Start だけを見ていたため、次の曲の開始で埋めた推定値
@@ -109,7 +109,7 @@ type fillRow struct {
 	ItunesID *int64
 	Source   string // holodex / comment
 
-	// RawName / RawArtist は**源から抽出したままの表記**。照合や AI 正規化で
+	// RawName / RawArtist は**入力元から抽出したままの表記**。照合や AI 正規化で
 	// Name / Artist が書き換わっても、こちらは動かさない。
 	//
 	// no_artist の判定はこちらで行う。以前は照合の後の Artist を見ていたので、
@@ -144,7 +144,7 @@ func (r *fillRow) addReview(reason string) {
 	r.Review = append(r.Review, reason)
 }
 
-// hasReliableEnd は源が終了時間を持っていたか。推定値（next_start）は持っていない扱い。
+// hasReliableEnd は入力元が終了時間を持っていたか。推定値（next_start）は持っていない扱い。
 func (r *fillRow) hasReliableEnd() bool {
 	return r.End > r.Start && reliableEndSources[r.EndSource]
 }
@@ -224,7 +224,7 @@ func (s *BatchFillService) ListRuns(limit int) ([]repository.BatchFillRun, error
 	return s.runRepo.ListRuns(limit)
 }
 
-// ListGaps は実行が見つけた「DB にあるが源に無い」歌唱を返す。
+// ListGaps は実行が見つけた「DB にあるが入力元に無い」歌唱を返す。
 func (s *BatchFillService) ListGaps(runID uuid.UUID) ([]repository.BatchFillGap, error) {
 	return s.runRepo.ListGaps(runID)
 }
@@ -262,7 +262,7 @@ func (s *BatchFillService) run(runID uuid.UUID, mode string, singerIDs []string,
 	}
 	logger.Infof("[batch-fill] 開始: mode=%s %s %d 配信", mode, scope, len(streams))
 
-	// ---- 第 1 段：源を読み、規則で照合できるところまで進める ----
+	// ---- 第 1 段：入力元を読み、規則で照合できるところまで進める ----
 	byStream := map[string][]*fillRow{}
 	var unresolved []*aiMatchRow
 	dedupe := map[string]*aiMatchRow{} // 同じ表記は 1 回だけ聞く
@@ -283,7 +283,7 @@ func (s *BatchFillService) run(runID uuid.UUID, mode string, singerIDs []string,
 			if row.SongID != nil {
 				continue
 			}
-			// 同じ表記の行はひとつの問いにまとめる（曲庫を何度も送らないため）
+			// 同じ表記の行はひとつの問いにまとめる（楽曲カタログを何度も送らないため）
 			key := songmatch.TitleKey(row.Name) + "\x1f" + songmatch.ParseArtist(row.Artist).String()
 			ai, ok := dedupe[key]
 			if !ok {
@@ -300,7 +300,7 @@ func (s *BatchFillService) run(runID uuid.UUID, mode string, singerIDs []string,
 
 	// ---- 第 2 段：AI に一度だけまとめて聞く ----
 	//
-	// 配信ごとに聞くと曲庫（約 12k トークン）を配信の数だけ送ることになる。
+	// 配信ごとに聞くと楽曲カタログ（約 12k トークン）を配信の数だけ送ることになる。
 	// 実測（356 配信）では候補ゼロが 82 行・65 種・58 配信で、
 	// 配信ごとなら 58 回、まとめれば 9 回で済む。
 	asked := 0
@@ -334,7 +334,7 @@ func (s *BatchFillService) run(runID uuid.UUID, mode string, singerIDs []string,
 
 	status, msg := "done", fmt.Sprintf("%d 曲を作成、%d 曲を審査へ", created, review)
 	if gaps > 0 {
-		msg += fmt.Sprintf("（源に無い既存 %d 曲）", gaps)
+		msg += fmt.Sprintf("（入力元に無い既存 %d 曲）", gaps)
 	}
 	if s.isCancelled() {
 		status, msg = "cancelled", "キャンセルされました（途中まで反映済み）"
@@ -343,7 +343,7 @@ func (s *BatchFillService) run(runID uuid.UUID, mode string, singerIDs []string,
 	logger.Infof("[batch-fill] 終了: %s", msg)
 }
 
-// loadRows は配信の源を読んで作業単位に落とす。Holodex を優先する。
+// loadRows は配信の入力元を読んで作業単位に落とす。Holodex を優先する。
 //
 // Holodex の曲は **iTunes ID を持っている**（最も強い証拠で、曲名が食い違っていても照合できる）。
 // ただし Holodex のセットリストは欠けていることがあるので、コメント側の曲数が明らかに多ければ
@@ -370,7 +370,7 @@ func (s *BatchFillService) loadRows(streamID string) []*fillRow {
 		return commentRows
 	}
 
-	// Holodex を源に採るが、**コメントにしか無い曲を落とさない**。
+	// Holodex を入力元に採るが、**コメントにしか無い曲を落とさない**。
 	//
 	// 以前は曲数の比（1.5 倍以上かつ 3 曲以上の差）で「取りこぼしの疑い」を出していたが、
 	// それでは 5 曲 vs 6 曲のような差が素通りする。実際 6SOyUVuOq9k では
@@ -399,7 +399,7 @@ func (s *BatchFillService) loadRows(streamID string) []*fillRow {
 	return rows
 }
 
-// hasCounterpart は同じ時間帯（±fillMatchWindow 秒）の行が源にあるか。
+// hasCounterpart は同じ時間帯（±fillMatchWindow 秒）の行が入力元にあるか。
 func hasCounterpart(rows []*fillRow, start int) bool {
 	for _, r := range rows {
 		if abs(r.Start-start) <= fillMatchWindow {
@@ -413,7 +413,7 @@ func hasCounterpart(rows []*fillRow, start int) bool {
 type applyResult struct {
 	created int // 自動で作った歌唱
 	review  int // 人の審査へ回した曲
-	gaps    int // DB にあるが源に無かった歌唱（force のみ）
+	gaps    int // DB にあるが入力元に無かった歌唱（force のみ）
 }
 
 // applyStream は 1 配信ぶんを反映する。
@@ -433,7 +433,7 @@ func (s *BatchFillService) applyStream(runID uuid.UUID, streamID string, rows []
 	reviewCount := 0
 	// この実行がこの配信に作る予定の行。**同じ実行の中の重複を弾くために要る**
 	// ── 一意制約は (stream_id, song_id, start_seconds) の完全一致しか止めないので、
-	// 源に数秒ずれた同じ曲が 2 行あると 2 件できてしまう。
+	// 入力元に数秒ずれた同じ曲が 2 行あると 2 件できてしまう。
 	var planned []*fillRow
 
 	for _, row := range rows {
@@ -444,7 +444,7 @@ func (s *BatchFillService) applyStream(runID uuid.UUID, streamID string, rows []
 		if !row.hasReliableEnd() {
 			row.addReview(reviewNoEnd)
 		}
-		// 歌手は**源に書かれていたか**で見る（照合で補われた値では見ない）
+		// 歌手は**入力元に書かれていたか**で見る（照合で補われた値では見ない）
 		if row.RawArtist == "" {
 			row.addReview(reviewNoArtist)
 		}
@@ -452,7 +452,7 @@ func (s *BatchFillService) applyStream(runID uuid.UUID, streamID string, rows []
 			row.addReview(reviewUnmatched)
 		}
 		if dup := findDuplicateRow(planned, row); dup != nil {
-			// 同じ実行の中で同じ曲が重なった。片方は源の重複なので人に見せる。
+			// 同じ実行の中で同じ曲が重なった。片方は入力元の重複なので人に見せる。
 			row.addReview(reviewDuplicate)
 		}
 
@@ -506,11 +506,11 @@ func (s *BatchFillService) applyStream(runID uuid.UUID, streamID string, rows []
 		planned = append(planned, row)
 	}
 
-	// force で「既存にあるが源に無い」曲があれば実行に紐づけて残す。
+	// force で「既存にあるが入力元に無い」曲があれば実行に紐づけて残す。
 	//
 	// **提案としては積まない** ── 源（Holodex のセットリストもコメントも）は欠けているのが
 	// 普通なので、欠落 1 件ごとに審査待ちを作ると人が処理できない量になり、しかも
-	// 「源に無い」だけでは何をすべきか決まらない（消すべきとは限らない）。
+	// 「入力元に無い」だけでは何をすべきか決まらない（消すべきとは限らない）。
 	// かといってログに出すだけでは誰も気付けないので、実行履歴から辿れるようにする。
 	gaps := 0
 	if mode == BatchFillModeForce && len(existing) > 0 {
@@ -518,9 +518,9 @@ func (s *BatchFillService) applyStream(runID uuid.UUID, streamID string, rows []
 		if len(missing) > 0 {
 			gaps = len(missing)
 			if err := s.runRepo.RecordGaps(runID, streamID, missing); err != nil {
-				logger.Warnf("[batch-fill] 源に無い歌唱の記録に失敗 (%s): %v", streamID, err)
+				logger.Warnf("[batch-fill] 入力元に無い歌唱の記録に失敗 (%s): %v", streamID, err)
 			}
-			logger.Infof("[batch-fill] %s: 既存 %d 曲のうち %d 曲は源に無い",
+			logger.Infof("[batch-fill] %s: 既存 %d 曲のうち %d 曲は入力元に無い",
 				streamID, len(existing), gaps)
 		}
 	}
@@ -615,7 +615,7 @@ func (s *BatchFillService) createReviewSuggestion(runID uuid.UUID, row *fillRow,
 	_, err := s.suggestions.Create(&dto.CreateSuggestionRequest{
 		Kind:    KindMissingSong,
 		Payload: payload,
-		Note:    fmt.Sprintf("一括作成の審査待ち（%s・源: %s）", joinReasons(row.Review), row.Source),
+		Note:    fmt.Sprintf("一括作成の審査待ち（%s・入力元: %s）", joinReasons(row.Review), row.Source),
 	}, SuggestionActor{ClientHint: "batch-fill", System: true})
 	if err != nil {
 		if errors.Is(err, ErrDuplicateSuggestion) {
@@ -776,7 +776,7 @@ func applyMatched(row *fillRow, id, name, artist *string) {
 	}
 }
 
-// 既存の歌唱と源の行を突き合わせた結果。
+// 既存の歌唱と入力元の行を突き合わせた結果。
 type existingDiff int
 
 const (
@@ -788,15 +788,15 @@ const (
 // fillMatchWindow は「同じ曲を指している」とみなす開始秒の窓。
 const fillMatchWindow = 30
 
-// fillTimeTolerance は時間の食い違いとみなす秒。源によって数秒の揺れは普通にあるので、
+// fillTimeTolerance は時間の食い違いとみなす秒。入力元によって数秒の揺れは普通にあるので、
 // これ以内なら「同じ」とみなす（毎回この差で審査に積むと人が処理できない）。
 const fillTimeTolerance = 3
 
-// diffAgainstExisting は既存の歌唱と源の行を突き合わせる。
+// diffAgainstExisting は既存の歌唱と入力元の行を突き合わせる。
 //
 // 以前は「曲 ID が一致するか」しか見ておらず、開始・終了が何十秒ずれていても
 // same 扱いで黙って飛ばしていた。force は「既存と食い違う分を審査へ回す」ための
-// モードなので、歌単として比べられる要素（曲・開始・終了）をすべて見る。
+// モードなので、歌唱として比べられる要素（曲・開始・終了）をすべて見る。
 // 食い違いの種類。審査画面にそのまま出すので、増やすときは表示側も見ること。
 const (
 	conflictSong     = "song"     // 同じ時間帯に別の曲がある（または曲が決まっていない）
@@ -805,7 +805,7 @@ const (
 	conflictAddition = "addition" // 既にセットリストがある配信への追加（相手が居ない）
 )
 
-// existingComparison は源の行と既存の歌唱を突き合わせた結果。
+// existingComparison は入力元の行と既存の歌唱を突き合わせた結果。
 //
 // **どこが違うのかまで返す。** 種類だけ返していた頃は、審査画面に
 // 「既存と食い違う」としか出せず、人は何を見ればいいのか分からなかった。
@@ -828,7 +828,7 @@ func diffAgainstExisting(existing []repository.PerformanceWithDetails, row *fill
 		if abs(e.StartSeconds-row.Start) > fillTimeTolerance {
 			return existingComparison{existingDiffers, conflictStart, e}
 		}
-		// 終了時間は源が持っているときだけ比べる。源に無いものを「食い違い」とは言えない。
+		// 終了時間は入力元が持っているときだけ比べる。入力元に無いものを「食い違い」とは言えない。
 		if row.hasReliableEnd() && abs(e.EndSeconds-row.End) > fillTimeTolerance {
 			return existingComparison{existingDiffers, conflictEnd, e}
 		}
@@ -853,7 +853,7 @@ func findDuplicateRow(planned []*fillRow, row *fillRow) *fillRow {
 	return nil
 }
 
-// existingNotInSource は「DB にあるが源に無い」歌唱の ID を返す（force の突き合わせ用）。
+// existingNotInSource は「DB にあるが入力元に無い」歌唱の ID を返す（force の突き合わせ用）。
 func existingNotInSource(existing []repository.PerformanceWithDetails, rows []*fillRow) []uuid.UUID {
 	var out []uuid.UUID
 	for _, e := range existing {
@@ -880,7 +880,7 @@ func joinReasons(reasons []string) string {
 		reviewConflict:    "既存と食い違う",
 		reviewLowConf:     "AI の確信度が低い",
 		reviewCommentOnly: "コメントにのみ存在",
-		reviewAddition:    "既存歌単への追加",
+		reviewAddition:    "既存の歌唱への追加",
 		reviewDuplicate:   "同じ曲が重複",
 	}
 	out := ""

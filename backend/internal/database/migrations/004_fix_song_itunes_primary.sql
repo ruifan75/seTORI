@@ -1,13 +1,13 @@
--- 修復 song_itunes 的 is_primary 標誌
--- 目的：確保每首歌曲至少有一個 Primary iTunes ID
+-- song_itunes の is_primary フラグを修正する
+-- 目的：各楽曲に Primary iTunes ID が一つ以上あることを保証する
 -- 規則：
---   - 如果歌曲只有一個 iTunes ID，設為 Primary
---   - 如果歌曲有多個 iTunes ID，將最早創建的設為 Primary，其他設為 False
+--   - iTunes ID が一つだけなら Primary にする
+--   - 複数ある場合は最初に作成されたものを Primary、その他を False にする
 
--- 首先，將所有已有的 Primary 設為 False（重置）
+-- 最初に既存の Primary をすべて False に戻す
 UPDATE song_itunes SET is_primary = FALSE;
 
--- 對於每首歌曲，設置最早的 iTunes 記錄為 Primary
+-- 各楽曲で最初の iTunes レコードを Primary にする
 UPDATE song_itunes si
 SET is_primary = TRUE
 WHERE id IN (
@@ -20,8 +20,8 @@ WHERE id IN (
     )
 );
 
--- 驗證：確認每首歌曲都有至少一個 Primary iTunes ID
--- 可選：運行此查詢以檢查結果
+-- 検証：各楽曲に Primary iTunes ID が一つ以上あることを確認する
+-- 任意：このクエリを実行して結果を確認する
 -- SELECT song_id, COUNT(*) as total_count, SUM(CASE WHEN is_primary THEN 1 ELSE 0 END) as primary_count
 -- FROM song_itunes
 -- GROUP BY song_id

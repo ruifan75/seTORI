@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useAuthStore } from '../store/auth';
 import LoginToSuggest from './LoginToSuggest';
 
-// 「可修改的地方」に置くインライン編集フィールド。
+// 編集可能な箇所に置くインライン編集フィールド。
 // 表示中はホバーで鉛筆アイコンが現れ、クリックでその場編集。
 // - 編集権限あり（canEdit）: onSave で即時保存
 // - ログイン済み・権限なし: onSuggest で管理者への修正提案として送信
