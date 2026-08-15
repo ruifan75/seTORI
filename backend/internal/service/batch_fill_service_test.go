@@ -302,3 +302,28 @@ func TestSongVerdictOf(t *testing.T) {
 		}
 	})
 }
+
+// Holodex を源に採るときも、コメントにしか無い曲を落としてはいけない。
+//
+// 実例：6SOyUVuOq9k は Holodex 5 曲・コメント 6 曲で、最後の `Snow halation` が
+// コメントにしか無かった。曲数の比（1.5 倍以上かつ 3 曲差）で見ていたので素通りし、
+// 提案にも歌唱にもならず消えていた。**1 曲だけ足りない（最後の曲の登録漏れ）**が
+// Holodex の欠け方として一番多いので、比率の門では守れない。
+func TestHasCounterpart(t *testing.T) {
+	holodex := []*fillRow{{Start: 530}, {Start: 944}, {Start: 1810}, {Start: 2630}, {Start: 3346}}
+
+	// コメント側の開始秒は数秒ずれる（534 vs 530）。窓の中なら同じ曲とみなす
+	for _, start := range []int{534, 945, 1812, 2632, 3346} {
+		if !hasCounterpart(holodex, start) {
+			t.Errorf("start=%d は Holodex 側に対応があるのに無いと判定された", start)
+		}
+	}
+	// これが落ちていた曲。対応が無いので拾わなければならない
+	if hasCounterpart(holodex, 3969) {
+		t.Error("コメントにしか無い曲を「対応あり」と判定した（審査に回らず消える）")
+	}
+	// 窓のすぐ外
+	if hasCounterpart(holodex, 530+fillMatchWindow+1) {
+		t.Error("窓の外なのに対応ありと判定した")
+	}
+}

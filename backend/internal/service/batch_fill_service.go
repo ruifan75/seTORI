@@ -61,7 +61,7 @@ const (
 	reviewMultiSinger = "multi_singer" // 配信に歌手が複数いる
 	reviewConflict    = "conflict"     // 既存の歌唱と食い違う
 	reviewLowConf     = "low_conf"     // AI の確信度が足りない
-	reviewSourceGap   = "source_gap"   // 源が既存より少ない（取りこぼしを疑う）
+	reviewCommentOnly = "comment_only" // Holodex に無く、コメントにだけあった曲
 	reviewAddition    = "addition"     // 既にセットリストがある配信への追加
 	reviewDuplicate   = "duplicate"    // 同じ実行の中で同じ曲が重複している
 )
@@ -369,15 +369,44 @@ func (s *BatchFillService) loadRows(streamID string) []*fillRow {
 	if len(holodexRows) == 0 {
 		return commentRows
 	}
-	// コメント側が明らかに多い（1.5 倍以上かつ 3 曲以上の差）なら取りこぼしを疑う
-	if len(commentRows) >= len(holodexRows)*3/2 && len(commentRows)-len(holodexRows) >= 3 {
-		for _, r := range holodexRows {
-			r.addReview(reviewSourceGap)
+
+	// Holodex を源に採るが、**コメントにしか無い曲を落とさない**。
+	//
+	// 以前は曲数の比（1.5 倍以上かつ 3 曲以上の差）で「取りこぼしの疑い」を出していたが、
+	// それでは 5 曲 vs 6 曲のような差が素通りする。実際 6SOyUVuOq9k では
+	// Holodex 5 曲・コメント 6 曲で、コメントにしか無い `Snow halation` が
+	// 提案にも歌唱にもならずに消えていた。**しかも 1 曲だけ足りない（最後の曲を
+	// 登録し忘れた）というのが Holodex の欠け方として一番多い**ので、
+	// 比率の門で守るのは的が外れている。
+	//
+	// 数を比べるのをやめ、**時間で 1 曲ずつ突き合わせる**。Holodex 側に対応が無い
+	// コメントの行は拾って審査へ回す。コメント抽出には誤検出があるので
+	// **自動では作らない**（reviewCommentOnly が付くので必ず人が見る）。
+	rows := holodexRows
+	extra := 0
+	for _, c := range commentRows {
+		if hasCounterpart(holodexRows, c.Start) {
+			continue
 		}
-		logger.Infof("[batch-fill] %s: Holodex %d 曲 / コメント %d 曲 ── 差が大きいので審査へ",
-			streamID, len(holodexRows), len(commentRows))
+		c.addReview(reviewCommentOnly)
+		rows = append(rows, c)
+		extra++
 	}
-	return holodexRows
+	if extra > 0 {
+		logger.Infof("[batch-fill] %s: Holodex %d 曲 / コメント %d 曲 ── コメントにしか無い %d 曲を審査へ",
+			streamID, len(holodexRows), len(commentRows), extra)
+	}
+	return rows
+}
+
+// hasCounterpart は同じ時間帯（±fillMatchWindow 秒）の行が源にあるか。
+func hasCounterpart(rows []*fillRow, start int) bool {
+	for _, r := range rows {
+		if abs(r.Start-start) <= fillMatchWindow {
+			return true
+		}
+	}
+	return false
 }
 
 // applyResult は 1 配信を反映した結果。
@@ -847,7 +876,7 @@ func joinReasons(reasons []string) string {
 		reviewMultiSinger: "歌手が複数",
 		reviewConflict:    "既存と食い違う",
 		reviewLowConf:     "AI の確信度が低い",
-		reviewSourceGap:   "源の取りこぼしの疑い",
+		reviewCommentOnly: "コメントにのみ存在",
 		reviewAddition:    "既存歌単への追加",
 		reviewDuplicate:   "同じ曲が重複",
 	}

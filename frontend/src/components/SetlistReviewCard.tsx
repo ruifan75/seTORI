@@ -12,7 +12,7 @@ const REASON_LABELS: Record<string, string> = {
   multi_singer: '歌手が複数',
   conflict: '既存と食い違う',
   low_conf: 'AI の確信度が低い',
-  source_gap: '源の取りこぼしの疑い',
+  comment_only: 'コメントにのみ存在',
   addition: '既存歌単への追加',
   duplicate: '同じ曲が重複',
 };
