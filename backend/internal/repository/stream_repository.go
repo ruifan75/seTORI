@@ -77,13 +77,14 @@ func (r *StreamRepository) FindAll(limit, offset int, includeHidden bool, sort, 
 // FindByID は動画 ID で歌枠を取得する。
 func (r *StreamRepository) FindByID(id string) (*models.Stream, error) {
 	query := `
-		SELECT id, title, stream_date, duration_seconds, thumbnail_url, holodex_data, holodex_hash, comment_raw, comment_songs, comment_songs_analyzed_at, is_processed, is_hidden, created_at, updated_at
+		SELECT id, title, stream_date, duration_seconds, thumbnail_url, holodex_data, holodex_hash, comment_raw, comment_songs, comment_songs_analyzed_at, chapter_raw, chapter_songs, is_processed, is_hidden, created_at, updated_at
 		FROM streams WHERE id = $1`
 
 	var s models.Stream
 	err := r.db.QueryRow(query, id).Scan(
 		&s.ID, &s.Title, &s.StreamDate, &s.DurationSeconds,
-		&s.ThumbnailURL, &s.HolodexData, &s.HolodexHash, &s.CommentRaw, &s.CommentSongs, &s.CommentSongsAnalyzedAt, &s.IsProcessed, &s.IsHidden, &s.CreatedAt, &s.UpdatedAt)
+		&s.ThumbnailURL, &s.HolodexData, &s.HolodexHash, &s.CommentRaw, &s.CommentSongs, &s.CommentSongsAnalyzedAt,
+		&s.ChapterRaw, &s.ChapterSongs, &s.IsProcessed, &s.IsHidden, &s.CreatedAt, &s.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -684,6 +685,71 @@ func (r *StreamRepository) SaveCommentSongs(id string, songs []byte, hash string
 	return nil
 }
 
+// SaveChapterRaw は chapter_raw を更新し、内容が変わった場合は古い章節から作られた
+// 抽出キャッシュも消す（SaveCommentRaw と同じ約束）。
+func (r *StreamRepository) SaveChapterRaw(id string, raw []byte) error {
+	raw = util.SanitizeJSONB(raw)
+	_, err := r.db.Exec(`
+		UPDATE streams
+		SET chapter_songs = CASE WHEN chapter_raw IS DISTINCT FROM $2 THEN NULL ELSE chapter_songs END,
+		    chapter_songs_hash = CASE WHEN chapter_raw IS DISTINCT FROM $2 THEN NULL ELSE chapter_songs_hash END,
+		    chapter_raw = $2,
+		    updated_at = NOW()
+		WHERE id = $1`, id, raw)
+	if err != nil {
+		return fmt.Errorf("save chapter raw: %w", err)
+	}
+	return nil
+}
+
+// GetChapterSongsHash は chapter_songs の計算元 chapter_raw のハッシュを取得する。
+func (r *StreamRepository) GetChapterSongsHash(id string) (sql.NullString, error) {
+	var h sql.NullString
+	err := r.db.QueryRow(`SELECT chapter_songs_hash FROM streams WHERE id = $1`, id).Scan(&h)
+	if err == sql.ErrNoRows {
+		return sql.NullString{}, nil
+	}
+	if err != nil {
+		return sql.NullString{}, fmt.Errorf("get chapter songs hash: %w", err)
+	}
+	return h, nil
+}
+
+// SaveChapterSongs は抽出結果と由来のハッシュを書き込む（この 3 列だけを変更）。
+func (r *StreamRepository) SaveChapterSongs(id string, songs []byte, hash string) error {
+	songs = util.SanitizeJSONB(songs)
+	_, err := r.db.Exec(`UPDATE streams
+		SET chapter_songs = $2, chapter_songs_hash = $3, chapter_songs_analyzed_at = NOW(), updated_at = NOW()
+		WHERE id = $1`, id, songs, hash)
+	if err != nil {
+		return fmt.Errorf("save chapter songs: %w", err)
+	}
+	return nil
+}
+
+// FindIDsWithoutChapterRaw はチャプターを**まだ調べていない**配信の ID を返す（backfill 用）。
+// 空配列（＝調べたが章節が無い）は対象に含めない。含めると毎回全配信を取り直すことになる。
+func (r *StreamRepository) FindIDsWithoutChapterRaw() ([]string, error) {
+	rows, err := r.db.Query(`
+		SELECT id FROM streams
+		WHERE is_hidden = FALSE AND chapter_raw IS NULL
+		ORDER BY stream_date DESC`)
+	if err != nil {
+		return nil, fmt.Errorf("query streams without chapter_raw: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan stream id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 // GetHolodexSongsCache はキャッシュ済みの Holodex 正規化結果と由来の holodex_hash を取得する。
 func (r *StreamRepository) GetHolodexSongsCache(id string) (normalized []byte, hash sql.NullString, err error) {
 	var n []byte
@@ -963,10 +1029,14 @@ func (r *StreamRepository) FindStreamsForFill(mode string, singerIDs []string, i
 	// comment_raw しか無い（まだ抽出していない）配信も対象に入れる。読み込みの側が
 	// 未解析なら抽出から走らせるので、「コメントはあるがまだ解析していない」を
 	// 一括の対象外にしておく理由が無い。
+	// チャプターは**取得済みで章節がある**配信だけを対象にする。yt-dlp は一括の中で
+	// 呼ばない約束（1 本あたり数秒かかる）なので、まだ調べていない配信を入れても
+	// 読み込みの側が空を返すだけになる。先に POST /api/chapters/backfill を回すこと。
 	where := `s.is_hidden = FALSE AND (
 		(jsonb_typeof(s.holodex_data->'songs') = 'array' AND jsonb_array_length(s.holodex_data->'songs') > 0)
 		OR (jsonb_typeof(s.comment_songs) = 'array' AND jsonb_array_length(s.comment_songs) > 0)
-		OR (s.comment_raw IS NOT NULL AND s.comment_raw != 'null'))`
+		OR (s.comment_raw IS NOT NULL AND s.comment_raw != 'null')
+		OR (jsonb_typeof(s.chapter_raw) = 'array' AND jsonb_array_length(s.chapter_raw) > 0))`
 	if mode == "unprocessed" {
 		where += " AND NOT EXISTS (SELECT 1 FROM performances p WHERE p.stream_id = s.id)"
 	}

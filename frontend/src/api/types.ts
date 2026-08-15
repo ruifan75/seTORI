@@ -223,8 +223,19 @@ export interface Stream {
   // 解析を最後に走らせた時刻。updated_at は Holodex 同期でも動くので代用できない
   comment_songs_analyzed_at?: string;
   has_comment_raw?: boolean;                  // 分析可能な生コメントがあるか
+  chapter_timeline_songs?: CommentSong[];     // チャプター解析済みタイムライン（分析キャッシュ）
+  // 配信者が付けた章節の数。-1 は「まだ調べていない」で、0（＝調べたが無い）とは別
+  chapter_count?: number;
   created_at: string;
   updated_at: string;
+}
+
+// Chapter は配信者が付けた YouTube の目次。end は次の章節の開始なので、
+// 「その曲が終わった時刻」ではない（曲のあとの MC を含む）
+export interface Chapter {
+  start: number;
+  end: number;
+  title: string;
 }
 
 export interface StreamListResponse {

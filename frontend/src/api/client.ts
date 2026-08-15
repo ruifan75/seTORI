@@ -27,6 +27,7 @@ import type {
   TagGap,
   TagGapDismissal,
   AnalyzeCommentsResponse,
+  Chapter,
   BatchAnalyzeStatus,
   BatchFillStatus,
   BatchFillRun,
@@ -442,6 +443,29 @@ export const commentApi = {
   // 自動採用に届かなかった候補を人が確定させる（AI は呼ばない）。
   // 確定は別表記として学習されるので、同じ表記は次から迷わない。
   // name は画面に出ていた曲名で、保存する行がズレていないかの確認に使う。
+};
+
+// ========== チャプター API ==========
+
+// 配信者が付けた目次を 3 つ目の入力元にする。Holodex にも曲が無く、コメントも
+// 取れない配信の受け皿。取得は yt-dlp なので、初回は数秒かかる。
+export const chapterApi = {
+  getChapters: async (videoId: string): Promise<{ video_id: string; chapters: Chapter[] }> => {
+    const { data } = await api.get(`/api/streams/${videoId}/chapters`);
+    return data;
+  },
+
+  // 配信者が後から目次を足した場合に取り直す
+  sync: async (videoId: string): Promise<{ video_id: string; chapter_count: number; chapters: Chapter[] }> => {
+    const { data } = await api.post(`/api/streams/${videoId}/chapters/sync`);
+    return data;
+  },
+
+  // 返す形はコメント分析と同じ（下流の変換・照合を共有しているため）
+  analyze: async (videoId: string, force = false): Promise<AnalyzeCommentsResponse> => {
+    const { data } = await api.post(`/api/streams/${videoId}/chapters/analyze${force ? '?force=true' : ''}`);
+    return data;
+  },
 };
 
 // ========== 一括プレ分析 API ==========

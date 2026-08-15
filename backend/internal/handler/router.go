@@ -47,6 +47,7 @@ type Router struct {
 	tagRepo              *repository.TagRepository
 	aiProviderRepo       *repository.AIProviderRepository
 	chatEndService       *service.ChatEndService
+	chapterService       *service.ChapterService
 	artistService        *service.ArtistService
 	batchAnalyzeService  *service.BatchAnalyzeService
 	batchFillService     *service.BatchFillService
@@ -116,6 +117,8 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	chatEndService := service.NewChatEndService(streamRepo, cfg.YtdlpPath, "")
 	// CommentService は分析時に正規化・拍手 end を内部で実行する（抽出→正規化→end→キャッシュ）
 	commentService := service.NewCommentService(holodexService, streamRepo, filterKeywordRepo, aiService, normalizationService, chatEndService, songMatchService)
+	// 3 つ目の入力元。抽出は CommentService と共有し、yt-dlp は ChatEndService のものを借りる
+	chapterService := service.NewChapterService(streamRepo, commentService, normalizationService, chatEndService)
 	// HolodexService も AnalyzeHolodexSongs で正規化・拍手 end を実行する（holodex_hash キャッシュ）
 	holodexService.SetAnalysisServices(normalizationService, chatEndService)
 	batchAnalyzeService := service.NewBatchAnalyzeService(commentService, streamRepo)
@@ -129,7 +132,7 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	suggestionService := service.NewSuggestionService(suggestionRepo, appSettingsRepo, songService, artistService, performanceService, songMatchService)
 	batchFillRepo := repository.NewBatchFillRepository(db)
 	batchFillService := service.NewBatchFillService(streamRepo, perfRepo, batchFillRepo,
-		commentService, holodexService, normalizationService, performanceService, suggestionService)
+		commentService, holodexService, chapterService, normalizationService, performanceService, suggestionService)
 	driveClient := gdrive.NewClient(cfg.GoogleOAuthClientID, cfg.GoogleOAuthSecret)
 	backupService := service.NewBackupService(db, appSettingsRepo, driveClient, cfg.DatabaseURL, cfg.BackupDir, cfg.BackupDockerContainer)
 	playlistRepo := repository.NewPlaylistRepository(db, perfRepo)
@@ -174,6 +177,7 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 		tagRepo:              tagRepo,
 		aiProviderRepo:       aiProviderRepo,
 		chatEndService:       chatEndService,
+		chapterService:       chapterService,
 		artistService:        artistService,
 		batchAnalyzeService:  batchAnalyzeService,
 		batchFillService:     batchFillService,
@@ -387,6 +391,12 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("POST /api/streams/{id}/analyze-chat-ends", r.handleAnalyzeChatEnds)
 	r.mux.HandleFunc("POST /api/streams/{id}/chat-end-estimate", r.handleEstimateChatEnds)
 	r.mux.HandleFunc("POST /api/chat-ends/backfill", r.handleBackfillChatEnds)
+
+	// チャプター分析（配信者が付けた目次を 3 つ目の入力元にする）
+	r.mux.HandleFunc("GET /api/streams/{id}/chapters", r.handleGetChapters)
+	r.mux.HandleFunc("POST /api/streams/{id}/chapters/sync", r.handleSyncChapters)
+	r.mux.HandleFunc("POST /api/streams/{id}/chapters/analyze", r.handleAnalyzeChapters)
+	r.mux.HandleFunc("POST /api/chapters/backfill", r.handleBackfillChapters)
 
 	// Filter keywords management
 	r.mux.HandleFunc("GET /api/filter-keywords", r.handleListFilterKeywords)
@@ -2391,6 +2401,70 @@ func (r *Router) handleBackfillChatEnds(w http.ResponseWriter, req *http.Request
 	go r.chatEndService.Backfill(concurrency)
 	respondJSON(w, http.StatusAccepted, map[string]interface{}{
 		"message":     "拍手 end のバックフィルを開始しました（バックグラウンド、ログ参照）",
+		"concurrency": concurrency,
+	})
+}
+
+// ========== Chapter Handlers ==========
+
+// handleGetChapters は保存済みのチャプターを返す（未取得なら yt-dlp で取りに行く）。
+func (r *Router) handleGetChapters(w http.ResponseWriter, req *http.Request) {
+	videoID := req.PathValue("id")
+	if videoID == "" {
+		respondError(w, http.StatusBadRequest, "無効な動画ID")
+		return
+	}
+	chapters, err := r.chapterService.GetChapters(videoID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"video_id": videoID, "chapters": chapters})
+}
+
+// handleSyncChapters は yt-dlp でチャプターを取り直す（配信者が後から目次を足した場合用）。
+func (r *Router) handleSyncChapters(w http.ResponseWriter, req *http.Request) {
+	videoID := req.PathValue("id")
+	if videoID == "" {
+		respondError(w, http.StatusBadRequest, "無効な動画ID")
+		return
+	}
+	chapters, err := r.chapterService.RefreshChapters(videoID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"video_id": videoID, "chapter_count": len(chapters), "chapters": chapters})
+}
+
+// handleAnalyzeChapters はチャプターから楽曲を抽出して返す（?force=true でキャッシュ無視）。
+func (r *Router) handleAnalyzeChapters(w http.ResponseWriter, req *http.Request) {
+	videoID := req.PathValue("id")
+	if videoID == "" {
+		respondError(w, http.StatusBadRequest, "無効な動画ID")
+		return
+	}
+	result, err := r.chapterService.AnalyzeChapters(videoID, req.URL.Query().Get("force") == "true")
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	logger.Infof("/chapters/analyze completed for %s: %d songs", videoID, len(result.Songs))
+	respondJSON(w, http.StatusOK, result)
+}
+
+// handleBackfillChapters はチャプターを未取得の配信をまとめて取りに行く
+// （バックグラウンド、同時実行数制限あり）。一括セットリスト作成の前に流しておくためのもの。
+func (r *Router) handleBackfillChapters(w http.ResponseWriter, req *http.Request) {
+	concurrency := 3
+	if c := req.URL.Query().Get("concurrency"); c != "" {
+		if v, err := strconv.Atoi(c); err == nil && v > 0 {
+			concurrency = v
+		}
+	}
+	go r.chapterService.Backfill(concurrency)
+	respondJSON(w, http.StatusAccepted, map[string]interface{}{
+		"message":     "チャプターの取得を開始しました（バックグラウンド、ログ参照）",
 		"concurrency": concurrency,
 	})
 }

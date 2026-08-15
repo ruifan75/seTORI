@@ -134,67 +134,22 @@ func (s *CommentService) analyzeComments(videoID string, force, dryRun, adjudica
 	// リモートから再取得した場合も、分析結果は実際に使ったコメント内容の hash に結び付ける。
 	rawHash = hashComments(comments)
 
-	// 2. AI で抽出（統合経路では正規化と重複排除もここで済む）。失敗時は段階的に退避
-	parsedSongs, preNormalized, extractWarning, path := s.parseComments(comments)
+	// 2〜5. 抽出 → 除外・重複排除 → 正規化 → DB 照合（チャプター経路と共通）
+	songs, aiWarning, path := s.ExtractSongs(comments)
 
-	// 3. 除外 + 重複排除 + 検証（楽曲以外の項目が重複排除へ影響しないよう先に除外）
+	// 規則で決まらなかった行を AI に回し、決まったぶんだけ照合し直す。
 	//
-	// 統合経路では AI が既に重複をまとめているが、DeduplicateSongs は通しておく。
-	// 開始時刻が離れていれば別の歌唱として残るので取りこぼしは増えず、
-	// AI が見落とした重複を拾う安全網として働く。
-	filterKW, keepKW, err := s.loadFilterKeywords()
-	if err != nil {
-		logger.Warnf("failed to load filter keywords, skipping filter: %v", err)
-	}
-	filteredSongs := comment.FilterSongs(parsedSongs, filterKW, keepKW)
-	deduped := comment.DeduplicateSongs(filteredSongs)
-	validSongs := comment.ValidateSongs(deduped)
-
-	// 4. CommentSong へ変換する（統合経路なら正規化結果も一緒に運ぶ）
-	songs := make([]dto.CommentSong, len(validSongs))
-	for i, song := range validSongs {
-		songs[i] = dto.CommentSong{
-			Start:              song.Start,
-			End:                song.End,
-			Name:               song.Name,
-			OriginalArtist:     song.OriginalArtist,
-			OriginalComment:    song.OriginalComment,
-			IsEndTimeEstimated: song.IsEndTimeEstimated,
-
-			NormalizedName:          song.NormalizedName,
-			NormalizedNameReading:   song.NormalizedNameReading,
-			NormalizedArtist:        song.NormalizedArtist,
-			NormalizedArtistReading: song.NormalizedArtistReading,
-			Tags:                    song.Tags,
-			Confidence:              song.Confidence,
-		}
-	}
-
-	// 5. 正規化と DB 照合
+	// 呼ぶのは新規解析のときだけ ── キャッシュ命中と backfill は AI を呼ばない約束。
+	// dry-run では行わない。判定は checks テーブルへの書き込みを伴うため。
 	//
-	// 統合経路では正規化が済んでいるので DB 照合だけを行う（AI を再度呼ばない）。
-	// 2 段階経路に退避した場合はここで AI 正規化を実行する。
-	var aiWarning string
+	// 抽出がどの経路（統合 / 2 段階 / 正規表現）を通ったかに関わらず呼ぶ。以前は
+	// 統合経路の中にだけ置いていて、「2 段階では BatchAINormalization が同じことをする」
+	// という前提でそうしていたが、判定が match_ai.go へ集約された時点でその前提は消えていた
+	// （＝退避した回だけ判定が走らなかった）。既に照合できた行は AdjudicateCommentSongs が
+	// 飛ばすので、二重に聞くことにはならない。
 	var aliasAsked, aliasLinked int
-	if preNormalized {
-		s.normalizationService.ResolveForDisplay(songs)
-		// 曲名は一意に当たったのにアーティストだけ食い違った組を AI に判定させ、
-		// 別名義が確定したぶんだけ照合をやり直す。
-		//
-		// 2 段階経路では BatchAINormalization の中で同じことをしている。
-		// 統合経路はそこを通らないので、ここに置かないと**一度も実行されない**
-		// （既定が統合経路に変わった時点でそうなっていた）。
-		// 呼ぶのは新規解析のときだけ ── キャッシュ命中と backfill は AI を呼ばない約束。
-		// dry-run では行わない。判定は checks テーブルへの書き込みを伴うため。
-		if s.normalizationService != nil && adjudicate && !dryRun {
-			aliasAsked, aliasLinked = s.adjudicateAll(songs)
-		}
-	} else {
-		aiWarning = s.normalizeInto(songs)
-	}
-	// 抽出の失敗は正規化の失敗より重い（曲そのものが取れていない）ので優先して伝える
-	if extractWarning != "" {
-		aiWarning = extractWarning
+	if s.normalizationService != nil && adjudicate && !dryRun {
+		aliasAsked, aliasLinked = s.adjudicateAll(songs)
 	}
 
 	// 6. live chat の拍手で end を推定（start 基準でマッチ。利用不可なら据え置き）
@@ -237,6 +192,70 @@ func (s *CommentService) analyzeComments(videoID string, force, dryRun, adjudica
 		Warning: aiWarning,
 		Stats:   buildStats(path, dryRun, saved, songs, aliasAsked, aliasLinked),
 	}, nil
+}
+
+// ExtractSongs は「タイムスタンプ付きのテキスト」から歌唱行を抽出し、正規化して DB と照合する。
+//
+// **コメント経路とチャプター経路の共通の入口。** 入力元が違うだけで、そこから先
+// （どの行が曲か・除外キーワード・重複排除・AI が落ちたときの退避）は同じ判断なので、
+// 経路ごとに書くと片方にしか効かない修正が生まれる。`resolveOne` を 1 つに保っているのと
+// 同じ理由で、ここも 1 つに保つこと。
+//
+// 照合結果は**保存しない**（呼び出し側が保存するのは抽出＋正規化まで）。
+// 返り値の warning は「AI が失敗して結果が劣化している」ことを示す。空でなければ
+// 呼び出し側はキャッシュへ書かないこと ── 劣化結果を保存すると、次回からキャッシュ命中で
+// AI を呼ばなくなり劣化が固定される。
+func (s *CommentService) ExtractSongs(texts []string) (songs []dto.CommentSong, warning, path string) {
+	// 1. AI で抽出（統合経路では正規化と重複排除もここで済む）。失敗時は段階的に退避
+	parsedSongs, preNormalized, extractWarning, path := s.parseComments(texts)
+
+	// 2. 除外 + 重複排除 + 検証（楽曲以外の項目が重複排除へ影響しないよう先に除外）
+	//
+	// 統合経路では AI が既に重複をまとめているが、DeduplicateSongs は通しておく。
+	// 開始時刻が離れていれば別の歌唱として残るので取りこぼしは増えず、
+	// AI が見落とした重複を拾う安全網として働く。
+	filterKW, keepKW, err := s.loadFilterKeywords()
+	if err != nil {
+		logger.Warnf("failed to load filter keywords, skipping filter: %v", err)
+	}
+	filteredSongs := comment.FilterSongs(parsedSongs, filterKW, keepKW)
+	deduped := comment.DeduplicateSongs(filteredSongs)
+	validSongs := comment.ValidateSongs(deduped)
+
+	// 3. CommentSong へ変換する（統合経路なら正規化結果も一緒に運ぶ）
+	songs = make([]dto.CommentSong, len(validSongs))
+	for i, song := range validSongs {
+		songs[i] = dto.CommentSong{
+			Start:              song.Start,
+			End:                song.End,
+			Name:               song.Name,
+			OriginalArtist:     song.OriginalArtist,
+			OriginalComment:    song.OriginalComment,
+			IsEndTimeEstimated: song.IsEndTimeEstimated,
+
+			NormalizedName:          song.NormalizedName,
+			NormalizedNameReading:   song.NormalizedNameReading,
+			NormalizedArtist:        song.NormalizedArtist,
+			NormalizedArtistReading: song.NormalizedArtistReading,
+			Tags:                    song.Tags,
+			Confidence:              song.Confidence,
+		}
+	}
+
+	// 4. 正規化と DB 照合
+	//
+	// 統合経路では正規化が済んでいるので DB 照合だけを行う（AI を再度呼ばない）。
+	// 2 段階経路に退避した場合はここで AI 正規化を実行する。
+	if preNormalized {
+		s.normalizationService.ResolveForDisplay(songs)
+	} else {
+		warning = s.normalizeInto(songs)
+	}
+	// 抽出の失敗は正規化の失敗より重い（曲そのものが取れていない）ので優先して伝える
+	if extractWarning != "" {
+		warning = extractWarning
+	}
+	return songs, warning, path
 }
 
 // adjudicateAll は規則で決まらなかった行を AI に回す。

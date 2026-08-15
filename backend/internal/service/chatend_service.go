@@ -4,13 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -23,74 +20,17 @@ import (
 
 // ChatEndService は live chat の「拍手」から各曲の終了時刻を検出し、comment_songs を更新する。
 type ChatEndService struct {
-	streamRepo *repository.StreamRepository
-	ytdlp      string
-	cacheDir   string
+	*ytdlpRunner // yt-dlp の場所と cookie。ChapterService と同じ実体を共有する
 
-	mu         sync.RWMutex
-	cookieData string // cookies.txt の中身（管理画面の設定 / YTDLP_COOKIES_FILE 由来）
+	streamRepo *repository.StreamRepository
+	cacheDir   string
 }
 
 func NewChatEndService(streamRepo *repository.StreamRepository, ytdlpPath, cacheDir string) *ChatEndService {
-	if ytdlpPath == "" {
-		ytdlpPath = "yt-dlp"
-	}
 	if cacheDir == "" {
 		cacheDir = "data/chat_cache"
 	}
-	// yt-dlp が無いと全配信で live chat が利用できなくなる。配信ごとの警告からは
-	// 「その配信にチャットが無い」のか「そもそも実行できていない」のか読み取れないので、
-	// 起動時に一度だけ切り分けて残す。
-	if _, err := exec.LookPath(ytdlpPath); err != nil {
-		logger.Warnf("[chatend] yt-dlp が見つかりません (%s): 拍手による end 推定は全配信でスキップされます。"+
-			"インストールしてください（本番イメージは backend/Dockerfile に同梱）", ytdlpPath)
-	}
-	return &ChatEndService{streamRepo: streamRepo, ytdlp: ytdlpPath, cacheDir: cacheDir}
-}
-
-// SetCookies は管理画面で設定された cookies.txt の中身を差し替える（再起動なしで効く）。
-func (s *ChatEndService) SetCookies(data string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.cookieData = strings.TrimSpace(data)
-}
-
-// prepareCookies は yt-dlp に渡す cookie ファイルを用意し、後始末の関数を返す。
-// 設定は中身で持っているので毎回一時ファイルへ書き出す。yt-dlp は終了時に
-// cookie をファイルへ書き戻すため、共有の実ファイルを直接渡すと
-// 読み取り専用マウントや Backfill の並列実行で壊れる。未設定なら空文字を返す。
-func (s *ChatEndService) prepareCookies() (string, func()) {
-	noop := func() {}
-
-	s.mu.RLock()
-	data := s.cookieData
-	s.mu.RUnlock()
-
-	if data == "" {
-		return "", noop
-	}
-
-	tmp, err := os.CreateTemp("", "setori-cookies-*.txt")
-	if err != nil {
-		logger.Warnf("[chatend] cookie の一時ファイルを作れません: %v", err)
-		return "", noop
-	}
-	name := tmp.Name()
-	if _, err := tmp.WriteString(data + "\n"); err != nil {
-		tmp.Close()
-		os.Remove(name)
-		logger.Warnf("[chatend] cookie の書き出しに失敗しました: %v", err)
-		return "", noop
-	}
-	tmp.Close()
-	return name, func() { os.Remove(name) }
-}
-
-// HasCookies は cookie が設定されているかを返す（失敗時の案内を出し分けるため）。
-func (s *ChatEndService) HasCookies() bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.cookieData != ""
+	return &ChatEndService{ytdlpRunner: newYtdlpRunner(ytdlpPath), streamRepo: streamRepo, cacheDir: cacheDir}
 }
 
 // AnalyzeResult は AnalyzeStream の結果（UI に何が起きたかを伝えるため）。
@@ -297,7 +237,7 @@ func (s *ChatEndService) fetchLiveChat(videoID string) (string, error) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, s.ytdlp, args...)
+	cmd := exec.CommandContext(ctx, s.path, args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	runErr := cmd.Run()
@@ -310,51 +250,17 @@ func (s *ChatEndService) fetchLiveChat(videoID string) (string, error) {
 	// ここから先は失敗の理由を残す。yt-dlp 未インストール・BOT 判定・単に
 	// チャットが無い配信は対処が全く違うのに、以前はどれも同じ文言になっていた。
 	switch {
-	// PATH 上の名前なら ErrNotFound、絶対パスなら fs.ErrNotExist で返る
-	case errors.Is(runErr, exec.ErrNotFound), errors.Is(runErr, fs.ErrNotExist):
-		return "", fmt.Errorf("yt-dlp が実行できません (%s): 未インストールの可能性があります", s.ytdlp)
+	case notInstalled(runErr):
+		return "", fmt.Errorf("yt-dlp が実行できません (%s): 未インストールの可能性があります", s.path)
 	case ctx.Err() != nil:
 		return "", fmt.Errorf("yt-dlp がタイムアウトしました（3分）")
 	case isBotCheck(stderr.String()):
 		// 全配信で一様に起きるので、原因と対処をここで名指ししておく
-		if s.HasCookies() {
-			return "", fmt.Errorf("YouTube に BOT 判定されました: 設定済みの cookie が失効している可能性があります（管理→設定で入れ直してください）")
-		}
-		return "", fmt.Errorf("YouTube に BOT 判定されました: 管理→設定の「YouTube cookie」に cookies.txt を登録してください")
+		return "", botCheckError(s.ytdlpRunner)
 	case runErr != nil:
 		return "", fmt.Errorf("yt-dlp に失敗 (%v): %s", runErr, ytdlpErrorLine(stderr.String()))
 	}
 	return "", fmt.Errorf("この配信に live chat replay がありません")
-}
-
-// isBotCheck は yt-dlp の出力が YouTube の BOT 判定かどうかを見る。
-func isBotCheck(stderr string) bool {
-	return strings.Contains(stderr, "Sign in to confirm you") ||
-		strings.Contains(stderr, "confirm you’re not a bot") ||
-		strings.Contains(stderr, "confirm you're not a bot")
-}
-
-// ytdlpErrorLine は stderr から原因の行だけを取り出す（ログを 1 行に収めるため）。
-func ytdlpErrorLine(stderr string) string {
-	line := ""
-	for _, l := range strings.Split(stderr, "\n") {
-		l = strings.TrimSpace(l)
-		if l == "" {
-			continue
-		}
-		if strings.HasPrefix(l, "ERROR:") {
-			line = l // ERROR 行があればそれを優先（最後のものを採る）
-		} else if line == "" {
-			line = l
-		}
-	}
-	if line == "" {
-		return "(stderr なし)"
-	}
-	if len(line) > 300 {
-		line = line[:300] + "…"
-	}
-	return line
 }
 
 // EstimateEnds は任意の開始秒数リストに対する拍手 end 推定を返す（編集ページの単曲追加用）。

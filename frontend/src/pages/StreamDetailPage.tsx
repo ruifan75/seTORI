@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, Link } from 'react-router-dom';
-import { streamApi, performanceApi, aiApi, itunesApi, holodexApi, commentApi, tagApi, artistApi } from '../api/client';
+import { streamApi, performanceApi, aiApi, itunesApi, holodexApi, commentApi, chapterApi, tagApi, artistApi } from '../api/client';
 import SingerSearchInput from '../components/SingerSearchInput';
 import PerformanceFields from '../components/PerformanceFields';
 import { formatTimeInput, parseTime } from '../utils/timeFormat';
@@ -16,9 +16,9 @@ import { youtubePlayerSeekTo, youtubePlayerGetCurrentTime } from '../components/
 import type { YouTubePlayerInstance } from '../types/youtube';
 import QueueAddButton from '../components/QueueAddButton';
 import RawCommentsPanel from '../components/RawCommentsPanel';
+import SourceSongList from '../components/SourceSongList';
 import ArtistLinks from '../components/ArtistLinks';
 import { extractRawCommentTimestamps } from '../utils/rawCommentTimestamps';
-import { matchReasonLabel } from '../utils/matchReason';
 
 
 // 編集可能な配信情報
@@ -133,6 +133,19 @@ function mergeDuplicateSongs(songs: EditableSong[]): EditableSong[] {
 
 
 
+/**
+ * endSourceForSourceSong は入力元から読み込んだ曲の終了時間の由来を決める。
+ * バックエンドの endSourceForComment / endSourceForChapter と同じ規則にしてある
+ * ── 経路によって違う値が入ると、確度で絞り込む問い合わせが当てにならなくなる。
+ */
+function endSourceForSourceSong(song: CommentSong, source: 'comment' | 'chapter'): EndSource | undefined {
+  if (song.end <= 0) return undefined;
+  if (song.chat_end && song.chat_end === song.end) return 'chat';
+  // チャプターの end は次の章節の開始なので、拍手で埋まっていない限り推定値でしかない
+  if (source === 'chapter') return 'next_start';
+  return song.is_end_time_estimated ? undefined : 'comment';
+}
+
 function formatTime(seconds: number): string {
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
@@ -156,7 +169,7 @@ export default function StreamDetailPage() {
 
   const [isEditing, setIsEditing] = useState(false);
   // 編集モード左上のタブ（操作 / Holodex / コメント / 生コメント）
-  const [editTab, setEditTab] = useState<'actions' | 'holodex' | 'comment' | 'raw'>('actions');
+  const [editTab, setEditTab] = useState<'actions' | 'holodex' | 'comment' | 'chapter' | 'raw'>('actions');
   // 閲覧モードのクイック編集 UI（タグ選択・参加者追加）の開閉
   const [tagPickerOpen, setTagPickerOpen] = useState(false);
   const [participantAddOpen, setParticipantAddOpen] = useState(false);
@@ -209,6 +222,7 @@ export default function StreamDetailPage() {
   const confirmedCount = editableSongs.filter((s) => s.confirmed).length;
   const [holodexTimelineSongs, setHolodexTimelineSongs] = useState<SongSuggestion[]>([]);
   const [commentTimelineSongs, setCommentTimelineSongs] = useState<CommentSong[]>([]);
+  const [chapterTimelineSongs, setChapterTimelineSongs] = useState<CommentSong[]>([]);
   const [channelOwner, setChannelOwner] = useState<Singer | null>(null);
   const [participants, setParticipants] = useState<Singer[]>([]);
   const [currentPlayerTime, setCurrentPlayerTime] = useState<number | null>(null);
@@ -260,6 +274,7 @@ export default function StreamDetailPage() {
     // 保存されたタイムラインデータを読み込み（ない場合はクリア）
     setHolodexTimelineSongs(stream?.holodex_timeline_songs || []);
     setCommentTimelineSongs(stream?.comment_timeline_songs || []);
+    setChapterTimelineSongs(stream?.chapter_timeline_songs || []);
   }, [stream]);
 
   // 編集モード時はページ全体のスクロールを避ける（ブロック内スクロールに変更）
@@ -495,10 +510,14 @@ export default function StreamDetailPage() {
   };
 
   // コメント分析結果（CommentSong）→ EditableSong 変換（一括読み込み・単曲追加で共用）
+  // 入力元は 'comment'（視聴者のコメント）か 'chapter'（配信者が付けた目次）。
+  // 終了時間の確度が違うので分ける ── チャプターの end は次の章節の開始そのもので、
+  // 「その曲が終わった時刻」ではない（曲のあとの MC を含む）。
   const commentSongToEditableSong = async (
     song: CommentSong,
     editableId: string,
     defaultSingerIds: string[],
+    source: 'comment' | 'chapter' = 'comment',
   ): Promise<EditableSong> => {
     const hasMatch = !!song.matched_song_id;
     const finalName = hasMatch && song.matched_song_name
@@ -540,8 +559,8 @@ export default function StreamDetailPage() {
       isEndTimeEstimated: song.is_end_time_estimated,
       chatEnd: song.chat_end,
       endDiff: song.end_diff,
-      originalCommentEnd: song.end, // 読み込み時の終了時刻をコメント由来の元値として扱う
-      endSource: song.end > 0 && !song.is_end_time_estimated ? 'comment' : undefined,
+      originalCommentEnd: song.end, // 読み込み時の終了時刻を入力元由来の元値として扱う
+      endSource: endSourceForSourceSong(song, source),
       customTags: [],
     };
   };
@@ -608,6 +627,40 @@ export default function StreamDetailPage() {
     }
   };
 
+  const [chapterAnalyzeLoading, setChapterAnalyzeLoading] = useState(false);
+
+  // 配信者が付けた目次から読み込む。Holodex にも曲が無く、コメントも取れない配信の受け皿。
+  // force=true はチャプターを yt-dlp で取り直してから再分析する（数秒かかる）。
+  const loadFromChapters = async (force = false) => {
+    if (!id) return;
+    setChapterAnalyzeLoading(true);
+    try {
+      const result = await chapterApi.analyze(id, force);
+      const sortedSongs = [...result.songs].sort((a, b) => a.start - b.start);
+
+      const songs: EditableSong[] = [];
+      for (let index = 0; index < sortedSongs.length; index++) {
+        songs.push(await commentSongToEditableSong(sortedSongs[index], `chapter-${index}`, getDefaultSingerIds(), 'chapter'));
+      }
+
+      const merged = mergeDuplicateSongs(songs);
+      setEditableSongs(merged);
+      setChapterTimelineSongs(sortedSongs);
+      // chapter_count（未取得か / 章節が無いか）が変わりうるので配信を読み直す
+      queryClient.invalidateQueries({ queryKey: ['stream', id] });
+      if (merged.length === 0) {
+        showToast('チャプターから曲を取り出せませんでした', 'info');
+      } else {
+        showToast(`チャプターから${merged.length}曲を読み込みました`, 'success');
+      }
+    } catch (error) {
+      showToast('チャプター分析に失敗しました', 'error');
+      console.error('Chapter analysis failed:', error);
+    } finally {
+      setChapterAnalyzeLoading(false);
+    }
+  };
+
   // live chat の拍手から end だけを取り直す（AI は呼ばない）。
   // 一括プレ分析はキャッシュ命中だと拍手 end を飛ばすので、後から埋めるのはこの経路。
   const chatEndMutation = useMutation({
@@ -648,6 +701,11 @@ export default function StreamDetailPage() {
   // コメントタブ：1曲追加
   const addCommentSongToList = async (song: CommentSong) => {
     addSingleSong(await commentSongToEditableSong(song, `comment-add-${Date.now()}`, getDefaultSingerIds()));
+  };
+
+  // チャプタータブ：1曲追加（終了時間の確度が違うので入力元を伝える）
+  const addChapterSongToList = async (song: CommentSong) => {
+    addSingleSong(await commentSongToEditableSong(song, `chapter-add-${Date.now()}`, getDefaultSingerIds(), 'chapter'));
   };
 
   // 自動採用に届かなかった候補（0.50〜0.85）を人が確定させる。
@@ -696,6 +754,11 @@ export default function StreamDetailPage() {
       await loadFromHolodex(false);
     } else if (stream?.has_comment_raw) {
       await loadFromComments(false);
+    } else if (stream?.chapter_count !== 0) {
+      // チャプターは最後の受け皿。表記は配信者が書いたものなので信用できるが、
+      // 区切りは「その曲の場面」であって歌唱そのものではない（曲のあとの MC を含む）。
+      // 章節が無いと分かっている配信（0）だけを除く ── 未取得（-1）は試す価値がある。
+      await loadFromChapters(false);
     } else {
       showToast('読み込めるデータがありません（Holodex から同期するか、コメントを取得してください）', 'info');
     }
@@ -1171,6 +1234,7 @@ export default function StreamDetailPage() {
                   { key: 'actions', label: '操作' },
                   { key: 'holodex', label: 'Holodex' },
                   { key: 'comment', label: 'コメント' },
+                  { key: 'chapter', label: 'チャプター' },
                   { key: 'raw', label: '生コメント' },
                 ] as const).map((t) => (
                   <button
@@ -1195,11 +1259,11 @@ export default function StreamDetailPage() {
                       <div className="flex flex-wrap gap-2">
                         <button
                           onClick={autoLoad}
-                          disabled={holodexAnalyzeLoading || commentAnalyzeLoading || syncYouTubeCommentsMutation.isPending}
+                          disabled={holodexAnalyzeLoading || commentAnalyzeLoading || chapterAnalyzeLoading || syncYouTubeCommentsMutation.isPending}
                           className="px-3 py-1.5 text-sm bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50"
-                          title="Holodex → コメント の優先順で読み込み、正規化と chat 時間チェックまで実行"
+                          title="Holodex → コメント → チャプター の優先順で読み込み、正規化と chat 時間チェックまで実行"
                         >
-                          {holodexAnalyzeLoading || commentAnalyzeLoading ? '読み込み中...' : '自動読み込み'}
+                          {holodexAnalyzeLoading || commentAnalyzeLoading || chapterAnalyzeLoading ? '読み込み中...' : '自動読み込み'}
                         </button>
                         <button
                           onClick={() => loadFromHolodex(false)}
@@ -1384,100 +1448,51 @@ export default function StreamDetailPage() {
                         })}
                       </p>
                     )}
-                    {commentTimelineSongs.length === 0 ? (
-                      <p className="text-sm text-gray-400 py-2">
-                        分析済みの曲がありません（「全部読み込む」で分析を実行）
-                      </p>
-                    ) : (
-                      <div className="space-y-0.5">
-                        {commentTimelineSongs.map((song, i) => (
-                          <div key={i}>
-                          <div
-                            onClick={() => addCommentSongToList(song)}
-                            className="flex items-baseline gap-2 px-2 py-1.5 rounded hover:bg-indigo-50 cursor-pointer group text-sm"
-                            title="クリックで追加"
-                          >
-                            <span className="shrink-0 flex items-baseline gap-0.5">
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  youtubePlayerSeekTo(song.start);
-                                }}
-                                className="px-1.5 rounded bg-orange-50 text-orange-700 font-mono text-xs hover:bg-orange-100 transition-colors"
-                                title="開始時間にジャンプ"
-                              >
-                                {formatTime(song.start)}
-                              </button>
-                              {song.end > 0 && (
-                                <>
-                                  <span className="text-gray-300 text-xs">〜</span>
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      youtubePlayerSeekTo(song.end);
-                                    }}
-                                    className="px-1.5 rounded bg-orange-50/60 text-orange-600 font-mono text-xs hover:bg-orange-100 transition-colors"
-                                    title="終了時間にジャンプ"
-                                  >
-                                    {formatTime(song.end)}
-                                  </button>
-                                </>
-                              )}
-                            </span>
-                            <span className="min-w-0 flex-1 truncate">
-                              <span className="text-gray-900 font-medium">{song.name}</span>
-                              {song.original_artist && <span className="text-gray-500"> / {song.original_artist}</span>}
-                              {song.matched_song_id && song.matched_song_name && (
-                                <span className="ml-1 text-xs text-emerald-600" title="DB の楽曲に照合済み">
-                                  → {song.matched_song_name}
-                                </span>
-                              )}
-                            </span>
-                            {/*
-                              正規化で付いた演奏バージョンのタグ（short / piano …）。
-                              追加すると EditableSong.tags にそのまま入るので、
-                              取り込む前にここで見えるようにしてある。
-                              PERFORMANCE_TAGS に無い ID は語彙のずれなので、
-                              そのまま灰色で出して気付けるようにする（黙って隠さない）。
-                            */}
-                            {(song.tags?.length ?? 0) > 0 && (
-                              <span className="shrink-0 flex items-center gap-1">
-                                {song.tags!.map((tagId) => {
-                                  const meta = PERFORMANCE_TAGS.find((t) => t.id === tagId);
-                                  return <Tag key={tagId} label={meta?.label || tagId} color={meta?.color || '#6B7280'} />;
-                                })}
-                              </span>
-                            )}
-                            <span className="shrink-0 text-gray-300 group-hover:text-indigo-600 transition-colors">＋</span>
-                          </div>
+                    <SourceSongList
+                      songs={commentTimelineSongs}
+                      performanceTags={PERFORMANCE_TAGS}
+                      onAdd={addCommentSongToList}
+                      emptyMessage="分析済みの曲がありません（「全部読み込む」で分析を実行）"
+                    />
+                  </div>
+                )}
 
-                          {/*
-                            照合が決めきれなかった候補。songmatch が 0.50〜0.85 で返したもので、
-                            「アーティストが書かれていないので曲名だけでは決めきれない」
-                            「feat. や CV 名の表記が違う」といった、文字列では決まらない組が来る。
-                            確定は行わない ── 照合を決めるのは「読み込む」で
-                            編集フォームへ取り込むときの仕事。
-                          */}
-                          {!song.matched_song_id && (song.match_candidates?.length ?? 0) > 0 && (
-                            <div className="ml-2 mb-1 flex flex-wrap items-center gap-1 pl-14">
-                              <span className="shrink-0 text-[11px] text-gray-400">候補</span>
-                              {song.match_candidates!.map((c) => (
-                                <span
-                                  key={c.song_id}
-                                  title={`${matchReasonLabel(c.reason)}（確信度 ${Math.round(c.score * 100)}%）`}
-                                  className="max-w-full truncate rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs text-amber-900"
-                                >
-                                  {c.name}
-                                  {c.artist && <span className="text-amber-700/70"> / {c.artist}</span>}
-                                  <span className="ml-1 text-amber-600/60">{Math.round(c.score * 100)}%</span>
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                          </div>
-                        ))}
-                      </div>
+                {editTab === 'chapter' && (
+                  <div className="space-y-2">
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => loadFromChapters(false)}
+                        disabled={stream?.chapter_count === 0 || chapterAnalyzeLoading}
+                        className="flex-1 px-3 py-1.5 text-sm bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50"
+                        title="配信者が付けた目次から曲を取り出して編集リストへ読み込む（正規化＋chat 時間チェック込み）"
+                      >
+                        {chapterAnalyzeLoading ? '分析中...' : '全部読み込む'}
+                      </button>
+                      <button
+                        onClick={() => loadFromChapters(true)}
+                        disabled={chapterAnalyzeLoading}
+                        title="チャプターを取り直して AI で再分析します（配信者が後から目次を足した場合）"
+                        className="px-3 py-1.5 text-sm bg-white text-gray-600 border border-gray-300 font-medium rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
+                      >
+                        再取得
+                      </button>
+                    </div>
+                    {/* 「まだ調べていない（-1）」と「調べたが無い（0）」を書き分ける。
+                        同じ文言にすると、取得を試せば済む配信が諦めた配信に見える */}
+                    {stream.chapter_count === -1 && (
+                      <p className="px-1 text-xs text-gray-400">
+                        チャプターは未取得です（「全部読み込む」で YouTube から取得します）
+                      </p>
                     )}
+                    {stream.chapter_count === 0 && (
+                      <p className="px-1 text-xs text-gray-400">この配信にチャプターはありません</p>
+                    )}
+                    <SourceSongList
+                      songs={chapterTimelineSongs}
+                      performanceTags={PERFORMANCE_TAGS}
+                      onAdd={addChapterSongToList}
+                      emptyMessage="分析済みの曲がありません（「全部読み込む」で分析を実行）"
+                    />
                   </div>
                 )}
 

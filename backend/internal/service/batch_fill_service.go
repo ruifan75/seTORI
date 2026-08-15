@@ -31,6 +31,7 @@ type BatchFillService struct {
 	runRepo        *repository.BatchFillRepository
 	commentService *CommentService
 	holodexService *HolodexService
+	chapterService *ChapterService
 	normalization  *NormalizationService
 	perfService    *PerformanceService
 	suggestions    *SuggestionService
@@ -62,6 +63,7 @@ const (
 	reviewConflict    = "conflict"     // 既存の歌唱と食い違う
 	reviewLowConf     = "low_conf"     // AI の確信度が足りない
 	reviewCommentOnly = "comment_only" // Holodex に無く、コメントにだけあった曲
+	reviewChapterOnly = "chapter_only" // 配信者が付けたチャプターだけを頼りに拾った曲
 	reviewAddition    = "addition"     // 既にセットリストがある配信への追加
 	reviewDuplicate   = "duplicate"    // 同じ実行の中で同じ曲が重複している
 )
@@ -87,13 +89,14 @@ func NewBatchFillService(
 	runRepo *repository.BatchFillRepository,
 	commentService *CommentService,
 	holodexService *HolodexService,
+	chapterService *ChapterService,
 	normalization *NormalizationService,
 	perfService *PerformanceService,
 	suggestions *SuggestionService,
 ) *BatchFillService {
 	return &BatchFillService{
 		streamRepo: streamRepo, perfRepo: perfRepo, runRepo: runRepo,
-		commentService: commentService, holodexService: holodexService,
+		commentService: commentService, holodexService: holodexService, chapterService: chapterService,
 		normalization: normalization, perfService: perfService, suggestions: suggestions,
 	}
 }
@@ -107,7 +110,7 @@ type fillRow struct {
 	End      int
 	Tags     []string
 	ItunesID *int64
-	Source   string // holodex / comment
+	Source   string // holodex / comment / chapter
 
 	// RawName / RawArtist は**入力元から抽出したままの表記**。照合や AI 正規化で
 	// Name / Artist が書き換わっても、こちらは動かさない。
@@ -366,6 +369,24 @@ func (s *BatchFillService) loadRows(streamID string) []*fillRow {
 		}
 	}
 
+	if len(holodexRows) == 0 && len(commentRows) == 0 {
+		// **チャプターは他がどちらも空のときだけ。** 配信者が付けた目次なので表記は
+		// 信用できるが、区切りは「その曲の場面」であって歌唱そのものではなく（MC を含む）、
+		// 曲でない章節も混ざる。Holodex の iTunes ID もコメントの明示 end も
+		// 捨ててまで採る理由が無いので、拾えるものが他に無い配信の受け皿に留める。
+		//
+		// **全行を審査へ回す。** 章節から曲を切り出したのは AI の判定なので、
+		// コメントにしか無い行を自動で作らないのと同じ扱いにする。
+		chapterRows := s.loadChapterRows(streamID)
+		for _, c := range chapterRows {
+			c.addReview(reviewChapterOnly)
+		}
+		if len(chapterRows) > 0 {
+			logger.Infof("[batch-fill] %s: Holodex もコメントも無いのでチャプターから %d 曲を審査へ", streamID, len(chapterRows))
+		}
+		return chapterRows
+	}
+
 	if len(holodexRows) == 0 {
 		return commentRows
 	}
@@ -395,6 +416,28 @@ func (s *BatchFillService) loadRows(streamID string) []*fillRow {
 	if extra > 0 {
 		logger.Infof("[batch-fill] %s: Holodex %d 曲 / コメント %d 曲 ── コメントにしか無い %d 曲を審査へ",
 			streamID, len(holodexRows), len(commentRows), extra)
+	}
+	return rows
+}
+
+// loadChapterRows は保存済みのチャプターから作業単位を作る。
+// **yt-dlp は呼ばない**（AnalyzeChaptersForBatch の約束）。取得は
+// `POST /api/chapters/backfill` で先に済ませておく。
+func (s *BatchFillService) loadChapterRows(streamID string) []*fillRow {
+	if s.chapterService == nil {
+		return nil
+	}
+	resp, err := s.chapterService.AnalyzeChaptersForBatch(streamID)
+	if err != nil || resp == nil {
+		if err != nil {
+			logger.Warnf("[batch-fill] チャプター読み込み失敗 (%s): %v", streamID, err)
+		}
+		return nil
+	}
+	s.normalization.ResolveForDisplay(resp.Songs)
+	rows := make([]*fillRow, 0, len(resp.Songs))
+	for _, cs := range resp.Songs {
+		rows = append(rows, chapterSongToFillRow(streamID, cs))
 	}
 	return rows
 }
@@ -744,6 +787,14 @@ func endSourceForHolodex(sg dto.SongSuggestion) string {
 	return "holodex"
 }
 
+// chapterSongToFillRow はチャプター由来の行。コメント由来との違いは Source と end の確度だけ。
+func chapterSongToFillRow(streamID string, cs dto.CommentSong) *fillRow {
+	row := commentSongToFillRow(streamID, cs)
+	row.Source = "chapter"
+	row.EndSource = endSourceForChapter(cs)
+	return row
+}
+
 func endSourceForComment(cs dto.CommentSong) string {
 	if cs.End <= 0 {
 		return "unknown"
@@ -755,6 +806,21 @@ func endSourceForComment(cs dto.CommentSong) string {
 		return "next_start" // 推定値。確度は低い（画面でも由来なしとして扱われる）
 	}
 	return "comment"
+}
+
+// endSourceForChapter は章節由来の end の確度。
+//
+// **拍手で埋まっていない限り next_start にする。** 章節の end は次の章節の開始そのもので、
+// 「その曲が終わった時刻」ではない（曲のあとの MC や拍手を含む）。`comment` と同格に
+// すると、確度で絞り込む問い合わせが嘘になり、審査を素通りする。
+func endSourceForChapter(cs dto.CommentSong) string {
+	if cs.End <= 0 {
+		return "unknown"
+	}
+	if cs.ChatEnd > 0 && cs.ChatEnd == cs.End {
+		return "chat"
+	}
+	return "next_start"
 }
 
 func applyMatched(row *fillRow, id, name, artist *string) {

@@ -372,6 +372,20 @@ func (s *StreamService) toStreamResponse(stream models.Stream, tags []models.Str
 	// comment_raw にコメントがあれば分析ボタンを有効化できる（comment_songs が未生成でも分析可能）
 	resp.HasCommentRaw = len(stream.CommentRaw) > 0 && string(stream.CommentRaw) != "null" && string(stream.CommentRaw) != "[]"
 
+	// チャプター経路も同じ扱い（保存済みの抽出結果をそのまま出し、照合はしない）
+	if len(stream.ChapterSongs) > 0 {
+		var chapterSongs []dto.CommentSong
+		if err := json.Unmarshal(stream.ChapterSongs, &chapterSongs); err == nil && len(chapterSongs) > 0 {
+			resp.ChapterTimelineSongs = stripMatchForStorage(chapterSongs)
+		}
+	}
+	// 章節の有無は 3 態ある。まだ調べていない（NULL）／調べたが無い（[]）／ある。
+	// 「まだ調べていない」を「無い」と同じ見た目にすると、取得を試す導線が消える。
+	resp.ChapterCount = -1
+	if chapters, ok := decodeChapters(stream.ChapterRaw); ok {
+		resp.ChapterCount = len(chapters)
+	}
+
 	return resp
 }
 

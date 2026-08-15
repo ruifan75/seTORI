@@ -223,6 +223,10 @@ type StreamResponse struct {
 	HolodexTimelineSongs []SongSuggestion    `json:"holodex_timeline_songs,omitempty"` // holodex_data から解析
 	CommentTimelineSongs []CommentSong       `json:"comment_timeline_songs,omitempty"` // comment_songs から解析（分析済みキャッシュ）
 	HasCommentRaw        bool                `json:"has_comment_raw"`                  // comment_raw に解析可能なコメントがあるか
+	ChapterTimelineSongs []CommentSong       `json:"chapter_timeline_songs,omitempty"` // chapter_songs から解析（分析済みキャッシュ）
+	// ChapterCount は配信者が付けた章節の数。-1 は「まだ調べていない」で、0（＝調べたが
+	// 章節が無い）とは別。同じ見た目にすると取得を試す導線が消える。
+	ChapterCount int `json:"chapter_count"`
 	// CommentSongsAnalyzedAt は解析を最後に走らせた時刻。updated_at では代用できない
 	// （毎日回る Holodex 同期が全配信の updated_at を今日に押し上げる）。
 	CommentSongsAnalyzedAt *string   `json:"comment_songs_analyzed_at,omitempty"`
