@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import SongSearchInput from './SongSearchInput';
 import SingerSearchInput from './SingerSearchInput';
+import ArtistSearchInput from './ArtistSearchInput';
 import FieldProvenance from './FieldProvenance';
 import { youtubePlayerGetCurrentTime, youtubePlayerSeekTo } from './youtubePlayerControl';
 import TimestampTweaker from './TimestampTweaker';
@@ -215,12 +216,18 @@ export default function PerformanceFields({
                         <label className="block text-sm font-medium text-gray-700 mb-1">
                           原曲アーティスト
                         </label>
-                        <input
-                          type="text"
+                        <ArtistSearchInput
                           value={value.artist}
-                          onChange={(e) => onChange({ artist: e.target.value })}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                          placeholder="アーティスト名を入力"
+                          onChange={(artist) => onChange({ artist })}
+                          onSelectArtist={(artist) =>
+                            onChange({
+                              artist: artist.name,
+                              // 読みは DB のものを引き継ぐ。空で上書きすると、
+                              // 既に入っている読みを消してしまう
+                              ...(artist.name_reading ? { artistReading: artist.name_reading } : {}),
+                            })
+                          }
+                          placeholder="アーティスト名を入力して検索"
                         />
                         {/* 由来（元の値 → どの処理 → 今の値）。changes が無い古い経路は従来表示 */}
                         {value.changes?.length ? (
