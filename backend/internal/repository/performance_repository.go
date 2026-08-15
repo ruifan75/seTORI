@@ -27,8 +27,12 @@ type PerformanceWithDetails struct {
 	OriginalArtist string                   `json:"original_artist"`
 	Artists        []models.ArtistReference `json:"artists"`
 	Arts           sql.NullString           `json:"arts"`
-	Tags           []models.PerformanceTag  `json:"tags"`
-	Singers        []models.Singer          `json:"singers"`
+	// ItunesID は「この曲に紐付いている primary な iTunes ID」。
+	// **FindByStreamID でのみ埋まる**（編集画面が紐付けの有無を出すために要る）。
+	// 一覧系まで JOIN を広げていないのは、そこでは使われないため。
+	ItunesID sql.NullInt64           `json:"itunes_id"`
+	Tags     []models.PerformanceTag `json:"tags"`
+	Singers  []models.Singer         `json:"singers"`
 }
 
 // attachArtistReferences は演唱一覧に song_artists の安定した UUID 参照を一括で付与する。
@@ -82,9 +86,10 @@ func (r *PerformanceRepository) FindByStreamID(streamID string) ([]PerformanceWi
 	query := `
 		SELECT p.id, p.stream_id, p.song_id, p.start_seconds, p.end_seconds, p.order_index,
 		       p.holodex_song_id, p.custom_tags, p.created_at, p.end_source, p.end_confirmed,
-		       s.name AS song_name, s.original_artist, s.arts
+		       s.name AS song_name, s.original_artist, s.arts, si.itunes_id
 		FROM performances p
 		JOIN songs s ON p.song_id = s.id
+		LEFT JOIN song_itunes si ON si.song_id = s.id AND si.is_primary
 		WHERE p.stream_id = $1
 		ORDER BY p.start_seconds ASC`
 
@@ -98,7 +103,7 @@ func (r *PerformanceRepository) FindByStreamID(streamID string) ([]PerformanceWi
 	for rows.Next() {
 		var p PerformanceWithDetails
 		err := rows.Scan(&p.ID, &p.StreamID, &p.SongID, &p.StartSeconds, &p.EndSeconds,
-			&p.OrderIndex, &p.HolodexSongID, &p.CustomTags, &p.CreatedAt, &p.EndSource, &p.EndConfirmed, &p.SongName, &p.OriginalArtist, &p.Arts)
+			&p.OrderIndex, &p.HolodexSongID, &p.CustomTags, &p.CreatedAt, &p.EndSource, &p.EndConfirmed, &p.SongName, &p.OriginalArtist, &p.Arts, &p.ItunesID)
 		if err != nil {
 			return nil, fmt.Errorf("scan performance: %w", err)
 		}

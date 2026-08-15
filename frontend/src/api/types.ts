@@ -272,6 +272,8 @@ export interface Performance {
   end_source: EndSource;
   /** 人が値を見て認めたか。由来とは独立 */
   end_confirmed: boolean;
+  // この曲に紐付いている primary な iTunes ID（配信詳細でのみ返る）
+  itunes_id?: number;
   // タグ検索など配信横断の一覧でのみ設定される
   stream_title?: string;
   stream_date?: string;

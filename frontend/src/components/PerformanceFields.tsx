@@ -56,6 +56,10 @@ interface Props {
   onTimeChange: (field: 'start' | 'end', timeStr: string) => void;
   onToggleTag: (tagId: string) => void;
   onApplyEndSource: (source: 'chat' | 'comment') => void;
+  // iTunes ID の紐付けを外す。誤った ID が song_itunes に焼き付くのを防ぐ
+  onClearItunes?: () => void;
+  // 既存曲への紐付けを解除する（＝新しい曲として登録し直す）
+  onClearSong?: () => void;
   performanceTags: PerformanceTagOption[];
   currentPlayerTime: number | null;
   participants: Singer[];
@@ -65,6 +69,77 @@ interface Props {
   showToast?: (message: string, type?: 'success' | 'error' | 'info') => void;
 }
 
+// MatchStatus は「今この行がどの楽曲・どの iTunes ID に結びついているか」を出す。
+//
+// **ここに置くのが要点。** 以前は編集画面の外殻にだけあり、審査画面には
+// iTunes の状態がまったく出ていなかった ── 検索で iTunes の曲を選んでも
+// 画面上は何も変わらず、紐付いたのか分からなかった。入力欄のすぐ下に置けば
+// 両方の画面で同じものが出る。
+//
+// iTunes が 3 態あるのは、**保存時に紐付けが作られる**状態を目立たせるため。
+// primary な iTunes ID は Holodex へのアップロードにも使われるので、
+// 誤った紐付けは外部へ伝播する。
+function MatchStatus({
+  value,
+  onClearItunes,
+  onClearSong,
+}: {
+  value: PerformanceFieldValues;
+  onClearItunes?: () => void;
+  onClearSong?: () => void;
+}) {
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+      {value.matchedSongId ? (
+        <span className="text-gray-500">
+          楽曲{' '}
+          <a
+            href={`/songs/${value.matchedSongId}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-mono text-indigo-600 hover:underline"
+          >
+            {value.matchedSongId.slice(0, 8)}…
+          </a>{' '}
+          （既存）
+          {onClearSong && (
+            <button
+              onClick={onClearSong}
+              className="ml-1 text-gray-400 hover:text-red-600"
+              title="紐付けを解除し、新しい曲として登録する"
+            >
+              ×
+            </button>
+          )}
+        </span>
+      ) : (
+        <span className="text-green-700">新規作成されます</span>
+      )}
+
+      {value.itunesId ? (
+        <span className={value.itunesFromDb ? 'text-gray-500' : 'text-amber-700'}>
+          iTunes <span className="font-mono">{value.itunesId}</span>
+          {value.itunesFromDb ? '（紐付け済み）' : '（保存時に紐付け）'}
+          {/* 外せるのは「まだ書き込まれていない紐付け」だけ。保存済みのものを
+              ここで消しても保存時に何も起きない（linkItunesID は追加しかしない）ので、
+              取り消せるかのように見せない。解除は楽曲ページの iTunes 管理で行う */}
+          {onClearItunes && !value.itunesFromDb && (
+            <button
+              onClick={onClearItunes}
+              className="ml-1 text-gray-400 hover:text-red-600"
+              title="この iTunes ID の紐付けを外す"
+            >
+              ×
+            </button>
+          )}
+        </span>
+      ) : (
+        <span className="text-gray-400">iTunes なし</span>
+      )}
+    </div>
+  );
+}
+
 export default function PerformanceFields({
   value,
   onChange,
@@ -72,6 +147,8 @@ export default function PerformanceFields({
   onTimeChange,
   onToggleTag,
   onApplyEndSource,
+  onClearItunes,
+  onClearSong,
   performanceTags,
   currentPlayerTime,
   participants,
@@ -94,6 +171,7 @@ export default function PerformanceFields({
                           placeholder="楽曲名を入力して検索"
                           showToast={showToast}
                         />
+                        <MatchStatus value={value} onClearItunes={onClearItunes} onClearSong={onClearSong} />
                         {/* 由来（元の値 → どの処理 → 今の値）。changes が無い古い経路は従来表示 */}
                         {value.changes?.length ? (
                           <FieldProvenance changes={value.changes} field="name" />

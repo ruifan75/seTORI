@@ -277,6 +277,10 @@ type PerformanceResponse struct {
 	// 編集画面はこれを読んで endSource を復元し、保存時にそのまま送り返す。
 	EndSource    string `json:"end_source"`
 	EndConfirmed bool   `json:"end_confirmed"`
+	// この曲に紐付いている primary な iTunes ID。配信詳細（編集画面）でのみ設定される。
+	// 編集カードが「紐付け済みか」を出すのに要る ── 無いと、既に紐付いている曲まで
+	// 「iTunes なし」と表示してしまう
+	ItunesID *int64 `json:"itunes_id,omitempty"`
 	// タグ検索など配信横断の一覧でのみ設定される（配信詳細では省略）
 	StreamTitle  string  `json:"stream_title,omitempty"`
 	StreamDate   string  `json:"stream_date,omitempty"`

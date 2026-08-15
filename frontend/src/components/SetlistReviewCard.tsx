@@ -249,27 +249,13 @@ export default function SetlistReviewCard({
           })
         }
         onApplyEndSource={() => undefined}
+        onClearItunes={() => patch({ itunesId: null })}
+        onClearSong={() => patch({ matchedSongId: null })}
         performanceTags={performanceTags}
         currentPlayerTime={currentPlayerTime}
         participants={participants}
         channelOwner={channelOwner}
       />
-
-      <div className="flex flex-wrap items-center gap-2 text-xs">
-        {draft.matchedSongId ? (
-          <>
-            <span className="text-green-700">✓ 登録済みの曲に紐づけ済み</span>
-            <button
-              onClick={() => patch({ matchedSongId: null })}
-              className="text-gray-500 hover:text-gray-800 underline"
-            >
-              解除して新しい曲として登録
-            </button>
-          </>
-        ) : (
-          <span className="text-amber-700">未紐づけ（承認すると新しい曲が作られます）</span>
-        )}
-      </div>
 
       {suggestion.note && <p className="text-xs text-gray-500">💬 {suggestion.note}</p>}
       {(suggestion.overlaps?.length ?? 0) > 0 && (

@@ -740,7 +740,10 @@ export default function StreamDetailPage() {
             singerIds: perf.singers.map((s) => s.id),
             matchedSongId: perf.song_id,
             artUrl: perf.arts || null,
-            itunesId: null, // 現有 performance 不會有 iTunes ID
+            // 既に紐付いている iTunes ID。null にしていた頃は、紐付け済みの曲まで
+            // カードが「iTunes なし」と表示していた
+            itunesId: perf.itunes_id ?? null,
+            itunesFromDb: perf.itunes_id != null,
             trackDuration: null,
             originalName: perf.song_name,
             originalArtist: perf.original_artist,
@@ -2027,49 +2030,6 @@ export default function StreamDetailPage() {
                         )}
                         <div>
                           <span className="text-sm font-medium text-gray-500">#{index + 1}</span>
-                          {/* Song ID Badge */}
-                          <div className="flex items-center gap-2 mt-1">
-                            {song.matchedSongId ? (
-                              <a
-                                href={`/songs/${song.matchedSongId}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-xs font-mono text-indigo-600 hover:underline"
-                              >
-                                {song.matchedSongId.slice(0, 8)}...
-                              </a>
-                            ) : (
-                              <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs font-medium rounded">
-                                New
-                              </span>
-                            )}
-                            {/* iTunes ID：未登録（amber）は保存時に song_itunes へ紐付けが作られる。
-                                primary な ID は Holodex へのアップロードにも使われるため誤りは外部に伝播する */}
-                            {song.itunesId && (
-                              <span
-                                className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-mono rounded ${
-                                  song.itunesFromDb
-                                    ? 'bg-gray-100 text-gray-600'
-                                    : 'bg-amber-100 text-amber-800'
-                                }`}
-                                title={
-                                  song.itunesFromDb
-                                    ? `iTunes ID ${song.itunesId}（登録済み）`
-                                    : `iTunes ID ${song.itunesId}（未登録：保存時にこの楽曲へ紐付けます）`
-                                }
-                              >
-                                iTunes: {song.itunesId}
-                                {!song.itunesFromDb && <span aria-hidden="true">＋</span>}
-                                <button
-                                  onClick={() => clearItunesId(index)}
-                                  className="ml-0.5 text-gray-400 hover:text-red-600"
-                                  title="この iTunes ID の紐付けを外す"
-                                >
-                                  ×
-                                </button>
-                              </span>
-                            )}
-                          </div>
                         </div>
                       </div>
                       <button
@@ -2091,6 +2051,7 @@ export default function StreamDetailPage() {
                       onTimeChange={(field, timeStr) => handleTimeChange(index, field, timeStr)}
                       onToggleTag={(tagId) => toggleTag(index, tagId)}
                       onApplyEndSource={(source) => applyEndSource(index, source)}
+                      onClearItunes={() => clearItunesId(index)}
                       performanceTags={PERFORMANCE_TAGS}
                       currentPlayerTime={currentPlayerTime}
                       participants={participants}

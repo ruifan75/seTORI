@@ -396,6 +396,9 @@ func (s *StreamService) toPerformanceResponse(perf repository.PerformanceWithDet
 	if perf.Arts.Valid {
 		resp.Arts = &perf.Arts.String
 	}
+	if perf.ItunesID.Valid {
+		resp.ItunesID = &perf.ItunesID.Int64
+	}
 
 	// 轉換標籤
 	resp.Tags = make([]dto.PerformanceTagResponse, len(perf.Tags))
