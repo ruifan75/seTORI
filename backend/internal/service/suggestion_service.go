@@ -421,7 +421,22 @@ func applyMissingSongEdits(base, edits dto.MissingSongPayload) (dto.MissingSongP
 		out.Tags = edits.Tags
 		changed = append(changed, "タグ")
 	}
+	// iTunes ID は検索で曲を選んだときだけ入る。**画面が持っている値を正とする**
+	// ── 曲を選び直せば別の ID になり、既存曲を選べば消える（その曲は自前の
+	// 紐付けを持っている）。ここで写し忘れると、iTunes から新曲を登録しても
+	// ID が承認の手前で捨てられ、Apple Music へのリンクが付かない。
+	if !sameItunesID(edits.ItunesID, base.ItunesID) {
+		out.ItunesID = edits.ItunesID
+		changed = append(changed, "iTunes ID")
+	}
 	return out, changed
+}
+
+func sameItunesID(a, b *int64) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }
 
 func sameStrings(a, b []string) bool {

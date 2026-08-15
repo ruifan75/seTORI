@@ -327,3 +327,47 @@ func TestHasCounterpart(t *testing.T) {
 		t.Error("窓の外なのに対応ありと判定した")
 	}
 }
+
+// 審査画面で iTunes から選んだ ID が承認まで届くこと。
+//
+// applyMissingSongEdits は out := base から始めて必要な欄だけ写すので、
+// 写し忘れた欄は**画面で入力しても黙って捨てられる**。iTunes ID がまさにそれで、
+// 新曲を iTunes から登録しても Apple Music の紐付けが付かなかった。
+func TestApplyMissingSongEditsItunesID(t *testing.T) {
+	id := func(v int64) *int64 { return &v }
+	base := dto.MissingSongPayload{SongName: "テスト曲", StartSeconds: 100, EndSeconds: 200}
+
+	t.Run("iTunes から選んだ ID が入る", func(t *testing.T) {
+		edits := base
+		edits.ItunesID = id(1440810103)
+		out, changed := applyMissingSongEdits(base, edits)
+		if out.ItunesID == nil || *out.ItunesID != 1440810103 {
+			t.Fatalf("ItunesID = %v, want 1440810103", out.ItunesID)
+		}
+		if len(changed) != 1 || changed[0] != "iTunes ID" {
+			t.Errorf("changed = %v, want [iTunes ID]", changed)
+		}
+	})
+
+	t.Run("触っていなければ変更扱いにしない", func(t *testing.T) {
+		withID := base
+		withID.ItunesID = id(999)
+		edits := withID
+		edits.ItunesID = id(999) // 別のポインタだが同じ値
+		_, changed := applyMissingSongEdits(withID, edits)
+		if len(changed) != 0 {
+			t.Errorf("changed = %v, want empty（値が同じなら変更ではない）", changed)
+		}
+	})
+
+	t.Run("既存曲を選び直したら外れる", func(t *testing.T) {
+		withID := base
+		withID.ItunesID = id(999)
+		edits := withID
+		edits.ItunesID = nil // 候補ボタンで DB の曲を選ぶと消える
+		out, _ := applyMissingSongEdits(withID, edits)
+		if out.ItunesID != nil {
+			t.Errorf("ItunesID = %v, want nil（その曲は自前の紐付けを持つ）", *out.ItunesID)
+		}
+	})
+}
