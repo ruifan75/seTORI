@@ -52,34 +52,8 @@ func (s *PerformanceService) CreatePerformances(streamID string, items []dto.Cre
 			return nil, fmt.Errorf("find or create song: %w", err)
 		}
 
-		// 2. 如果有 iTunes ID，確保新增 iTunes ID 與歌曲的關聯
-		if item.ItunesID != nil && *item.ItunesID > 0 {
-			// 檢查這個 iTunes ID 是否已經被其他歌曲關聯
-			existingItunes, _ := s.songItunesRepo.FindByItunesID(*item.ItunesID)
-
-			// 只有在以下情況才新增：
-			// 1. iTunes ID 還沒有被關聯到任何歌曲，或
-			// 2. iTunes ID 已關聯到其他歌曲（這種情況不應該發生，但為安全起見檢查）
-			if existingItunes == nil {
-				// 檢查該歌曲是否已經有其他 iTunes ID
-				existingSongItunes, _ := s.songItunesRepo.FindBySongID(song.ID)
-				isPrimary := isNewSong || len(existingSongItunes) == 0 // 新歌曲或該歌曲還沒有任何 iTunes ID 時設為主要
-
-				// iTunes ID 未被關聯，新增關聯
-				songItunes := &models.SongITunes{
-					SongID:    song.ID,
-					ITunesID:  *item.ItunesID,
-					IsPrimary: isPrimary,
-				}
-				if err := s.songItunesRepo.Create(songItunes); err != nil {
-					// 記錄錯誤但不中斷
-					fmt.Printf("create song itunes error: %v\n", err)
-				}
-			} else if existingItunes.SongID != song.ID {
-				// iTunes ID 關聯到不同的歌曲（這可能表示重複的歌曲，記錄警告）
-				fmt.Printf("warning: iTunes ID %d already associated with different song\n", *item.ItunesID)
-			}
-		}
+		// 2. iTunes ID があれば楽曲へ紐づける
+		s.linkItunesID(song, item.ItunesID, isNewSong)
 
 		// 3. 目標状態を組み立てる（書き込みは後段の差分更新でまとめて行う）
 		// 終了時間の由来。編集画面から来たものは人が見たとみなして confirmed=true を既定にし、
@@ -120,6 +94,38 @@ func (s *PerformanceService) CreatePerformances(streamID string, items []dto.Cre
 	return &dto.CreatePerformancesResponse{
 		CreatedCount: len(perfIDs),
 	}, nil
+}
+
+// linkItunesID は iTunes ID を楽曲へ紐づける（song_itunes）。
+//
+// **楽曲を作る経路すべてから呼ぶこと。** findOrCreateSong は iTunes ID を
+// 「照合の手がかり」としてしか使わず、紐付けは作らない。以前ここが
+// CreatePerformances の中に直接書かれていたため、承認経路
+// （CreateFromMissingSong）を通って作られた楽曲には iTunes が紐づかず、
+// 審査画面で iTunes から選んで登録しても ID が落ちていた。
+//
+// 失敗しても楽曲と歌唱の作成は止めない（紐付けは補助情報）。
+func (s *PerformanceService) linkItunesID(song *models.Song, itunesID *int64, isNewSong bool) {
+	if itunesID == nil || *itunesID <= 0 {
+		return
+	}
+	// 既に別の楽曲に紐づいているなら触らない（重複楽曲の兆候なので警告だけ残す）
+	existing, _ := s.songItunesRepo.FindByItunesID(*itunesID)
+	if existing != nil {
+		if existing.SongID != song.ID {
+			logger.Warnf("iTunes ID %d は既に別の楽曲に紐づいています（%s）", *itunesID, song.Name)
+		}
+		return
+	}
+	// 新曲か、その楽曲がまだ iTunes ID を 1 つも持たないなら primary にする
+	owned, _ := s.songItunesRepo.FindBySongID(song.ID)
+	if err := s.songItunesRepo.Create(&models.SongITunes{
+		SongID:    song.ID,
+		ITunesID:  *itunesID,
+		IsPrimary: isNewSong || len(owned) == 0,
+	}); err != nil {
+		logger.Warnf("iTunes ID の紐付けに失敗 (%s): %v", song.Name, err)
+	}
 }
 
 // findOrCreateSong 尋找或建立歌曲
@@ -347,10 +353,13 @@ func (s *PerformanceService) OverlappingPerformances(streamID string, start, end
 // 歌手・タグ・終了時間の由来も payload から反映する。以前は perfRepo.Create を呼ぶだけで
 // SetSingers を通らず、multi_singer を審査に回す設計なのに承認しても vocalist が空だった。
 func (s *PerformanceService) CreateFromMissingSong(p dto.MissingSongPayload) error {
-	song, err := s.songForMissing(p)
+	song, isNew, err := s.songForMissing(p)
 	if err != nil {
 		return err
 	}
+	// iTunes ID を紐づける。審査画面で iTunes から選んだ新曲はこれが無いと
+	// ID が落ちる（findOrCreateSong は照合に使うだけで紐付けは作らない）。
+	s.linkItunesID(song, p.ItunesID, isNew)
 
 	// 終了時間の確度。審査担当が画面で時間を見て承認するので、終了時間があれば
 	// confirmed とみなす。無い（0＝動画の最後まで）ものは確認しようがないので false。
@@ -402,30 +411,31 @@ func (s *PerformanceService) CreateFromMissingSong(p dto.MissingSongPayload) err
 //
 // song_id が指す曲が消えている（統合された・削除された）場合は名前で引き直す。
 // 提案は溜まるものなので、承認するときに対象が消えていることは普通に起きる。
-func (s *PerformanceService) songForMissing(p dto.MissingSongPayload) (*models.Song, error) {
+// 戻り値の bool は「新しく作った楽曲か」（iTunes ID を primary にするかの判断に使う）。
+func (s *PerformanceService) songForMissing(p dto.MissingSongPayload) (*models.Song, bool, error) {
 	if id := strings.TrimSpace(p.SongID); id != "" {
 		songID, err := uuid.Parse(id)
 		if err != nil {
-			return nil, fmt.Errorf("song_id が不正です")
+			return nil, false, fmt.Errorf("song_id が不正です")
 		}
 		song, err := s.songRepo.FindByID(songID)
 		if err != nil {
-			return nil, fmt.Errorf("find song: %w", err)
+			return nil, false, fmt.Errorf("find song: %w", err)
 		}
 		if song != nil {
-			return song, nil
+			return song, false, nil
 		}
 		logger.Warnf("missing song suggestion points at a song that no longer exists (%s); falling back to name lookup", id)
 	}
-	song, _, err := s.findOrCreateSong(dto.CreatePerformanceItem{
+	song, isNew, err := s.findOrCreateSong(dto.CreatePerformanceItem{
 		Name:           p.SongName,
 		OriginalArtist: p.OriginalArtist,
 		ItunesID:       p.ItunesID,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("find or create song: %w", err)
+		return nil, false, fmt.Errorf("find or create song: %w", err)
 	}
-	return song, nil
+	return song, isNew, nil
 }
 
 // defaultSingerIDs は配信のオーナー（居なければ参加者が1人のときだけその人）を返す。

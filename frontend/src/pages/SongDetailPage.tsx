@@ -604,7 +604,10 @@ export default function SongDetailPage() {
               className="w-32 h-32 rounded-lg object-cover shadow-md"
             />
           )}
-          <div className="flex-1">
+          {/* min-w-0 が無いと、中の長い文字列（iTunes の歌手名など）に押されて
+              この列が伸び、パネルごと横スクロールになる。flex の子は既定で
+              min-width:auto なので、内容より小さくなることを拒む。 */}
+          <div className="flex-1 min-w-0">
             {isEditing ? (
               <div className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -692,8 +695,12 @@ export default function SongDetailPage() {
                       {(editedSong.itunes_ids || []).map((itunes) => {
                         const detail = itunesDetails[itunes.itunes_id];
                         return (
+                          // 長い曲名・歌手名で容器が横に伸びないようにする。
+                          // truncate は flex の子では min-w-0 が無いと効かない（既定の
+                          // min-width:auto が内容より小さくなるのを拒むため）。画像と
+                          // ボタンには shrink-0 を付けて、縮むのは文字側だけにする。
                           <div key={itunes.itunes_id} className="flex items-center gap-3 p-2 bg-gray-50 rounded-lg">
-                            <div className="w-12 h-12 bg-gray-200 rounded overflow-hidden flex items-center justify-center">
+                            <div className="w-12 h-12 shrink-0 bg-gray-200 rounded overflow-hidden flex items-center justify-center">
                               {detail?.artwork_url ? (
                                 <img
                                   src={detail.artwork_url}
@@ -705,34 +712,38 @@ export default function SongDetailPage() {
                               )}
                             </div>
                             <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-2 min-w-0">
+                                {/* 曲名を優先して見せる。歌手名は連名クレジットで
+                                    100 文字を超えることがあり、等しく縮めると曲名が
+                                    「ユメ…」まで潰れる。曲名は最大 55% までで先に確保し、
+                                    残りを歌手名が使う。 */}
                                 <a
                                   href={`https://music.apple.com/song/${itunes.itunes_id}`}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  className="text-sm font-medium text-indigo-600 hover:text-indigo-700 hover:underline truncate"
+                                  className="shrink-0 max-w-[55%] truncate text-sm font-medium text-indigo-600 hover:text-indigo-700 hover:underline"
                                 >
                                   {detail?.track_name || `ID: ${itunes.itunes_id}`}
                                 </a>
                                 {detail?.artist_name && (
-                                  <span className="text-xs text-gray-600 truncate">{detail.artist_name}</span>
+                                  <span className="min-w-0 truncate text-xs text-gray-600">{detail.artist_name}</span>
                                 )}
                               </div>
                               {detail?.collection_name && (
-                                <div className="text-xs text-gray-500 truncate">{detail.collection_name}</div>
+                                <div className="truncate text-xs text-gray-500">{detail.collection_name}</div>
                               )}
                             </div>
                             <button
                               onClick={() => handleSyncArtFromItunes(itunes.itunes_id)}
                               disabled={isSearching}
-                              className="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                              className="shrink-0 whitespace-nowrap px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 disabled:opacity-50 disabled:cursor-not-allowed"
                               title="このiTunes IDのアートワークを設定"
                             >
                               アート設定
                             </button>
                             <button
                               onClick={() => handleSetPrimary(itunes.itunes_id)}
-                              className={`px-2 py-1 text-xs rounded ${
+                              className={`shrink-0 whitespace-nowrap px-2 py-1 text-xs rounded ${
                                 itunes.is_primary
                                   ? 'bg-pink-500 text-white'
                                   : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
@@ -742,7 +753,7 @@ export default function SongDetailPage() {
                             </button>
                             <button
                               onClick={() => handleRemoveItunes(itunes.itunes_id)}
-                              className="px-2 py-1 text-xs bg-red-100 text-red-700 rounded hover:bg-red-200"
+                              className="shrink-0 whitespace-nowrap px-2 py-1 text-xs bg-red-100 text-red-700 rounded hover:bg-red-200"
                             >
                               削除
                             </button>
