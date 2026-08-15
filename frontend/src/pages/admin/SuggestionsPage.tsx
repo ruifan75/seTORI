@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { performanceApi, songApi, streamApi, suggestionApi, tagApi } from '../../api/client';
 import type {
   MissingSongPayload,
+  Singer,
   Suggestion,
   SuggestionGroup,
   SuggestionKind,
@@ -319,6 +320,9 @@ function GroupCard({
   // 審査カードは一度に 1 枚だけ開く。開いた曲へプレイヤーが飛ぶ（セットリスト編集と同じ）
   const [openId, setOpenId] = useState<string | null>(null);
   const [playerTime, setPlayerTime] = useState<number | null>(null);
+  // 検索で足したゲスト歌手。配信の参加者一覧（サーバー由来）には居ないので
+  // ここで抱えておかないと、選んだ本人が候補に並ばず外せなくなる
+  const [extraSingers, setExtraSingers] = useState<Singer[]>([]);
   // 審査カードの編集値は親が持つ。生コメントの ＋ から直接書き換えるため
   const [drafts, setDrafts] = useState<Record<string, PerformanceFieldValues>>({});
   const draftOf = (s: Suggestion) => drafts[s.id] ?? toFieldValues(s.id, s.payload!);
@@ -477,8 +481,13 @@ function GroupCard({
             <div key={s.id} className="py-1">
               <SetlistReviewCard
                 suggestion={s}
-                participants={playback.participants}
+                participants={[...playback.participants, ...extraSingers]}
                 channelOwner={playback.channelOwner}
+                onAddParticipant={(singer) =>
+                  setExtraSingers((prev) =>
+                    prev.some((s) => s.id === singer.id) ? prev : [...prev, singer]
+                  )
+                }
                 performanceTags={performanceTags}
                 currentPlayerTime={playerTime}
                 expanded={openId === s.id}

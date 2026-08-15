@@ -1,3 +1,4 @@
+import { useMemo, useState } from 'react';
 import SongSearchInput from './SongSearchInput';
 import SingerSearchInput from './SingerSearchInput';
 import FieldProvenance from './FieldProvenance';
@@ -156,6 +157,23 @@ export default function PerformanceFields({
   onAddParticipant,
   showToast,
 }: Props) {
+  const [searchingSinger, setSearchingSinger] = useState(false);
+
+  // 並べる候補＝配信の参加者。チャンネル主を先頭に置く（歌枠では最も押される）。
+  // 選択済みなのに参加者に居ない歌手も足す ── 落とすと、値は送られるのに
+  // 画面には出ないという最悪の形になる（外すことも確認することもできない）
+  const vocalOptions = useMemo(() => {
+    const byId = new Map<string, Singer>();
+    if (channelOwner) byId.set(channelOwner.id, channelOwner);
+    for (const singer of participants) {
+      if (!byId.has(singer.id)) byId.set(singer.id, singer);
+    }
+    for (const id of value.singerIds) {
+      if (!byId.has(id)) byId.set(id, { id, name: id } as Singer);
+    }
+    return Array.from(byId.values());
+  }, [participants, channelOwner, value.singerIds]);
+
   return (
     <>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -492,71 +510,82 @@ export default function PerformanceFields({
                       </div>
                     </div>
 
-                    {/* Vocalist (ボーカル) Selection */}
+                    {/* ボーカル。**参加者からの選択が主で、検索は例外の入口**。
+                        以前は毎回検索して選び、外すのは ✕ を押す形だった。歌枠の
+                        ボーカルはほぼ必ず配信の参加者の中に居るので、並べて押すだけにする。
+                        参加者に居ない歌手（ゲスト等）だけ検索から足す */}
                     <div className="mt-4">
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         ボーカル
                       </label>
-                      <div className="space-y-2">
-                        {/* Display selected vocalists */}
-                        {value.singerIds.length > 0 && (
-                          <div className="flex flex-wrap gap-2 mb-2">
-                            {value.singerIds
-                              .slice()
-                              .sort((a, b) => {
-                                // 頻道擁有者排在最前面
-                                if (channelOwner && a === channelOwner.id) return -1;
-                                if (channelOwner && b === channelOwner.id) return 1;
-                                return 0;
-                              })
-                              .map((singerId) => {
-                              const singer = participants.find((p) => p.id === singerId);
-                              return singer ? (
-                                <div
-                                  key={singerId}
-                                  className="flex items-center gap-2 px-3 py-1 bg-indigo-100 text-indigo-700 rounded-full text-sm"
-                                >
-                                  {singer.photo_url && (
-                                    <img
-                                      src={singer.photo_url}
-                                      alt={singer.name}
-                                      className="w-5 h-5 rounded-full"
-                                      onError={(e) => {
-                                        e.currentTarget.onerror = null;
-                                        e.currentTarget.src = `https://holodex.net/statics/channelImg/${singer.id}/50.png`;
-                                      }}
-                                    />
-                                  )}
-                                  <span>{singer.name}</span>
-                                  <button
-                                    onClick={() => {
-                                      const newSingerIds = value.singerIds.filter((id) => id !== singerId);
-                                      onChange({ singerIds: newSingerIds });
-                                    }}
-                                    className="ml-1 text-indigo-600 hover:text-indigo-800"
-                                  >
-                                    ✕
-                                  </button>
-                                </div>
-                              ) : null;
-                            })}
-                          </div>
-                        )}
-                        {/* Vocalist search input */}
-                        <SingerSearchInput
-                          onSelectSinger={(singer) => {
-                            if (!value.singerIds.includes(singer.id)) {
-                              onChange({ singerIds: [...value.singerIds, singer.id] });
-                              // 如果歌手不在participants中，加入
-                              if (!participants.find(p => p.id === singer.id)) {
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {vocalOptions.map((singer) => {
+                          const selected = value.singerIds.includes(singer.id);
+                          return (
+                            <button
+                              key={singer.id}
+                              type="button"
+                              onClick={() =>
+                                onChange({
+                                  singerIds: selected
+                                    ? value.singerIds.filter((id) => id !== singer.id)
+                                    : [...value.singerIds, singer.id],
+                                })
+                              }
+                              title={singer.name}
+                              aria-pressed={selected}
+                              className={`inline-flex items-center gap-1.5 pl-1 pr-2.5 py-1 rounded-full border text-sm transition-colors ${
+                                selected
+                                  ? 'bg-indigo-100 border-indigo-300 text-indigo-800'
+                                  : 'bg-white border-gray-200 text-gray-500 hover:border-indigo-300 hover:bg-indigo-50'
+                              }`}
+                            >
+                              {singer.photo_url ? (
+                                <img
+                                  src={singer.photo_url}
+                                  alt=""
+                                  className={`w-5 h-5 rounded-full ${selected ? '' : 'opacity-60'}`}
+                                  onError={(e) => {
+                                    e.currentTarget.onerror = null;
+                                    e.currentTarget.src = `https://holodex.net/statics/channelImg/${singer.id}/50.png`;
+                                  }}
+                                />
+                              ) : (
+                                <span className="w-5 h-5 rounded-full bg-gray-200" />
+                              )}
+                              <span className="max-w-[11rem] truncate">{singer.name}</span>
+                              {/* 色だけに頼らない。選択済みかどうかを記号でも出す */}
+                              {selected && <span aria-hidden="true">✓</span>}
+                            </button>
+                          );
+                        })}
+                        <button
+                          type="button"
+                          onClick={() => setSearchingSinger((v) => !v)}
+                          className="px-2.5 py-1 rounded-full border border-dashed border-gray-300 text-sm text-gray-500 hover:border-indigo-300 hover:text-indigo-600"
+                        >
+                          {searchingSinger ? '閉じる' : '＋ 参加者以外'}
+                        </button>
+                      </div>
+                      {(searchingSinger || vocalOptions.length === 0) && (
+                        <div className="mt-2">
+                          <SingerSearchInput
+                            onSelectSinger={(singer) => {
+                              if (!value.singerIds.includes(singer.id)) {
+                                onChange({ singerIds: [...value.singerIds, singer.id] });
+                              }
+                              // 参加者に足しておかないと、選んだ本人が候補に並ばず
+                              // 次に外すことも選び直すこともできなくなる
+                              if (!participants.find((p) => p.id === singer.id)) {
                                 onAddParticipant?.(singer);
                               }
-                            }
-                          }}
-                          excludeIds={value.singerIds}
-                          placeholder="ボーカルを検索して追加..."
-                        />
-                      </div>
+                              setSearchingSinger(false);
+                            }}
+                            excludeIds={value.singerIds}
+                            placeholder="参加者以外のボーカルを検索..."
+                          />
+                        </div>
+                      )}
                     </div>
     </>
   );

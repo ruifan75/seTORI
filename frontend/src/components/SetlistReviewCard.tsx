@@ -45,6 +45,7 @@ export default function SetlistReviewCard({
   suggestion,
   participants,
   channelOwner,
+  onAddParticipant,
   performanceTags,
   currentPlayerTime,
   expanded,
@@ -58,6 +59,7 @@ export default function SetlistReviewCard({
   suggestion: Suggestion;
   participants: Singer[];
   channelOwner?: Singer | null;
+  onAddParticipant?: (singer: Singer) => void;
   performanceTags: PerformanceTagOption[];
   currentPlayerTime: number | null;
   expanded: boolean;
@@ -255,6 +257,7 @@ export default function SetlistReviewCard({
         currentPlayerTime={currentPlayerTime}
         participants={participants}
         channelOwner={channelOwner}
+        onAddParticipant={onAddParticipant}
       />
 
       {suggestion.note && <p className="text-xs text-gray-500">💬 {suggestion.note}</p>}
