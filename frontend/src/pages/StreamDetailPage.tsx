@@ -1554,18 +1554,26 @@ export default function StreamDetailPage() {
                       key={singer.id}
                       className="flex items-center gap-2 px-3 py-1 bg-gray-100 rounded-full text-sm"
                     >
-                      {singer.photo_url && (
-                        <img
-                          src={singer.photo_url}
-                          alt={singer.name}
-                          className="w-5 h-5 rounded-full"
-                          onError={(e) => {
-                            e.currentTarget.onerror = null;
-                            e.currentTarget.src = `https://holodex.net/statics/channelImg/${singer.id}/50.png`;
-                          }}
-                        />
-                      )}
-                      <span className="text-gray-700">{singer.name}</span>
+                      {/* リンクは名前と画像だけに掛ける。チップ全体を包むと、
+                          「参加者から外す」の ✕ を押したときにチャンネルページへ飛ぶ */}
+                      <Link
+                        to={`/singers/${singer.id}`}
+                        className="flex items-center gap-2 text-gray-700 hover:text-indigo-600 transition-colors"
+                        title={`${singer.name} のチャンネルページを開く`}
+                      >
+                        {singer.photo_url && (
+                          <img
+                            src={singer.photo_url}
+                            alt={singer.name}
+                            className="w-5 h-5 rounded-full"
+                            onError={(e) => {
+                              e.currentTarget.onerror = null;
+                              e.currentTarget.src = `https://holodex.net/statics/channelImg/${singer.id}/50.png`;
+                            }}
+                          />
+                        )}
+                        <span>{singer.name}</span>
+                      </Link>
                       {canEdit && participantAddOpen && (
                         <button
                           onClick={() =>
