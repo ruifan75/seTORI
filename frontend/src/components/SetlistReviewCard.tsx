@@ -1,7 +1,6 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { songApi } from '../api/client';
 import type { MissingSongPayload, Singer, Song, Suggestion } from '../api/types';
+import SongSearchInput from './SongSearchInput';
 import { formatSeconds, parseSeconds } from './usePerformanceTiming';
 import { youtubePlayerGetCurrentTime, youtubePlayerSeekTo } from './youtubePlayerControl';
 
@@ -45,25 +44,35 @@ export default function SetlistReviewCard({
   const [startText, setStartText] = useState(formatSeconds(base?.start_seconds ?? 0));
   const [endText, setEndText] = useState(base?.end_seconds ? formatSeconds(base.end_seconds) : '');
   const [singerIds, setSingerIds] = useState<string[]>(base?.singer_ids ?? []);
-  const [query, setQuery] = useState('');
+  // iTunes ID は検索で選んだときだけ入る。承認時に新曲を作るならそれに紐づく
+  const [itunesID, setItunesID] = useState<number | undefined>(base?.itunes_id);
   const [error, setError] = useState('');
-
-  const { data: searchResult, isFetching } = useQuery({
-    queryKey: ['songs', 'review-search', query],
-    queryFn: () => songApi.list(1, 8, query),
-    enabled: query.trim().length >= 2,
-  });
 
   if (!base) return null;
 
   const start = parseSeconds(startText);
   const end = endText.trim() === '' ? 0 : parseSeconds(endText);
 
-  const pickSong = (song: { id: string; name: string; original_artist: string }) => {
+  // 検索結果から曲を選ぶ。
+  //
+  // id が空文字なら「iTunes にはあるが DB に無い曲」── 照合先は無いので song_id は空のまま、
+  // 曲名・歌手と **iTunes ID** だけ受け取る。承認時に findOrCreateSong が新曲を作り、
+  // その iTunes ID が紐づく（iTunes ID は照合で最も強い証拠なので、ここで拾えるかどうかが
+  // 次回以降の当たりやすさに効く）。
+  const pickSong = (song: Song) => {
     setSongId(song.id);
     setSongName(song.name);
     setArtist(song.original_artist);
-    setQuery('');
+    setItunesID(song.itunes_ids?.[0]?.itunes_id);
+  };
+
+  // 候補ボタンから確定する。候補は DB の曲なので iTunes ID は持たない
+  // （紐付いていれば楽曲側に既にあるので、ここで送る必要がない）。
+  const pickCandidate = (songID: string, name: string, songArtist: string) => {
+    setSongId(songID);
+    setSongName(name);
+    setArtist(songArtist);
+    setItunesID(undefined);
   };
 
   // 照合を解除する。曲名はそのまま残し、承認時に findOrCreateSong で作り直す。
@@ -108,6 +117,7 @@ export default function SetlistReviewCard({
       start_seconds: start,
       end_seconds: end,
       singer_ids: singerIds,
+      itunes_id: itunesID,
     });
   };
 
@@ -141,24 +151,29 @@ export default function SetlistReviewCard({
 
       {/* 曲 */}
       <div>
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs text-gray-500 w-10 shrink-0">曲</span>
-          <input
-            type="text"
-            value={songName}
-            onChange={(e) => {
-              setSongName(e.target.value);
-              // 曲名を手で書き換えたら、それはもう選んだ曲ではない
-              setSongId('');
-            }}
-            className="flex-1 min-w-40 px-2 py-1 text-sm border border-gray-300 rounded"
-            placeholder="曲名"
-          />
+        <div className="flex flex-wrap items-start gap-2">
+          <span className="text-xs text-gray-500 w-10 shrink-0 pt-2">曲</span>
+          {/* 編集画面と同じ検索を使う（DB と iTunes を同時に引く）。
+              別実装にしていた頃、ここだけ DB のみ・2 文字以上で、
+              `糸` `恋` のような 1 文字の曲が引けず iTunes からの登録もできなかった。 */}
+          <div className="flex-1 min-w-40">
+            <SongSearchInput
+              value={songName}
+              onChange={(v) => {
+                setSongName(v);
+                // 曲名を手で書き換えたら、それはもう選んだ曲ではない
+                setSongId('');
+                setItunesID(undefined);
+              }}
+              onSelectSong={pickSong}
+              placeholder="曲名を入力して検索（DB と iTunes）"
+            />
+          </div>
           <input
             type="text"
             value={artist}
             onChange={(e) => setArtist(e.target.value)}
-            className="flex-1 min-w-32 px-2 py-1 text-sm border border-gray-300 rounded"
+            className="flex-1 min-w-32 px-2 py-2 text-sm border border-gray-300 rounded-lg"
             placeholder="原曲アーティスト"
           />
         </div>
@@ -192,7 +207,7 @@ export default function SetlistReviewCard({
             {base.candidates!.map((c) => (
               <button
                 key={c.song_id}
-                onClick={() => pickSong({ id: c.song_id, name: c.name, original_artist: c.artist })}
+                onClick={() => pickCandidate(c.song_id, c.name, c.artist)}
                 className={`px-2 py-1 text-xs rounded border ${
                   c.song_id === songId
                     ? 'bg-indigo-600 text-white border-indigo-600'
@@ -208,34 +223,6 @@ export default function SetlistReviewCard({
           </div>
         )}
 
-        {/* 候補に無いときの検索 */}
-        <div className="mt-1.5 pl-12">
-          <input
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="登録済みの曲を検索して選ぶ（2文字以上）"
-            className="w-full px-2 py-1 text-xs border border-gray-200 rounded"
-          />
-          {query.trim().length >= 2 && (
-            <div className="mt-1 flex flex-wrap gap-1.5">
-              {isFetching && <span className="text-xs text-gray-400">検索中…</span>}
-              {searchResult?.songs.map((s: Song) => (
-                <button
-                  key={s.id}
-                  onClick={() => pickSong(s)}
-                  className="px-2 py-1 text-xs rounded border border-gray-300 bg-white hover:bg-indigo-50"
-                >
-                  {s.name}
-                  {s.original_artist && <span className="opacity-70"> / {s.original_artist}</span>}
-                </button>
-              ))}
-              {searchResult && searchResult.songs.length === 0 && !isFetching && (
-                <span className="text-xs text-gray-400">見つかりません</span>
-              )}
-            </div>
-          )}
-        </div>
       </div>
 
       {/* 時間 */}
