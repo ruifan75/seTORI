@@ -1,12 +1,37 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { playlistApi } from '../api/client';
-import type { PlaylistVisibility } from '../api/types';
+import { playlistApi, presetPlaylistApi } from '../api/client';
+import type { PlaylistVisibility, PresetPlaylist } from '../api/types';
 import { useAuthStore } from '../store/auth';
 import Loading from '../components/ui/Loading';
 import { useToast } from '../components/ui/ToastContext';
 import VisibilityBadge from '../components/VisibilityBadge';
+
+// プリセットのカード。フォロー中かどうかで見た目を変える。
+function PresetCard({ preset, followed }: { preset: PresetPlaylist; followed?: boolean }) {
+  return (
+    <li>
+      <Link
+        to={`/playlists/preset/${preset.key}`}
+        className="block h-full bg-white border border-gray-200 rounded-lg p-4 hover:border-indigo-300 transition-colors"
+      >
+        <div className="flex items-start justify-between gap-2">
+          <span className="font-medium text-gray-900 truncate">{preset.name}</span>
+          <span className={followed
+            ? 'shrink-0 px-2 py-0.5 text-xs font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-full'
+            : 'shrink-0 px-2 py-0.5 text-xs font-medium text-gray-500 bg-gray-50 border border-gray-200 rounded-full'}>
+            {followed ? '自動更新' : 'プリセット'}
+          </span>
+        </div>
+        <span className="block mt-1 text-sm text-gray-500">{preset.item_count} 曲</span>
+        {preset.description && (
+          <span className="block mt-1 text-xs text-gray-400 truncate">{preset.description}</span>
+        )}
+      </Link>
+    </li>
+  );
+}
 
 export default function PlaylistsPage() {
   const status = useAuthStore((s) => s.status);
@@ -28,6 +53,15 @@ export default function PlaylistsPage() {
     queryKey: ['playlists', 'public'],
     queryFn: () => playlistApi.listPublic(),
   });
+
+  const presets = useQuery({
+    queryKey: ['presets'],
+    queryFn: () => presetPlaylistApi.list(),
+  });
+
+  // フォロー中は上に分けて出す（残りは「プリセット」として並べるので重複しない）。
+  const followedPresets = presets.data?.presets.filter((p) => p.is_following) ?? [];
+  const unfollowedPresets = presets.data?.presets.filter((p) => !p.is_following) ?? [];
 
   const createMutation = useMutation({
     mutationFn: () => playlistApi.create({ name: newName, visibility: newVisibility }),
@@ -135,6 +169,33 @@ export default function PlaylistsPage() {
           </ul>
         )}
       </section>
+
+      {/* フォロー中のプリセット（中身は自動で最新になる） */}
+      {followedPresets.length > 0 && (
+        <section className="space-y-3">
+          <h2 className="text-xl font-semibold text-gray-900">フォロー中</h2>
+          <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {followedPresets.map((preset) => (
+              <PresetCard key={preset.key} preset={preset} followed />
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {/* プリセット（運営が用意した歌単） */}
+      {unfollowedPresets.length > 0 && (
+        <section className="space-y-3">
+          <h2 className="text-xl font-semibold text-gray-900">プリセット</h2>
+          <p className="text-sm text-gray-500">
+            条件で自動的に集まる歌単です。フォローするとここに並び、コピーすると自分で編集できるプレイリストになります。
+          </p>
+          <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {unfollowedPresets.map((preset) => (
+              <PresetCard key={preset.key} preset={preset} />
+            ))}
+          </ul>
+        </section>
+      )}
 
       {/* 公開プレイリスト */}
       <section className="space-y-3">

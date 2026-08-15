@@ -282,6 +282,68 @@ func (r *PlaylistRepository) ListItems(playlistID uuid.UUID) ([]PerformanceWithD
 	return r.perf.queryPerformanceDetails(query, playlistID)
 }
 
+// AddItems は与えられた順で複数の歌唱を末尾へ追加する（プリセットのコピー用）。
+// AddItem を繰り返すと 1 曲ごとに MAX(position) を引き直すことになるので 1 文にまとめる。
+func (r *PlaylistRepository) AddItems(playlistID uuid.UUID, performanceIDs []uuid.UUID) error {
+	if len(performanceIDs) == 0 {
+		return nil
+	}
+	// WITH ORDINALITY で配列の並びをそのまま position にする（ROW_NUMBER() OVER () と違い順序が保証される）。
+	query := `
+		INSERT INTO playlist_items (playlist_id, performance_id, position)
+		SELECT $1, t.id,
+		       (SELECT COALESCE(MAX(position), -1) FROM playlist_items WHERE playlist_id = $1) + t.ord
+		FROM unnest($2::uuid[]) WITH ORDINALITY AS t(id, ord)
+		ON CONFLICT (playlist_id, performance_id) DO NOTHING`
+	if _, err := r.db.Exec(query, playlistID, pq.Array(uuidStrings(performanceIDs))); err != nil {
+		return fmt.Errorf("add playlist items: %w", err)
+	}
+	return r.touch(playlistID)
+}
+
+// ========== プリセットプレイリストのフォロー ==========
+
+// ListFollowedPresetKeys はフォロー中のプリセットのキーを、フォローした新しい順で返す。
+func (r *PlaylistRepository) ListFollowedPresetKeys(userID uuid.UUID) ([]string, error) {
+	rows, err := r.db.Query(
+		"SELECT preset_key FROM playlist_follows WHERE user_id = $1 ORDER BY followed_at DESC", userID)
+	if err != nil {
+		return nil, fmt.Errorf("list followed presets: %w", err)
+	}
+	defer rows.Close()
+
+	keys := make([]string, 0)
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, fmt.Errorf("scan followed preset: %w", err)
+		}
+		keys = append(keys, key)
+	}
+	return keys, rows.Err()
+}
+
+// FollowPreset はフォローを登録する。既にフォロー済みなら何もしない。
+func (r *PlaylistRepository) FollowPreset(userID uuid.UUID, presetKey string) error {
+	_, err := r.db.Exec(`
+		INSERT INTO playlist_follows (user_id, preset_key) VALUES ($1, $2)
+		ON CONFLICT (user_id, preset_key) DO NOTHING`, userID, presetKey)
+	if err != nil {
+		return fmt.Errorf("follow preset: %w", err)
+	}
+	return nil
+}
+
+// UnfollowPreset はフォローを外す。フォローしていなくてもエラーにしない。
+func (r *PlaylistRepository) UnfollowPreset(userID uuid.UUID, presetKey string) error {
+	_, err := r.db.Exec(
+		"DELETE FROM playlist_follows WHERE user_id = $1 AND preset_key = $2", userID, presetKey)
+	if err != nil {
+		return fmt.Errorf("unfollow preset: %w", err)
+	}
+	return nil
+}
+
 // ContainsPerformance は指定の歌唱が既に入っているかを返す（UI の追加済み表示用）。
 func (r *PlaylistRepository) ContainsPerformance(playlistID, performanceID uuid.UUID) (bool, error) {
 	var exists bool

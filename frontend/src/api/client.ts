@@ -83,6 +83,8 @@ import type {
   PlaylistListResponse,
   CreatePlaylistRequest,
   UpdatePlaylistRequest,
+  PresetPlaylist,
+  PresetPlaylistListResponse,
   BackupStatusResponse,
   BackupSettings,
   BackupResult,
@@ -1269,6 +1271,46 @@ export const playlistApi = {
 
   sharedItems: async (slug: string): Promise<PerformanceListResponse> => {
     const { data } = await api.get(`/api/shared/playlists/${slug}/items`);
+    return data;
+  },
+};
+
+// ========== プリセットプレイリスト API ==========
+// 一覧・中身の閲覧は未ログインでも可。フォローとコピーは要ログイン（権限は不要）。
+
+export const presetPlaylistApi = {
+  list: async (): Promise<PresetPlaylistListResponse> => {
+    const { data } = await api.get('/api/presets');
+    return data;
+  },
+
+  /** フォロー中のみ（要ログイン） */
+  listFollowed: async (): Promise<PresetPlaylistListResponse> => {
+    const { data } = await api.get('/api/presets/followed');
+    return data;
+  },
+
+  get: async (key: string): Promise<PresetPlaylist> => {
+    const { data } = await api.get(`/api/presets/${key}`);
+    return data;
+  },
+
+  items: async (key: string, limit?: number): Promise<PerformanceListResponse> => {
+    const { data } = await api.get(`/api/presets/${key}/items`, { params: limit ? { limit } : undefined });
+    return data;
+  },
+
+  follow: async (key: string): Promise<void> => {
+    await api.post(`/api/presets/${key}/follow`);
+  },
+
+  unfollow: async (key: string): Promise<void> => {
+    await api.delete(`/api/presets/${key}/follow`);
+  },
+
+  /** 現在の中身を自分のプレイリストへ複製する（以後プリセットとは無関係になる） */
+  copy: async (key: string): Promise<Playlist> => {
+    const { data } = await api.post(`/api/presets/${key}/copy`);
     return data;
   },
 };

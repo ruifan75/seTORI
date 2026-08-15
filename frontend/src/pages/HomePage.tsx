@@ -1,17 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { homeApi, songApi, tagApi } from '../api/client';
-import type { Performance, Singer, Stream } from '../api/types';
+import { homeApi, presetPlaylistApi, songApi, tagApi } from '../api/client';
+import type { Performance, PresetPlaylist, Stream } from '../api/types';
 import Loading from '../components/ui/Loading';
 import Tag from '../components/ui/Tag';
 import { useToast } from '../components/ui/ToastContext';
-import QueueAddButton from '../components/QueueAddButton';
 import ArtistLinks from '../components/ArtistLinks';
+import SingerAvatars from '../components/SingerAvatars';
+import PerformanceCard from '../components/PerformanceCard';
+import PerformanceCardRow from '../components/PerformanceCardRow';
+import PresetActions from '../components/PresetActions';
 import { usePlayerStore, performancesToTracks as toTracks } from '../store/player';
 
 const RECOMMENDATION_PAGE_SIZE = 20;
 const RECOMMENDATION_PLAYBACK_MIN = 50;
+// プリセットの列に出す件数。再生ボタンは足りなければ残りを取りに行く。
+const PRESET_ROW_SIZE = 20;
 
 function uniqueSongs(perfs: Performance[]): Performance[] {
   const songIds = new Set<string>();
@@ -20,122 +25,6 @@ function uniqueSongs(perfs: Performance[]): Performance[] {
     songIds.add(perf.song_id);
     return true;
   });
-}
-
-function SingerImage({ singer }: { singer: Singer }) {
-  const [imageFailed, setImageFailed] = useState(false);
-  const imageUrl = singer.photo_url || `https://holodex.net/statics/channelImg/${singer.id}/50.png`;
-
-  if (imageFailed) {
-    return <span className="flex h-full w-full items-center justify-center">{singer.name.trim().charAt(0) || '?'}</span>;
-  }
-
-  return (
-    <img
-      src={imageUrl}
-      alt=""
-      loading="lazy"
-      className="h-full w-full object-cover"
-      onError={() => setImageFailed(true)}
-    />
-  );
-}
-
-function SingerAvatar({ singer }: { singer: Singer }) {
-  return (
-    <Link
-      to={`/singers/${singer.id}`}
-      aria-label={singer.name}
-      title={singer.name}
-      className="relative inline-flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 border-white bg-indigo-100 text-[10px] font-semibold text-indigo-700 shadow-sm transition-transform hover:z-10 hover:-translate-y-0.5 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
-    >
-      <SingerImage singer={singer} />
-    </Link>
-  );
-}
-
-function SingerOverflowMenu({ singers }: { singers: Singer[] }) {
-  const buttonRef = useRef<HTMLButtonElement>(null);
-  const popoverRef = useRef<HTMLDivElement>(null);
-  const [open, setOpen] = useState(false);
-
-  const toggle = () => {
-    const button = buttonRef.current;
-    const popover = popoverRef.current;
-    if (!button || !popover) return;
-    if (popover.matches(':popover-open')) {
-      popover.hidePopover();
-      return;
-    }
-
-    const rect = button.getBoundingClientRect();
-    const menuWidth = 224;
-    popover.style.left = `${Math.min(Math.max(8, rect.right - menuWidth), window.innerWidth - menuWidth - 8)}px`;
-    popover.style.top = `${rect.bottom + 6}px`;
-    popover.showPopover();
-
-    window.requestAnimationFrame(() => {
-      if (rect.bottom + 6 + popover.offsetHeight > window.innerHeight - 8) {
-        popover.style.top = `${Math.max(8, rect.top - popover.offsetHeight - 6)}px`;
-      }
-    });
-  };
-
-  return (
-    <>
-      <button
-        ref={buttonRef}
-        type="button"
-        onClick={toggle}
-        aria-label={`ほか${singers.length}チャンネルを表示`}
-        aria-expanded={open}
-        title={`ほか${singers.length}チャンネル`}
-        className="relative inline-flex h-7 min-w-7 shrink-0 items-center justify-center rounded-full border-2 border-white bg-gray-700 px-1 text-[9px] font-semibold text-white shadow-sm transition-colors hover:z-10 hover:bg-gray-800 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
-      >
-        +{singers.length}
-      </button>
-      <div
-        ref={popoverRef}
-        popover="auto"
-        onToggle={(event) => setOpen(event.currentTarget.matches(':popover-open'))}
-        className="fixed inset-auto z-[100] m-0 w-56 rounded-lg border border-gray-200 bg-white p-1 shadow-xl"
-      >
-        <div className="px-2 py-1.5 text-xs font-medium text-gray-400">その他のチャンネル</div>
-        {singers.map((singer) => (
-          <Link
-            key={singer.id}
-            to={`/singers/${singer.id}`}
-            onClick={() => popoverRef.current?.hidePopover()}
-            className="flex items-center gap-2 rounded-md px-2 py-2 text-sm text-gray-700 hover:bg-indigo-50 hover:text-indigo-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
-          >
-            <span className="inline-flex h-8 w-8 shrink-0 overflow-hidden rounded-full bg-indigo-100 text-[10px] font-semibold text-indigo-700">
-              <SingerImage singer={singer} />
-            </span>
-            <span className="min-w-0 truncate">{singer.name}</span>
-          </Link>
-        ))}
-      </div>
-    </>
-  );
-}
-
-function SingerAvatars({ singers }: { singers: Singer[] }) {
-  const uniqueSingers = singers.filter(
-    (singer, index) => singers.findIndex((candidate) => candidate.id === singer.id) === index,
-  );
-  if (uniqueSingers.length === 0) return null;
-
-  const visibleSingers = uniqueSingers.slice(0, 4);
-  const remainingSingers = uniqueSingers.slice(4);
-
-  return (
-    <div className="flex shrink-0 -space-x-2 pl-2" aria-label="チャンネル">
-      {visibleSingers.map((singer) => <SingerAvatar key={singer.id} singer={singer} />)}
-      {remainingSingers.length > 0 && (
-        <SingerOverflowMenu singers={remainingSingers} />
-      )}
-    </div>
-  );
 }
 
 // セクション見出し（右側に「すべて見る」リンクや操作ボタンを置ける）
@@ -262,6 +151,57 @@ function StreamCardRow({ streams }: { streams: Stream[] }) {
   );
 }
 
+// プリセットプレイリスト 1 本ぶんの列。中身はプリセットごとに取りに行く。
+function PresetSection({ preset }: { preset: PresetPlaylist }) {
+  const { showToast } = useToast();
+  const [isPreparingPlayback, setIsPreparingPlayback] = useState(false);
+
+  // キーの先頭を 'presets' にしない：フォローの更新で invalidate する範囲に入り、
+  // 押すたびに全プリセットの中身を取り直すことになる。
+  const { data, isLoading } = useQuery({
+    queryKey: ['preset-items', preset.key, PRESET_ROW_SIZE],
+    queryFn: () => presetPlaylistApi.items(preset.key, PRESET_ROW_SIZE),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const performances = useMemo(() => data?.performances ?? [], [data]);
+
+  const playFrom = (startIndex: number) => {
+    usePlayerStore.getState().playTracks(toTracks(performances), startIndex);
+  };
+
+  // 列に出しているのは先頭の数曲なので、再生ボタンは残りを取りに行ってから流す。
+  const playAll = async () => {
+    if (performances.length === 0 || isPreparingPlayback) return;
+    if (preset.item_count <= performances.length) {
+      playFrom(0);
+      return;
+    }
+    setIsPreparingPlayback(true);
+    try {
+      const full = await presetPlaylistApi.items(preset.key);
+      usePlayerStore.getState().playTracks(toTracks(full.performances));
+    } catch {
+      usePlayerStore.getState().playTracks(toTracks(performances));
+      showToast('全曲を取得できなかったため、表示中の曲を再生します', 'error');
+    } finally {
+      setIsPreparingPlayback(false);
+    }
+  };
+
+  if (!isLoading && performances.length === 0) return null;
+
+  return (
+    <section>
+      <SectionHeader title={preset.name} linkTo={`/playlists/preset/${preset.key}`}>
+        <span className="text-sm text-gray-500">{preset.item_count}曲</span>
+        <PresetActions preset={preset} onPlayAll={playAll} playDisabled={isPreparingPlayback} />
+      </SectionHeader>
+      {isLoading ? <Loading /> : <PerformanceCardRow performances={performances} onPlayFrom={playFrom} />}
+    </section>
+  );
+}
+
 export default function HomePage() {
   const { showToast } = useToast();
   const queryClient = useQueryClient();
@@ -307,6 +247,11 @@ export default function HomePage() {
   const { data: songsData, isLoading: songsLoading } = useQuery({
     queryKey: ['songs', 'popular'],
     queryFn: () => songApi.list(1, 10, undefined, 'performances', 'desc'),
+  });
+
+  const { data: presetData } = useQuery({
+    queryKey: ['presets'],
+    queryFn: () => presetPlaylistApi.list(),
   });
 
   const reco = useMemo(
@@ -489,61 +434,7 @@ export default function HomePage() {
               className="flex touch-pan-x snap-x snap-mandatory gap-4 overflow-x-auto scroll-smooth px-1 pb-2 overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             >
               {reco.map((perf, i) => (
-                <div key={perf.id} className="w-56 shrink-0 snap-start bg-white rounded-lg shadow-sm border hover:shadow-md transition-shadow group">
-                  {/* 配信サムネイル + 右下に CD 風の楽曲アート */}
-                  <div className="relative">
-                    <button
-                      onClick={() => playRecoFrom(i)}
-                      className="block w-full relative overflow-hidden rounded-t-lg"
-                      title="この歌唱から連続再生"
-                    >
-                      {perf.thumbnail_url ? (
-                        <img src={perf.thumbnail_url} alt="" loading="lazy" className="w-full h-32 object-cover" />
-                      ) : (
-                        <div className="w-full h-32 bg-gray-200" />
-                      )}
-                      <span className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 flex items-center justify-center transition-all">
-                        <span className="w-10 h-10 rounded-full bg-indigo-600 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                          <svg className="w-5 h-5 text-white ml-0.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
-                        </span>
-                      </span>
-                    </button>
-                    {perf.arts && (
-                      <span className="absolute -bottom-4 right-2 w-14 h-14 pointer-events-none">
-                        <img src={perf.arts} alt="" loading="lazy" className="w-14 h-14 rounded-full object-cover border-2 border-white shadow-md" />
-                        {/* CD の中心穴 */}
-                        <span className="absolute inset-0 m-auto w-3 h-3 rounded-full bg-white border border-gray-300" />
-                      </span>
-                    )}
-                    <QueueAddButton
-                      track={toTracks([perf])[0]}
-                      className="absolute top-1.5 right-1.5 bg-white/90 shadow opacity-0 group-hover:opacity-100"
-                    />
-                  </div>
-                  <div className="p-3 pt-4">
-                    <Link
-                      to={`/songs/${perf.song_id}`}
-                      className="block h-10 text-sm font-medium leading-5 text-gray-900 hover:text-indigo-600 line-clamp-2 pr-14"
-                      title={perf.song_name}
-                    >
-                      {perf.song_name}
-                    </Link>
-                    <ArtistLinks
-                      artists={perf.artists}
-                      fallback={perf.original_artist}
-                      className="block text-xs text-gray-500 truncate pr-14"
-                      linkClassName="hover:text-indigo-600"
-                    />
-                    <div className="mt-1 flex min-h-7 items-center justify-between gap-2">
-                      {perf.stream_date ? (
-                        <time dateTime={perf.stream_date} className="min-w-0 text-xs text-gray-400">
-                          {new Date(perf.stream_date).toLocaleDateString('ja-JP')}
-                        </time>
-                      ) : <span />}
-                      <SingerAvatars singers={perf.singers} />
-                    </div>
-                  </div>
-                </div>
+                <PerformanceCard key={perf.id} performance={perf} onPlay={() => playRecoFrom(i)} />
               ))}
             </div>
 
@@ -589,6 +480,11 @@ export default function HomePage() {
           </div>
         )}
       </section>
+
+      {/* プリセットプレイリスト（運営が用意した歌単） */}
+      {presetData?.presets.map((preset) => (
+        <PresetSection key={preset.key} preset={preset} />
+      ))}
 
       {/* 最近の歌枠（singing タグ付きのみ） */}
       <section>

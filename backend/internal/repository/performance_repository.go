@@ -81,6 +81,82 @@ func (r *PerformanceRepository) attachArtistReferences(performances []Performanc
 	return nil
 }
 
+// attachTagsAndSingers は歌唱一覧にバージョンタグと歌手を一括で付ける。
+//
+// 1 件ずつ GetTags / GetSingers を呼ぶと 100 曲の一覧で 200 回問い合わせることになる。
+// 本番機（1 vCPU）ではこれがそのまま応答時間に出るので、まとめて 2 回で引く。
+// 空の場合に nil のままにするのは 1 件ずつのときと同じ（JSON では null になる）。
+func (r *PerformanceRepository) attachTagsAndSingers(performances []PerformanceWithDetails) error {
+	if len(performances) == 0 {
+		return nil
+	}
+
+	ids := make([]string, len(performances))
+	for i, perf := range performances {
+		ids[i] = perf.ID.String()
+	}
+
+	tagRows, err := r.db.Query(`
+		SELECT ppt.performance_id, pt.id, pt.display_name, pt.color, pt.created_at
+		FROM performance_tags pt
+		JOIN performance_performance_tags ppt ON pt.id = ppt.tag_id
+		WHERE ppt.performance_id = ANY($1::uuid[])
+		ORDER BY ppt.performance_id, pt.id`, pq.Array(ids))
+	if err != nil {
+		return fmt.Errorf("get performance tags: %w", err)
+	}
+	defer tagRows.Close()
+
+	tagsByPerf := make(map[uuid.UUID][]models.PerformanceTag, len(performances))
+	for tagRows.Next() {
+		var perfID uuid.UUID
+		var t models.PerformanceTag
+		if err := tagRows.Scan(&perfID, &t.ID, &t.DisplayName, &t.Color, &t.CreatedAt); err != nil {
+			return fmt.Errorf("scan performance tag: %w", err)
+		}
+		tagsByPerf[perfID] = append(tagsByPerf[perfID], t)
+	}
+	if err := tagRows.Err(); err != nil {
+		return err
+	}
+
+	singerRows, err := r.db.Query(`
+		SELECT ps.performance_id,
+		       s.id, s.name, s.english_name, s.photo_url,
+		       COALESCE(s.organization_override, s.organization), o.display_name,
+		       COALESCE(o.is_unaffiliated, FALSE), s.metadata_source, s.created_at, s.updated_at
+		FROM singers s
+		LEFT JOIN organizations o ON COALESCE(s.organization_override, s.organization) = o.key
+		JOIN performance_singers ps ON s.id = ps.singer_id
+		WHERE ps.performance_id = ANY($1::uuid[])
+		ORDER BY ps.performance_id, s.name`, pq.Array(ids))
+	if err != nil {
+		return fmt.Errorf("get performance singers: %w", err)
+	}
+	defer singerRows.Close()
+
+	singersByPerf := make(map[uuid.UUID][]models.Singer, len(performances))
+	for singerRows.Next() {
+		var perfID uuid.UUID
+		var s models.Singer
+		if err := singerRows.Scan(&perfID, &s.ID, &s.Name, &s.EnglishName, &s.PhotoURL,
+			&s.Organization, &s.OrganizationName, &s.OrganizationUnaffil,
+			&s.MetadataSource, &s.CreatedAt, &s.UpdatedAt); err != nil {
+			return fmt.Errorf("scan singer: %w", err)
+		}
+		singersByPerf[perfID] = append(singersByPerf[perfID], s)
+	}
+	if err := singerRows.Err(); err != nil {
+		return err
+	}
+
+	for i := range performances {
+		performances[i].Tags = tagsByPerf[performances[i].ID]
+		performances[i].Singers = singersByPerf[performances[i].ID]
+	}
+	return nil
+}
+
 // FindByStreamID は配信 ID に紐付くすべての歌唱を取得する（歌枠詳細ページ用）。
 func (r *PerformanceRepository) FindByStreamID(streamID string) ([]PerformanceWithDetails, error) {
 	query := `
@@ -800,23 +876,14 @@ func (r *PerformanceRepository) queryPerformanceDetails(query string, args ...in
 		if err != nil {
 			return nil, fmt.Errorf("scan performance: %w", err)
 		}
-
-		tags, err := r.GetTags(p.ID)
-		if err != nil {
-			return nil, err
-		}
-		p.Tags = tags
-
-		singers, err := r.GetSingers(p.ID)
-		if err != nil {
-			return nil, err
-		}
-		p.Singers = singers
-
 		performances = append(performances, p)
 	}
 
 	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	if err := r.attachTagsAndSingers(performances); err != nil {
 		return nil, err
 	}
 	if err := r.attachArtistReferences(performances); err != nil {
@@ -850,6 +917,131 @@ func (r *PerformanceRepository) FindRandom(limit int, excludedSongIDs []string) 
 		LIMIT $1`
 
 	return r.queryPerformanceDetails(query, limit, pq.Array(excludedSongIDs))
+}
+
+// ========== プリセットプレイリスト ==========
+
+// PresetFilter はプリセットプレイリストの抽出条件。
+// 定義そのものは service.Presets にあり、ここは「条件をどう SQL にするか」だけを持つ。
+type PresetFilter struct {
+	SingerID    string   // このチャンネルが歌っている歌唱だけ（空なら問わない）
+	IncludeTags []string // いずれかの配信タグを持つ配信の歌唱だけ（空なら問わない）
+	ExcludeTags []string // いずれかの配信タグを持つ配信は除く
+	MultiSinger bool     // その歌唱を 2 人以上で歌っている（コラボ）
+}
+
+// presetWhere は FindRandom と同じ可視性の除外（非表示・メン限・アーカイブなし）に
+// PresetFilter の条件を重ねた WHERE 句。$1〜$4 を使う。
+//
+// 条件の有無を SQL 文字列の組み立てではなく引数で表しているのは、プリセットが
+// 「歌手あり・タグなし」「タグあり・歌手あり」などの組み合わせで増えるため。
+// 分岐で文を作ると、増えるたびに検証していない SQL が生まれる。
+const presetWhere = `
+	WHERE st.is_hidden = FALSE
+	  AND NOT EXISTS (
+		SELECT 1 FROM stream_stream_tags hid
+		WHERE hid.stream_id = st.id AND hid.tag_id IN ('members_only', 'unarchived')
+	  )
+	  AND ($1 = '' OR EXISTS (
+		SELECT 1 FROM performance_singers fs
+		WHERE fs.performance_id = p.id AND fs.singer_id = $1
+	  ))
+	  AND (cardinality($2::text[]) = 0 OR EXISTS (
+		SELECT 1 FROM stream_stream_tags inc
+		WHERE inc.stream_id = st.id AND inc.tag_id = ANY($2::text[])
+	  ))
+	  AND NOT EXISTS (
+		SELECT 1 FROM stream_stream_tags exc
+		WHERE exc.stream_id = st.id AND exc.tag_id = ANY($3::text[])
+	  )
+	  AND (NOT $4 OR (
+		SELECT count(*) FROM performance_singers ms WHERE ms.performance_id = p.id
+	  ) > 1)`
+
+// presetArgs は presetWhere へ渡す $1〜$4 を作る。
+//
+// nil のスライスを pq.Array に渡すと SQL 上は NULL になり、cardinality(NULL) が NULL、
+// つまり「タグを問わない」はずの条件が全行を落とす。ここで空スライスに正規化しておく。
+func presetArgs(f PresetFilter) []interface{} {
+	include := f.IncludeTags
+	if include == nil {
+		include = []string{}
+	}
+	exclude := f.ExcludeTags
+	if exclude == nil {
+		exclude = []string{}
+	}
+	return []interface{}{f.SingerID, pq.Array(include), pq.Array(exclude), f.MultiSinger}
+}
+
+// presetOrder はプリセットの並び順。新しい配信から、配信内は歌った順。
+//
+// **必ず一意に決まるところまで指定すること。** order_index は 0 のままの歌唱が多く
+// （コメント解析で作られた歌唱は順序を持たない）、そこで打ち止めにすると同着だらけになる。
+// 同着があると Postgres は都合のいい順で返すので、LIMIT の有無で並びが変わり、
+// 「ホームの列とプレイリスト画面で曲順が違う」「コピーすると別の順で入る」が起きる。
+const presetOrder = `st.stream_date DESC, p.order_index, p.start_seconds, p.id`
+
+// presetLatestPerSong は条件に合う歌唱を曲ごとに 1 件（最新の配信のもの）へ畳む CTE。
+// 同じ曲を何度も歌っているため、畳まないと一覧が同じ曲で埋まる。
+const presetLatestPerSong = `
+	WITH latest_per_song AS (
+		SELECT DISTINCT ON (p.song_id) p.id
+		FROM performances p
+		JOIN streams st ON st.id = p.stream_id
+	` + presetWhere + `
+		ORDER BY p.song_id, ` + presetOrder + `
+	)`
+
+// FindByPreset は条件に合う歌唱を新しい配信の順で返す（曲ごとに最新の 1 件）。
+func (r *PerformanceRepository) FindByPreset(f PresetFilter, limit int) ([]PerformanceWithDetails, error) {
+	query := presetLatestPerSong + perfDetailSelect + `
+		JOIN latest_per_song lps ON lps.id = p.id
+		ORDER BY ` + presetOrder + `
+		LIMIT $5`
+	return r.queryPerformanceDetails(query, append(presetArgs(f), limit)...)
+}
+
+// FindIDsByPreset は FindByPreset と同じ並びの歌唱 ID だけを返す（プレイリストへのコピー用）。
+// 明細を組み立てると歌手・タグを 1 件ずつ引くことになるので、ID で足りる経路は分けている。
+func (r *PerformanceRepository) FindIDsByPreset(f PresetFilter, limit int) ([]uuid.UUID, error) {
+	query := presetLatestPerSong + `
+		SELECT p.id
+		FROM performances p
+		JOIN streams st ON st.id = p.stream_id
+		JOIN latest_per_song lps ON lps.id = p.id
+		ORDER BY ` + presetOrder + `
+		LIMIT $5`
+	rows, err := r.db.Query(query, append(presetArgs(f), limit)...)
+	if err != nil {
+		return nil, fmt.Errorf("find preset performance ids: %w", err)
+	}
+	defer rows.Close()
+
+	ids := make([]uuid.UUID, 0)
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan preset performance id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// CountByPreset は条件に合う曲数を返す（FindByPreset と同じく曲単位で数える）。
+func (r *PerformanceRepository) CountByPreset(f PresetFilter) (int, error) {
+	query := `
+		SELECT count(DISTINCT p.song_id)
+		FROM performances p
+		JOIN streams st ON st.id = p.stream_id
+	` + presetWhere
+
+	var count int
+	if err := r.db.QueryRow(query, presetArgs(f)...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count preset performances: %w", err)
+	}
+	return count, nil
 }
 
 // EndSource の取りうる値。migration 030 の CHECK 制約と一致させること。

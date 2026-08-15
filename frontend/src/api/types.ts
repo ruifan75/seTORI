@@ -1065,6 +1065,23 @@ export interface UpdatePlaylistRequest {
   visibility?: PlaylistVisibility;
 }
 
+/**
+ * 運営が用意したプリセットプレイリスト（コラボ・睡眠導入など）。
+ * 中身は毎回サーバー側で計算されるので、フォローしていれば新しい歌唱が自動で入る。
+ * 中身を固定したい場合は copy で自分のプレイリストへ複製する。
+ */
+export interface PresetPlaylist {
+  key: string;
+  name: string;
+  description: string;
+  item_count: number;
+  is_following: boolean;
+}
+
+export interface PresetPlaylistListResponse {
+  presets: PresetPlaylist[];
+}
+
 // ========== 外部アカウント連携 ==========
 
 export interface OAuthIdentity {

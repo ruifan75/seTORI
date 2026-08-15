@@ -1179,6 +1179,20 @@ type ReorderPlaylistRequest struct {
 	PerformanceIDs []string `json:"performance_ids"`
 }
 
+// PresetPlaylistResponse は運営が用意したプリセットプレイリスト。
+// 所有者がいないので share_slug も is_owner も持たない（誰でも同じものが見える）。
+type PresetPlaylistResponse struct {
+	Key         string `json:"key"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	ItemCount   int    `json:"item_count"`
+	IsFollowing bool   `json:"is_following"`
+}
+
+type PresetPlaylistListResponse struct {
+	Presets []PresetPlaylistResponse `json:"presets"`
+}
+
 // ========== 外部サービス連携の設定（管理画面） ==========
 
 // SecretFieldStatus は機密項目の状態。値そのものは返さない。

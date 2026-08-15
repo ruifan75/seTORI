@@ -57,6 +57,7 @@ type Router struct {
 	suggestionService *service.SuggestionService
 	backupService     *service.BackupService
 	playlistService   *service.PlaylistService
+	presetService     *service.PresetService
 	oauthService      *service.OAuthService
 	settingsService   *service.SettingsService
 	songMatchService  *service.SongMatchService
@@ -133,6 +134,7 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	backupService := service.NewBackupService(db, appSettingsRepo, driveClient, cfg.DatabaseURL, cfg.BackupDir, cfg.BackupDockerContainer)
 	playlistRepo := repository.NewPlaylistRepository(db, perfRepo)
 	playlistService := service.NewPlaylistService(playlistRepo)
+	presetService := service.NewPresetService(perfRepo, playlistRepo)
 	oauthRepo := repository.NewOAuthRepository(db)
 	// 連携先は Provider を足すだけで増やせる（X / Discord は実装を追加する）
 	googleProvider := oauth.NewGoogleProvider(cfg.GoogleSigninClientID, cfg.GoogleSigninSecret)
@@ -181,6 +183,7 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 		suggestionService:    suggestionService,
 		backupService:        backupService,
 		playlistService:      playlistService,
+		presetService:        presetService,
 		oauthService:         oauthService,
 		settingsService:      settingsService,
 		songMatchService:     songMatchService,
@@ -325,6 +328,17 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("POST /api/playlists/{id}/items", r.handleAddPlaylistItem)
 	r.mux.HandleFunc("DELETE /api/playlists/{id}/items/{performanceId}", r.handleRemovePlaylistItem)
 	r.mux.HandleFunc("PUT /api/playlists/{id}/order", r.handleReorderPlaylist)
+
+	// プリセットプレイリスト（運営が用意した歌単）。
+	// /api/playlists/preset/... にすると /api/playlists/{id} と食い合うので前置きを分ける
+	// （限定公開 URL を /api/shared/playlists へ分けたのと同じ理由）。
+	r.mux.HandleFunc("GET /api/presets", r.handleListPresets)
+	r.mux.HandleFunc("GET /api/presets/followed", r.handleListFollowedPresets)
+	r.mux.HandleFunc("GET /api/presets/{key}", r.handleGetPreset)
+	r.mux.HandleFunc("GET /api/presets/{key}/items", r.handleListPresetItems)
+	r.mux.HandleFunc("POST /api/presets/{key}/follow", r.handleFollowPreset)
+	r.mux.HandleFunc("DELETE /api/presets/{key}/follow", r.handleUnfollowPreset)
+	r.mux.HandleFunc("POST /api/presets/{key}/copy", r.handleCopyPreset)
 
 	// API routes - Singers
 	r.mux.HandleFunc("GET /api/singers", r.handleListSingers)
@@ -3146,6 +3160,16 @@ func requiredPermission(method, path string) (perm string, needsAuth bool) {
 			return "", false
 		}
 		return "", true // 作成・更新・削除はログイン必須（特定権限は不要）
+	}
+
+	// プリセットプレイリストは運営が用意した公開の歌単。中身の閲覧は誰でもできる。
+	// フォローとコピーは自分のデータを作るだけなので、ログインだけを求める
+	// （プレイリストと同じ考え方。フォロー中の一覧も本人の分しか返らない）。
+	if strings.HasPrefix(path, "/api/presets") {
+		if method == http.MethodGet && path != "/api/presets/followed" {
+			return "", false
+		}
+		return "", true
 	}
 
 	// 照合の学習層は全楽曲の照合結果を左右する。AI の判定も含まれるので、

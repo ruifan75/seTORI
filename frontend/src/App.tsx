@@ -22,6 +22,7 @@ import PlaylistsPage from './pages/PlaylistsPage';
 import MySuggestionsPage from './pages/MySuggestionsPage';
 import MyAccountPage from './pages/MyAccountPage';
 import PlaylistDetailPage from './pages/PlaylistDetailPage';
+import PresetPlaylistPage from './pages/PresetPlaylistPage';
 import SyncPage from './pages/admin/SyncPage';
 import SettingsPage from './pages/admin/SettingsPage';
 import LogsPage from './pages/admin/LogsPage';
@@ -69,6 +70,9 @@ function App() {
               <Route path="artists/:id" element={<ArtistDetailPage />} />
               <Route path="search" element={<SearchPage />} />
               <Route path="playlists" element={<PlaylistsPage />} />
+              {/* プリセット（運営が用意した歌単）。:id より前に置かなくても静的な
+                  preset セグメントが優先されるが、読む順として先に並べておく */}
+              <Route path="playlists/preset/:key" element={<PresetPlaylistPage />} />
               <Route path="playlists/:id" element={<PlaylistDetailPage />} />
               {/* 限定公開の共有リンク（未ログインでも開ける） */}
               <Route path="shared/playlists/:slug" element={<PlaylistDetailPage shared />} />
