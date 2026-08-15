@@ -16,6 +16,7 @@ import Tag from '../components/ui/Tag';
 import EditableField from '../components/EditableField';
 import QueueAddButton from '../components/QueueAddButton';
 import ArtistLinks from '../components/ArtistLinks';
+import ArtistSearchInput from '../components/ArtistSearchInput';
 import PerformanceTimingDialog from '../components/PerformanceTimingDialog';
 import SongSwapDialog from '../components/SongSwapDialog';
 import { withdrawSuggestion } from '../components/usePerformanceTiming';
@@ -638,12 +639,13 @@ export default function SongDetailPage() {
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       原曲アーティスト *
                     </label>
-                    <input
-                      type="text"
+                    {/* 読みは選ばない。楽曲側の読みは artists から写されるので、
+                        ここで持っても保存時に上書きされる */}
+                    <ArtistSearchInput
                       value={editedSong.original_artist}
-                      onChange={(e) => setEditedSong({ ...editedSong, original_artist: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                      placeholder="原曲アーティストを入力"
+                      onChange={(v) => setEditedSong({ ...editedSong, original_artist: v })}
+                      onSelectArtist={(a) => setEditedSong({ ...editedSong, original_artist: a.name })}
+                      placeholder="アーティスト名を入力して検索"
                     />
                   </div>
                 </div>
@@ -926,19 +928,10 @@ export default function SongDetailPage() {
                     {/* 読みはここでは直せない。持ち主はアーティストで、楽曲側の列は
                         その写し ── 二か所で編集できると、楽曲側で直しても artists は
                         古いままなので、次にアーティスト側を触った時点で黙って戻る。
-                        直す先へ案内するだけにする */}
+                        直す先へは、すぐ上のアーティスト名のリンクから行ける */}
                     <p className="text-gray-500 text-sm">
                       {song.original_artist_reading || (
                         <span className="text-gray-400">読み未設定</span>
-                      )}
-                      {song.artists?.[0] && (
-                        <Link
-                          to={`/artists/${song.artists[0].id}`}
-                          className="ml-2 text-xs text-indigo-600 hover:underline"
-                          title="読みはアーティストごとに設定します（同じアーティストの全楽曲に反映されます）"
-                        >
-                          アーティストで編集
-                        </Link>
                       )}
                     </p>
                   </div>
