@@ -82,14 +82,19 @@ export default function SetlistReviewCard({
 
   // 検索結果から曲を選ぶ。id が空文字なら「iTunes にはあるが DB に無い曲」で、
   // 照合先は無いまま曲名・歌手・iTunes ID・封面だけを受け取る。
-  const selectSong = (song: Song) =>
+  const selectSong = (song: Song) => {
+    const itunesId = song.itunes_ids?.[0]?.itunes_id ?? null;
     patch({
       matchedSongId: song.id || null,
       name: song.name,
       artist: song.original_artist,
-      itunesId: song.itunes_ids?.[0]?.itunes_id ?? null,
+      itunesId,
+      // DB にある曲を選んだなら、その iTunes ID は既に紐付いている。
+      // 編集画面と同じ判定にしないと「保存時に紐付け」と嘘を出す
+      itunesFromDb: itunesId != null && !!song.id,
       artUrl: song.arts || null,
     });
+  };
 
   const approve = () => {
     if (draft.end !== 0 && draft.end <= draft.start) {

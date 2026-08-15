@@ -56,6 +56,10 @@ func (r *SuggestionRepository) Create(s *models.EditSuggestion) (*models.EditSug
 }
 
 // List は status / kind で絞った提案一覧をページングして返す。どちらも空なら全件。
+//
+// 並びは COALESCE(reviewed_at, created_at) の降順。処理済みのタブで見たいのは
+// 「いつ投稿されたか」ではなく「いつ処理したか」で、直前に承認したものを
+// 探しに来るため。未処理は reviewed_at が無いので投稿順のまま。
 func (r *SuggestionRepository) List(status, kind string, limit, offset int) ([]models.EditSuggestion, int, error) {
 	var conds []string
 	args := []any{}
@@ -81,7 +85,7 @@ func (r *SuggestionRepository) List(status, kind string, limit, offset int) ([]m
 		SELECT %s
 		FROM edit_suggestions
 		%s
-		ORDER BY created_at DESC
+		ORDER BY COALESCE(reviewed_at, created_at) DESC
 		LIMIT $%d OFFSET $%d`, suggestionColumns, where, len(args)+1, len(args)+2)
 	args = append(args, limit, offset)
 
@@ -144,7 +148,7 @@ func (r *SuggestionRepository) ListGroupedByTarget(status, kind string, limit, o
 
 	// 先に対象を決めてから、その対象の提案だけを引く（グループがページ境界で割れないように）
 	pageQuery := fmt.Sprintf(`
-		SELECT target_type, target_id, target_key, MAX(created_at) AS latest
+		SELECT target_type, target_id, target_key, MAX(COALESCE(reviewed_at, created_at)) AS latest
 		FROM edit_suggestions
 		%s
 		GROUP BY target_type, target_id, target_key

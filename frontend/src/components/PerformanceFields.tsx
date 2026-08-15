@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import SongSearchInput from './SongSearchInput';
 import SingerSearchInput from './SingerSearchInput';
 import ArtistSearchInput from './ArtistSearchInput';
@@ -7,6 +7,7 @@ import { youtubePlayerGetCurrentTime, youtubePlayerSeekTo } from './youtubePlaye
 import TimestampTweaker from './TimestampTweaker';
 import { formatTimeInput, formatDuration } from '../utils/timeFormat';
 import type { ArtistAliasProposal, FieldChange, Singer, Song } from '../api/types';
+import { itunesApi } from '../api/client';
 
 // 歌唱 1 件の編集欄（曲・アーティスト・時間・タグ・ボーカル）。
 //
@@ -159,6 +160,34 @@ export default function PerformanceFields({
   showToast,
 }: Props) {
   const [searchingSinger, setSearchingSinger] = useState(false);
+
+  // iTunes の再生時間。呼び出し側が持っていなければ ID から引く。
+  //
+  // **ここで引くのが要点。** 編集画面は自前で引いていたが審査画面は引いておらず、
+  // 曲を iTunes から選んでも終了時間の「+??:??」が押せないままだった。
+  // 片側にだけ処理を置くと、共用にした意味が無い。
+  const [fetchedDuration, setFetchedDuration] = useState<{ itunesId: number; seconds: number } | null>(null);
+  useEffect(() => {
+    const id = value.itunesId;
+    if (value.trackDuration != null || id == null) return;
+    let cancelled = false;
+    itunesApi
+      .queryById(id)
+      .then((r) => {
+        if (!cancelled && r?.track_time_millis) {
+          setFetchedDuration({ itunesId: id, seconds: Math.round(r.track_time_millis / 1000) });
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [value.itunesId, value.trackDuration]);
+
+  // 引いた値は取得元の ID と対で持つ。曲を選び直した直後に、前の曲の長さを出さないため
+  const trackDuration =
+    value.trackDuration ??
+    (fetchedDuration && fetchedDuration.itunesId === value.itunesId ? fetchedDuration.seconds : null);
 
   // 並べる候補＝配信の参加者。チャンネル主を先頭に置く（歌枠では最も押される）。
   // 選択済みなのに参加者に居ない歌手も足す ── 落とすと、値は送られるのに
@@ -347,21 +376,19 @@ export default function PerformanceFields({
                           {/* 時長按鈕 */}
                           <button
                             onClick={() => {
-                              if (value.trackDuration) {
-                                const newEnd = value.start + value.trackDuration;
-                                onChange({ end: newEnd });
-                                onChange({ isEndTimeEstimated: false });
+                              if (trackDuration) {
+                                onChange({ end: value.start + trackDuration, isEndTimeEstimated: false });
                               }
                             }}
-                            disabled={!value.trackDuration}
+                            disabled={!trackDuration}
                             className={`px-3 py-2 rounded-lg font-mono text-sm font-medium transition-colors whitespace-nowrap min-w-[5.5rem] ${
-                              value.trackDuration
+                              trackDuration
                                 ? 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200'
                                 : 'bg-gray-100 text-gray-400 cursor-not-allowed'
                             }`}
-                            title={value.trackDuration ? 'iTunes歌曲長度を適用' : '歌曲長度情報なし'}
+                            title={trackDuration ? 'iTunes歌曲長度を適用' : '歌曲長度情報なし'}
                           >
-                            {formatDuration(value.trackDuration ?? null)}
+                            {formatDuration(trackDuration)}
                           </button>
                           <button
                             onClick={() => {

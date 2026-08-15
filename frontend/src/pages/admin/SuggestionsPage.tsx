@@ -714,7 +714,13 @@ function HistoryCard({
             }`}
           >
             {suggestion.status === 'approved' ? '承認済み' : '却下'}
-            {suggestion.reviewed_at && ` · ${new Date(suggestion.reviewed_at).toLocaleDateString('ja-JP')}`}
+            {/* 時刻まで出す。一覧は審査時刻の降順なので、同じ日に何件も処理した
+                ときに順番を確かめられるようにする */}
+            {suggestion.reviewed_at &&
+              ` · ${new Date(suggestion.reviewed_at).toLocaleString('ja-JP', {
+                dateStyle: 'short',
+                timeStyle: 'short',
+              })}`}
           </span>
         </div>
       </div>
