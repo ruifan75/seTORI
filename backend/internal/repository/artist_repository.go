@@ -307,9 +307,19 @@ func (r *ArtistRepository) FindReferencesBySongID(songID uuid.UUID) ([]models.Ar
 	return bySong[songID], nil
 }
 
-// SyncSongArtist は楽曲の original_artist テキストと artists/song_artists を同期する。
+// SyncSongArtist は楽曲の original_artist テキストと artists/song_artists を同期し、
+// **`songs.original_artist_reading` を artists 側の読みに合わせる**。
 // 楽曲の作成・更新時にサービス層から呼ぶ。アーティストは表記そのままで upsert する。
-func (r *ArtistRepository) SyncSongArtist(songID uuid.UUID, artistText string) error {
+//
+// 読みの持ち主はアーティストであって楽曲ではない。楽曲側にも列があるのは
+// 表示・並び替えのためで、二か所で別々に編集できると必ず食い違う
+// ── 楽曲側で直しても artists は古いままなので、次にアーティスト側を触った
+// 時点（読みの一括補完を含む）で黙って巻き戻る。
+//
+// readingHint は楽曲側から来た読み。**アーティストがまだ読みを持たないときだけ**
+// 種として使う。既にあるものは上書きしない（1 曲の編集が、そのアーティストの
+// 全楽曲の読みを書き換えてしまうため）。
+func (r *ArtistRepository) SyncSongArtist(songID uuid.UUID, artistText, readingHint string) error {
 	if artistText == "" {
 		return nil
 	}
@@ -327,6 +337,20 @@ func (r *ArtistRepository) SyncSongArtist(songID uuid.UUID, artistText string) e
 		return fmt.Errorf("begin: %w", err)
 	}
 	defer tx.Rollback()
+
+	if readingHint != "" {
+		if _, err := tx.Exec(`
+			UPDATE artists SET name_reading = $2, updated_at = NOW()
+			WHERE id = $1 AND (name_reading IS NULL OR name_reading = '')`, artistID, readingHint); err != nil {
+			return fmt.Errorf("seed artist reading: %w", err)
+		}
+	}
+	if _, err := tx.Exec(`
+		UPDATE songs SET original_artist_reading = (SELECT name_reading FROM artists WHERE id = $2)
+		WHERE id = $1`, songID, artistID); err != nil {
+		return fmt.Errorf("propagate artist reading to song: %w", err)
+	}
+
 	if _, err := tx.Exec(`DELETE FROM song_artists WHERE song_id = $1`, songID); err != nil {
 		return fmt.Errorf("clear song artists: %w", err)
 	}

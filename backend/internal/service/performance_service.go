@@ -185,7 +185,7 @@ func (s *PerformanceService) findOrCreateSong(item dto.CreatePerformanceItem) (*
 		return nil, false, fmt.Errorf("create song: %w", err)
 	}
 	// artists / song_artists マッピングを同期（失敗は警告のみ）
-	if err := s.artistRepo.SyncSongArtist(song.ID, song.OriginalArtist); err != nil {
+	if err := s.artistRepo.SyncSongArtist(song.ID, song.OriginalArtist, nullStr(song.OriginalArtistReading)); err != nil {
 		logger.Warnf("sync song artist mapping failed (song: %s): %v", song.ID, err)
 	}
 

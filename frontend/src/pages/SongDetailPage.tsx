@@ -174,7 +174,6 @@ export default function SongDetailPage() {
     name: '',
     name_reading: '',
     original_artist: '',
-    original_artist_reading: '',
     arts: '',
     itunes_ids: [],
   });
@@ -301,7 +300,6 @@ export default function SongDetailPage() {
         name: data.song.name,
         name_reading: data.song.name_reading || '',
         original_artist: data.song.original_artist,
-        original_artist_reading: data.song.original_artist_reading || '',
         arts: data.song.arts || '',
         itunes_ids: (data.song.itunes_ids || []).map(i => ({
           itunes_id: i.itunes_id,
@@ -545,7 +543,6 @@ export default function SongDetailPage() {
       name: song.name,
       name_reading: song.name_reading || '',
       original_artist: song.original_artist,
-      original_artist_reading: song.original_artist_reading || '',
       arts: song.arts || '',
       itunes_ids: (song.itunes_ids || []).map((i) => ({ itunes_id: i.itunes_id, is_primary: i.is_primary })),
       ...patch,
@@ -647,18 +644,6 @@ export default function SongDetailPage() {
                       onChange={(e) => setEditedSong({ ...editedSong, original_artist: e.target.value })}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                       placeholder="原曲アーティストを入力"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      アーティスト読み方
-                    </label>
-                    <input
-                      type="text"
-                      value={editedSong.original_artist_reading}
-                      onChange={(e) => setEditedSong({ ...editedSong, original_artist_reading: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                      placeholder="アーティスト読み方を入力"
                     />
                   </div>
                 </div>
@@ -938,17 +923,24 @@ export default function SongDetailPage() {
                       onSave={(v) => saveSongField({ original_artist: v })}
                       onSuggest={(v, n) => suggestSongField('original_artist', v, n)}
                     />
-                    <EditableField
-                      as="p"
-                      label="アーティストの読み（平仮名）"
-                      value={song.original_artist_reading || ''}
-                      canEdit={canEdit}
-                      className="text-gray-500 text-sm"
-                      placeholder="よみがな"
-                      emptyText="読み未設定"
-                      onSave={(v) => saveSongField({ original_artist_reading: v })}
-                      onSuggest={(v, n) => suggestSongField('original_artist_reading', v, n)}
-                    />
+                    {/* 読みはここでは直せない。持ち主はアーティストで、楽曲側の列は
+                        その写し ── 二か所で編集できると、楽曲側で直しても artists は
+                        古いままなので、次にアーティスト側を触った時点で黙って戻る。
+                        直す先へ案内するだけにする */}
+                    <p className="text-gray-500 text-sm">
+                      {song.original_artist_reading || (
+                        <span className="text-gray-400">読み未設定</span>
+                      )}
+                      {song.artists?.[0] && (
+                        <Link
+                          to={`/artists/${song.artists[0].id}`}
+                          className="ml-2 text-xs text-indigo-600 hover:underline"
+                          title="読みはアーティストごとに設定します（同じアーティストの全楽曲に反映されます）"
+                        >
+                          アーティストで編集
+                        </Link>
+                      )}
+                    </p>
                   </div>
                   {canEdit && (
                     <button

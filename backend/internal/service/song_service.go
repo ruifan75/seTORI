@@ -42,7 +42,7 @@ func NewSongService(
 // syncArtistMapping は楽曲の original_artist と artists/song_artists を同期する。
 // 失敗しても楽曲操作自体は成功扱い（マッピングは検索用の付随データのため）。
 func (s *SongService) syncArtistMapping(song *models.Song) {
-	if err := s.artistRepo.SyncSongArtist(song.ID, song.OriginalArtist); err != nil {
+	if err := s.artistRepo.SyncSongArtist(song.ID, song.OriginalArtist, nullStr(song.OriginalArtistReading)); err != nil {
 		logger.Warnf("sync song artist mapping failed (song: %s): %v", song.ID, err)
 	}
 }
@@ -234,11 +234,8 @@ func (s *SongService) Update(id uuid.UUID, req *dto.UpdateSongRequest) (*dto.Son
 	} else {
 		song.NameReading = sql.NullString{Valid: false}
 	}
-	if req.OriginalArtistReading != nil {
-		song.OriginalArtistReading = sql.NullString{String: *req.OriginalArtistReading, Valid: true}
-	} else {
-		song.OriginalArtistReading = sql.NullString{Valid: false}
-	}
+	// OriginalArtistReading は req から取らない。読みはアーティストのもので、
+	// 楽曲側の列は syncArtistMapping が artists から写す
 	if req.Arts != nil {
 		song.Arts = sql.NullString{String: *req.Arts, Valid: true}
 	} else {
@@ -298,11 +295,14 @@ func (s *SongService) GetEditableFields(id uuid.UUID) (map[string]string, string
 	if song == nil {
 		return nil, "", nil
 	}
+	// 原曲アーティストの読みはここに無い。読みの持ち主は artists で、
+	// 楽曲側の列はその写し ── 楽曲の提案として通すと artists が古いまま残り、
+	// 次にアーティスト側を触った時点で黙って巻き戻る。
+	// 読みを直す提案は artist を対象に出す
 	fields := map[string]string{
-		"name":                    song.Name,
-		"name_reading":            nullStr(song.NameReading),
-		"original_artist":         song.OriginalArtist,
-		"original_artist_reading": nullStr(song.OriginalArtistReading),
+		"name":            song.Name,
+		"name_reading":    nullStr(song.NameReading),
+		"original_artist": song.OriginalArtist,
 	}
 	return fields, song.Name + " / " + song.OriginalArtist, nil
 }
@@ -330,9 +330,6 @@ func (s *SongService) ApplyEditableFields(id uuid.UUID, fields map[string]string
 	}
 	if v, ok := fields["name_reading"]; ok {
 		song.NameReading = sql.NullString{String: strings.TrimSpace(v), Valid: strings.TrimSpace(v) != ""}
-	}
-	if v, ok := fields["original_artist_reading"]; ok {
-		song.OriginalArtistReading = sql.NullString{String: strings.TrimSpace(v), Valid: strings.TrimSpace(v) != ""}
 	}
 	if err := s.songRepo.Update(song); err != nil {
 		return fmt.Errorf("update song: %w", err)
