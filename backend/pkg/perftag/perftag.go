@@ -30,6 +30,14 @@ var tagSynonyms = map[string]string{
 	"ピアノ":       "piano",
 	"アコースティック":  "acoustic",
 	"メドレー":      "medley",
+
+	// performance_tags の ID は migration 019 で '弾き語り' → 'self-accompanied' に
+	// 変わっている（表示名は「弾き語り」のまま）。AI へのプロンプトは日本語のまま
+	// 出させているので、ここで DB の ID へ寄せる。
+	// 寄せずに '弾き語り' を通していた頃は、保存時に SetTags の GetValidTagIDs が
+	// 存在しないタグとして**黙って捨てる**ので、このタグだけ一度も付かなかった。
+	"弾き語り":    "self-accompanied",
+	"ギター弾き語り": "self-accompanied",
 }
 
 // shortMarkers は原文の曲名から short を導ける語。
@@ -38,14 +46,18 @@ var shortMarkers = []string{"1chorus", "1 chorus", "1コーラス", "ワンコ�
 
 // allowedTags は正規化で許可する演奏バージョンタグ。
 // AI が語彙外の値を返しても DB を汚さないよう、Go 側で必ず濾す。
+//
+// **値は performance_tags.id と一致していること。** ここを通ったタグは
+// そのまま歌唱のタグとして保存されるが、存在しない ID は保存時に黙って
+// 捨てられるので、ずれても画面には「タグが付かない」としか現れない。
 var allowedTags = map[string]bool{
-	"acoustic":  true,
-	"piano":     true,
-	"弾き語り":      true,
-	"acappella": true,
-	"short":     true,
-	"full":      true,
-	"medley":    true,
+	"acoustic":         true,
+	"piano":            true,
+	"self-accompanied": true, // 表示名は「弾き語り」（migration 019）
+	"acappella":        true,
+	"short":            true,
+	"full":             true,
+	"medley":           true,
 }
 
 // normalizeTags は AI が返したタグを正規の語彙へ寄せ、

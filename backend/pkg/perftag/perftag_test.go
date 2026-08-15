@@ -16,6 +16,12 @@ func TestNormalize(t *testing.T) {
 		{"語彙外は落とす", []string{"piano", "Piano ver.", "instrumental"}, "曲名", []string{"piano"}},
 		{"別の言い方は寄せる", []string{"ピアノ"}, "曲名", []string{"piano"}},
 		{"重複を除く", []string{"piano", "piano"}, "曲名", []string{"piano"}},
+
+		// performance_tags.id は migration 019 で 'self-accompanied' に変わっている。
+		// AI には日本語で出させているので、DB の ID へ寄せないと保存時に捨てられる。
+		{"弾き語りは DB の ID へ寄せる", []string{"弾き語り"}, "曲名", []string{"self-accompanied"}},
+		{"ギター弾き語りも同じ", []string{"ギター弾き語り"}, "曲名", []string{"self-accompanied"}},
+		{"DB の ID を直接渡しても通る", []string{"self-accompanied"}, "曲名", []string{"self-accompanied"}},
 		{"空は落とす", []string{"", "  "}, "曲名", nil},
 
 		// 報告された実データ。Holodex の曲名にだけバージョン表記があり、
