@@ -31,6 +31,7 @@ import SuggestionsPage from './pages/admin/SuggestionsPage';
 import MergeCandidatesPage from './pages/admin/MergeCandidatesPage';
 import MissingTagsPage from './pages/admin/MissingTagsPage';
 import OrganizationsPage from './pages/admin/OrganizationsPage';
+import ReadingsPage from './pages/admin/ReadingsPage';
 import BackupPage from './pages/admin/BackupPage';
 
 const queryClient = new QueryClient({
@@ -109,6 +110,10 @@ function App() {
               <Route
                 path="admin/organizations"
                 element={<RequirePermission permission={PERM.CONTENT_EDIT}><OrganizationsPage /></RequirePermission>}
+              />
+              <Route
+                path="admin/readings"
+                element={<RequirePermission permission={PERM.CONTENT_EDIT}><ReadingsPage /></RequirePermission>}
               />
               <Route
                 path="admin/logs"

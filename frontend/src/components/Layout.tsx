@@ -20,6 +20,7 @@ const adminItems = [
   { path: '/admin/merge-candidates', label: '重複候補', permission: PERM.CONTENT_EDIT },
   { path: '/admin/missing-tags', label: 'タグ漏れ', permission: PERM.CONTENT_EDIT },
   { path: '/admin/organizations', label: '事務所', permission: PERM.CONTENT_EDIT },
+  { path: '/admin/readings', label: '読み仮名', permission: PERM.CONTENT_EDIT },
   { path: '/admin/sync', label: '同期', permission: PERM.SYNC_RUN },
   { path: '/admin/settings', label: '設定', permission: PERM.CONTENT_EDIT },
   { path: '/admin/logs', label: 'ログ', permission: PERM.LOGS_VIEW },

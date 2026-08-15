@@ -624,6 +624,14 @@ export interface ImportReadingsResult {
   errors?: string[];
 }
 
+// 読みの整備状況（管理画面の残件表示用）。needs_fix は「名前に漢字を含むのに読みが空 or 読みに漢字が残る」件数
+export interface ReadingsStats {
+  artists_total: number;
+  artists_needs_fix: number;
+  songs_total: number;
+  songs_needs_fix: number;
+}
+
 // 修正提案（閲覧モードからの提案 → 管理者レビュー）
 export type SuggestionTargetType = 'song' | 'artist' | 'performance' | 'stream';
 // conflict … 提案後に対象が変更された状態。承認すると他人の編集を巻き戻すため保留される

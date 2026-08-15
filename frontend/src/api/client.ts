@@ -58,6 +58,7 @@ import type {
   BackfillReadingsResponse,
   ReadingsExport,
   ImportReadingsResult,
+  ReadingsStats,
   CreateSuggestionRequest,
   SuggestionListResponse,
   SuggestionGroupListResponse,
@@ -825,6 +826,12 @@ export const artistApi = {
 // ========== 読みのエクスポート / インポート API ==========
 
 export const readingApi = {
+  // 読みの整備状況（未整備の残件数）
+  stats: async (): Promise<ReadingsStats> => {
+    const { data } = await api.get('/api/readings/stats');
+    return data;
+  },
+
   // 読みデータを Blob で取得（filter=needs_fix で未整備のみ、format=csv で CSV）
   exportBlob: async (
     filter: 'all' | 'needs_fix',

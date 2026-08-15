@@ -6,6 +6,7 @@ import Loading from '../components/ui/Loading';
 import Pagination from '../components/ui/Pagination';
 import ArtistLinks from '../components/ArtistLinks';
 import { SortableTh, type SortDir, type SortState } from '../components/ui/Sort';
+import { useAuthStore, hasPermission, PERM } from '../store/auth';
 
 export default function SongsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -14,6 +15,7 @@ export default function SongsPage() {
   const sort = searchParams.get('sort') || 'name';
   const dir: SortDir = searchParams.get('dir') === 'desc' ? 'desc' : 'asc';
   const [searchInput, setSearchInput] = useState(search);
+  const canEdit = hasPermission(useAuthStore((s) => s.user), PERM.CONTENT_EDIT);
 
   const { data, isLoading } = useQuery({
     queryKey: ['songs', page, search, sort, dir],
@@ -52,22 +54,34 @@ export default function SongsPage() {
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
         <h1 className="text-3xl font-bold text-gray-900">楽曲一覧</h1>
 
-        {/* Search */}
-        <form onSubmit={handleSearch} className="flex gap-2">
-          <input
-            type="text"
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="楽曲名・アーティスト名で検索"
-            className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent flex-1 sm:flex-none sm:w-64 min-w-0"
-          />
-          <button
-            type="submit"
-            className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors shrink-0"
-          >
-            検索
-          </button>
-        </form>
+        <div className="flex gap-2 items-center flex-wrap justify-end">
+          {/* 曲名の読みの一括整備。対象がアーティスト名と両方なので実体は管理側に置いてある */}
+          {canEdit && (
+            <Link
+              to="/admin/readings"
+              className="px-3 py-2 text-sm bg-white text-gray-700 border border-gray-300 font-medium rounded-lg hover:bg-gray-50 transition-colors shrink-0"
+            >
+              読みの整備
+            </Link>
+          )}
+
+          {/* Search */}
+          <form onSubmit={handleSearch} className="flex gap-2">
+            <input
+              type="text"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              placeholder="楽曲名・アーティスト名で検索"
+              className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent flex-1 sm:flex-none sm:w-64 min-w-0"
+            />
+            <button
+              type="submit"
+              className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors shrink-0"
+            >
+              検索
+            </button>
+          </form>
+        </div>
       </div>
 
       {isLoading ? (

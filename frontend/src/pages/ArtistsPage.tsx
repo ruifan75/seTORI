@@ -1,12 +1,10 @@
 import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router-dom';
 import { artistApi } from '../api/client';
 import Loading from '../components/ui/Loading';
 import Pagination from '../components/ui/Pagination';
-import ReadingsIO from '../components/ReadingsIO';
 import { SortableTh, type SortDir, type SortState } from '../components/ui/Sort';
-import { useToast } from '../components/ui/ToastContext';
 import { useAuthStore, hasPermission, PERM } from '../store/auth';
 
 // 原曲アーティスト一覧。表頭クリックで名前順／楽曲数順を昇降切替、名前・読みで検索できる。
@@ -17,25 +15,11 @@ export default function ArtistsPage() {
   const sort = searchParams.get('sort') || 'name';
   const dir: SortDir = searchParams.get('dir') === 'desc' ? 'desc' : 'asc';
   const [searchInput, setSearchInput] = useState(search);
-  const { showToast } = useToast();
-  const queryClient = useQueryClient();
   const canEdit = hasPermission(useAuthStore((s) => s.user), PERM.CONTENT_EDIT);
 
   const { data, isLoading } = useQuery({
     queryKey: ['artists', page, search, sort, dir],
     queryFn: () => artistApi.list(page, 50, search || undefined, sort, dir),
-  });
-
-  // AI 読み仮名補完（1回で最大30件ずつ、複数回押して続きを処理）
-  const backfillMutation = useMutation({
-    mutationFn: () => artistApi.backfillReadings(),
-    onSuccess: (r) => {
-      const msg = `読み補完: アーティスト${r.artists_updated}件・曲名${r.songs_updated}件`;
-      showToast(r.warning ? `${msg}（${r.warning}）` : msg, r.warning ? 'error' : 'success');
-      queryClient.invalidateQueries({ queryKey: ['artists'] });
-      queryClient.invalidateQueries({ queryKey: ['songs'] });
-    },
-    onError: (err: Error) => showToast(`補完エラー: ${err.message}`, 'error'),
   });
 
   // 検索・ソート・ページを URL クエリにまとめる（既定値は URL から省略する）
@@ -71,18 +55,15 @@ export default function ArtistsPage() {
         <h1 className="text-3xl font-bold text-gray-900">アーティスト一覧</h1>
 
         <div className="flex gap-2 items-center flex-wrap justify-end">
+          {/* 読みの一括整備（AI 補完・書き出し/取り込み）は管理→読み仮名に移した。
+              対象がアーティストと曲名の両方なので、片方の一覧に置くと導線がねじれる */}
           {canEdit && (
-            <>
-              <button
-                onClick={() => backfillMutation.mutate()}
-                disabled={backfillMutation.isPending}
-                title="読みが未整備のアーティスト・曲名の読み仮名を AI で補完します（1回で最大30件ずつ）"
-                className="px-3 py-2 text-sm bg-indigo-50 text-indigo-700 border border-indigo-200 font-medium rounded-lg hover:bg-indigo-100 transition-colors disabled:opacity-50 shrink-0"
-              >
-                {backfillMutation.isPending ? 'AI補完中...' : '読みをAIで補完'}
-              </button>
-              <ReadingsIO />
-            </>
+            <Link
+              to="/admin/readings"
+              className="px-3 py-2 text-sm bg-white text-gray-700 border border-gray-300 font-medium rounded-lg hover:bg-gray-50 transition-colors shrink-0"
+            >
+              読みの整備
+            </Link>
           )}
           <form onSubmit={handleSearch} className="flex gap-2">
             <input

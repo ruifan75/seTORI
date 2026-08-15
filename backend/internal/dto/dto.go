@@ -747,6 +747,14 @@ type ReadingsExport struct {
 	Songs   []ReadingItem `json:"songs"`
 }
 
+// ReadingsStats は読みの整備状況。管理画面で「あと何件残っているか」を出すために使う。
+type ReadingsStats struct {
+	ArtistsTotal    int `json:"artists_total"`
+	ArtistsNeedsFix int `json:"artists_needs_fix"`
+	SongsTotal      int `json:"songs_total"`
+	SongsNeedsFix   int `json:"songs_needs_fix"`
+}
+
 // ImportReadingsResult は読み取り込みの結果。
 type ImportReadingsResult struct {
 	ArtistsUpdated int      `json:"artists_updated"`

@@ -294,6 +294,7 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("POST /api/artists/{id}/merge", r.handleMergeArtist)
 	r.mux.HandleFunc("POST /api/ai/backfill-readings", r.handleBackfillReadings)
 	// 読みデータのエクスポート/インポート（外部 AI で読みを作成する運用向け）
+	r.mux.HandleFunc("GET /api/readings/stats", r.handleReadingsStats)
 	r.mux.HandleFunc("GET /api/readings/export", r.handleExportReadings)
 	r.mux.HandleFunc("POST /api/readings/import", r.handleImportReadings)
 
@@ -929,6 +930,16 @@ func (r *Router) handleBackfillReadings(w http.ResponseWriter, req *http.Request
 		return
 	}
 	respondJSON(w, http.StatusOK, result)
+}
+
+// handleReadingsStats は読みの整備状況（未整備の残件数）を返す。
+func (r *Router) handleReadingsStats(w http.ResponseWriter, req *http.Request) {
+	stats, err := r.readingService.Stats()
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, stats)
 }
 
 // handleExportReadings はアーティスト・楽曲の読みを一括出力する。

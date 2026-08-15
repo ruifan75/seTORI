@@ -62,6 +62,32 @@ func (s *ReadingService) Export(onlyNeedsFix bool) (*dto.ReadingsExport, error) 
 	return out, nil
 }
 
+// Stats は読みの整備状況を返す。管理画面に「あと何件か」を出すためのもので、
+// 判定は Export と同じ needsFix を通す（画面の件数と書き出される件数をずらさないため）。
+func (s *ReadingService) Stats() (*dto.ReadingsStats, error) {
+	artists, err := s.artistRepo.ListAllReadings()
+	if err != nil {
+		return nil, err
+	}
+	songs, err := s.songRepo.ListAllReadings()
+	if err != nil {
+		return nil, err
+	}
+
+	out := &dto.ReadingsStats{ArtistsTotal: len(artists), SongsTotal: len(songs)}
+	for _, a := range artists {
+		if needsFix(a.Name, a.NameReading.String) {
+			out.ArtistsNeedsFix++
+		}
+	}
+	for _, sg := range songs {
+		if needsFix(sg.Name, sg.NameReading.String) {
+			out.SongsNeedsFix++
+		}
+	}
+	return out, nil
+}
+
 // normalizeReading は読みを平仮名へ正規化（片仮名→平仮名、trim）し、採用可否を返す。
 // 空文字は「読みを消す」意図として ok=true で通す。漢字が残るものは不可。
 func normalizeReading(raw string) (reading string, ok bool) {
