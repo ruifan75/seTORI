@@ -17,6 +17,10 @@ import { formatTimeInput } from '../utils/timeFormat';
 // ドラッグ中はシークしない（連続シークは重く、音も途切れて判断できない）。
 // 離した時点で確定し、start はそこから・end は 3 秒前から試聴する
 // ── TimestampTweaker と同じ規則にしてある。
+//
+// **タッチでは細いハンドルをつまめない**ので、tapTarget を渡すと
+// 「トラックのどこを押してもそのハンドルが動く」モードになる。
+// 押した位置＝聴きたい位置＝境界の候補なので、移動と試聴を分ける必要が無い。
 
 export interface RangeNeighbour {
   id: string;
@@ -38,12 +42,15 @@ export default function RangeEditor({
   end,
   duration,
   neighbours = [],
+  tapTarget = null,
   onChange,
 }: {
   start: number;
   end: number; // 0 = 動画の最後まで
   duration: number | null; // 動画全体の長さ（取れなければ null）
   neighbours?: RangeNeighbour[];
+  // タッチ向け：トラックのタップでこのハンドルを動かす（null ならタップは試聴のみ）
+  tapTarget?: Handle | null;
   onChange: (patch: { start?: number; end?: number }) => void;
 }) {
   const scope = usePlayerScope();
@@ -137,14 +144,18 @@ export default function RangeEditor({
       {/* 時間軸本体。クリック（ハンドル以外）はその位置から試聴 */}
       <div
         ref={trackRef}
-        className="relative h-14 rounded-lg bg-gray-100 cursor-pointer touch-none"
-        title="クリックでこの位置から再生"
+        className={`relative rounded-lg bg-gray-100 cursor-pointer touch-none ${tapTarget ? 'h-16' : 'h-14'}`}
+        title={tapTarget ? `タップで${tapTarget === 'start' ? '開始' : '終了'}をここにする` : 'クリックでこの位置から再生'}
         onPointerMove={onPointerMove}
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
         onClick={(e) => {
           if (drag) return;
-          playerSeekTo(scope, valueFromX(e.clientX));
+          const at = valueFromX(e.clientX);
+          // タップ先が決まっていればハンドルを動かす（commit が試聴もする）。
+          // 決まっていなければ従来どおりその位置を聴くだけ
+          if (tapTarget) commit(tapTarget, moveHandle(tapTarget, at));
+          else playerSeekTo(scope, at);
         }}
       >
         {/* 前後の歌唱。ここへ食い込んでいないかを見るためのもの */}
@@ -215,12 +226,16 @@ export default function RangeEditor({
                 const step = e.key === 'ArrowRight' ? 1 : -1;
                 commit(handle, moveHandle(handle, (handle === 'start' ? start : segEnd) + step));
               }}
-              className="absolute top-0 bottom-0 w-6 -translate-x-1/2 cursor-ew-resize touch-none flex items-center justify-center"
+              className={`absolute top-0 bottom-0 -translate-x-1/2 cursor-ew-resize touch-none flex items-center justify-center ${
+                tapTarget ? 'w-11' : 'w-6'
+              }`}
               style={{ left: `${at}%` }}
             >
               <span
-                className={`w-1.5 h-8 rounded-full bg-indigo-600 shadow transition-transform ${
-                  active ? 'scale-y-110 bg-indigo-700' : ''
+                className={`rounded-full shadow transition-transform ${
+                  tapTarget === handle ? 'w-2 h-11 bg-indigo-600' : 'w-1.5 h-8 bg-indigo-600'
+                } ${active ? 'scale-y-110 bg-indigo-700' : ''} ${
+                  tapTarget && tapTarget !== handle ? 'opacity-40' : ''
                 }`}
               />
             </div>

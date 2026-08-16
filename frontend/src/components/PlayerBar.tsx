@@ -724,13 +724,9 @@ export default function PlayerBar() {
                 <div className="flex items-center gap-4">
                   {controls('lg')}
                   {progressBar(true)}
-                  {/* 通報導線はモバイルでは出さない。「開始はここ／終了はここ」は
-                      区間の外へ出られないので、区間そのものが大きくずれている
-                      ときに押しようがない ── タッチで扱える編集画面を作るまで、
-                      中途半端な入口を残すより畳んでおく */}
-                  <div className="hidden sm:flex">
-                    <PlaybackFeedback dark />
-                  </div>
+                  {/* 全画面はモバイル唯一の操作面なので、報告の導線もここに置く
+                      （報告画面は lg 未満でタブ切り替えのタッチ向けに切り替わる） */}
+                  <PlaybackFeedback dark />
                   {/* iOS は Web からの音量変更不可（ハードウェアキーのみ）のためモバイルでは非表示 */}
                   <div className="hidden sm:flex">{volumeControl(true)}</div>
                 </div>
