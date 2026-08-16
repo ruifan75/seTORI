@@ -244,6 +244,12 @@ export default function PlayerBar() {
         return;
       }
       const origin = window.location.origin;
+      // 初回の起動中も「切り替え中」とみなす。YT は起動の途中で一時的な PAUSED を
+      // 発することがあり、それを再生意図として同期すると [playing] effect が
+      // 始まりかけの動画を止めてしまう。トラック切り替えには同じ保護が入っていたが
+      // （下の [track?.performanceId] effect）、そちらは readyRef が立つ前に
+      // 早期 return するので、初回だけ無防備だった。PLAYING が来た時点で解除される
+      switchingRef.current = true;
       playerRef.current = new YT.Player(container, {
         origin,
         width: '100%',
@@ -383,8 +389,18 @@ export default function PlayerBar() {
     const p = playerRef.current;
     if (!p || !readyRef.current) return;
     try {
-      if (playing) p.playVideo();
-      else p.pauseVideo();
+      if (playing) {
+        p.playVideo();
+        return;
+      }
+      // **まだ一度も始まっていないプレイヤー（-1 UNSTARTED / 5 CUED）は止めない。**
+      // 止める対象が無いばかりか、走り出す寸前の自動再生をここで打ち消してしまう。
+      // 「1.5 秒たっても未開始なら諦める」判定（scheduleBlockedCheck）が
+      // setPlaying(false) を投げるので、遅れて成功するはずだった再生を
+      // 自分で潰していた ── 起動が 1.5 秒より速いか遅いかで結果が変わるため、
+      // 「たまに自動再生されない」という形でしか現れない
+      const st = typeof p.getPlayerState === 'function' ? p.getPlayerState() : 1;
+      if (st !== -1 && st !== 5) p.pauseVideo();
     } catch {
       /* noop */
     }
