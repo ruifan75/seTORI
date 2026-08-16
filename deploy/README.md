@@ -106,7 +106,42 @@ cp .env.example .env
 >   失効・再発行することではない。実際に漏えいした疑いがある場合だけ別途ローテーションする。
 > - **稼働中の環境で鍵だけを直接差し替えないこと。** 現在の実装は旧鍵から新鍵への
 >   再暗号化を自動では行わないため、既存の機密がすべて読めなくなる。鍵を更新する場合は、
->   旧鍵で復号して新鍵で再暗号化する移行処理を用意するか、計画停止のうえ全機密を再登録する。
+>   下記のローテーションコマンドを使うか、計画停止のうえ全機密を再登録する。
+
+#### `SETTINGS_ENCRYPTION_KEY` のローテーション
+
+`/app/rotate-secrets` は `app_settings` の外部サービス機密・Google Drive refresh token・
+`ai_providers.api_key` を単一トランザクションで新しい鍵へ再暗号化する。既定は検証のみで、
+`--apply` を付けるまで DB は変更しない。1 件でも旧鍵で復号できなければ全体を中止する。
+
+```bash
+cd deploy
+umask 077
+openssl rand -base64 32 > .env.production.key.next
+chmod 600 .env.production.key.next
+
+rotation_image_tag=$(git rev-parse HEAD)
+
+# 先に dry-run。件数だけが表示され、DB は変更されない
+IMAGE_TAG="$rotation_image_tag" docker compose run --rm --no-deps --user 0 \
+  -v "$PWD/.env.production.key.next:/run/secrets/new-key:ro" \
+  backend /app/rotate-secrets --new-key-file /run/secrets/new-key
+
+# 書き込みを止めてから同じ検証を実行し、1 transaction で反映
+docker compose stop backend
+IMAGE_TAG="$rotation_image_tag" docker compose run --rm --no-deps --user 0 \
+  -v "$PWD/.env.production.key.next:/run/secrets/new-key:ro" \
+  backend /app/rotate-secrets --new-key-file /run/secrets/new-key --apply
+```
+
+成功後、`.env.production.key.next` の値をパスワードマネージャーへ保存し、`.env` の
+`SETTINGS_ENCRYPTION_KEY` を同じ値へ置き換えてから backend を起動する。新しい鍵で
+もう一度 dry-run し、全件を復号できることを確かめるまで旧 `.env` と直前の DB dump を残す。
+
+**既存の DB dump は自動では再暗号化されない。** 古い dump が旧鍵で復号できる期間を
+終わらせるには、換鍵後の dump を作成・外部保存したうえで、旧 dump を保管方針に従って削除する。
+暗号化導入前の dump に平文の機密が含まれる場合は、該当する外部サービスの資格情報も
+必要に応じて失効・再発行する。
 
 ### 2. 起動
 
