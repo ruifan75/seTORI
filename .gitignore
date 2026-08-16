@@ -1,5 +1,6 @@
 
 # 公開リポジトリに含めないローカルの計画・運用資料
+/CLAUDE.md
 /TODO.md
 /deploy/
 *.postman_collection.json
