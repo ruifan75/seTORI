@@ -221,9 +221,14 @@ export default function Layout() {
           </div>
         </div>
 
-        {/* Mobile menu panel */}
+        {/* モバイルのメニュー。**ヘッダーの中に流し込まず、上に浮かせる。**
+            流れの中に置くとヘッダーが伸び、その分だけページ全体が下へずれる。
+            さらにヘッダーは shrink-0 なので、項目が増えると画面の外へはみ出し、
+            root の overflow-hidden に切られて下端が押せなくなっていた
+            （スクロールもできない）。
+            浮かせたうえで高さを半分までに抑え、あふれたら中でスクロールさせる。 */}
         {menuOpen && (
-          <nav className="lg:hidden border-t bg-white">
+          <nav className="lg:hidden absolute inset-x-0 top-full max-h-menu-dynamic overflow-y-auto overscroll-contain border-t bg-white shadow-lg">
             <div className="px-4 py-3 space-y-1">
               <div className="pb-2">
                 <GlobalSearch />
@@ -301,6 +306,17 @@ export default function Layout() {
           </nav>
         )}
       </header>
+
+      {/* メニューの背後を押したら閉じる。ヘッダー（z-30）より下に敷くので
+          ハンバーガー自身と開いたメニューは押せたままになる */}
+      {menuOpen && (
+        <button
+          type="button"
+          onClick={() => setMenuLocationKey(null)}
+          aria-label="メニューを閉じる"
+          className="lg:hidden fixed inset-0 z-20 bg-gray-900/20"
+        />
+      )}
 
       {/* Main content
           スクロールコンテナ（main）は常に全幅にし、幅制限（max-w-7xl）は内側の div で行う。

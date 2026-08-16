@@ -32,6 +32,14 @@ body {
   height: 100dvh;
 }
 
+/* モバイルのメニューは画面の半分までにして、あふれたら中でスクロールさせる。
+   全高にすると下端の項目（ログアウト等）が画面外へ出て押せなくなる
+   ── ヘッダーは shrink-0 なので、伸びたぶんは main ではなく画面の外へ出る。 */
+.max-h-menu-dynamic {
+  max-height: 50vh;
+  max-height: 50dvh;
+}
+
 /* 全画面プレイヤーのスライドイン（動画コンテナと重ねて同距離 100vh を動かす） */
 @keyframes player-slide-up {
   from {
