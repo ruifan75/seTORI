@@ -152,6 +152,13 @@ export default function LoginPage() {
               <p className="mt-3 text-xs text-gray-400 text-center">
                 初めての場合はアカウントが自動で作成されます
               </p>
+              <p className="mt-2 text-center text-xs leading-5 text-gray-400">
+                ログイン前に、データの取扱いを含む
+                <Link to="/about" className="text-indigo-500 underline underline-offset-2 hover:text-indigo-700">
+                  「このサイトについて」
+                </Link>
+                をご確認ください
+              </p>
 
               {!showPasswordForm && (
                 <p className="mt-5 text-center">

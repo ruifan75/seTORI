@@ -35,7 +35,7 @@ import OrganizationsPage from './pages/admin/OrganizationsPage';
 import ReadingsPage from './pages/admin/ReadingsPage';
 import BackupPage from './pages/admin/BackupPage';
 import ActivityPage from './pages/admin/ActivityPage';
-import PrivacyPage from './pages/PrivacyPage';
+import AboutPage from './pages/AboutPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -74,7 +74,10 @@ function App() {
               <Route path="artists" element={<ArtistsPage />} />
               <Route path="artists/:id" element={<ArtistDetailPage />} />
               <Route path="search" element={<SearchPage />} />
-              <Route path="privacy" element={<PrivacyPage />} />
+              <Route path="about" element={<AboutPage />} />
+              {/* 旧 URL は外部リンクやブックマークを壊さないため同じ内容を表示する */}
+              <Route path="terms" element={<AboutPage />} />
+              <Route path="privacy" element={<AboutPage />} />
               <Route path="playlists" element={<PlaylistsPage />} />
               {/* プリセット（運営が用意した歌単）。:id より前に置かなくても静的な
                   preset セグメントが優先されるが、読む順として先に並べておく */}
