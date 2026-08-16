@@ -855,7 +855,7 @@ export default function PlayerBar() {
                       <span className={`text-sm truncate ${i === index ? 'text-indigo-700 font-medium' : 'text-gray-900'}`}>
                         {t.songName}
                       </span>
-                      {t.artist && <span className="text-[11px] text-gray-400 truncate shrink-0">{t.artist}</span>}
+                      {t.artist && <span className="text-[11px] text-gray-400 truncate shrink-0 max-w-[40%]">{t.artist}</span>}
                     </span>
                     <span className="block text-xs text-gray-400 truncate">
                       {t.streamDate && (
