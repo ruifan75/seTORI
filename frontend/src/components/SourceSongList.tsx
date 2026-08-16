@@ -1,5 +1,6 @@
 import Tag from './ui/Tag';
-import { youtubePlayerSeekTo } from './youtubePlayerControl';
+import { playerSeekTo } from './youtubePlayerControl';
+import { usePlayerScope } from './playerScope';
 import { matchReasonLabel } from '../utils/matchReason';
 import type { CommentSong } from '../api/types';
 
@@ -35,6 +36,8 @@ function formatTime(seconds: number): string {
  * 1 つに保っているのと同じ理由）。
  */
 export default function SourceSongList({ songs, performanceTags, onAdd, emptyMessage }: Props) {
+  const scope = usePlayerScope();
+
   if (songs.length === 0) {
     return <p className="text-sm text-gray-400 py-2">{emptyMessage}</p>;
   }
@@ -52,7 +55,7 @@ export default function SourceSongList({ songs, performanceTags, onAdd, emptyMes
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  youtubePlayerSeekTo(song.start);
+                  playerSeekTo(scope, song.start);
                 }}
                 className="px-1.5 rounded bg-orange-50 text-orange-700 font-mono text-xs hover:bg-orange-100 transition-colors"
                 title="開始時間にジャンプ"
@@ -65,7 +68,7 @@ export default function SourceSongList({ songs, performanceTags, onAdd, emptyMes
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      youtubePlayerSeekTo(song.end);
+                      playerSeekTo(scope, song.end);
                     }}
                     className="px-1.5 rounded bg-orange-50/60 text-orange-600 font-mono text-xs hover:bg-orange-100 transition-colors"
                     title={song.is_end_time_estimated ? '終了時間にジャンプ（推定値）' : '終了時間にジャンプ'}

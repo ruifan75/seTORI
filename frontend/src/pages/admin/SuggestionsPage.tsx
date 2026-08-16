@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { performanceApi, songApi, streamApi, suggestionApi, tagApi } from '../../api/client';
@@ -30,7 +30,7 @@ import {
 import { OverlapWarning, SuggestionChanges } from '../../components/SuggestionChanges';
 import AutoApplySettingsPanel from '../../components/AutoApplySettingsPanel';
 import { formatSeconds } from '../../components/usePerformanceTiming';
-import { youtubePlayerGetCurrentTime, youtubePlayerSeekTo } from '../../components/youtubePlayerControl';
+import { playerSeekTo } from '../../components/youtubePlayerControl';
 
 const STATUS_TABS: { value: SuggestionStatus; label: string }[] = [
   { value: 'pending', label: '未処理' },
@@ -319,7 +319,6 @@ function GroupCard({
   const [merging, setMerging] = useState(false);
   // 審査カードは一度に 1 枚だけ開く。開いた曲へプレイヤーが飛ぶ（セットリスト編集と同じ）
   const [openId, setOpenId] = useState<string | null>(null);
-  const [playerTime, setPlayerTime] = useState<number | null>(null);
   // 検索で足したゲスト歌手。配信の参加者一覧（サーバー由来）には居ないので
   // ここで抱えておかないと、選んだ本人が候補に並ばず外せなくなる
   const [extraSingers, setExtraSingers] = useState<Singer[]>([]);
@@ -336,13 +335,6 @@ function GroupCard({
     staleTime: 60 * 60 * 1000,
   });
   const performanceTags = perfTags.map((t) => ({ id: t.id, label: t.display_name, color: t.color }));
-
-  // 展開中のカードが再生位置を使うので、開いている間だけ追う
-  useEffect(() => {
-    if (!open || !openId) return;
-    const timer = setInterval(() => setPlayerTime(youtubePlayerGetCurrentTime()), 1000);
-    return () => clearInterval(timer);
-  }, [open, openId]);
 
   const playback = usePlaybackSource(group, open);
 
@@ -424,7 +416,7 @@ function GroupCard({
                       <li key={p.id} className="flex items-start gap-2 text-xs">
                         {/* 開始だけでは重なりを判断できないので終了まで出す */}
                         <button
-                          onClick={() => youtubePlayerSeekTo(p.start_seconds)}
+                          onClick={() => playerSeekTo('page', p.start_seconds)}
                           className="font-mono text-indigo-600 hover:text-indigo-900 shrink-0"
                           title="ここから再生"
                         >
@@ -450,7 +442,7 @@ function GroupCard({
                 <div className="mt-2 max-h-72 overflow-y-auto">
                   <RawCommentsPanel
                     videoId={group.target_key}
-                    onSeek={(sec) => youtubePlayerSeekTo(sec)}
+                    onSeek={(sec) => playerSeekTo('page', sec)}
                     onAddSong={(input) => {
                       // 展開中のカードへ流し込む。原文にしか無い歌手名などを
                       // 手で打ち直さずに済ませるための経路
@@ -484,7 +476,6 @@ function GroupCard({
                   )
                 }
                 performanceTags={performanceTags}
-                currentPlayerTime={playerTime}
                 expanded={openId === s.id}
                 draft={draftOf(s)}
                 onDraftChange={(patch) => patchDraft(s, patch)}
@@ -495,7 +486,7 @@ function GroupCard({
                   if (next) {
                     if (!open) onToggleOpen();
                     const start = s.payload?.start_seconds;
-                    if (start != null) youtubePlayerSeekTo(start);
+                    if (start != null) playerSeekTo('page', start);
                   }
                 }}
                 busy={busy}
@@ -601,7 +592,7 @@ function usePlaybackSource(group: SuggestionGroup, open: boolean) {
   // （読み込み前に seek しても効かないので onReady で行う）。
   const onReady = useCallback(() => {
     if (seekTo !== null && seekTo > 0) {
-      youtubePlayerSeekTo(seekTo);
+      playerSeekTo('page', seekTo);
     }
   }, [seekTo]);
 

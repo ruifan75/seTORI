@@ -1,4 +1,4 @@
-import { useQueryClient } from '@tanstack/react-query';
+import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { performanceApi, suggestionApi } from '../api/client';
 import { useAuthStore, hasPermission, PERM } from '../store/auth';
 import { usePlayerStore } from '../store/player';
@@ -47,6 +47,14 @@ export function parseSeconds(input: string): number | null {
   return total;
 }
 
+// 内容が変わったときに引き直すクエリ。**報告ダイアログと共有する** ──
+// 別々に並べていると、片方だけ足したときに「直したのに一覧が古いまま」になる。
+export function invalidateContentQueries(queryClient: QueryClient) {
+  for (const key of ['song', 'songs', 'stream', 'streams', 'performances', 'singer', 'suggestions']) {
+    queryClient.invalidateQueries({ queryKey: [key] });
+  }
+}
+
 export function usePerformanceTiming() {
   const user = useAuthStore((s) => s.user);
   const canEdit = hasPermission(user, PERM.CONTENT_EDIT);
@@ -57,15 +65,7 @@ export function usePerformanceTiming() {
   const queryClient = useQueryClient();
   const updateTrackTiming = usePlayerStore((s) => s.updateTrackTiming);
 
-  const invalidate = () => {
-    queryClient.invalidateQueries({ queryKey: ['song'] });
-    queryClient.invalidateQueries({ queryKey: ['songs'] });
-    queryClient.invalidateQueries({ queryKey: ['stream'] });
-    queryClient.invalidateQueries({ queryKey: ['streams'] });
-    queryClient.invalidateQueries({ queryKey: ['performances'] });
-    queryClient.invalidateQueries({ queryKey: ['singer'] });
-    queryClient.invalidateQueries({ queryKey: ['suggestions'] });
-  };
+  const invalidate = () => invalidateContentQueries(queryClient);
 
   // 変更が妥当かを送信前に判定する。end = 0 は「動画の最後まで」なので範囲チェックから外す。
   const validate = (target: TimingTarget, change: TimingChange): string | null => {

@@ -1,6 +1,8 @@
 export interface YouTubePlayerInstance {
   destroy(): void;
   getCurrentTime(): number;
+  // 動画全体の長さ（秒）。読み込み前は 0 を返す
+  getDuration(): number;
   getPlayerState(): number;
   loadVideoById(options: { videoId: string; startSeconds?: number }): void;
   mute(): void;

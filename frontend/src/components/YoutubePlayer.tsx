@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { setYoutubePlayerInstance, youtubePlayerGetCurrentTime } from './youtubePlayerControl';
+import { setPlayerInstance, playerGetCurrentTime } from './youtubePlayerControl';
 import type { YouTubePlayerEvent, YouTubePlayerInstance } from '../types/youtube';
 
 interface YoutubePlayerProps {
@@ -27,9 +27,9 @@ export default function YoutubePlayer({ videoId, onReady }: YoutubePlayerProps) 
   // ページを再読み込みすると**編集中の内容がすべて消える**。ここだけ
   // 作り直せば編集は保たれる。
   const reload = useCallback(() => {
-    const now = youtubePlayerGetCurrentTime();
+    const now = playerGetCurrentTime('page');
     resumeAtRef.current = now && now > 0 ? now : null;
-    setYoutubePlayerInstance(null);
+    setPlayerInstance('page', null);
     initTokenRef.current = null;
     setReloadNonce((n) => n + 1);
   }, []);
@@ -73,7 +73,7 @@ export default function YoutubePlayer({ videoId, onReady }: YoutubePlayerProps) 
           },
           events: {
             onReady: (event: YouTubePlayerEvent) => {
-              setYoutubePlayerInstance(event.target);
+              setPlayerInstance('page', event.target);
               // 再読み込み前の位置へ戻す（読み込み完了前に seek しても効かない）
               const resumeAt = resumeAtRef.current;
               if (resumeAt != null) {
@@ -88,7 +88,7 @@ export default function YoutubePlayer({ videoId, onReady }: YoutubePlayerProps) 
             },
           },
         });
-        setYoutubePlayerInstance(player);
+        setPlayerInstance('page', player);
 
         initTokenRef.current = token;
       } catch (error) {

@@ -650,6 +650,12 @@ export interface SongSwapPayload {
   song_name: string;
   original_artist: string;
   current_song_name: string; // 提案時点の曲名（レビュー時の表示・衝突判定用）
+  // 未登録の曲へ差し替えるとき（song_id が空）だけ効く。承認時の曲作成に渡る。
+  // 落とすと差し替えから作った曲だけジャケットも読みも iTunes も付かない
+  itunes_id?: number;
+  art_url?: string;
+  name_reading?: string;
+  original_artist_reading?: string;
 }
 
 // 「この配信のこの時点に、登録されていない曲がある」という報告の中身

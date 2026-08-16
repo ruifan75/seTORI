@@ -851,6 +851,18 @@ type SongSwapPayload struct {
 	// CurrentSongName は提案時点の曲名。レビュー時に「何から何へ」を見せるためと、
 	// 提案後に曲が差し替えられていないかの確認に使う。
 	CurrentSongName string `json:"current_song_name"`
+
+	// ここから下は **CreatePerformanceItem が運ぶ欄と揃えるためのもの**。
+	// SongID が空（＝未登録の曲へ差し替える）ときだけ効く。
+	//
+	// MissingSongPayload と同じ理由で要る：承認は findOrCreateSong を通り、
+	// その中でジャケットと読みが使われる。運ばなければ空のまま渡り、
+	// **差し替えから作った曲だけ**ジャケットも読みも iTunes も付かない。
+	// **CreatePerformanceItem に欄を足したらここにも足すこと。**
+	ItunesID              *int64 `json:"itunes_id,omitempty"`
+	ArtURL                string `json:"art_url,omitempty"`
+	NameReading           string `json:"name_reading,omitempty"`
+	OriginalArtistReading string `json:"original_artist_reading,omitempty"`
 }
 
 // CreateSuggestionRequest 修正提案の投稿（要ログイン）。

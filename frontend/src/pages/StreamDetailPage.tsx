@@ -12,9 +12,10 @@ import { useToast } from '../components/ui/ToastContext';
 import { useAuthStore, hasPermission, PERM } from '../store/auth';
 import { usePlayerStore } from '../store/player';
 import YoutubePlayer from '../components/YoutubePlayer';
-import { youtubePlayerSeekTo, youtubePlayerGetCurrentTime } from '../components/youtubePlayerControl';
+import { playerSeekTo } from '../components/youtubePlayerControl';
 import type { YouTubePlayerInstance } from '../types/youtube';
 import QueueAddButton from '../components/QueueAddButton';
+import ReportButton from '../components/ReportButton';
 import RawCommentsPanel from '../components/RawCommentsPanel';
 import SourceSongList from '../components/SourceSongList';
 import ArtistLinks from '../components/ArtistLinks';
@@ -197,7 +198,7 @@ export default function StreamDetailPage() {
     setSelectedSongIndex(index);
     const song = editableSongs[index];
     if (seek && song && song.start >= 0) {
-      youtubePlayerSeekTo(song.start);
+      playerSeekTo('page', song.start);
     }
   };
 
@@ -225,7 +226,6 @@ export default function StreamDetailPage() {
   const [chapterTimelineSongs, setChapterTimelineSongs] = useState<CommentSong[]>([]);
   const [channelOwner, setChannelOwner] = useState<Singer | null>(null);
   const [participants, setParticipants] = useState<Singer[]>([]);
-  const [currentPlayerTime, setCurrentPlayerTime] = useState<number | null>(null);
   const [highlightedSongId, setHighlightedSongId] = useState<string | null>(null);
 
   const fetchTrackDurationByItunesId = async (itunesId: number): Promise<number | null> => {
@@ -290,16 +290,6 @@ export default function StreamDetailPage() {
       document.documentElement.style.overflow = prevHtmlOverflow;
     };
   }, [isEditing]);
-
-  // プレイヤーの現在時刻を定期更新（1秒ごと）
-  useEffect(() => {
-    const interval = setInterval(() => {
-      const time = youtubePlayerGetCurrentTime();
-      setCurrentPlayerTime(time);
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, []);
 
   // Stream 情報を更新
   const updateStreamMutation = useMutation({
@@ -1359,7 +1349,7 @@ export default function StreamDetailPage() {
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  youtubePlayerSeekTo(song.start_seconds);
+                                  playerSeekTo('page', song.start_seconds);
                                 }}
                                 className="px-1.5 rounded bg-blue-50 text-blue-700 font-mono text-xs hover:bg-blue-100 transition-colors"
                                 title="開始時間にジャンプ"
@@ -1372,7 +1362,7 @@ export default function StreamDetailPage() {
                                   <button
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      youtubePlayerSeekTo(song.end_seconds);
+                                      playerSeekTo('page', song.end_seconds);
                                     }}
                                     className="px-1.5 rounded bg-blue-50/60 text-blue-600 font-mono text-xs hover:bg-blue-100 transition-colors"
                                     title="終了時間にジャンプ"
@@ -1499,7 +1489,7 @@ export default function StreamDetailPage() {
                 {editTab === 'raw' && (
                   <RawCommentsPanel
                     videoId={stream.id}
-                    onSeek={(secs) => youtubePlayerSeekTo(secs)}
+                    onSeek={(secs) => playerSeekTo('page', secs)}
                     onAddSong={addFromRawComment}
                   />
                 )}
@@ -1689,7 +1679,7 @@ export default function StreamDetailPage() {
                     key={item.id}
                     type="button"
                     onClick={() => {
-                      youtubePlayerSeekTo(item.start);
+                      playerSeekTo('page', item.start);
                       if (isEditing) scrollToEditableSong(item.start);
                     }}
                     className="absolute top-0 h-full rounded bg-indigo-500/80 hover:bg-indigo-600 transition-colors group"
@@ -1719,7 +1709,7 @@ export default function StreamDetailPage() {
                       <button
                         key={item.id}
                         type="button"
-                        onClick={() => youtubePlayerSeekTo(item.start)}
+                        onClick={() => playerSeekTo('page', item.start)}
                         className="absolute top-0 h-full rounded bg-blue-500/70 hover:bg-blue-600 transition-colors group"
                         style={{
                           left: `${getTimelineLeft(item.start)}%`,
@@ -1744,7 +1734,7 @@ export default function StreamDetailPage() {
                       <button
                         key={item.id}
                         type="button"
-                        onClick={() => youtubePlayerSeekTo(item.start)}
+                        onClick={() => playerSeekTo('page', item.start)}
                         className="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-orange-500 hover:bg-orange-600 transition-colors group"
                         style={{ left: `${getTimelineLeft(item.start)}%` }}
                       >
@@ -1957,7 +1947,6 @@ export default function StreamDetailPage() {
                       onApplyEndSource={(source) => applyEndSource(index, source)}
                       onClearItunes={() => clearItunesId(index)}
                       performanceTags={PERFORMANCE_TAGS}
-                      currentPlayerTime={currentPlayerTime}
                       participants={participants}
                       channelOwner={channelOwner}
                       onAddParticipant={(singer) => setParticipants([...participants, singer])}
@@ -2051,6 +2040,21 @@ export default function StreamDetailPage() {
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
                   {stream.performances.map((perf, index) => {
+                    // キュー追加と報告で同じトラックを使う（片方だけ欄が欠けないように）
+                    const rowTrack = {
+                      performanceId: perf.id,
+                      streamId: perf.stream_id,
+                      songId: perf.song_id,
+                      songName: perf.song_name,
+                      artist: perf.original_artist,
+                      artists: perf.artists ?? [],
+                      artUrl: perf.arts,
+                      singers: perf.singers?.map((s) => ({ id: s.id, name: s.name })) ?? [],
+                      streamTitle: stream.title,
+                      streamDate: stream.stream_date,
+                      start: perf.start_seconds,
+                      end: perf.end_seconds,
+                    };
                     const singerCount = perf.singers?.length || 0;
                     const showCount = singerCount > 3;
                     // 歌手を並べ替える：チャンネル所有者を優先
@@ -2163,7 +2167,7 @@ export default function StreamDetailPage() {
                         <td className="px-4 py-4 text-right">
                           <div className="inline-flex items-center gap-1.5">
                             <button
-                              onClick={() => youtubePlayerSeekTo(perf.start_seconds)}
+                              onClick={() => playerSeekTo('page', perf.start_seconds)}
                               className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
                               title={`${perf.song_name} を再生`}
                             >
@@ -2171,22 +2175,9 @@ export default function StreamDetailPage() {
                                 <path d="M8 5v14l11-7z" />
                               </svg>
                             </button>
-                            <QueueAddButton
-                              track={{
-                                performanceId: perf.id,
-                                streamId: perf.stream_id,
-                                songId: perf.song_id,
-                                songName: perf.song_name,
-                                artist: perf.original_artist,
-                                artists: perf.artists ?? [],
-                                artUrl: perf.arts,
-                                singers: perf.singers?.map((s) => ({ id: s.id, name: s.name })) ?? [],
-                                streamTitle: stream.title,
-                                streamDate: stream.stream_date,
-                                start: perf.start_seconds,
-                                end: perf.end_seconds,
-                              }}
-                            />
+                            <QueueAddButton track={rowTrack} />
+                            {/* 時間・曲・歌った人はすべて 1 つの報告画面で直す */}
+                            <ReportButton track={rowTrack} />
                             <a
                               href={perf.youtube_url}
                               target="_blank"

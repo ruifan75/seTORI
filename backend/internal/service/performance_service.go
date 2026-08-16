@@ -491,10 +491,19 @@ func (s *PerformanceService) SongLabelOf(performanceID uuid.UUID) (string, strin
 func (s *PerformanceService) ApplySongSwap(performanceID uuid.UUID, p dto.SongSwapPayload) error {
 	songID := strings.TrimSpace(p.SongID)
 	if songID == "" {
-		song, _, err := s.findOrCreateSong(dto.CreatePerformanceItem{
-			Name:           p.SongName,
-			OriginalArtist: p.OriginalArtist,
-		})
+		// **編集画面と同じ欄を渡す。** findOrCreateSong はジャケットと読みを
+		// ここで使うので、渡さないと差し替えから作った曲だけそれらが空になる
+		item := dto.CreatePerformanceItem{
+			Name:                  p.SongName,
+			NameReading:           p.NameReading,
+			OriginalArtist:        p.OriginalArtist,
+			OriginalArtistReading: p.OriginalArtistReading,
+			ItunesID:              p.ItunesID,
+		}
+		if p.ArtURL != "" {
+			item.ArtURL = &p.ArtURL
+		}
+		song, _, err := s.findOrCreateSong(item)
 		if err != nil {
 			return fmt.Errorf("find or create song: %w", err)
 		}
@@ -509,8 +518,13 @@ func (s *PerformanceService) ApplySongSwap(performanceID uuid.UUID, p dto.SongSw
 // GetEditableFields は修正提案の対象となる編集可能フィールドと表示ラベルを返す。
 // 見つからなければ (nil, "", nil)。TargetEditor インターフェースを満たす。
 //
-// 現状は時間軸（開始/終了）のみ。曲の差し替えは「どの曲か」を選ぶ操作で、
-// 文字列の差分としては表現できないため、別の提案種別として扱う。
+// 時間軸（開始/終了）と歌った人（singer_ids）。曲の差し替えは「どの曲か」を選ぶ
+// 操作で、文字列の差分としては表現できないため、別の提案種別として扱う。
+//
+// singer_ids が「,」区切りの 1 行なのは fields が map[string]string だから
+// （`artists.aliases` を読点区切りで持っているのと同じ手）。
+// 自動反映は autoApplyFields の allowlist で時間軸だけに絞ってあるので、
+// ここに足しても中央値の計算には回らない。
 func (s *PerformanceService) GetEditableFields(id uuid.UUID) (map[string]string, string, error) {
 	perf, err := s.perfRepo.FindByID(id)
 	if err != nil {
@@ -519,9 +533,14 @@ func (s *PerformanceService) GetEditableFields(id uuid.UUID) (map[string]string,
 	if perf == nil {
 		return nil, "", nil
 	}
+	singerIDs := make([]string, 0, len(perf.Singers))
+	for _, singer := range perf.Singers {
+		singerIDs = append(singerIDs, singer.ID)
+	}
 	fields := map[string]string{
 		"start_seconds": strconv.Itoa(perf.StartSeconds),
 		"end_seconds":   strconv.Itoa(perf.EndSeconds),
+		"singer_ids":    strings.Join(singerIDs, ","),
 	}
 	label := perf.SongName
 	if perf.OriginalArtist != "" {
@@ -549,6 +568,16 @@ func (s *PerformanceService) ApplyEditableFields(id uuid.UUID, fields map[string
 			return fmt.Errorf("終了時間が不正です: %s", v)
 		}
 		req.EndSeconds = &n
+	}
+	if v, ok := fields["singer_ids"]; ok {
+		// 空文字は「歌手を全部外す」。空白だけの要素は落とす
+		ids := []string{}
+		for _, part := range strings.Split(v, ",") {
+			if id := strings.TrimSpace(part); id != "" {
+				ids = append(ids, id)
+			}
+		}
+		req.SingerIDs = &ids
 	}
 	_, err := s.UpdatePerformance(id, req)
 	return err

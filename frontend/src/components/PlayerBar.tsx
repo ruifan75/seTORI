@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { usePlayerStore } from '../store/player';
 import ArtistLinks from './ArtistLinks';
 import PlaybackFeedback from './PlaybackFeedback';
-import { setPlayerBarInstance } from './youtubePlayerControl';
+import PerformanceReportDialog from './PerformanceReportDialog';
+import { setPlayerInstance } from './youtubePlayerControl';
 import type { YouTubePlayerInstance, YouTubePlayerStateChangeEvent } from '../types/youtube';
 
 // 秒 → M:SS
@@ -19,7 +20,7 @@ function fmt(sec: number): string {
 // 動画 iframe は同一 DOM 要素を CSS の fixed 配置だけで移動する
 // （別コンテナへ再マウントすると再生が中断されるため）。
 export default function PlayerBar() {
-  const { queue, index, playing, queueOpen, next, prev, jumpTo, removeAt, setPlaying, setQueueOpen, clear } =
+  const { queue, index, playing, queueOpen, editing, next, prev, jumpTo, removeAt, setPlaying, setQueueOpen, clear } =
     usePlayerStore();
   const track = queue[index];
 
@@ -66,18 +67,6 @@ export default function PlayerBar() {
       /* noop */
     }
   };
-
-  // 動画内の絶対再生位置（秒）。通報パネルが「押した瞬間はどこか」を知るために使う。
-  // パネル側の useEffect の依存に入るので、参照が変わらないよう固定する。
-  const getPlayerCurrentTime = useCallback((): number | null => {
-    const p = playerRef.current;
-    if (!p || !readyRef.current || typeof p.getCurrentTime !== 'function') return null;
-    try {
-      return p.getCurrentTime();
-    } catch {
-      return null;
-    }
-  }, []);
 
   // 自動再生がブロックされたままなら UI を「再生」表示に合わせ（ワンタップで開始可能に）、
   // 再生ボタンを指す吹き出しを出す。iOS は「ユーザー操作から離れた play」を必ず拒むので、
@@ -167,9 +156,12 @@ export default function PlayerBar() {
         } catch {
           return;
         }
-        const lo = track.start;
+        // 報告ダイアログを開いている間は区間の外へも出られる（ずれを直すには
+        // 今の区間の外を聴く必要がある）
+        const free = usePlayerStore.getState().editing !== null;
+        const lo = free ? 0 : track.start;
         // 区間末尾ちょうどへ飛ぶと終端監視が次曲へ送ってしまうので 1 秒手前まで
-        const hi = track.end > track.start ? track.end - 1 : Infinity;
+        const hi = free || track.end <= track.start ? Infinity : track.end - 1;
         let nt = t + (e.key === 'ArrowRight' ? 5 : -5);
         if (nt < lo) nt = lo;
         if (nt > hi) nt = Math.max(lo, hi);
@@ -181,6 +173,43 @@ export default function PlayerBar() {
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [track]);
+
+  // 報告ダイアログを開いている間の動画枠。**ダイアログ側のプレースホルダを測って
+  // 合わせる。** 拡大表示のように CSS 決め打ちにすると、ダイアログの余白を変える
+  // たびに 2 か所を揃える必要があり、片方だけ直して動画がずれる。
+  // iframe は再マウントできないので、ここでも DOM は動かさず位置だけ変える。
+  const [editorSlot, setEditorSlot] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
+
+  // エディタと拡大表示は同じ動画要素を奪い合うので同時には出さない。
+  // 開く前が拡大表示だったなら、閉じたときに戻す
+  const expandedBeforeEditRef = useRef(false);
+  useEffect(() => {
+    if (editing) {
+      expandedBeforeEditRef.current = expanded;
+      setExpanded(false);
+      // 拡大表示のドラッグで残った transform を持ち込まない
+      setPanelTransform('', '');
+    } else {
+      if (expandedBeforeEditRef.current) {
+        expandedBeforeEditRef.current = false;
+        setExpanded(true);
+      }
+      // 区間の外を聴いたまま閉じると、締め切りが戻った瞬間に終端監視が
+      // 次の曲へ送ってしまう。範囲外なら開始へ戻して、閉じた先を予測可能にする
+      const p = playerRef.current;
+      const t = readyRef.current && p ? p.getCurrentTime() : null;
+      const cur = usePlayerStore.getState();
+      const playingTrack = cur.queue[cur.index];
+      if (t != null && playingTrack) {
+        const outside = t < playingTrack.start || (playingTrack.end > playingTrack.start && t >= playingTrack.end);
+        if (outside) {
+          p!.seekTo(playingTrack.start, true);
+          setProgress(0);
+        }
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing]);
 
   // スワイプ判定用（ミニバー：上へ→拡大 / 拡大表示：下へ→縮小）
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
@@ -264,7 +293,7 @@ export default function PlayerBar() {
             readyRef.current = true;
             currentVideoRef.current = track.streamId;
             // 他ページ（曲詳細など）から再生位置を参照できるようにする
-            setPlayerBarInstance(playerRef.current);
+            setPlayerInstance('bar', playerRef.current);
             applyVolume(volume, muted);
             // iOS は初回の自動再生（ユーザー操作から時間が経った play）をブロックする。
             // もう一度 play を試し、それでも始まらなければ scheduleBlockedCheck が
@@ -277,9 +306,11 @@ export default function PlayerBar() {
             scheduleBlockedCheck();
           },
           onStateChange: (e: YouTubePlayerStateChangeEvent) => {
-            // 動画自体が終わった（end 未設定 or 区間が動画末尾）→ 次へ
+            // 動画自体が終わった（end 未設定 or 区間が動画末尾）→ 次へ。
+            // 報告ダイアログを開いている間は送らない（末尾まで聴いて終了位置を
+            // 確かめている最中に画面の対象が変わってしまう）
             if (e.data === window.YT?.PlayerState?.ENDED) {
-              usePlayerStore.getState().next();
+              if (!usePlayerStore.getState().editing) usePlayerStore.getState().next();
               return;
             }
             // YouTube 側の操作（動画クリックやネイティブコントロール）で
@@ -336,7 +367,7 @@ export default function PlayerBar() {
     playerRef.current = null;
     readyRef.current = false;
     currentVideoRef.current = '';
-    setPlayerBarInstance(null);
+    setPlayerInstance('bar', null);
     setAutoplayBlocked(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [!!track]);
@@ -353,7 +384,7 @@ export default function PlayerBar() {
       playerRef.current = null;
       readyRef.current = false;
       currentVideoRef.current = '';
-      setPlayerBarInstance(null);
+      setPlayerInstance('bar', null);
     };
   }, []);
 
@@ -406,7 +437,9 @@ export default function PlayerBar() {
     }
   }, [playing]);
 
-  // 区間終端の監視（0.5秒ポーリング）
+  // 区間終端の監視（0.5秒ポーリング）。
+  // editing 中は送らない ── 「終了が早すぎる」を直しに来た人を、その早すぎる
+  // 終了で追い出してしまっては直しようがない。
   useEffect(() => {
     if (!track || !playing) return;
     const interval = setInterval(() => {
@@ -414,6 +447,7 @@ export default function PlayerBar() {
       if (!p || !readyRef.current || typeof p.getCurrentTime !== 'function') return;
       const t = p.getCurrentTime();
       setProgress(Math.max(0, t - track.start));
+      if (usePlayerStore.getState().editing) return;
       if (track.end > track.start && t >= track.end - 0.3) {
         usePlayerStore.getState().next();
       }
@@ -536,6 +570,10 @@ export default function PlayerBar() {
 
   return (
     <>
+      {/* 報告ダイアログ。**PlayerBar が描く**のは、動画（fixed 要素）を
+          ダイアログの中へ重ねる必要があるため（DOM は動かせない） */}
+      {editing && <PerformanceReportDialog onVideoSlot={setEditorSlot} />}
+
       {/* 音量 HUD（キーボード ↑/↓ 操作時に一瞬だけ表示） */}
       {volumeHud !== null && (
         <div className="fixed left-1/2 -translate-x-1/2 bottom-28 z-[70] flex items-center gap-2 px-4 py-2 rounded-full bg-gray-900/85 text-white text-sm shadow-lg pointer-events-none">
@@ -555,15 +593,20 @@ export default function PlayerBar() {
       <div
         ref={videoWrapRef}
         className={
-          expanded
-            ? 'fixed z-[60] top-12 sm:top-16 left-2 right-2 h-[min(calc((100vw-1rem)*9/16),36vh)] lg:top-20 lg:left-8 lg:right-auto lg:h-auto lg:aspect-video lg:w-[min(calc((100vh-17rem)*1.7778),60vw)] bg-black rounded-lg overflow-hidden [&_iframe]:w-full [&_iframe]:h-full animate-[player-slide-up_240ms_ease-out]'
-            : 'fixed z-[45] bottom-2 left-3 w-32 h-[72px] hidden sm:block bg-black rounded overflow-hidden [&_iframe]:w-full [&_iframe]:h-full'
+          editing
+            ? // 位置は style（測ったプレースホルダ）で決める。ダイアログより前面に出す
+              'fixed z-[70] bg-black rounded-lg overflow-hidden [&_iframe]:w-full [&_iframe]:h-full'
+            : expanded
+              ? 'fixed z-[60] top-12 sm:top-16 left-2 right-2 h-[min(calc((100vw-1rem)*9/16),36vh)] lg:top-20 lg:left-8 lg:right-auto lg:h-auto lg:aspect-video lg:w-[min(calc((100vh-17rem)*1.7778),60vw)] bg-black rounded-lg overflow-hidden [&_iframe]:w-full [&_iframe]:h-full animate-[player-slide-up_240ms_ease-out]'
+              : 'fixed z-[45] bottom-2 left-3 w-32 h-[72px] hidden sm:block bg-black rounded overflow-hidden [&_iframe]:w-full [&_iframe]:h-full'
         }
+        // スロットを測れていない一瞬だけ画面外へ逃がす（左上にちらつかせない）
+        style={editing ? (editorSlot ?? { top: -9999, left: -9999, width: 1, height: 1 }) : undefined}
       >
         <div ref={containerRef} className="w-full h-full" />
         {/* 縮小時は小さすぎて YT コントロールを操作できないためロックし、
             クリックで全画面に拡大する */}
-        {!expanded && (
+        {!expanded && !editing && (
           <button
             className="absolute inset-0 z-10 cursor-pointer"
             onClick={() => setExpanded(true)}
@@ -681,8 +724,13 @@ export default function PlayerBar() {
                 <div className="flex items-center gap-4">
                   {controls('lg')}
                   {progressBar(true)}
-                  {/* 全画面はモバイル唯一の操作面なので、通報導線もここに置く */}
-                  <PlaybackFeedback getCurrentTime={getPlayerCurrentTime} dark />
+                  {/* 通報導線はモバイルでは出さない。「開始はここ／終了はここ」は
+                      区間の外へ出られないので、区間そのものが大きくずれている
+                      ときに押しようがない ── タッチで扱える編集画面を作るまで、
+                      中途半端な入口を残すより畳んでおく */}
+                  <div className="hidden sm:flex">
+                    <PlaybackFeedback dark />
+                  </div>
                   {/* iOS は Web からの音量変更不可（ハードウェアキーのみ）のためモバイルでは非表示 */}
                   <div className="hidden sm:flex">{volumeControl(true)}</div>
                 </div>
@@ -925,7 +973,7 @@ export default function PlayerBar() {
 
             {/* 通報・拡大・キュー・閉じる（sm 以上のみ。モバイルは拡大＝バータップ、キュー/閉じるは全画面側で操作） */}
             <div className="hidden sm:flex items-center gap-1 shrink-0">
-              <PlaybackFeedback getCurrentTime={getPlayerCurrentTime} />
+              <PlaybackFeedback />
               <button
                 onClick={() => setExpanded(true)}
                 className="p-2 text-gray-500 hover:text-gray-900"

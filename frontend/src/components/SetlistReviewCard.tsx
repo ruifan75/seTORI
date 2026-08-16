@@ -5,7 +5,8 @@ import PerformanceFields, {
   type PerformanceTagOption,
 } from './PerformanceFields';
 import { formatTimeInput, parseTime } from '../utils/timeFormat';
-import { youtubePlayerSeekTo } from './youtubePlayerControl';
+import { playerSeekTo } from './youtubePlayerControl';
+import { usePlayerScope } from './playerScope';
 
 // 審査へ回した理由。バックエンドの reviewNoEnd … と対応させること。
 const REASON_LABELS: Record<string, string> = {
@@ -47,7 +48,6 @@ export default function SetlistReviewCard({
   channelOwner,
   onAddParticipant,
   performanceTags,
-  currentPlayerTime,
   expanded,
   draft,
   onDraftChange,
@@ -61,7 +61,6 @@ export default function SetlistReviewCard({
   channelOwner?: Singer | null;
   onAddParticipant?: (singer: Singer) => void;
   performanceTags: PerformanceTagOption[];
-  currentPlayerTime: number | null;
   expanded: boolean;
   // 編集中の値は親が持つ。生コメントの ＋ から直接書き換えられるようにするため
   // ── カードの内部 state にしていた頃は effect で流し込むしかなく、
@@ -74,6 +73,7 @@ export default function SetlistReviewCard({
   onReject: (id: string, note: string, notThisSong: boolean) => void;
 }) {
   const base = suggestion.payload;
+  const scope = usePlayerScope();
   const [error, setError] = useState('');
 
   if (!base) return null;
@@ -183,7 +183,7 @@ export default function SetlistReviewCard({
             <div className="mt-1 text-gray-600">
               <span className="text-gray-400 mr-1">既存</span>
               <button
-                onClick={() => youtubePlayerSeekTo(base.existing!.start_seconds)}
+                onClick={() => playerSeekTo(scope, base.existing!.start_seconds)}
                 className="font-mono text-indigo-600 hover:text-indigo-900"
                 title="ここから再生"
               >
@@ -259,7 +259,6 @@ export default function SetlistReviewCard({
         onClearItunes={() => patch({ itunesId: null })}
         onClearSong={() => patch({ matchedSongId: null })}
         performanceTags={performanceTags}
-        currentPlayerTime={currentPlayerTime}
         participants={participants}
         channelOwner={channelOwner}
         onAddParticipant={onAddParticipant}

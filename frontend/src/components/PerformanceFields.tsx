@@ -3,7 +3,9 @@ import SongSearchInput from './SongSearchInput';
 import SingerSearchInput from './SingerSearchInput';
 import ArtistSearchInput from './ArtistSearchInput';
 import FieldProvenance from './FieldProvenance';
-import { youtubePlayerGetCurrentTime, youtubePlayerSeekTo } from './youtubePlayerControl';
+import { playerGetCurrentTime, playerSeekTo } from './youtubePlayerControl';
+import { usePlayerScope } from './playerScope';
+import { usePlayerTime } from './usePlayerTime';
 import TimestampTweaker from './TimestampTweaker';
 import { formatTimeInput, formatDuration } from '../utils/timeFormat';
 import type { ArtistAliasProposal, FieldChange, Singer, Song } from '../api/types';
@@ -64,7 +66,6 @@ interface Props {
   // 既存曲への紐付けを解除する（＝新しい曲として登録し直す）
   onClearSong?: () => void;
   performanceTags: PerformanceTagOption[];
-  currentPlayerTime: number | null;
   participants: Singer[];
   channelOwner?: Singer | null;
   // 参加者に居ない歌手を選んだとき、配信の参加者へ足す（編集画面のみ）
@@ -153,13 +154,16 @@ export default function PerformanceFields({
   onClearItunes,
   onClearSong,
   performanceTags,
-  currentPlayerTime,
   participants,
   channelOwner,
   onAddParticipant,
   showToast,
 }: Props) {
   const [searchingSinger, setSearchingSinger] = useState(false);
+  // 再生位置は自分で追う。親から prop で渡していた頃は、親の再レンダー頻度が
+  // そのまま更新頻度になっていた（1 秒に 1 回＝±6 秒の窓では幅の 8%）
+  const scope = usePlayerScope();
+  const currentPlayerTime = usePlayerTime(scope);
 
   // iTunes の再生時間。呼び出し側が持っていなければ ID から引く。
   //
@@ -325,7 +329,7 @@ export default function PerformanceFields({
                           />
                           <button
                             onClick={() => {
-                              const currentTime = youtubePlayerGetCurrentTime();
+                              const currentTime = playerGetCurrentTime(scope);
                               if (currentTime !== null) {
                                 onChange({ start: Math.floor(currentTime) });
                               }
@@ -336,7 +340,7 @@ export default function PerformanceFields({
                             {currentPlayerTime !== null ? formatTimeInput(Math.floor(currentPlayerTime)) : '--:--'}
                           </button>
                           <button
-                            onClick={() => youtubePlayerSeekTo(value.start)}
+                            onClick={() => playerSeekTo(scope, value.start)}
                             className="px-3 py-2 bg-red-100 text-red-600 rounded-lg hover:bg-red-200 transition-colors"
                             title="この時間から再生"
                           >
@@ -349,7 +353,6 @@ export default function PerformanceFields({
                         <TimestampTweaker
                           value={value.start}
                           mode="start"
-                          currentTime={currentPlayerTime}
                           onChange={(v) => onChange({ start: v })}
                         />
                       </div>
@@ -395,7 +398,7 @@ export default function PerformanceFields({
                           </button>
                           <button
                             onClick={() => {
-                              const currentTime = youtubePlayerGetCurrentTime();
+                              const currentTime = playerGetCurrentTime(scope);
                               if (currentTime !== null) {
                                 onChange({ end: Math.floor(currentTime) });
                               }
@@ -408,7 +411,7 @@ export default function PerformanceFields({
                           {value.end > 0 && (
                             <>
                               <button
-                                onClick={() => youtubePlayerSeekTo(Math.max(value.end - 3, 0))}
+                                onClick={() => playerSeekTo(scope, Math.max(value.end - 3, 0))}
                                 className="px-3 py-2 bg-red-100 text-red-600 rounded-lg hover:bg-red-200 transition-colors"
                                 title="終了時間の3秒前から再生"
                               >
@@ -420,7 +423,7 @@ export default function PerformanceFields({
                                 <span className="sr-only">-3s</span>
                               </button>
                               <button
-                                onClick={() => youtubePlayerSeekTo(value.end)}
+                                onClick={() => playerSeekTo(scope, value.end)}
                                 className="px-3 py-2 bg-red-100 text-red-600 rounded-lg hover:bg-red-200 transition-colors"
                                 title="終了時間から再生"
                               >
@@ -436,7 +439,6 @@ export default function PerformanceFields({
                           <TimestampTweaker
                             value={value.end}
                             mode="end"
-                            currentTime={currentPlayerTime}
                             onChange={(v) => onChange({ end: v })}
                           />
                         )}

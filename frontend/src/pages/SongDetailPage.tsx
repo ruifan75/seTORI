@@ -8,19 +8,16 @@ import type {
   ITunesSearchResult,
   Song,
   ITunesQueryResult,
-  SongPerformance,
 } from '../api/types';
 import Loading from '../components/ui/Loading';
 import Pagination from '../components/ui/Pagination';
 import Tag from '../components/ui/Tag';
 import EditableField from '../components/EditableField';
 import QueueAddButton from '../components/QueueAddButton';
+import ReportButton from '../components/ReportButton';
 import ArtistLinks from '../components/ArtistLinks';
 import ArtistSearchInput from '../components/ArtistSearchInput';
-import PerformanceTimingDialog from '../components/PerformanceTimingDialog';
-import SongSwapDialog from '../components/SongSwapDialog';
 import { withdrawSuggestion } from '../components/usePerformanceTiming';
-import { playerBarGetCurrentTime } from '../components/youtubePlayerControl';
 import { useToast } from '../components/ui/ToastContext';
 import { useAuthStore, hasPermission, PERM } from '../store/auth';
 import { usePlayerStore, type PlayerTrack } from '../store/player';
@@ -159,12 +156,6 @@ export default function SongDetailPage() {
   const navigate = useNavigate();
   const canEdit = hasPermission(useAuthStore((s) => s.user), PERM.CONTENT_EDIT);
   const [isEditing, setIsEditing] = useState(false);
-  // 開始/終了時間を直す（提案する）ダイアログの対象。null なら閉じている
-  const [timingTarget, setTimingTarget] = useState<SongPerformance | null>(null);
-  // 曲の差し替え（「この曲ではない」）ダイアログの対象
-  const [swapTarget, setSwapTarget] = useState<SongPerformance | null>(null);
-  // 再生バーで今かかっている歌唱（ダイアログで「再生位置を使う」を出すかの判定に使う）
-  const playingTrack = usePlayerStore((s) => s.queue[s.index]);
   const [mergeTargetId, setMergeTargetId] = useState('');
   const [mergeTargetQuery, setMergeTargetQuery] = useState('');
   const [itunesDetails, setItunesDetails] = useState<Record<number, ITunesQueryResult>>({});
@@ -1114,26 +1105,9 @@ export default function SongDetailPage() {
                             <svg className="w-4 h-4 ml-0.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
                           </button>
                           <QueueAddButton track={toTrack(perf)} />
-                          <button
-                            onClick={() => setTimingTarget(perf)}
-                            className="inline-flex items-center justify-center w-8 h-8 rounded-full text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
-                            title={canEdit ? '歌唱時間を編集' : '歌唱時間の修正を提案'}
-                            aria-label={canEdit ? '歌唱時間を編集' : '歌唱時間の修正を提案'}
-                          >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
-                          </button>
-                          <button
-                            onClick={() => setSwapTarget(perf)}
-                            className="inline-flex items-center justify-center w-8 h-8 rounded-full text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
-                            title={canEdit ? '別の曲に差し替え' : 'この曲ではないと提案'}
-                            aria-label={canEdit ? '別の曲に差し替え' : 'この曲ではないと提案'}
-                          >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
-                            </svg>
-                          </button>
+                          {/* 時間・曲・歌った人はすべて 1 つの報告画面で直す
+                              （行ごとにボタンを増やさない） */}
+                          <ReportButton track={toTrack(perf)} />
                           <a
                             href={perf.youtube_url}
                             target="_blank"
@@ -1193,33 +1167,6 @@ export default function SongDetailPage() {
         )}
       </div>
 
-      {timingTarget && (
-        <PerformanceTimingDialog
-          target={{
-            performanceId: timingTarget.id,
-            songName: timingTarget.song_name ?? song.name,
-            start: timingTarget.start_seconds,
-            end: timingTarget.end_seconds,
-          }}
-          subtitle={timingTarget.stream_title}
-          // 同じ歌唱を再生バーで再生中のときだけ、その再生位置を取り込めるようにする
-          currentTime={
-            playingTrack?.performanceId === timingTarget.id ? playerBarGetCurrentTime() : null
-          }
-          onClose={() => setTimingTarget(null)}
-        />
-      )}
-
-      {swapTarget && (
-        <SongSwapDialog
-          performanceId={swapTarget.id}
-          currentSongName={swapTarget.song_name ?? song.name}
-          subtitle={swapTarget.stream_title}
-          onClose={() => setSwapTarget(null)}
-          // 差し替えると、この曲の歌唱一覧からその歌唱が消える
-          onDone={() => queryClient.invalidateQueries({ queryKey: ['song'] })}
-        />
-      )}
     </div>
   );
 }
