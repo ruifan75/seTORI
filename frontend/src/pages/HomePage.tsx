@@ -2,11 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { homeApi, presetPlaylistApi, songApi, tagApi } from '../api/client';
-import type { Performance, PresetPlaylist, Stream } from '../api/types';
+import type { Performance, PresetPlaylist } from '../api/types';
 import Loading from '../components/ui/Loading';
 import Tag from '../components/ui/Tag';
 import { useToast } from '../components/ui/ToastContext';
-import ArtistLinks from '../components/ArtistLinks';
 import SingerAvatars from '../components/SingerAvatars';
 import PerformanceCard from '../components/PerformanceCard';
 import PerformanceCardRow from '../components/PerformanceCardRow';
@@ -37,115 +36,6 @@ function SectionHeader({ title, linkTo, children }: { title: string; linkTo?: st
         <Link to={linkTo} className="ml-auto text-indigo-600 hover:text-indigo-700 text-sm font-medium">
           すべて見る →
         </Link>
-      )}
-    </div>
-  );
-}
-
-// 横スクロールの配信カード列（オリジナル曲・歌ってみた用）
-function StreamCardRow({ streams }: { streams: Stream[] }) {
-  const rowRef = useRef<HTMLDivElement>(null);
-  const [scrollState, setScrollState] = useState({ canGoLeft: false, canGoRight: true });
-
-  const updateScrollState = useCallback(() => {
-    const row = rowRef.current;
-    if (!row) return;
-    const next = {
-      canGoLeft: row.scrollLeft > 2,
-      canGoRight: row.scrollLeft + row.clientWidth < row.scrollWidth - 2,
-    };
-    setScrollState((current) =>
-      current.canGoLeft === next.canGoLeft && current.canGoRight === next.canGoRight ? current : next,
-    );
-  }, []);
-
-  useEffect(() => {
-    const frame = window.requestAnimationFrame(updateScrollState);
-    window.addEventListener('resize', updateScrollState);
-    return () => {
-      window.cancelAnimationFrame(frame);
-      window.removeEventListener('resize', updateScrollState);
-    };
-  }, [streams.length, updateScrollState]);
-
-  const scroll = (direction: -1 | 1) => {
-    const row = rowRef.current;
-    if (!row) return;
-    row.scrollBy({
-      left: direction * Math.max(240, row.clientWidth - 160),
-      behavior: 'smooth',
-    });
-  };
-
-  return (
-    <div className="relative -mx-1">
-      <div
-        ref={rowRef}
-        onScroll={updateScrollState}
-        className="flex touch-pan-x snap-x snap-mandatory gap-4 overflow-x-auto scroll-smooth px-1 pb-2 overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-      >
-        {streams.map((stream) => (
-          <article
-            key={stream.id}
-            className="w-56 shrink-0 snap-start bg-white rounded-lg shadow-sm border hover:shadow-md transition-shadow group"
-          >
-            <Link to={`/streams/${stream.id}`} className="block overflow-hidden rounded-t-lg">
-              {stream.thumbnail_url ? (
-                <img src={stream.thumbnail_url} alt={stream.title} loading="lazy" className="w-full h-32 object-cover transition-transform group-hover:scale-[1.02]" />
-              ) : (
-                <div className="w-full h-32 bg-gray-200 flex items-center justify-center text-gray-400 text-sm">
-                  No Image
-                </div>
-              )}
-            </Link>
-            <div className="p-3">
-              <Link
-                to={`/streams/${stream.id}`}
-                className="block h-10 text-sm font-medium leading-5 text-gray-900 line-clamp-2 group-hover:text-indigo-600 transition-colors"
-              >
-                {stream.title}
-              </Link>
-              <div className="mt-2 flex min-h-7 items-center justify-between gap-2">
-                <time dateTime={stream.stream_date} className="min-w-0 text-xs text-gray-500">
-                  {new Date(stream.stream_date).toLocaleDateString('ja-JP')}
-                </time>
-                <SingerAvatars singers={stream.participants ?? []} />
-              </div>
-            </div>
-          </article>
-        ))}
-      </div>
-
-      {scrollState.canGoLeft && (
-        <button
-          type="button"
-          onClick={() => scroll(-1)}
-          aria-label="前の配信を表示"
-          title="前へ"
-          className="absolute inset-y-0 left-0 z-10 hidden w-14 items-center justify-start bg-gradient-to-r from-gray-50 via-gray-50/80 to-transparent pl-2 opacity-0 transition-opacity md:flex md:hover:opacity-100 md:focus-visible:opacity-100"
-        >
-          <span className="flex h-10 w-10 items-center justify-center rounded-full bg-white text-gray-700 shadow-lg ring-1 ring-black/5">
-            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="m15 19-7-7 7-7" />
-            </svg>
-          </span>
-        </button>
-      )}
-
-      {scrollState.canGoRight && (
-        <button
-          type="button"
-          onClick={() => scroll(1)}
-          aria-label="次の配信を表示"
-          title="次へ"
-          className="absolute inset-y-0 right-0 z-10 hidden w-14 items-center justify-end bg-gradient-to-l from-gray-50 via-gray-50/80 to-transparent pr-2 opacity-0 transition-opacity md:flex md:hover:opacity-100 md:focus-visible:opacity-100"
-        >
-          <span className="flex h-10 w-10 items-center justify-center rounded-full bg-white text-gray-700 shadow-lg ring-1 ring-black/5">
-            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="m9 5 7 7-7 7" />
-            </svg>
-          </span>
-        </button>
       )}
     </div>
   );
@@ -232,16 +122,6 @@ export default function HomePage() {
   const { data: singingData, isLoading: singingLoading } = useQuery({
     queryKey: ['tag-streams', 'singing', 'home'],
     queryFn: () => tagApi.getStreamsByTag('singing', 1, 6),
-  });
-
-  const { data: originalData } = useQuery({
-    queryKey: ['tag-streams', 'original_song', 'home'],
-    queryFn: () => tagApi.getStreamsByTag('original_song', 1, 10),
-  });
-
-  const { data: coverData } = useQuery({
-    queryKey: ['tag-streams', 'music_cover', 'home'],
-    queryFn: () => tagApi.getStreamsByTag('music_cover', 1, 10),
   });
 
   const { data: songsData, isLoading: songsLoading } = useQuery({
@@ -532,80 +412,58 @@ export default function HomePage() {
         )}
       </section>
 
-      {/* 新着オリジナル曲 */}
-      {(originalData?.streams.length ?? 0) > 0 && (
-        <section>
-          <SectionHeader title="新着オリジナル曲" linkTo="/tags/stream/original_song" />
-          <StreamCardRow streams={originalData!.streams} />
-        </section>
-      )}
-
-      {/* 新着歌ってみた */}
-      {(coverData?.streams.length ?? 0) > 0 && (
-        <section>
-          <SectionHeader title="新着歌ってみた" linkTo="/tags/stream/music_cover" />
-          <StreamCardRow streams={coverData!.streams} />
-        </section>
-      )}
-
-      {/* 人気の楽曲 */}
+      {/* 人気の楽曲（歌唱回数の多い順） */}
       <section>
         <SectionHeader title="人気の楽曲" linkTo="/songs" />
         {songsLoading ? (
           <Loading />
         ) : (
-          <div className="bg-white rounded-lg shadow-sm border overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    楽曲名
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    アーティスト
-                  </th>
-                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    歌唱回数
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {songsData?.songs.map((song) => (
-                  <tr key={song.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-3">
-                      <div className="flex items-center gap-3">
-                        {song.arts ? (
-                          <img src={song.arts} alt="" loading="lazy" className="w-10 h-10 object-cover rounded shrink-0" />
-                        ) : (
-                          <div className="w-10 h-10 bg-gray-100 rounded shrink-0 flex items-center justify-center">
-                            <svg className="w-5 h-5 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z" />
-                            </svg>
-                          </div>
-                        )}
-                        <Link
-                          to={`/songs/${song.id}`}
-                          className="text-indigo-600 hover:text-indigo-900 font-medium truncate"
-                        >
-                          {song.name}
-                        </Link>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-gray-500">
-                      <ArtistLinks
-                        artists={song.artists}
-                        fallback={song.original_artist}
-                        linkClassName="hover:text-indigo-600"
+          <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+            {songsData?.songs.map((song, index) => (
+              <li key={song.id}>
+                <Link
+                  to={`/songs/${song.id}`}
+                  className="group flex h-full flex-col items-center rounded-lg border bg-white p-4 text-center shadow-sm transition-shadow hover:shadow-md"
+                >
+                  {/* ジャケットを CD に見立てる（おすすめのカードと同じ絵柄） */}
+                  <span className="relative mb-3 block h-24 w-24">
+                    {song.arts ? (
+                      <img
+                        src={song.arts}
+                        alt=""
+                        loading="lazy"
+                        className="h-24 w-24 rounded-full object-cover shadow-md ring-1 ring-black/5 transition-transform group-hover:scale-105"
                       />
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right text-gray-500">
-                      {song.performance_count}回
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                    ) : (
+                      <span className="flex h-24 w-24 items-center justify-center rounded-full bg-gray-100 shadow-md ring-1 ring-black/5 transition-transform group-hover:scale-105">
+                        <svg className="h-8 w-8 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z" />
+                        </svg>
+                      </span>
+                    )}
+                    {/* CD の中心穴 */}
+                    <span className="absolute inset-0 m-auto h-5 w-5 rounded-full border border-gray-300 bg-white" />
+                    {/* 順位。上位3曲だけ色を付ける */}
+                    <span
+                      className={`absolute -left-1 -top-1 flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold shadow ring-1 ring-black/5 ${
+                        index < 3 ? 'bg-indigo-600 text-white' : 'bg-white text-gray-500'
+                      }`}
+                    >
+                      {index + 1}
+                    </span>
+                  </span>
+
+                  <span className="line-clamp-2 text-sm font-medium leading-5 text-gray-900 group-hover:text-indigo-600" title={song.name}>
+                    {song.name}
+                  </span>
+                  <span className="mt-0.5 w-full truncate text-xs text-gray-500">
+                    {song.artists?.length ? song.artists.map((a) => a.name).join('、') : song.original_artist}
+                  </span>
+                  <span className="mt-2 text-xs font-medium text-gray-400">{song.performance_count}回</span>
+                </Link>
+              </li>
+            ))}
+          </ul>
         )}
       </section>
     </div>

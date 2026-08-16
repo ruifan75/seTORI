@@ -246,9 +246,12 @@ func (s *PresetService) Unfollow(userID uuid.UUID, key string) error {
 	return s.playlistRepo.UnfollowPreset(userID, key)
 }
 
-// Copy はプリセットの現在の中身を、その人のプレイリストとして複製する。
-// 以後はプリセット側の変更と無関係になる（中身を固定したい人のための経路）。
-func (s *PresetService) Copy(userID uuid.UUID, key string) (*dto.PlaylistResponse, error) {
+// AddToPlaylist はプリセットの現在の中身を、その人のプレイリストへ入れる。
+// 追加先は既存のプレイリスト（PlaylistID）か、新規作成（Name）のどちらか。
+//
+// 入るのは押した時点の中身で、以後はプリセット側の変更と無関係になる
+// （常に最新を追いたい人向けにはフォローがある）。
+func (s *PresetService) AddToPlaylist(userID uuid.UUID, key string, req *dto.AddPresetToPlaylistRequest) (*dto.AddPresetToPlaylistResponse, error) {
 	preset := FindPreset(key)
 	if preset == nil {
 		return nil, ErrPresetNotFound
@@ -259,24 +262,63 @@ func (s *PresetService) Copy(userID uuid.UUID, key string) (*dto.PlaylistRespons
 		return nil, err
 	}
 
-	description := strings.TrimSpace(preset.Description + "（プリセットからコピー）")
-	playlist := &models.Playlist{
-		UserID:      userID,
-		Name:        preset.Name,
-		Description: description,
-		Visibility:  models.PlaylistPrivate,
-	}
-	if err := s.playlistRepo.Create(playlist); err != nil {
-		return nil, err
-	}
-	if err := s.playlistRepo.AddItems(playlist.ID, ids); err != nil {
-		return nil, err
-	}
-
-	meta, err := s.playlistRepo.FindByIDWithMeta(playlist.ID)
+	playlistID, created, err := s.resolveTarget(userID, preset, req)
 	if err != nil {
 		return nil, err
 	}
-	resp := toPlaylistResponse(meta, &userID)
-	return &resp, nil
+
+	added, err := s.playlistRepo.AddItems(playlistID, ids)
+	if err != nil {
+		return nil, err
+	}
+
+	meta, err := s.playlistRepo.FindByIDWithMeta(playlistID)
+	if err != nil {
+		return nil, err
+	}
+	return &dto.AddPresetToPlaylistResponse{
+		Playlist: toPlaylistResponse(meta, &userID),
+		Added:    added,
+		Skipped:  len(ids) - added,
+		Created:  created,
+	}, nil
+}
+
+// resolveTarget は追加先のプレイリストを決める（無ければ作る）。
+// 他人のプレイリストは存在を伏せて ErrPlaylistNotFound にする（PlaylistService と同じ扱い）。
+func (s *PresetService) resolveTarget(userID uuid.UUID, preset *Preset, req *dto.AddPresetToPlaylistRequest) (uuid.UUID, bool, error) {
+	if req != nil && strings.TrimSpace(req.PlaylistID) != "" {
+		id, err := uuid.Parse(strings.TrimSpace(req.PlaylistID))
+		if err != nil {
+			return uuid.Nil, false, ErrPlaylistNotFound
+		}
+		existing, err := s.playlistRepo.FindByID(id)
+		if err != nil {
+			return uuid.Nil, false, err
+		}
+		if existing == nil || existing.UserID != userID {
+			return uuid.Nil, false, ErrPlaylistNotFound
+		}
+		return id, false, nil
+	}
+
+	name := preset.Name
+	if req != nil && strings.TrimSpace(req.Name) != "" {
+		name = strings.TrimSpace(req.Name)
+	}
+	name, err := validateName(name)
+	if err != nil {
+		return uuid.Nil, false, err
+	}
+
+	playlist := &models.Playlist{
+		UserID:      userID,
+		Name:        name,
+		Description: strings.TrimSpace(preset.Description + "（プリセットから追加）"),
+		Visibility:  models.PlaylistPrivate,
+	}
+	if err := s.playlistRepo.Create(playlist); err != nil {
+		return uuid.Nil, false, err
+	}
+	return playlist.ID, true, nil
 }

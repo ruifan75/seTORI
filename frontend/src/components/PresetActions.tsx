@@ -1,8 +1,11 @@
+import { useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { presetPlaylistApi } from '../api/client';
 import type { PresetPlaylist } from '../api/types';
 import { useToast } from './ui/ToastContext';
+import PlaylistPickerMenu, { PLAYLIST_MENU_WIDTH } from './PlaylistPickerMenu';
+import { menuPositionFor, type MenuPosition } from './menuPosition';
 import { useAuthStore } from '../store/auth';
 
 interface Props {
@@ -12,8 +15,18 @@ interface Props {
   playDisabled?: boolean;
 }
 
+// addedMessage は「何曲入ったか」をそのまま伝える。
+// 既に入っていた曲は飛ばすので、押した曲数と増えた曲数は一致しないことがある。
+function addedMessage(name: string, added: number, skipped: number, created: boolean): string {
+  if (added === 0) {
+    return `「${name}」には全部すでに入っていました`;
+  }
+  const head = created ? `「${name}」を作成して${added}曲追加しました` : `「${name}」に${added}曲追加しました`;
+  return skipped > 0 ? `${head}（${skipped}曲は既に入っていました）` : head;
+}
+
 /**
- * プリセットプレイリストの操作（再生・コピー・フォロー）。
+ * プリセットプレイリストの操作（再生・プレイリストへ追加・フォロー）。
  *
  * 未ログインでもボタンは出す。隠すと「できること」に気づけないので、
  * 押した時点でログインへ案内する（修正提案の LoginToSuggest と同じ考え方）。
@@ -24,6 +37,10 @@ export default function PresetActions({ preset, onPlayAll, playDisabled }: Props
   const navigate = useNavigate();
   const location = useLocation();
   const isAuthenticated = useAuthStore((state) => state.status === 'authenticated');
+
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerPos, setPickerPos] = useState<MenuPosition>({ top: 0, left: 0 });
+  const addButtonRef = useRef<HTMLButtonElement>(null);
 
   const goToLogin = () => navigate('/login', { state: { from: location.pathname } });
 
@@ -38,17 +55,29 @@ export default function PresetActions({ preset, onPlayAll, playDisabled }: Props
     onError: () => showToast('フォローの更新に失敗しました', 'error'),
   });
 
-  const copyMutation = useMutation({
-    mutationFn: () => presetPlaylistApi.copy(preset.key),
-    onSuccess: (playlist) => {
+  const addMutation = useMutation({
+    mutationFn: (target: { playlistId?: string; name?: string }) =>
+      presetPlaylistApi.addToPlaylist(preset.key, target),
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['playlists'] });
-      showToast(`「${playlist.name}」としてコピーしました（${playlist.item_count}曲）`, 'success', {
+      queryClient.invalidateQueries({ queryKey: ['playlist', result.playlist.id] });
+      setPickerOpen(false);
+      showToast(addedMessage(result.playlist.name, result.added, result.skipped, result.created), 'success', {
         label: '開く',
-        onClick: () => navigate(`/playlists/${playlist.id}`),
+        onClick: () => navigate(`/playlists/${result.playlist.id}`),
       });
     },
-    onError: () => showToast('コピーに失敗しました', 'error'),
+    onError: (err: Error) => showToast(`追加に失敗しました: ${err.message}`, 'error'),
   });
+
+  const openPicker = () => {
+    if (!isAuthenticated) {
+      goToLogin();
+      return;
+    }
+    if (!pickerOpen) setPickerPos(menuPositionFor(addButtonRef.current, PLAYLIST_MENU_WIDTH)); // 開く直前に測る
+    setPickerOpen((v) => !v);
+  };
 
   const iconButton = 'inline-flex items-center justify-center w-8 h-8 text-gray-500 border rounded-full hover:text-indigo-600 hover:bg-indigo-50 transition-colors disabled:opacity-60';
 
@@ -66,24 +95,40 @@ export default function PresetActions({ preset, onPlayAll, playDisabled }: Props
       )}
 
       <button
-        onClick={() => (isAuthenticated ? copyMutation.mutate() : goToLogin())}
-        disabled={copyMutation.isPending}
+        ref={addButtonRef}
+        onClick={openPicker}
+        disabled={addMutation.isPending}
         className={iconButton}
         title={isAuthenticated
-          ? `今の${preset.item_count}曲を自分のプレイリストへコピー（以後は自分で編集できます）`
-          : 'コピーするにはログインが必要です'}
+          ? `今の${preset.item_count}曲をプレイリストに追加（既存のものか、新しく作る）`
+          : 'プレイリストに追加するにはログインが必要です'}
       >
-        {copyMutation.isPending ? (
+        {addMutation.isPending ? (
           <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
             <circle className="opacity-25" cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="3" />
             <path className="opacity-75" fill="currentColor" d="M12 3a9 9 0 0 1 9 9h-3a6 6 0 0 0-6-6V3Z" />
           </svg>
         ) : (
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V5a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2M5 21h9a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2Z" />
+          // 1曲の追加（QueueAddButton）と同じ playlist-add の絵柄にする。
+          // 増える曲数が違うだけで、選ばせるもの（どのプレイリストへ入れるか）は同じなので
+          <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M14 10H3v2h11v-2zm0-4H3v2h11V6zm4 8v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zM3 16h7v-2H3v2z" />
           </svg>
         )}
       </button>
+
+      {pickerOpen && (
+        <PlaylistPickerMenu
+          anchorRef={addButtonRef}
+          initialPosition={pickerPos}
+          onClose={() => setPickerOpen(false)}
+          heading={`${preset.item_count}曲を追加`}
+          defaultName={preset.name}
+          busy={addMutation.isPending}
+          onPick={(playlistId) => addMutation.mutate({ playlistId })}
+          onCreate={(name) => addMutation.mutate({ name })}
+        />
+      )}
 
       <button
         onClick={() => (isAuthenticated ? followMutation.mutate() : goToLogin())}

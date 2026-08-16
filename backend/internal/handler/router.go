@@ -343,7 +343,7 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("GET /api/presets/{key}/items", r.handleListPresetItems)
 	r.mux.HandleFunc("POST /api/presets/{key}/follow", r.handleFollowPreset)
 	r.mux.HandleFunc("DELETE /api/presets/{key}/follow", r.handleUnfollowPreset)
-	r.mux.HandleFunc("POST /api/presets/{key}/copy", r.handleCopyPreset)
+	r.mux.HandleFunc("POST /api/presets/{key}/add", r.handleAddPresetToPlaylist)
 
 	// API routes - Singers
 	r.mux.HandleFunc("GET /api/singers", r.handleListSingers)

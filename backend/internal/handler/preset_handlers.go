@@ -1,10 +1,13 @@
 package handler
 
 import (
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 
+	"github.com/ruifan75/setori/internal/dto"
 	"github.com/ruifan75/setori/internal/service"
 )
 
@@ -87,13 +90,20 @@ func (r *Router) handleUnfollowPreset(w http.ResponseWriter, req *http.Request) 
 	respondJSON(w, http.StatusOK, map[string]string{"message": "フォローを解除しました"})
 }
 
-// POST /api/presets/{key}/copy — 自分のプレイリストへ複製（要ログイン）
-func (r *Router) handleCopyPreset(w http.ResponseWriter, req *http.Request) {
+// POST /api/presets/{key}/add — 自分のプレイリストへ追加（要ログイン）。
+// body が空なら「プリセット名で新規作成」。playlist_id を渡せば既存へ足す。
+func (r *Router) handleAddPresetToPlaylist(w http.ResponseWriter, req *http.Request) {
 	userID, ok := r.requireLogin(w, req)
 	if !ok {
 		return
 	}
-	result, err := r.presetService.Copy(userID, req.PathValue("key"))
+	var body dto.AddPresetToPlaylistRequest
+	// body 無しでも既定（新規作成）で通す。EOF は空リクエストなので許す。
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil && err != io.EOF {
+		respondError(w, http.StatusBadRequest, "リクエストの形式が不正です")
+		return
+	}
+	result, err := r.presetService.AddToPlaylist(userID, req.PathValue("key"), &body)
 	if err != nil {
 		respondError(w, presetErrStatus(err), err.Error())
 		return

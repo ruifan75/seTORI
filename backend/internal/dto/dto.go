@@ -1205,6 +1205,23 @@ type PresetPlaylistListResponse struct {
 	Presets []PresetPlaylistResponse `json:"presets"`
 }
 
+// AddPresetToPlaylistRequest はプリセットの中身をどこへ入れるか。
+// PlaylistID があれば既存のプレイリストへ足し、無ければ新規作成する
+// （Name は省略できる。その場合はプリセット名を使う）。
+type AddPresetToPlaylistRequest struct {
+	PlaylistID string `json:"playlist_id,omitempty"`
+	Name       string `json:"name,omitempty"`
+}
+
+// AddPresetToPlaylistResponse は追加先と、実際に入った件数。
+// Skipped は既に入っていて飛ばした件数（既存プレイリストへ足したときに出る）。
+type AddPresetToPlaylistResponse struct {
+	Playlist PlaylistResponse `json:"playlist"`
+	Added    int              `json:"added"`
+	Skipped  int              `json:"skipped"`
+	Created  bool             `json:"created"` // 新しいプレイリストを作ったか
+}
+
 // ========== 外部サービス連携の設定（管理画面） ==========
 
 // SecretFieldStatus は機密項目の状態。値そのものは返さない。

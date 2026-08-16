@@ -87,6 +87,7 @@ import type {
   UpdatePlaylistRequest,
   PresetPlaylist,
   PresetPlaylistListResponse,
+  AddPresetToPlaylistResult,
   BackupStatusResponse,
   BackupSettings,
   BackupResult,
@@ -1339,9 +1340,15 @@ export const presetPlaylistApi = {
     await api.delete(`/api/presets/${key}/follow`);
   },
 
-  /** 現在の中身を自分のプレイリストへ複製する（以後プリセットとは無関係になる） */
-  copy: async (key: string): Promise<Playlist> => {
-    const { data } = await api.post(`/api/presets/${key}/copy`);
+  /**
+   * 現在の中身を自分のプレイリストへ入れる（以後プリセットとは無関係になる）。
+   * playlist_id を渡せば既存へ追加、name を渡せば新規作成。どちらも無ければプリセット名で新規作成。
+   */
+  addToPlaylist: async (key: string, target: { playlistId?: string; name?: string } = {}): Promise<AddPresetToPlaylistResult> => {
+    const { data } = await api.post(`/api/presets/${key}/add`, {
+      playlist_id: target.playlistId,
+      name: target.name,
+    });
     return data;
   },
 };

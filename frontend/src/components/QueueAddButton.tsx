@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useRef, useState } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { playlistApi } from '../api/client';
 import { useAuthStore } from '../store/auth';
 import { useToast } from './ui/ToastContext';
+import PlaylistPickerMenu, { PLAYLIST_MENU_WIDTH } from './PlaylistPickerMenu';
+import { menuPositionFor, type MenuPosition } from './menuPosition';
 import { usePlayerStore, type PlayerTrack } from '../store/player';
 
 // 歌唱を再生キューやプレイリストへ追加するアイコンボタン（playlist-add）。
@@ -15,56 +16,8 @@ export default function QueueAddButton({ track, className = '' }: { track: Playe
   const isLoggedIn = useAuthStore((s) => s.status) === 'authenticated';
 
   const [open, setOpen] = useState(false);
-  const [creatingName, setCreatingName] = useState('');
-  const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });
+  const [menuPos, setMenuPos] = useState<MenuPosition>({ top: 0, left: 0 });
   const buttonRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  const MENU_WIDTH = 256;
-
-  // メニューはビューポート基準（fixed）で body 直下に描く。
-  // このボタンはホームの横スクロール列（overflow-x-auto）の中にも置かれるため、
-  // 通常の absolute だと祖先に切り取られて見えなくなる。
-  const updatePosition = useCallback(() => {
-    const rect = buttonRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    // 既定はボタン右端に右揃え。画面外へはみ出す場合は内側へ寄せる。
-    const left = Math.min(
-      Math.max(8, rect.right - MENU_WIDTH),
-      window.innerWidth - MENU_WIDTH - 8,
-    );
-    setMenuPos({ top: rect.bottom + 4, left });
-  }, []);
-
-  // メニュー外クリック・Esc で閉じる。スクロールやリサイズでは位置を追従させる。
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (e: MouseEvent) => {
-      const target = e.target as Node;
-      if (buttonRef.current?.contains(target) || menuRef.current?.contains(target)) return;
-      setOpen(false);
-    };
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
-    };
-    document.addEventListener('mousedown', onPointerDown);
-    document.addEventListener('keydown', onKeyDown);
-    window.addEventListener('resize', updatePosition);
-    window.addEventListener('scroll', updatePosition, true); // 祖先のスクロールも拾う
-    return () => {
-      document.removeEventListener('mousedown', onPointerDown);
-      document.removeEventListener('keydown', onKeyDown);
-      window.removeEventListener('resize', updatePosition);
-      window.removeEventListener('scroll', updatePosition, true);
-    };
-  }, [open, updatePosition]);
-
-  // メニューを開いたときだけ自分のプレイリストを取る
-  const playlists = useQuery({
-    queryKey: ['playlists', 'mine'],
-    queryFn: playlistApi.listMine,
-    enabled: open && isLoggedIn,
-  });
 
   const addToQueue = () => {
     usePlayerStore.getState().enqueue([track]);
@@ -93,7 +46,6 @@ export default function QueueAddButton({ track, className = '' }: { track: Playe
     onSuccess: (created) => {
       queryClient.invalidateQueries({ queryKey: ['playlists'] });
       showToast(`「${created.name}」を作成して追加しました`, 'success');
-      setCreatingName('');
       setOpen(false);
     },
     onError: (err: Error) => showToast(`作成に失敗しました: ${err.message}`, 'error'),
@@ -104,7 +56,7 @@ export default function QueueAddButton({ track, className = '' }: { track: Playe
       addToQueue(); // 未ログインならプレイリストは選べないので従来動作
       return;
     }
-    if (!open) updatePosition(); // 開く直前にボタン位置を測る
+    if (!open) setMenuPos(menuPositionFor(buttonRef.current, PLAYLIST_MENU_WIDTH)); // 開く直前にボタン位置を測る
     setOpen((v) => !v);
   };
 
@@ -121,59 +73,16 @@ export default function QueueAddButton({ track, className = '' }: { track: Playe
         </svg>
       </button>
 
-      {open && createPortal(
-        <div
-          ref={menuRef}
-          style={{ position: 'fixed', top: menuPos.top, left: menuPos.left, width: MENU_WIDTH }}
-          className="z-50 bg-white border border-gray-200 rounded-lg shadow-lg py-1 text-left">
-          <button
-            onClick={addToQueue}
-            className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 transition-colors"
-          >
-            再生キューに追加
-          </button>
-
-          <div className="border-t border-gray-100 my-1" />
-          <p className="px-3 py-1 text-xs font-medium text-gray-400">プレイリストに追加</p>
-
-          {playlists.isLoading ? (
-            <p className="px-3 py-2 text-sm text-gray-400">読み込み中...</p>
-          ) : (playlists.data?.playlists.length ?? 0) === 0 ? (
-            <p className="px-3 py-2 text-sm text-gray-400">まだプレイリストがありません</p>
-          ) : (
-            <ul className="max-h-48 overflow-y-auto">
-              {playlists.data!.playlists.map((pl) => (
-                <li key={pl.id}>
-                  <button
-                    onClick={() => addMutation.mutate(pl.id)}
-                    disabled={addMutation.isPending}
-                    className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 disabled:text-gray-300 transition-colors flex items-center justify-between gap-2"
-                  >
-                    <span className="truncate">{pl.name}</span>
-                    <span className="text-xs text-gray-400 shrink-0">{pl.item_count}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-
-          <div className="border-t border-gray-100 my-1" />
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (creatingName.trim()) createAndAddMutation.mutate(creatingName.trim());
-            }}
-            className="px-2 py-1"
-          >
-            <input
-              value={creatingName}
-              onChange={(e) => setCreatingName(e.target.value)}
-              placeholder="新しいプレイリスト名"
-              className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-            />
-          </form>
-        </div>,
-        document.body,
+      {open && (
+        <PlaylistPickerMenu
+          anchorRef={buttonRef}
+          initialPosition={menuPos}
+          onClose={() => setOpen(false)}
+          leadingAction={{ label: '再生キューに追加', onClick: addToQueue }}
+          onPick={(playlistId) => addMutation.mutate(playlistId)}
+          onCreate={(name) => createAndAddMutation.mutate(name)}
+          busy={addMutation.isPending || createAndAddMutation.isPending}
+        />
       )}
     </>
   );

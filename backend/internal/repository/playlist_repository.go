@@ -282,23 +282,33 @@ func (r *PlaylistRepository) ListItems(playlistID uuid.UUID) ([]PerformanceWithD
 	return r.perf.queryPerformanceDetails(query, playlistID)
 }
 
-// AddItems は与えられた順で複数の歌唱を末尾へ追加する（プリセットのコピー用）。
+// AddItems は与えられた順で複数の歌唱を末尾へ追加し、実際に入った件数を返す。
 // AddItem を繰り返すと 1 曲ごとに MAX(position) を引き直すことになるので 1 文にまとめる。
-func (r *PlaylistRepository) AddItems(playlistID uuid.UUID, performanceIDs []uuid.UUID) error {
+//
+// 既に入っている歌唱は飛ばすので、戻り値は渡した件数より少なくなりうる
+// （プリセットを既存のプレイリストへ足すときに「何曲増えたか」を出すために要る）。
+func (r *PlaylistRepository) AddItems(playlistID uuid.UUID, performanceIDs []uuid.UUID) (int, error) {
 	if len(performanceIDs) == 0 {
-		return nil
+		return 0, nil
 	}
 	// WITH ORDINALITY で配列の並びをそのまま position にする（ROW_NUMBER() OVER () と違い順序が保証される）。
+	// 既存の曲が飛ばされると position に穴があくが、並び自体は変わらないので詰めない
+	// （既に入っている曲を末尾へ動かさないほうが、追加した人の意図に近い）。
 	query := `
 		INSERT INTO playlist_items (playlist_id, performance_id, position)
 		SELECT $1, t.id,
 		       (SELECT COALESCE(MAX(position), -1) FROM playlist_items WHERE playlist_id = $1) + t.ord
 		FROM unnest($2::uuid[]) WITH ORDINALITY AS t(id, ord)
 		ON CONFLICT (playlist_id, performance_id) DO NOTHING`
-	if _, err := r.db.Exec(query, playlistID, pq.Array(uuidStrings(performanceIDs))); err != nil {
-		return fmt.Errorf("add playlist items: %w", err)
+	result, err := r.db.Exec(query, playlistID, pq.Array(uuidStrings(performanceIDs)))
+	if err != nil {
+		return 0, fmt.Errorf("add playlist items: %w", err)
 	}
-	return r.touch(playlistID)
+	added, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("count added playlist items: %w", err)
+	}
+	return int(added), r.touch(playlistID)
 }
 
 // ========== プリセットプレイリストのフォロー ==========

@@ -1101,6 +1101,14 @@ export interface PresetPlaylistListResponse {
   presets: PresetPlaylist[];
 }
 
+/** プリセットをプレイリストへ入れた結果。skipped は既に入っていて飛ばした件数 */
+export interface AddPresetToPlaylistResult {
+  playlist: Playlist;
+  added: number;
+  skipped: number;
+  created: boolean;
+}
+
 // ========== 外部アカウント連携 ==========
 
 export interface OAuthIdentity {
