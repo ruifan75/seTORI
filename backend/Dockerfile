@@ -17,7 +17,9 @@ ARG BUILD_TIME=
 # lib/pq は純 Go なので CGO 不要。静的バイナリにして実行イメージを軽くする
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath \
     -ldflags="-s -w -X main.commit=${GIT_COMMIT} -X main.builtAt=${BUILD_TIME}" \
-    -o /out/server ./cmd/server
+    -o /out/server ./cmd/server && \
+    CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" \
+    -o /out/rotate-secrets ./cmd/rotate-secrets
 
 # ===== 実行 =====
 FROM alpine:3.21
@@ -47,6 +49,7 @@ ENV TZ=Asia/Tokyo
 
 WORKDIR /app
 COPY --from=build /out/server /app/server
+COPY --from=build /out/rotate-secrets /app/rotate-secrets
 
 # 非 root で動かす。BACKUP_DIR と live chat のキャッシュは名前付きボリュームを
 # 載せる場所なので、先にこのユーザー所有で作っておく（空のボリュームは初回マウント時に

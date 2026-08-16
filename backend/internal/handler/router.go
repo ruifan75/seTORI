@@ -134,7 +134,12 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	batchFillService := service.NewBatchFillService(streamRepo, perfRepo, batchFillRepo,
 		commentService, holodexService, chapterService, normalizationService, performanceService, suggestionService)
 	driveClient := gdrive.NewClient(cfg.GoogleOAuthClientID, cfg.GoogleOAuthSecret)
-	backupService := service.NewBackupService(db, appSettingsRepo, driveClient, cfg.DatabaseURL, cfg.BackupDir, cfg.BackupDockerContainer)
+	backupService := service.NewBackupService(db, appSettingsRepo, driveClient, settingsCipher, cfg.DatabaseURL, cfg.BackupDir, cfg.BackupDockerContainer)
+	if migrated, err := backupService.EncryptPlaintextDriveToken(); err != nil {
+		logger.Warnf("Google Drive refresh token の暗号化移行に失敗しました: %v", err)
+	} else if migrated {
+		logger.Infof("Google Drive refresh token を暗号化しました")
+	}
 	playlistRepo := repository.NewPlaylistRepository(db, perfRepo)
 	playlistService := service.NewPlaylistService(playlistRepo)
 	presetService := service.NewPresetService(perfRepo, playlistRepo)

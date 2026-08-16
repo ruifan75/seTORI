@@ -18,6 +18,7 @@ import (
 	"github.com/ruifan75/setori/internal/logger"
 	"github.com/ruifan75/setori/internal/repository"
 	"github.com/ruifan75/setori/pkg/gdrive"
+	"github.com/ruifan75/setori/pkg/secrets"
 )
 
 const (
@@ -77,6 +78,7 @@ type BackupService struct {
 	db           *sql.DB
 	settingsRepo *repository.AppSettingsRepository
 	drive        *gdrive.Client
+	cipher       *secrets.Cipher
 
 	databaseURL     string
 	backupDir       string
@@ -93,11 +95,12 @@ type BackupService struct {
 	accessTokenExp time.Time
 }
 
-func NewBackupService(db *sql.DB, settingsRepo *repository.AppSettingsRepository, drive *gdrive.Client, databaseURL, backupDir, dockerContainer string) *BackupService {
+func NewBackupService(db *sql.DB, settingsRepo *repository.AppSettingsRepository, drive *gdrive.Client, cipher *secrets.Cipher, databaseURL, backupDir, dockerContainer string) *BackupService {
 	s := &BackupService{
 		db:              db,
 		settingsRepo:    settingsRepo,
 		drive:           drive,
+		cipher:          cipher,
 		databaseURL:     databaseURL,
 		backupDir:       backupDir,
 		dockerContainer: dockerContainer,
@@ -549,6 +552,78 @@ func (s *BackupService) restore(path string) error {
 
 // ========== Google Drive 連携 ==========
 
+func encryptGDriveToken(cipher *secrets.Cipher, tok gdriveToken) (gdriveToken, error) {
+	if tok.RefreshToken == "" || secrets.IsEncrypted(tok.RefreshToken) {
+		return tok, nil
+	}
+	if cipher == nil {
+		return gdriveToken{}, secrets.ErrNoKey
+	}
+	enc, err := cipher.Encrypt(tok.RefreshToken)
+	if err != nil {
+		return gdriveToken{}, err
+	}
+	tok.RefreshToken = enc
+	return tok, nil
+}
+
+func decryptGDriveToken(cipher *secrets.Cipher, tok gdriveToken) (gdriveToken, error) {
+	if tok.RefreshToken == "" || !secrets.IsEncrypted(tok.RefreshToken) {
+		return tok, nil
+	}
+	if cipher == nil {
+		return gdriveToken{}, secrets.ErrNoKey
+	}
+	plain, err := cipher.Decrypt(tok.RefreshToken)
+	if err != nil {
+		return gdriveToken{}, err
+	}
+	tok.RefreshToken = plain
+	return tok, nil
+}
+
+func (s *BackupService) readGDriveToken() (gdriveToken, bool, error) {
+	var tok gdriveToken
+	found, err := s.settingsRepo.Get(settingsKeyGDriveToken, &tok)
+	if err != nil || !found {
+		return gdriveToken{}, found, err
+	}
+	tok, err = decryptGDriveToken(s.cipher, tok)
+	if err != nil {
+		return gdriveToken{}, true, fmt.Errorf("Google Drive refresh token の復号に失敗: %w", err)
+	}
+	return tok, true, nil
+}
+
+func (s *BackupService) saveGDriveToken(tok gdriveToken) error {
+	stored, err := encryptGDriveToken(s.cipher, tok)
+	if err != nil {
+		return fmt.Errorf("Google Drive refresh token の暗号化に失敗: %w", err)
+	}
+	return s.settingsRepo.Set(settingsKeyGDriveToken, stored)
+}
+
+// EncryptPlaintextDriveToken は暗号化導入前に保存された refresh token を移行する。
+// 起動時に呼ばれ、既に暗号化済みなら何もしない。
+func (s *BackupService) EncryptPlaintextDriveToken() (bool, error) {
+	var tok gdriveToken
+	found, err := s.settingsRepo.Get(settingsKeyGDriveToken, &tok)
+	if err != nil || !found || tok.RefreshToken == "" || secrets.IsEncrypted(tok.RefreshToken) {
+		return false, err
+	}
+	if s.cipher == nil || !s.cipher.Enabled() {
+		return false, secrets.ErrNoKey
+	}
+	stored, err := encryptGDriveToken(s.cipher, tok)
+	if err != nil {
+		return false, err
+	}
+	if err := s.settingsRepo.Set(settingsKeyGDriveToken, stored); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // DriveConfigured は OAuth クライアントが設定済みかを返す。
 func (s *BackupService) DriveConfigured() bool {
 	return s.drive.Configured()
@@ -559,8 +634,7 @@ func (s *BackupService) DriveConnected() bool {
 	if !s.drive.Configured() {
 		return false
 	}
-	var tok gdriveToken
-	found, err := s.settingsRepo.Get(settingsKeyGDriveToken, &tok)
+	tok, found, err := s.readGDriveToken()
 	return err == nil && found && tok.RefreshToken != ""
 }
 
@@ -570,8 +644,7 @@ func (s *BackupService) DriveStatus() DriveStatus {
 	if !st.Configured {
 		return st
 	}
-	var tok gdriveToken
-	if found, err := s.settingsRepo.Get(settingsKeyGDriveToken, &tok); err == nil && found && tok.RefreshToken != "" {
+	if tok, found, err := s.readGDriveToken(); err == nil && found && tok.RefreshToken != "" {
 		st.Connected = true
 		st.Email = tok.Email
 		st.FolderName = driveBackupFolderName
@@ -607,7 +680,7 @@ func (s *BackupService) PollDriveAuth(deviceCode string) (bool, error) {
 	} else {
 		logger.Warnf("gdrive about: %v", err)
 	}
-	if err := s.settingsRepo.Set(settingsKeyGDriveToken, saved); err != nil {
+	if err := s.saveGDriveToken(saved); err != nil {
 		return false, err
 	}
 	s.tokenMu.Lock()
@@ -620,8 +693,11 @@ func (s *BackupService) PollDriveAuth(deviceCode string) (bool, error) {
 
 // DisconnectDrive は連携を解除する（トークン無効化 + 保存情報の削除）。
 func (s *BackupService) DisconnectDrive() error {
-	var tok gdriveToken
-	if found, _ := s.settingsRepo.Get(settingsKeyGDriveToken, &tok); found && tok.RefreshToken != "" {
+	tok, found, err := s.readGDriveToken()
+	if err != nil {
+		return err
+	}
+	if found && tok.RefreshToken != "" {
 		if err := s.drive.Revoke(tok.RefreshToken); err != nil {
 			logger.Warnf("gdrive revoke: %v", err)
 		}
@@ -669,8 +745,7 @@ func (s *BackupService) getAccessToken() (string, error) {
 		return s.accessToken, nil
 	}
 
-	var tok gdriveToken
-	found, err := s.settingsRepo.Get(settingsKeyGDriveToken, &tok)
+	tok, found, err := s.readGDriveToken()
 	if err != nil {
 		return "", err
 	}
