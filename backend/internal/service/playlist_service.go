@@ -274,6 +274,27 @@ func (s *PlaylistService) AddItem(id, userID uuid.UUID, performanceIDStr string)
 	return s.repo.AddItem(id, performanceID)
 }
 
+// AddItems は複数の歌唱を指定順で末尾へ追加する。
+// 既に入っている歌唱は飛ばし、実際に増えた件数を返す。
+func (s *PlaylistService) AddItems(id, userID uuid.UUID, performanceIDStrs []string) (int, error) {
+	if _, err := s.requireOwner(id, userID); err != nil {
+		return 0, err
+	}
+	if len(performanceIDStrs) == 0 {
+		return 0, ErrPerformanceInvalid
+	}
+
+	ids := make([]uuid.UUID, 0, len(performanceIDStrs))
+	for _, str := range performanceIDStrs {
+		pid, err := uuid.Parse(str)
+		if err != nil {
+			return 0, ErrPerformanceInvalid
+		}
+		ids = append(ids, pid)
+	}
+	return s.repo.AddItems(id, ids)
+}
+
 func (s *PlaylistService) RemoveItem(id, userID uuid.UUID, performanceIDStr string) error {
 	if _, err := s.requireOwner(id, userID); err != nil {
 		return err

@@ -10,6 +10,7 @@ import SingerAvatars from '../components/SingerAvatars';
 import PerformanceCard from '../components/PerformanceCard';
 import PerformanceCardRow from '../components/PerformanceCardRow';
 import PresetActions from '../components/PresetActions';
+import QueueAddButton from '../components/QueueAddButton';
 import { usePlayerStore, performancesToTracks as toTracks } from '../store/player';
 
 const RECOMMENDATION_PAGE_SIZE = 20;
@@ -138,6 +139,7 @@ export default function HomePage() {
     () => uniqueSongs(recoData?.pages.flatMap((page) => page.performances) ?? []),
     [recoData],
   );
+  const recommendationTracks = useMemo(() => toTracks(reco), [reco]);
 
   const updateRecommendationScroll = useCallback(() => {
     const row = recommendationRowRef.current;
@@ -247,12 +249,6 @@ export default function HomePage() {
     }
   };
 
-  const enqueueCurrentRecommendations = () => {
-    if (reco.length === 0) return;
-    usePlayerStore.getState().enqueue(toTracks(reco));
-    showToast(`現在のおすすめ${reco.length}曲をキューに追加しました`, 'success');
-  };
-
   // おすすめを最初から選び直す（蓄積した全ページを破棄して 1 ページ目を取り直す）
   const reshuffleRecommendations = () => {
     pendingRecommendationReveal.current = null;
@@ -282,15 +278,13 @@ export default function HomePage() {
                   <svg className="w-4 h-4 ml-0.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
                 )}
               </button>
-              <button
-                onClick={enqueueCurrentRecommendations}
-                className="inline-flex items-center justify-center w-8 h-8 text-gray-500 border rounded-full hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
-                title={`現在のおすすめ${reco.length}曲をキューに追加`}
-              >
-                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M14 10H3v2h11v-2zm0-4H3v2h11V6zm4 8v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zM3 16h7v-2H3v2z" />
-                </svg>
-              </button>
+              <QueueAddButton
+                tracks={recommendationTracks}
+                description={`現在のおすすめ${reco.length}曲`}
+                playlistHeading={`${reco.length}曲を追加`}
+                defaultPlaylistName="おすすめ"
+                className="border"
+              />
               <button
                 onClick={reshuffleRecommendations}
                 className="inline-flex items-center justify-center w-8 h-8 text-gray-500 border rounded-full hover:text-indigo-600 hover:bg-indigo-50 transition-colors"

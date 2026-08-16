@@ -88,6 +88,7 @@ import type {
   PresetPlaylist,
   PresetPlaylistListResponse,
   AddPresetToPlaylistResult,
+  AddPlaylistItemsResult,
   BackupStatusResponse,
   BackupSettings,
   BackupResult,
@@ -1285,6 +1286,12 @@ export const playlistApi = {
 
   addItem: async (id: string, performanceId: string): Promise<void> => {
     await api.post(`/api/playlists/${id}/items`, { performance_id: performanceId });
+  },
+
+  /** 複数の歌唱を指定順で末尾へ追加する（既存の項目は飛ばす） */
+  addItems: async (id: string, performanceIds: string[]): Promise<AddPlaylistItemsResult> => {
+    const { data } = await api.post(`/api/playlists/${id}/items`, { performance_ids: performanceIds });
+    return data;
   },
 
   removeItem: async (id: string, performanceId: string): Promise<void> => {

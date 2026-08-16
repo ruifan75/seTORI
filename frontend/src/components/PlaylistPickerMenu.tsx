@@ -12,9 +12,11 @@ interface Props {
   onClose: () => void;
   /** プレイリスト一覧の前に置く操作（再生キューに追加など） */
   leadingAction?: { label: string; onClick: () => void };
+  /** 未ログインなどでプレイリストを取得できない場合に代わりに出す操作 */
+  playlistUnavailableAction?: { label: string; onClick: () => void };
   /** プレイリスト一覧の見出し */
   heading?: string;
-  onPick: (playlistId: string) => void;
+  onPick: (playlistId: string, playlistName: string) => void;
   onCreate: (name: string) => void;
   /** 追加処理の実行中は選べないようにする */
   busy?: boolean;
@@ -28,7 +30,7 @@ const MENU_WIDTH = PLAYLIST_MENU_WIDTH;
 /**
  * 「どのプレイリストへ入れるか」を選ばせるメニュー（既存から選ぶ / 新しく作る）。
  *
- * 1曲の追加（QueueAddButton）とプリセットの追加（PresetActions）で共通に使う。
+ * 1曲・おすすめの追加（QueueAddButton）とプリセットの追加（PresetActions）で共通に使う。
  * 選択の仕組みは同じなので、片方だけ挙動が変わらないようにここへ寄せてある。
  *
  * メニューはビューポート基準（fixed）で body 直下に描く。呼び出し元がホームの
@@ -40,6 +42,7 @@ export default function PlaylistPickerMenu({
   initialPosition,
   onClose,
   leadingAction,
+  playlistUnavailableAction,
   heading = 'プレイリストに追加',
   onPick,
   onCreate,
@@ -81,6 +84,7 @@ export default function PlaylistPickerMenu({
   const playlists = useQuery({
     queryKey: ['playlists', 'mine'],
     queryFn: playlistApi.listMine,
+    enabled: !playlistUnavailableAction,
   });
 
   return createPortal(
@@ -93,6 +97,7 @@ export default function PlaylistPickerMenu({
         <>
           <button
             onClick={leadingAction.onClick}
+            disabled={busy}
             className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 transition-colors"
           >
             {leadingAction.label}
@@ -103,7 +108,14 @@ export default function PlaylistPickerMenu({
 
       <p className="px-3 py-1 text-xs font-medium text-gray-400">{heading}</p>
 
-      {playlists.isLoading ? (
+      {playlistUnavailableAction ? (
+        <button
+          onClick={playlistUnavailableAction.onClick}
+          className="w-full px-3 py-2 text-left text-sm text-indigo-600 hover:bg-indigo-50 transition-colors"
+        >
+          {playlistUnavailableAction.label}
+        </button>
+      ) : playlists.isLoading ? (
         <p className="px-3 py-2 text-sm text-gray-400">読み込み中...</p>
       ) : (playlists.data?.playlists.length ?? 0) === 0 ? (
         <p className="px-3 py-2 text-sm text-gray-400">まだプレイリストがありません</p>
@@ -112,7 +124,7 @@ export default function PlaylistPickerMenu({
           {playlists.data!.playlists.map((pl) => (
             <li key={pl.id}>
               <button
-                onClick={() => onPick(pl.id)}
+                onClick={() => onPick(pl.id, pl.name)}
                 disabled={busy}
                 className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 disabled:text-gray-300 transition-colors flex items-center justify-between gap-2"
               >
@@ -124,22 +136,26 @@ export default function PlaylistPickerMenu({
         </ul>
       )}
 
-      <div className="border-t border-gray-100 my-1" />
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (!busy && name.trim()) onCreate(name.trim());
-        }}
-        className="px-2 py-1"
-      >
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="新しいプレイリスト名"
-          disabled={busy}
-          className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500 focus:border-transparent disabled:bg-gray-50"
-        />
-      </form>
+      {!playlistUnavailableAction && (
+        <>
+          <div className="border-t border-gray-100 my-1" />
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!busy && name.trim()) onCreate(name.trim());
+            }}
+            className="px-2 py-1"
+          >
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="新しいプレイリスト名"
+              disabled={busy}
+              className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500 focus:border-transparent disabled:bg-gray-50"
+            />
+          </form>
+        </>
+      )}
     </div>,
     document.body,
   );

@@ -7,6 +7,7 @@ import { useToast } from './ui/ToastContext';
 import PlaylistPickerMenu, { PLAYLIST_MENU_WIDTH } from './PlaylistPickerMenu';
 import { menuPositionFor, type MenuPosition } from './menuPosition';
 import { useAuthStore } from '../store/auth';
+import { performancesToTracks, usePlayerStore } from '../store/player';
 
 interface Props {
   preset: PresetPlaylist;
@@ -26,10 +27,10 @@ function addedMessage(name: string, added: number, skipped: number, created: boo
 }
 
 /**
- * プリセットプレイリストの操作（再生・プレイリストへ追加・フォロー）。
+ * プリセットプレイリストの操作（再生・キュー／プレイリストへ追加・フォロー）。
  *
  * 未ログインでもボタンは出す。隠すと「できること」に気づけないので、
- * 押した時点でログインへ案内する（修正提案の LoginToSuggest と同じ考え方）。
+ * キュー追加はそのまま使え、プレイリスト追加やフォローを選んだ時点でログインへ案内する。
  */
 export default function PresetActions({ preset, onPlayAll, playDisabled }: Props) {
   const { showToast } = useToast();
@@ -42,7 +43,7 @@ export default function PresetActions({ preset, onPlayAll, playDisabled }: Props
   const [pickerPos, setPickerPos] = useState<MenuPosition>({ top: 0, left: 0 });
   const addButtonRef = useRef<HTMLButtonElement>(null);
 
-  const goToLogin = () => navigate('/login', { state: { from: location.pathname } });
+  const goToLogin = () => navigate('/login', { state: { from: `${location.pathname}${location.search}` } });
 
   const followMutation = useMutation({
     mutationFn: () => (preset.is_following
@@ -70,11 +71,18 @@ export default function PresetActions({ preset, onPlayAll, playDisabled }: Props
     onError: (err: Error) => showToast(`追加に失敗しました: ${err.message}`, 'error'),
   });
 
+  const enqueueMutation = useMutation({
+    mutationFn: () => presetPlaylistApi.items(preset.key),
+    onSuccess: (result) => {
+      const tracks = performancesToTracks(result.performances);
+      usePlayerStore.getState().enqueue(tracks);
+      setPickerOpen(false);
+      showToast(`「${preset.name}」の${tracks.length}曲をキューに追加しました`, 'success');
+    },
+    onError: () => showToast('キューに追加する曲を読み込めませんでした', 'error'),
+  });
+
   const openPicker = () => {
-    if (!isAuthenticated) {
-      goToLogin();
-      return;
-    }
     if (!pickerOpen) setPickerPos(menuPositionFor(addButtonRef.current, PLAYLIST_MENU_WIDTH)); // 開く直前に測る
     setPickerOpen((v) => !v);
   };
@@ -97,13 +105,13 @@ export default function PresetActions({ preset, onPlayAll, playDisabled }: Props
       <button
         ref={addButtonRef}
         onClick={openPicker}
-        disabled={addMutation.isPending}
+        disabled={addMutation.isPending || enqueueMutation.isPending || preset.item_count === 0}
         className={iconButton}
-        title={isAuthenticated
-          ? `今の${preset.item_count}曲をプレイリストに追加（既存のものか、新しく作る）`
-          : 'プレイリストに追加するにはログインが必要です'}
+        title={`今の${preset.item_count}曲をキュー／プレイリストに追加`}
+        aria-haspopup="menu"
+        aria-expanded={pickerOpen}
       >
-        {addMutation.isPending ? (
+        {addMutation.isPending || enqueueMutation.isPending ? (
           <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
             <circle className="opacity-25" cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="3" />
             <path className="opacity-75" fill="currentColor" d="M12 3a9 9 0 0 1 9 9h-3a6 6 0 0 0-6-6V3Z" />
@@ -122,9 +130,14 @@ export default function PresetActions({ preset, onPlayAll, playDisabled }: Props
           anchorRef={addButtonRef}
           initialPosition={pickerPos}
           onClose={() => setPickerOpen(false)}
+          leadingAction={{ label: '再生キューに追加', onClick: () => enqueueMutation.mutate() }}
+          playlistUnavailableAction={!isAuthenticated ? {
+            label: 'ログインしてプレイリストに追加',
+            onClick: goToLogin,
+          } : undefined}
           heading={`${preset.item_count}曲を追加`}
           defaultName={preset.name}
-          busy={addMutation.isPending}
+          busy={addMutation.isPending || enqueueMutation.isPending}
           onPick={(playlistId) => addMutation.mutate({ playlistId })}
           onCreate={(name) => addMutation.mutate({ name })}
         />

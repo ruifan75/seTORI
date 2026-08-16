@@ -174,7 +174,7 @@ func (r *Router) handleListPlaylistItems(w http.ResponseWriter, req *http.Reques
 	respondJSON(w, http.StatusOK, r.streamService.ComposePerformanceList(perfs))
 }
 
-// POST /api/playlists/{id}/items — 曲の追加（所有者のみ）
+// POST /api/playlists/{id}/items — 1曲または複数曲の追加（所有者のみ）
 func (r *Router) handleAddPlaylistItem(w http.ResponseWriter, req *http.Request) {
 	userID, ok := r.requireLogin(w, req)
 	if !ok {
@@ -189,11 +189,19 @@ func (r *Router) handleAddPlaylistItem(w http.ResponseWriter, req *http.Request)
 		respondError(w, http.StatusBadRequest, "リクエストの形式が不正です")
 		return
 	}
-	if err := r.playlistService.AddItem(id, userID, body.PerformanceID); err != nil {
+	performanceIDs := body.PerformanceIDs
+	if len(performanceIDs) == 0 && body.PerformanceID != "" {
+		performanceIDs = []string{body.PerformanceID}
+	}
+	added, err := r.playlistService.AddItems(id, userID, performanceIDs)
+	if err != nil {
 		respondError(w, playlistErrStatus(err), err.Error())
 		return
 	}
-	respondJSON(w, http.StatusOK, map[string]string{"message": "プレイリストに追加しました"})
+	respondJSON(w, http.StatusOK, dto.AddPlaylistItemsResponse{
+		Added:   added,
+		Skipped: len(performanceIDs) - added,
+	})
 }
 
 // DELETE /api/playlists/{id}/items/{performanceId} — 曲の削除（所有者のみ）

@@ -14,6 +14,7 @@ import RangeEditor, { type RangeNeighbour } from './RangeEditor';
 import SetlistStrip from './SetlistStrip';
 import SongSearchInput from './SongSearchInput';
 import ArtistSearchInput from './ArtistSearchInput';
+import SingerSearchInput from './SingerSearchInput';
 import LoginToSuggest from './LoginToSuggest';
 import {
   usePerformanceTiming,
@@ -344,16 +345,16 @@ export default function PerformanceReportDialog({
   return (
     // この画面の再生位置・試聴はすべてグローバル再生バーのもの
     <PlayerScopeContext value="bar">
-      <div className="fixed inset-0 z-[65] bg-gray-950 text-white flex flex-col pb-[env(safe-area-inset-bottom)]">
+      <div className="fixed inset-0 z-[65] bg-white text-gray-900 flex flex-col pb-[env(safe-area-inset-bottom)]">
         {/* ヘッダー */}
-        <div className="shrink-0 flex items-center gap-3 px-4 h-12 border-b border-white/10">
+        <div className="shrink-0 flex items-center gap-3 px-4 h-12 border-b border-gray-200 bg-white">
           <span className="text-sm font-medium shrink-0 whitespace-nowrap">
             {missingMode ? '抜けている曲を報告' : '歌唱を報告'}
           </span>
-          <span className="text-xs text-gray-400 truncate min-w-0">{stream?.title}</span>
+          <span className="text-xs text-gray-500 truncate min-w-0">{stream?.title}</span>
           <button
             onClick={close}
-            className="ml-auto p-2 -mr-2 text-gray-300 hover:text-white hover:bg-white/10 rounded-lg"
+            className="ml-auto p-2 -mr-2 text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-lg"
             title="閉じる（Esc）"
             aria-label="閉じる"
           >
@@ -382,7 +383,7 @@ export default function PerformanceReportDialog({
             <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-3 pb-3 space-y-3">
 
             {target || missingMode ? (
-              <div className="rounded-lg bg-white text-gray-900 p-3">
+              <div className="rounded-lg bg-white border border-gray-200 p-3 shadow-sm">
                 <RangeEditor
                   start={draft.start}
                   end={draft.end}
@@ -410,11 +411,11 @@ export default function PerformanceReportDialog({
                 </div>
               </div>
             ) : (
-              <p className="text-sm text-gray-400">対象の歌唱が見つかりません</p>
+              <p className="text-sm text-gray-500">対象の歌唱が見つかりません</p>
             )}
 
             {(target || missingMode) && (
-              <div className="rounded-lg bg-white text-gray-900 p-3 space-y-3">
+              <div className="rounded-lg bg-white border border-gray-200 p-3 space-y-3 shadow-sm">
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">
                     曲 <span className="font-normal text-gray-400">（登録済み / iTunes から選ぶ・無ければそのまま入力）</span>
@@ -469,6 +470,7 @@ export default function PerformanceReportDialog({
                   participants={stream?.participants ?? []}
                   channelOwner={stream?.channel_owner}
                   current={target?.singers ?? []}
+                  canCreate={canEdit}
                   onToggle={(id) =>
                     setDraft((d) => ({
                       ...d,
@@ -482,7 +484,7 @@ export default function PerformanceReportDialog({
             )}
 
             {!canSubmit && (
-              <div className="rounded-lg bg-white p-3">
+              <div className="rounded-lg bg-white border border-gray-200 p-3 shadow-sm">
                 <LoginToSuggest message="誤りの報告にはログインが必要です。" />
               </div>
             )}
@@ -493,14 +495,14 @@ export default function PerformanceReportDialog({
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
                 placeholder={canEdit ? 'メモ（任意）' : '報告の理由（任意）'}
-                className="w-full px-3 py-2 text-sm bg-white/10 border border-white/20 rounded-lg placeholder:text-gray-500 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                className="w-full px-3 py-2 text-sm bg-white border border-gray-300 rounded-lg text-gray-900 placeholder:text-gray-400 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
               />
             )}
 
-            {error && <p className="text-xs text-red-400">{error}</p>}
+            {error && <p className="text-xs text-red-600">{error}</p>}
 
             <div className="flex items-center gap-2">
-              <span className="text-xs text-gray-400 min-w-0 truncate">
+              <span className="text-xs text-gray-500 min-w-0 truncate">
                 {changed
                   ? `送信する内容：${summary.join('、')}`
                   : missingMode
@@ -513,7 +515,7 @@ export default function PerformanceReportDialog({
                 type="button"
                 onClick={close}
                 disabled={busy}
-                className="ml-auto px-4 py-2 text-sm border border-white/20 rounded-lg hover:bg-white/10 disabled:opacity-50"
+                className="ml-auto px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
               >
                 キャンセル
               </button>
@@ -521,7 +523,7 @@ export default function PerformanceReportDialog({
                 type="button"
                 onClick={handleSubmit}
                 disabled={busy || !changed || !canSubmit}
-                className="px-4 py-2 text-sm bg-indigo-600 font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-40"
+                className="px-4 py-2 text-sm bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-40"
               >
                 {busy ? '送信中...' : missingMode || !canEdit ? '報告を送信' : '保存'}
               </button>
@@ -530,7 +532,7 @@ export default function PerformanceReportDialog({
           </div>
 
           {/* 右：この配信の曲（対象の切り替え） */}
-          <div className="shrink-0 lg:w-80 border-t lg:border-t-0 lg:border-l border-white/10 bg-white text-gray-900 flex flex-col max-h-[30vh] lg:max-h-none">
+          <div className="shrink-0 lg:w-80 border-t lg:border-t-0 lg:border-l border-gray-200 bg-white text-gray-900 flex flex-col max-h-[30vh] lg:max-h-none">
             <SetlistStrip
               performances={performances}
               currentId={performanceId}
@@ -591,7 +593,7 @@ function Transport({ currentTime }: { currentTime: number | null }) {
       <button
         type="button"
         onClick={() => nudge(-5)}
-        className="px-2 py-1 text-xs rounded-lg text-gray-300 hover:bg-white/10"
+        className="px-2 py-1 text-xs rounded-lg text-gray-600 hover:bg-gray-100"
         title="5秒戻す"
       >
         -5s
@@ -599,7 +601,7 @@ function Transport({ currentTime }: { currentTime: number | null }) {
       <button
         type="button"
         onClick={() => setPlaying(!playing)}
-        className="p-2 bg-indigo-600 rounded-full hover:bg-indigo-700"
+        className="p-2 bg-indigo-600 text-white rounded-full hover:bg-indigo-700"
         title={playing ? '一時停止' : '再生'}
         aria-label={playing ? '一時停止' : '再生'}
       >
@@ -616,12 +618,12 @@ function Transport({ currentTime }: { currentTime: number | null }) {
       <button
         type="button"
         onClick={() => nudge(5)}
-        className="px-2 py-1 text-xs rounded-lg text-gray-300 hover:bg-white/10"
+        className="px-2 py-1 text-xs rounded-lg text-gray-600 hover:bg-gray-100"
         title="5秒進める"
       >
         +5s
       </button>
-      <span className="font-mono text-sm text-gray-200">
+      <span className="font-mono text-sm text-gray-800">
         {currentTime != null ? formatTimeInput(Math.floor(currentTime)) : '--:--'}
       </span>
       <span className="text-xs text-gray-500 truncate min-w-0">
@@ -639,28 +641,46 @@ function VocalPicker({
   participants,
   channelOwner,
   current,
+  canCreate,
   onToggle,
 }: {
   selected: string[];
   participants: Singer[];
   channelOwner?: Singer;
   current: Singer[];
+  canCreate: boolean;
   onToggle: (id: string) => void;
 }) {
+  const [searching, setSearching] = useState(false);
+  const [extraSingers, setExtraSingers] = useState<Singer[]>([]);
   const options = useMemo(() => {
     const byId = new Map<string, Singer>();
     if (channelOwner) byId.set(channelOwner.id, channelOwner);
     for (const s of participants) if (!byId.has(s.id)) byId.set(s.id, s);
     for (const s of current) if (!byId.has(s.id)) byId.set(s.id, s);
+    for (const s of extraSingers) if (!byId.has(s.id)) byId.set(s.id, s);
     return [...byId.values()];
-  }, [participants, channelOwner, current]);
+  }, [participants, channelOwner, current, extraSingers]);
 
-  if (options.length === 0) return null;
+  const selectSinger = (singer: Singer) => {
+    setExtraSingers((items) => items.some((item) => item.id === singer.id) ? items : [...items, singer]);
+    if (!selected.includes(singer.id)) onToggle(singer.id);
+    setSearching(false);
+  };
 
   return (
     <div>
-      <label className="block text-xs font-medium text-gray-600 mb-1">歌った人</label>
-      <div className="flex flex-wrap gap-1.5">
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <label className="block text-xs font-medium text-gray-600">歌った人</label>
+        <button
+          type="button"
+          onClick={() => setSearching((open) => !open)}
+          className="text-xs text-indigo-600 hover:text-indigo-800"
+        >
+          {searching ? '閉じる' : canCreate ? '＋ チャンネルを検索・追加' : '＋ チャンネルを検索'}
+        </button>
+      </div>
+      {options.length > 0 && <div className="flex flex-wrap gap-1.5">
         {options.map((singer) => {
           const on = selected.includes(singer.id);
           return (
@@ -687,7 +707,19 @@ function VocalPicker({
             </button>
           );
         })}
-      </div>
+      </div>}
+      {(searching || options.length === 0) && (
+        <div className={options.length > 0 ? 'mt-2' : ''}>
+          <SingerSearchInput
+            onSelectSinger={selectSinger}
+            excludeIds={selected}
+            allowCreate={canCreate}
+            placeholder={canCreate
+              ? '名前で検索／@handle・Channel ID・URLで新規追加'
+              : 'チャンネル名で検索'}
+          />
+        </div>
+      )}
     </div>
   );
 }

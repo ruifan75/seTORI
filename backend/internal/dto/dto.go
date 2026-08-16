@@ -1196,7 +1196,14 @@ type PlaylistListResponse struct {
 }
 
 type AddPlaylistItemRequest struct {
-	PerformanceID string `json:"performance_id"`
+	// PerformanceID は従来の1曲追加用。PerformanceIDs は一覧を順番どおり一括追加する。
+	PerformanceID  string   `json:"performance_id"`
+	PerformanceIDs []string `json:"performance_ids"`
+}
+
+type AddPlaylistItemsResponse struct {
+	Added   int `json:"added"`
+	Skipped int `json:"skipped"`
 }
 
 type ReorderPlaylistRequest struct {

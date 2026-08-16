@@ -1090,6 +1090,12 @@ export interface UpdatePlaylistRequest {
   visibility?: PlaylistVisibility;
 }
 
+/** プレイリストへ一括追加した結果。skipped は既に入っていて飛ばした件数 */
+export interface AddPlaylistItemsResult {
+  added: number;
+  skipped: number;
+}
+
 /**
  * 運営が用意したプリセットプレイリスト（コラボ・睡眠導入など）。
  * 中身は毎回サーバー側で計算されるので、フォローしていれば新しい歌唱が自動で入る。
