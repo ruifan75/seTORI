@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import { PlayerScopeContext } from './playerScope';
 import RangeEditor from './RangeEditor';
 import SetlistStrip from './SetlistStrip';
@@ -52,43 +52,15 @@ type Report = ReturnType<typeof usePerformanceReport>;
 
 // ========== 共通の小物 ==========
 
-function Header({
-  report,
-  onClose,
-  swipeToClose = false,
-}: {
-  report: Report;
-  onClose: () => void;
-  swipeToClose?: boolean;
-}) {
-  // 下スワイプで閉じる（拡大表示と同じ手つき）。追従アニメはしない ──
-  // 動画は別の fixed 要素なので、両方を同じ transform で動かす必要があり、
-  // 閉じるだけの導線に見合わない（✕ もある）
-  const touchStart = useRef<{ x: number; y: number } | null>(null);
-
+function Header({ report, onClose }: { report: Report; onClose: () => void }) {
+  // **下スワイプで閉じる導線は置かない。** 全画面プレイヤーには付けてあるが、
+  // あちらは見るだけの画面なので払っても何も失わない。こちらは送信前の編集を
+  // 抱えているので、同じ手つきで消えると直した内容ごと消える
+  // （しかも開く前が全画面表示だったなら、閉じた瞬間にプレイヤーが
+  // 滑り戻ってきて「プレイヤーの操作に吸われた」ようにしか見えない）。
+  // 閉じるのは ✕ と Esc だけ。
   return (
-    <div
-      className="shrink-0 flex items-center gap-3 px-4 h-12 border-b border-gray-200 bg-white"
-      onTouchStart={
-        swipeToClose
-          ? (e) => {
-              touchStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-            }
-          : undefined
-      }
-      onTouchEnd={
-        swipeToClose
-          ? (e) => {
-              const s = touchStart.current;
-              touchStart.current = null;
-              if (!s) return;
-              const dx = e.changedTouches[0].clientX - s.x;
-              const dy = e.changedTouches[0].clientY - s.y;
-              if (dy > 50 && dy > Math.abs(dx)) onClose();
-            }
-          : undefined
-      }
-    >
+    <div className="shrink-0 flex items-center gap-3 px-4 h-12 border-b border-gray-200 bg-white">
       <span className="text-sm font-medium shrink-0 whitespace-nowrap">
         {report.missingMode ? '抜けている曲を報告' : '歌唱を報告'}
       </span>
@@ -351,7 +323,7 @@ function CompactShell({ report, onVideoSlot }: { report: Report; onVideoSlot: (r
 
   return (
     <div className="fixed inset-0 z-[65] bg-white text-gray-900 flex flex-col pb-[env(safe-area-inset-bottom)]">
-      <Header report={report} onClose={close} swipeToClose />
+      <Header report={report} onClose={close} />
 
       {pane === 'time' && (
         <div className="shrink-0 px-3 pt-2">
