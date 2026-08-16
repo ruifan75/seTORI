@@ -1,0 +1,87 @@
+# 本番用。開発用の docker/docker-compose.yml とは別物（あちらは Postgres だけ）。
+#
+#   cd deploy && cp .env.example .env && vi .env
+#   docker compose up -d --build
+#
+name: setori
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD を .env に設定してください}
+      POSTGRES_DB: ${POSTGRES_DB:-setori}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    # ポートは公開しない。compose 内部ネットワークからのみ到達できればよい
+    # （公開するとインターネットから直接叩かれる）。
+    #
+    # 開発用 compose と違い migrations は initdb.d に載せない。
+    # マイグレーションはバックエンド起動時に schema_migrations で管理して
+    # 実行されるので、二重適用を避ける。
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-setori}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    # 通常は CI が GHCR へ発行したものを pull する（deploy.sh が IMAGE_TAG を渡す）。
+    # build: も残してあるので、CI が使えないときは `docker compose build` で作れる。
+    image: ghcr.io/ruifan75/setori-backend:${IMAGE_TAG:-main}
+    build:
+      context: ../backend
+      # 稼働中のバージョン。compose 自身は git を呼べないので deploy.sh が
+      # 環境変数で渡す。素の `docker compose up --build` では dev になる。
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-dev}
+        BUILD_TIME: ${BUILD_TIME:-}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      # compose 内部の名前解決で postgres サービスへ繋ぐ
+      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-setori}?sslmode=disable
+      HOST: 0.0.0.0
+      PORT: "8080"
+      BACKUP_DIR: /app/backups
+    volumes:
+      - backups:/app/backups
+      # yt-dlp が落とした live chat（拍手による歌唱 end 推定の入力）。
+      # 1配信あたり数 MB あり再取得は数十秒かかるので、redeploy で消さない。
+      - chat_cache:/app/data/chat_cache
+    # ポートは公開しない。外からは Caddy 経由の /api/* だけが届く。
+
+  web:
+    image: ghcr.io/ruifan75/setori-frontend:${IMAGE_TAG:-main}
+    build:
+      context: ../frontend
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-dev}
+        BUILD_TIME: ${BUILD_TIME:-}
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?DOMAIN を .env に設定してください}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Cloudflare Origin CA の証明書と秘密鍵。git には入れず本番機に手で置く
+      # （deploy/README.md の「オリジンサーバーの証明書」を参照）。無いと Caddy は起動しない。
+      - ./certs:/etc/caddy/certs:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  postgres_data:
+  backups:
+  chat_cache:
+  caddy_data:
+  caddy_config:

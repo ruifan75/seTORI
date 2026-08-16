@@ -1,0 +1,62 @@
+# {$DOMAIN} は compose の環境変数から入る。
+{$DOMAIN} {
+	# Cloudflare Origin CA の証明書を使う（compose が ./certs をマウントする）。
+	#
+	# なぜ Let's Encrypt の自動取得をやめたか：
+	# Cloudflare のプロキシ（オレンジ雲）を通すと、TLS はエッジで終端されるので
+	# TLS-ALPN-01 が使えなくなり、更新経路が HTTP-01 のみになる。しかもその
+	# HTTP-01 も Cloudflare を経由しないとオリジンサーバーに届かないため、更新の成否が
+	# Cloudflare 側の挙動（Always Use HTTPS の転送など）に依存する。
+	# さらに 80/443 を Cloudflare の IP レンジだけに絞ると経路はもっと細くなる。
+	# 静かに失敗して 90 日後に全断、という事故の形が悪すぎる。
+	#
+	# Origin CA 証明書は有効期間 15 年で更新が要らず、この依存を丸ごと消せる。
+	# 公開の信頼は無いが、Cloudflare だけが繋いでくるオリジンサーバーにはそれで足りる。
+	#
+	# ⚠️ この構成はオレンジ雲が常に有効であることが前提になる。灰色雲に戻すと
+	#    訪問者が直接オリジンサーバーに当たり、信頼されない証明書でサイト全体が開けなくなる。
+	tls /etc/caddy/certs/origin.crt /etc/caddy/certs/origin.key
+
+	encode zstd gzip
+
+	# API はバックエンドへ。
+	# バックアップ/リストアや一括解析は数分かかることがあるので、
+	# 応答待ちのタイムアウトは設けない（既定のまま）。
+	handle /api/* {
+		reverse_proxy backend:8080
+	}
+
+	# それ以外は SPA。実ファイルが無いパスは index.html に流して
+	# React Router に解決させる（/songs/xxx を直接開いた場合など）。
+	handle {
+		root * /srv
+
+		# ビルド成果物はファイル名にハッシュが入るので長期キャッシュしてよい。
+		@assets path /assets/*
+		header @assets Cache-Control "public, max-age=31536000, immutable"
+
+		# それ以外（"/" と SPA のパス＝中身は index.html）は毎回確認させる。
+		# ここを immutable な資産と一緒にキャッシュさせると、デプロイしても
+		# 古い index.html が古い JS を指し続けて更新が反映されなくなる。
+		@notAssets not path /assets/*
+		header @notAssets Cache-Control "no-cache"
+
+		try_files {path} /index.html
+		file_server
+	}
+
+	log {
+		output stdout
+	}
+}
+
+# www は正規のホスト名へ寄せる。両方で配信しないのは、セッショントークンが
+# localStorage（オリジン単位）にあるため。www で入った利用者は apex では
+# ログアウト状態に見え、その逆も起きる。正規のホスト名は 1 つだけにする。
+#
+# tls を明示するのは apex と同じ理由（ACME を使わない）。Origin CA 証明書は
+# `*.setori.app` を含めて発行してあるので、このホスト名もそのまま覆える。
+www.{$DOMAIN} {
+	tls /etc/caddy/certs/origin.crt /etc/caddy/certs/origin.key
+	redir https://{$DOMAIN}{uri} permanent
+}

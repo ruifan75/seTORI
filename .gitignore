@@ -2,8 +2,14 @@
 # 公開リポジトリに含めないローカルの計画・運用資料
 /CLAUDE.md
 /TODO.md
-/deploy/
 *.postman_collection.json
+
+# 本番デプロイの設定値・証明書・ローカルバックアップ
+/deploy/.env
+/deploy/.env.*
+!/deploy/.env.example
+/deploy/certs/
+/deploy/backups-copy/
 
 # YouTube のログイン cookie（yt-dlp が BOT 判定を回避するのに使う）。
 # セッションそのものなので絶対に追跡しない。運用では管理→設定から登録する
