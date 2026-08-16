@@ -25,6 +25,7 @@ const adminItems = [
   { path: '/admin/settings', label: '設定', permission: PERM.CONTENT_EDIT },
   { path: '/admin/logs', label: 'ログ', permission: PERM.LOGS_VIEW },
   { path: '/admin/users', label: 'ユーザー', permission: PERM.USERS_MANAGE },
+  { path: '/admin/activity', label: 'アクセス', permission: PERM.USERS_MANAGE },
   { path: '/admin/backups', label: 'バックアップ', permission: PERM.BACKUP_MANAGE },
 ];
 
@@ -317,6 +318,9 @@ export default function Layout() {
         ) : (
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
             <Outlet />
+            <footer className="mt-10 border-t border-gray-200 pt-4 text-center text-xs text-gray-400">
+              <Link to="/privacy" className="hover:text-indigo-600">プライバシー</Link>
+            </footer>
           </div>
         )}
       </main>

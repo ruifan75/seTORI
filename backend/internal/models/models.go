@@ -297,3 +297,35 @@ type Session struct {
 	ExpiresAt time.Time `json:"expires_at"`
 	CreatedAt time.Time `json:"created_at"`
 }
+
+// VisitorActivity は UTC の1日・IP・利用者ごとにまとめたページ表示記録。
+// IP は管理権限を持つ利用者にだけ返す。
+type VisitorActivity struct {
+	ID          int64      `json:"id"`
+	VisitDate   time.Time  `json:"visit_date"`
+	IPAddress   string     `json:"ip_address"`
+	UserID      *uuid.UUID `json:"user_id"`
+	Username    string     `json:"username"`
+	DisplayName string     `json:"display_name"`
+	FirstSeen   time.Time  `json:"first_seen"`
+	LastSeen    time.Time  `json:"last_seen"`
+	PageViews   int        `json:"page_views"`
+	LastPath    string     `json:"last_path"`
+	UserAgent   string     `json:"user_agent"`
+}
+
+type ActivityStats struct {
+	UniqueIPs          int64 `json:"unique_ips"`
+	AuthenticatedUsers int64 `json:"authenticated_users"`
+	PageViews          int64 `json:"page_views"`
+	AnonymousIPs       int64 `json:"anonymous_ips"`
+}
+
+type UserActivitySummary struct {
+	UserID         uuid.UUID  `json:"user_id"`
+	LastIPAddress  string     `json:"last_ip_address"`
+	LastSeen       *time.Time `json:"last_seen"`
+	PageViews      int64      `json:"page_views"`
+	DistinctIPs    int64      `json:"distinct_ips"`
+	ActiveSessions int64      `json:"active_sessions"`
+}

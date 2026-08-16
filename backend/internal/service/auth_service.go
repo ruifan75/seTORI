@@ -239,6 +239,18 @@ func (s *AuthService) DeleteUser(id uuid.UUID) error {
 	return s.repo.DeleteUser(id)
 }
 
+// RevokeSessions は指定利用者を全端末からログアウトさせる。
+func (s *AuthService) RevokeSessions(id uuid.UUID) error {
+	existing, err := s.repo.FindUserByID(id)
+	if err != nil {
+		return err
+	}
+	if existing == nil {
+		return ErrUserNotFound
+	}
+	return s.repo.DeleteSessionsByUser(id)
+}
+
 // ========== ロール管理 ==========
 
 func (s *AuthService) ListRoles() ([]models.Role, error) {

@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"strconv"
 )
 
 // Config アプリケーション設定
@@ -41,6 +42,12 @@ type Config struct {
 	// DB のバックアップは Google Drive へ自動アップロードされるため、
 	// 鍵だけは DB に置かず環境変数で持つ（鍵が無ければ機密の保存を拒否する）。
 	SettingsEncryptionKey string
+
+	// 訪客活動。IP は個人情報になり得るため、保存期間を有限にする。
+	ActivityRetentionDays int
+	// CF-Connecting-IP / X-Forwarded-For を信用してよい直前 proxy の CIDR。
+	// 本番では compose が Caddy の内部ネットワークだけを渡す。
+	TrustedProxyCIDRs string
 }
 
 // Load 環境変数から設定を読み込み
@@ -71,9 +78,24 @@ func Load() (*Config, error) {
 		YtdlpCookiesFile: getEnv("YTDLP_COOKIES_FILE", ""),
 
 		SettingsEncryptionKey: getEnv("SETTINGS_ENCRYPTION_KEY", ""),
+
+		ActivityRetentionDays: getEnvInt("ACTIVITY_RETENTION_DAYS", 30),
+		TrustedProxyCIDRs:     getEnv("TRUSTED_PROXY_CIDRS", "127.0.0.1/32,::1/128"),
 	}
 
 	return cfg, nil
+}
+
+func getEnvInt(key string, defaultValue int) int {
+	value := os.Getenv(key)
+	if value == "" {
+		return defaultValue
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return defaultValue
+	}
+	return parsed
 }
 
 func getEnv(key, defaultValue string) string {

@@ -1000,6 +1000,56 @@ export interface UpdateUserRequest {
   is_active: boolean;
 }
 
+// ========== 訪客／利用者活動（要 users:manage） ==========
+
+export interface VisitorActivity {
+  id: number;
+  visit_date: string;
+  ip_address: string;
+  user_id?: string | null;
+  username: string;
+  display_name: string;
+  first_seen: string;
+  last_seen: string;
+  page_views: number;
+  last_path: string;
+  user_agent: string;
+}
+
+export interface ActivityListResponse {
+  activity: VisitorActivity[];
+  total: number;
+  page: number;
+  limit: number;
+  retention_days: number;
+}
+
+export interface ActivityStats {
+  unique_ips: number;
+  authenticated_users: number;
+  page_views: number;
+  anonymous_ips: number;
+}
+
+export interface ActivityStatsResponse {
+  stats: ActivityStats;
+  retention_days: number;
+}
+
+export interface UserActivitySummary {
+  user_id: string;
+  last_ip_address: string;
+  last_seen?: string | null;
+  page_views: number;
+  distinct_ips: number;
+  active_sessions: number;
+}
+
+export interface UserActivitySummaryResponse {
+  users: UserActivitySummary[];
+  retention_days: number;
+}
+
 // ========== DB バックアップ ==========
 
 export interface BackupSettings {

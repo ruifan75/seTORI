@@ -59,14 +59,19 @@ openssl rsa  -noout -modulus -in deploy/certs/origin.key | openssl md5
 ## 訪問者の IP
 
 オリジンサーバーから見た接続元は Cloudflare のエッジなので、`RemoteAddr` は使えない。
-バックエンドは `CF-Connecting-IP`（Cloudflare が必ず上書きする）を見る
-（`internal/handler/auth_handlers.go` の `clientIP`）。
+バックエンドは `CF-Connecting-IP`（Cloudflare が上書きする）を見る。ただし無条件ではなく、
+直前の接続元が `TRUSTED_PROXY_CIDRS`（本番では Docker 内部の Caddy）に含まれる場合だけ
+転送ヘッダーを信用する。範囲外から同じヘッダーを送っても接続元 IP へフォールバックする。
 
 ⚠️ **ヘッダーは詐称できるので、オリジンサーバーに直接到達できないことが前提。**
 VPS のファイアウォールで 80/443 を Cloudflare の IP レンジだけに絞ること（TODO 30）。
 これが無いと、オリジンサーバーの IP を知っている相手は Cloudflare を迂回して
-`CF-Connecting-IP` を好きな値にでき、ログインの絞り込みも匿名投稿の
-数え上げも回避できてしまう。
+`CF-Connecting-IP` を好きな値にでき、ログインの絞り込みやアクセス記録を
+回避できてしまう。Cloudflare の IP レンジが更新された場合は Vultr 側も追従する。
+
+管理画面の `管理 → アクセス` はページ表示を UTC の日・IP・利用者単位で集約する。
+query string と referrer は保存せず、`ACTIVITY_RETENTION_DAYS`（既定 30 日）を過ぎた行は
+自動削除する。IP は `users:manage` 権限を持つ利用者だけが閲覧でき、画面上は既定でマスクする。
 
 ## 手順
 

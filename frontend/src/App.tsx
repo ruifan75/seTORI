@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ToastProvider } from './components/ui/Toast';
 import Layout from './components/Layout';
+import ActivityTracker from './components/ActivityTracker';
 import RequirePermission from './components/RequirePermission';
 import { useAuthStore, PERM } from './store/auth';
 import HomePage from './pages/HomePage';
@@ -33,6 +34,8 @@ import MissingTagsPage from './pages/admin/MissingTagsPage';
 import OrganizationsPage from './pages/admin/OrganizationsPage';
 import ReadingsPage from './pages/admin/ReadingsPage';
 import BackupPage from './pages/admin/BackupPage';
+import ActivityPage from './pages/admin/ActivityPage';
+import PrivacyPage from './pages/PrivacyPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -54,6 +57,7 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
         <BrowserRouter>
+          <ActivityTracker />
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             {/* OAuth の戻り先。Layout の外に置き、認証確立まで何も描かない */}
@@ -70,6 +74,7 @@ function App() {
               <Route path="artists" element={<ArtistsPage />} />
               <Route path="artists/:id" element={<ArtistDetailPage />} />
               <Route path="search" element={<SearchPage />} />
+              <Route path="privacy" element={<PrivacyPage />} />
               <Route path="playlists" element={<PlaylistsPage />} />
               {/* プリセット（運営が用意した歌単）。:id より前に置かなくても静的な
                   preset セグメントが優先されるが、読む順として先に並べておく */}
@@ -122,6 +127,10 @@ function App() {
               <Route
                 path="admin/users"
                 element={<RequirePermission permission={PERM.USERS_MANAGE}><UsersPage /></RequirePermission>}
+              />
+              <Route
+                path="admin/activity"
+                element={<RequirePermission permission={PERM.USERS_MANAGE}><ActivityPage /></RequirePermission>}
               />
               <Route
                 path="admin/backups"

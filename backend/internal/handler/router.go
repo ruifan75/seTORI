@@ -64,6 +64,8 @@ type Router struct {
 	songMatchService  *service.SongMatchService
 	aiService         *service.AIService
 	orgService        *service.OrganizationService
+	activityService   *service.ActivityService
+	clientIPResolver  *clientIPResolver
 }
 
 // NewRouter 新しいルーターを作成
@@ -81,6 +83,7 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	songMatchRepo := repository.NewSongMatchRepository(db)
 	aliasRepo := repository.NewAliasRepository(db)
 	orgRepo := repository.NewOrganizationRepository(db)
+	activityRepo := repository.NewActivityRepository(db)
 
 	// AI サービス：複数 provider ローテーション + failover、未設定時は GROQ_API_KEY にフォールバック
 	// 外部サービス連携の設定：DB（暗号化保存）→ .env の順に解決し、変更を各サービスへ即時反映する。
@@ -126,6 +129,12 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	itunesClient := itunes.NewClient()
 	endTimeEstimateService := service.NewEndTimeEstimateService(itunesClient)
 	authService := service.NewAuthService(authRepo)
+	activityService := service.NewActivityService(activityRepo, cfg.ActivityRetentionDays)
+	ipResolver, err := newClientIPResolver(cfg.TrustedProxyCIDRs)
+	if err != nil {
+		logger.Errorf("信頼 proxy の設定を読み込めませんでした: %v", err)
+		ipResolver, _ = newClientIPResolver("")
+	}
 	readingService := service.NewReadingService(artistRepo, songRepo)
 	suggestionRepo := repository.NewSuggestionRepository(db)
 	appSettingsRepo := repository.NewAppSettingsRepository(db)
@@ -198,6 +207,8 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 		songMatchService:     songMatchService,
 		aiService:            aiService,
 		orgService:           orgService,
+		activityService:      activityService,
+		clientIPResolver:     ipResolver,
 	}
 
 	r.setupRoutes()
@@ -243,11 +254,19 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("PUT /api/users/{id}", r.handleUpdateUser)
 	r.mux.HandleFunc("PUT /api/users/{id}/password", r.handleChangeUserPassword)
 	r.mux.HandleFunc("DELETE /api/users/{id}", r.handleDeleteUser)
+	r.mux.HandleFunc("POST /api/users/{id}/revoke-sessions", r.handleRevokeUserSessions)
 	r.mux.HandleFunc("GET /api/roles", r.handleListRoles)
 	r.mux.HandleFunc("POST /api/roles", r.handleCreateRole)
 	r.mux.HandleFunc("PUT /api/roles/{id}", r.handleUpdateRole)
 	r.mux.HandleFunc("DELETE /api/roles/{id}", r.handleDeleteRole)
 	r.mux.HandleFunc("GET /api/permissions", r.handleListPermissions)
+
+	// 訪客／利用者活動。記録だけは公開、閲覧は users:manage。
+	r.mux.HandleFunc("POST /api/activity/visit", r.handleRecordVisit)
+	r.mux.HandleFunc("GET /api/activity/policy", r.handleActivityPolicy)
+	r.mux.HandleFunc("GET /api/activity", r.handleListActivity)
+	r.mux.HandleFunc("GET /api/activity/stats", r.handleActivityStats)
+	r.mux.HandleFunc("GET /api/activity/users", r.handleUserActivitySummaries)
 
 	// 統一検索（楽曲・歌枠・チャンネル・YouTube URL/video ID）
 	r.mux.HandleFunc("GET /api/search", r.handleGlobalSearch)
@@ -1076,7 +1095,7 @@ func (r *Router) handleProposeArtistAlias(w http.ResponseWriter, req *http.Reque
 		TargetID:   artist.ID.String(),
 		Fields:     fields,
 		Note:       fmt.Sprintf("%s は %s の別名義", body.Alias, body.Canonical),
-	}, service.SuggestionActor{User: currentUser(req), ClientHint: clientHint(req)})
+	}, service.SuggestionActor{User: currentUser(req), ClientHint: r.clientIPResolver.clientHint(req)})
 	if err != nil {
 		respondError(w, http.StatusBadRequest, err.Error())
 		return
@@ -1111,7 +1130,7 @@ func (r *Router) handleCreateSuggestion(w http.ResponseWriter, req *http.Request
 
 	actor := service.SuggestionActor{
 		User:       currentUser(req),
-		ClientHint: clientHint(req),
+		ClientHint: r.clientIPResolver.clientHint(req),
 	}
 	sug, err := r.suggestionService.Create(&body, actor)
 	if err != nil {
@@ -3176,7 +3195,7 @@ func requiredPermission(method, path string) (perm string, needsAuth bool) {
 
 	// 公開・認証のみ（特定権限不要）のエンドポイント
 	switch path {
-	case "/health", "/api/version", "/api/auth/login":
+	case "/health", "/api/version", "/api/auth/login", "/api/activity/visit", "/api/activity/policy":
 		return "", false
 	case "/api/auth/logout", "/api/auth/me":
 		return "", true
@@ -3283,7 +3302,8 @@ func requiredPermission(method, path string) (perm string, needsAuth bool) {
 	switch {
 	case strings.HasPrefix(path, "/api/users"),
 		strings.HasPrefix(path, "/api/roles"),
-		path == "/api/permissions":
+		path == "/api/permissions",
+		strings.HasPrefix(path, "/api/activity"):
 		return auth.PermUsersManage, true
 	case strings.HasPrefix(path, "/api/settings"):
 		// 連携設定は実質的に資格情報の管理なのでユーザー管理と同格の権限を要求する

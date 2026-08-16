@@ -2,12 +2,9 @@ package handler
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"strings"
 
@@ -43,49 +40,6 @@ func userHasPermission(req *http.Request, perm string) bool {
 	return auth.HasPermission(user.Permissions, perm)
 }
 
-// clientIP は訪問者の IP を返す。取れなければ空文字。
-//
-// 由来を1か所に集める：ログイン試行の絞り込みと匿名投稿の数え上げが両方これに
-// 依存していて、間違えると「効いているつもりで効いていない」形で壊れるため。
-//
-// 優先順位：
-//  1. CF-Connecting-IP … Cloudflare が必ず上書きする単一値。プロキシ経由なら常にこれが正しい
-//  2. X-Forwarded-For の先頭 … Cloudflare を挟まない構成（オリジンサーバー直結・他の CDN）向け
-//  3. RemoteAddr … プロキシが無いローカル開発
-//
-// ⚠️ 2 と 3 の間には信頼の断絶がある。ヘッダーは送信側が自由に詐称できるので、
-// これらが信用できるのは「オリジンサーバーに直接到達できない」ことが前提。
-// つまり VPS のファイアウォールで 80/443 を Cloudflare の IP レンジだけに絞ること
-// （TODO 30）とセットで初めて成立する。片方だけでは絞り込みは回避できてしまう。
-//
-// 実際、Cloudflare を挟んだ直後は X-Forwarded-For の先頭が安定せず、
-// ログインの絞り込みが 8 連続失敗でも発火しない状態になっていた。
-func clientIP(req *http.Request) string {
-	if cf := strings.TrimSpace(req.Header.Get("CF-Connecting-IP")); cf != "" {
-		return cf
-	}
-	if xff := req.Header.Get("X-Forwarded-For"); xff != "" {
-		if first := strings.TrimSpace(strings.Split(xff, ",")[0]); first != "" {
-			return first
-		}
-	}
-	if host, _, err := net.SplitHostPort(req.RemoteAddr); err == nil {
-		return host
-	}
-	return req.RemoteAddr
-}
-
-// clientHint は匿名リクエストの同一性の手がかりを返す（IP の SHA-256 先頭16桁）。
-// 生 IP は保存しないが、同じ相手からの連投は数えられる、という妥協点。
-func clientHint(req *http.Request) string {
-	ip := clientIP(req)
-	if ip == "" {
-		return ""
-	}
-	sum := sha256.Sum256([]byte(ip))
-	return hex.EncodeToString(sum[:])[:16]
-}
-
 // bearerToken は Authorization ヘッダーから Bearer トークンを取り出す。
 func bearerToken(req *http.Request) string {
 	h := req.Header.Get("Authorization")
@@ -114,7 +68,7 @@ func (r *Router) handleLogin(w http.ResponseWriter, req *http.Request) {
 	// 総当たりと bcrypt による CPU 消費を止める。判定はパスワード検証より前に置く
 	// ——ロック中の相手にハッシュ計算をさせない（それ自体が攻撃の目的になり得る）。
 	// 鍵は生 IP ではなく clientHint（IP のハッシュ）で、匿名投稿の数え方と揃える。
-	ipKey := clientHint(req)
+	ipKey := r.clientIPResolver.clientHint(req)
 	userKey := strings.ToLower(strings.TrimSpace(body.Username))
 	if ok, remain := r.loginLimiter.allow(ipKey, userKey); !ok {
 		respondError(w, http.StatusTooManyRequests,
@@ -281,6 +235,20 @@ func (r *Router) handleDeleteUser(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]string{"message": "ユーザーを削除しました"})
+}
+
+func (r *Router) handleRevokeUserSessions(w http.ResponseWriter, req *http.Request) {
+	id, err := uuid.Parse(req.PathValue("id"))
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "無効なユーザーID")
+		return
+	}
+	if err := r.authService.RevokeSessions(id); err != nil {
+		respondError(w, userErrStatus(err), err.Error())
+		return
+	}
+	logger.Infof("user %s sessions revoked by %s", id, currentUser(req).Username)
+	respondJSON(w, http.StatusOK, map[string]string{"message": "すべてのセッションを失効しました"})
 }
 
 // ========== Role Management Handlers ==========

@@ -96,6 +96,9 @@ import type {
   DriveStatus,
   DriveFile,
   BuildVersion,
+  ActivityListResponse,
+  ActivityStatsResponse,
+  UserActivitySummaryResponse,
 } from './types';
 
 const DEFAULT_API_BASE_URL =
@@ -1125,6 +1128,52 @@ export const userApi = {
 
   delete: async (id: string): Promise<void> => {
     await api.delete(`/api/users/${id}`);
+  },
+
+  revokeSessions: async (id: string): Promise<void> => {
+    await api.post(`/api/users/${id}/revoke-sessions`);
+  },
+};
+
+// ========== 訪客／利用者活動 API ==========
+
+export const activityApi = {
+  // 公開ページの表示を記録。失敗は呼び出し側で握り、閲覧機能を妨げない。
+  recordVisit: async (path: string): Promise<void> => {
+    await api.post('/api/activity/visit', { path });
+  },
+
+  policy: async (): Promise<{ retention_days: number }> => {
+    const { data } = await api.get('/api/activity/policy');
+    return data;
+  },
+
+  list: async (opts: {
+    days?: number;
+    page?: number;
+    limit?: number;
+    kind?: 'all' | 'anonymous' | 'authenticated';
+    q?: string;
+  } = {}): Promise<ActivityListResponse> => {
+    const params = new URLSearchParams({
+      days: String(opts.days ?? 7),
+      page: String(opts.page ?? 1),
+      limit: String(opts.limit ?? 50),
+      kind: opts.kind ?? 'all',
+    });
+    if (opts.q) params.set('q', opts.q);
+    const { data } = await api.get(`/api/activity?${params}`);
+    return data;
+  },
+
+  stats: async (days = 7): Promise<ActivityStatsResponse> => {
+    const { data } = await api.get(`/api/activity/stats?days=${days}`);
+    return data;
+  },
+
+  userSummaries: async (days = 30): Promise<UserActivitySummaryResponse> => {
+    const { data } = await api.get(`/api/activity/users?days=${days}`);
+    return data;
   },
 };
 

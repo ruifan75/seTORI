@@ -49,6 +49,9 @@ services:
       HOST: 0.0.0.0
       PORT: "8080"
       BACKUP_DIR: /app/backups
+      # 既存 .env に変数がまだ無い初回 deploy でも Caddy の転送 header を読めるようにする。
+      # backend port は公開しておらず、直前 peer は compose 内部の Caddy だけ。
+      TRUSTED_PROXY_CIDRS: ${TRUSTED_PROXY_CIDRS:-172.16.0.0/12}
     volumes:
       - backups:/app/backups
       # yt-dlp が落とした live chat（拍手による歌唱 end 推定の入力）。

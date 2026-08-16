@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { userApi, roleApi } from '../../api/client';
+import { userApi, roleApi, activityApi } from '../../api/client';
 import { useToast } from '../../components/ui/ToastContext';
 import { useAuthStore } from '../../store/auth';
-import type { AuthUser, Role, PermissionInfo, CreateUserRequest } from '../../api/types';
+import { maskIP } from '../../utils/ip';
+import type { AuthUser, Role, PermissionInfo, CreateUserRequest, UserActivitySummary } from '../../api/types';
 
 const ALL_PERM = '*';
 
@@ -13,15 +14,21 @@ function UserRow({
   user,
   roles,
   isSelf,
+  activity,
+  showFullIP,
   onUpdate,
   onChangePassword,
+  onRevokeSessions,
   onDelete,
 }: {
   user: AuthUser;
   roles: Role[];
   isSelf: boolean;
+  activity?: UserActivitySummary;
+  showFullIP: boolean;
   onUpdate: (id: string, req: { display_name: string; role_id: string; is_active: boolean }) => void;
   onChangePassword: (id: string, password: string) => void;
+  onRevokeSessions: (id: string) => void;
   onDelete: (id: string) => void;
 }) {
   const [pwOpen, setPwOpen] = useState(false);
@@ -38,6 +45,16 @@ function UserRow({
         <div className="text-xs text-gray-400">
           {user.display_name || '—'}
           {user.last_login && ` · 最終ログイン ${new Date(user.last_login).toLocaleString('ja-JP')}`}
+        </div>
+        <div className="mt-1 text-xs text-gray-400">
+          {activity?.last_seen ? (
+            <>
+              最終IP <span className="font-mono">{showFullIP ? activity.last_ip_address : maskIP(activity.last_ip_address)}</span>
+              {' · '}{new Date(activity.last_seen).toLocaleString('ja-JP')}
+              {' · '}{activity.distinct_ips} IP / {activity.page_views} 表示（30日）
+            </>
+          ) : 'アクセス記録なし'}
+          {activity && ` · 有効セッション ${activity.active_sessions}`}
         </div>
       </div>
 
@@ -70,6 +87,14 @@ function UserRow({
         className="text-sm text-indigo-600 hover:text-indigo-800"
       >
         パスワード
+      </button>
+      <button
+        onClick={() => onRevokeSessions(user.id)}
+        disabled={isSelf || activity?.active_sessions === 0}
+        className="text-sm text-amber-600 hover:text-amber-800 disabled:opacity-40"
+        title={isSelf ? '自分のセッションはここから失効できません' : 'この利用者を全端末からログアウト'}
+      >
+        セッション失効
       </button>
       <button
         onClick={() => onDelete(user.id)}
@@ -120,6 +145,12 @@ function UsersSection() {
 
   const { data: users = [], isLoading } = useQuery({ queryKey: ['users'], queryFn: userApi.list });
   const { data: roles = [] } = useQuery({ queryKey: ['roles'], queryFn: roleApi.list });
+  const { data: activityData } = useQuery({
+    queryKey: ['activity', 'users', 30],
+    queryFn: () => activityApi.userSummaries(30),
+  });
+
+  const activityByUser = new Map((activityData?.users ?? []).map((item) => [item.user_id, item]));
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['users'] });
 
@@ -143,11 +174,20 @@ function UsersSection() {
     onSuccess: () => { invalidate(); showToast('ユーザーを削除しました', 'success'); },
     onError: (err: Error) => showToast(`削除エラー: ${err.message}`, 'error'),
   });
+  const revokeSessionsMutation = useMutation({
+    mutationFn: (id: string) => userApi.revokeSessions(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['activity', 'users'] });
+      showToast('すべてのセッションを失効しました', 'success');
+    },
+    onError: (err: Error) => showToast(`セッション失効エラー: ${err.message}`, 'error'),
+  });
 
   const [username, setUsername] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [password, setPassword] = useState('');
   const [roleId, setRoleId] = useState('');
+  const [showFullIP, setShowFullIP] = useState(false);
 
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
@@ -161,7 +201,16 @@ function UsersSection() {
 
   return (
     <div className="bg-white rounded-lg shadow-sm border p-6">
-      <h2 className="text-xl font-bold text-gray-900 mb-2">ユーザー管理</h2>
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-xl font-bold text-gray-900">ユーザー管理</h2>
+        <button
+          type="button"
+          onClick={() => setShowFullIP((value) => !value)}
+          className="rounded border border-gray-300 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50"
+        >
+          {showFullIP ? 'IPを隠す' : '完全なIPを表示'}
+        </button>
+      </div>
       <p className="text-gray-500 mb-6">
         ログインアカウントを管理します。ロールで編集権限が決まります。未ログインのユーザーは閲覧のみ可能です。
       </p>
@@ -176,8 +225,15 @@ function UsersSection() {
               user={u}
               roles={roles}
               isSelf={me?.id === u.id}
+              activity={activityByUser.get(u.id)}
+              showFullIP={showFullIP}
               onUpdate={(id, req) => updateMutation.mutate({ id, req })}
               onChangePassword={(id, pw) => passwordMutation.mutate({ id, password: pw })}
+              onRevokeSessions={(id) => {
+                if (window.confirm('この利用者をすべての端末からログアウトさせますか？')) {
+                  revokeSessionsMutation.mutate(id);
+                }
+              }}
               onDelete={(id) => deleteMutation.mutate(id)}
             />
           ))}
