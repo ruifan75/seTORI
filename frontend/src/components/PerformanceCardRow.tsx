@@ -48,10 +48,16 @@ export default function PerformanceCardRow({ performances, onPlayFrom }: Props) 
 
   return (
     <div className="relative -mx-1">
+      {/* touch-action は指定しない（既定の auto）。
+          **`touch-pan-x` を付けると縦に指を動かしてもページが動かなくなる。**
+          touch-action は「ヒットした要素から祖先まで」を交差させて決まるので、
+          ここで pan-x と言うと縦方向の手繰りがこの列だけでなく祖先ごと禁止される
+          ── 横スクロールの列に指が乗った状態で下へ払うと、何も起きない。
+          auto なら最初の動きで方向が決まり、横なら列・縦ならページが動く。 */}
       <div
         ref={rowRef}
         onScroll={updateScrollState}
-        className="flex touch-pan-x snap-x snap-mandatory gap-4 overflow-x-auto scroll-smooth px-1 pb-2 overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className="flex snap-x snap-mandatory gap-4 overflow-x-auto scroll-smooth px-1 pb-2 overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
         {performances.map((perf, i) => (
           <PerformanceCard key={perf.id} performance={perf} onPlay={() => onPlayFrom(i)} />

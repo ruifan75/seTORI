@@ -302,10 +302,12 @@ export default function HomePage() {
           <Loading />
         ) : (
           <div className="relative -mx-1">
+            {/* touch-action は指定しない。pan-x にすると縦の手繰りが祖先ごと禁止され、
+                この列に指が乗った状態でページを下へ送れなくなる（PerformanceCardRow と同じ） */}
             <div
               ref={recommendationRowRef}
               onScroll={handleRecommendationScroll}
-              className="flex touch-pan-x snap-x snap-mandatory gap-4 overflow-x-auto scroll-smooth px-1 pb-2 overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              className="flex snap-x snap-mandatory gap-4 overflow-x-auto scroll-smooth px-1 pb-2 overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             >
               {reco.map((perf, i) => (
                 <PerformanceCard key={perf.id} performance={perf} onPlay={() => playRecoFrom(i)} />
