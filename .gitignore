@@ -1,8 +1,8 @@
 
-# 本番の秘密情報。.env.example だけを追跡する
-/deploy/.env
-/deploy/.env.*
-!/deploy/.env.example
+# 公開リポジトリに含めないローカルの計画・運用資料
+/TODO.md
+/deploy/
+*.postman_collection.json
 
 # YouTube のログイン cookie（yt-dlp が BOT 判定を回避するのに使う）。
 # セッションそのものなので絶対に追跡しない。運用では管理→設定から登録する
@@ -28,8 +28,7 @@ Thumbs.db
 # Claude Code のローカル作業ファイル
 /.claude/
 
-# Cloudflare Origin CA の証明書と秘密鍵（本番機に手で置く。git には絶対に入れない）
-deploy/certs/
+# 証明書と秘密鍵（本番機に手で置く。git には絶対に入れない）
 *.key
 *.pem
 
