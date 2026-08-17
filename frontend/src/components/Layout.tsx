@@ -325,7 +325,9 @@ export default function Layout() {
       <main
         className={
           isStreamDetail
-            ? 'flex-1 w-full max-w-none px-2 sm:px-4 lg:px-6 py-6 overflow-hidden min-h-0'
+            ? // 配信詳細は 1300px 以上でだけ「左右のペインが各自スクロールする」形にする。
+              // それ未満は縦積みなので、ページごとスクロールできないと下端に届かない
+              'flex-1 w-full max-w-none px-2 sm:px-4 lg:px-6 py-6 min-h-0 overflow-y-auto overscroll-y-contain min-[1300px]:overflow-hidden'
             : 'flex-1 overflow-y-auto overscroll-y-contain [scrollbar-gutter:stable_both-edges]'
         }
       >

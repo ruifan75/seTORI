@@ -1210,7 +1210,11 @@ export default function StreamDetailPage() {
 
   return (
     <>
-      <div className="flex flex-col min-[1300px]:flex-row gap-6 w-full h-full min-h-0 overflow-hidden">
+      {/* 1300px 以上：左右のペインが画面内に収まり各自スクロールする。
+          それ未満：縦積みなので高さを固定せず、main ごとスクロールさせる
+          ── h-full + overflow-hidden のままだと、左カラム（情報＋プレイヤー）が
+          縦を食い尽くしてセットリストが数十pxに潰れ、下へ送る手段も無くなる */}
+      <div className="flex flex-col min-[1300px]:flex-row gap-6 w-full min-h-0 min-[1300px]:h-full min-[1300px]:overflow-hidden">
       {/* Left Column - Stream Info + YouTube Player */}
       {/* モバイル（<sm）は情報カードとプレイヤーを縦積みにし高さ制限も外す。sm〜1300px は左右並び+40vh 制限 */}
       <div className="w-full min-[1300px]:basis-2/5 min-[1300px]:shrink-0 min-[1300px]:self-stretch flex flex-col sm:flex-row min-[1300px]:grid min-[1300px]:grid-rows-[2fr_3fr] gap-4 min-h-0 min-[1300px]:overflow-hidden shrink-0 max-h-none sm:max-h-[40vh] min-[1300px]:max-h-none">
@@ -1843,7 +1847,7 @@ export default function StreamDetailPage() {
           </div>
         </div>
 
-        <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
+        <div className="overflow-x-hidden min-[1300px]:flex-1 min-[1300px]:min-h-0 min-[1300px]:overflow-y-auto">
         {isEditing ? (
           /* Editable Setlist */
           <div className="bg-white rounded-lg shadow-sm border p-6">
