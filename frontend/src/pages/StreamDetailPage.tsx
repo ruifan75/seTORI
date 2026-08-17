@@ -2142,10 +2142,18 @@ export default function StreamDetailPage() {
                             </div>
                           </div>
                         </td>
+                        {/* 開始と終了は**常に2行**にする。1行に流していたときは
+                            列幅（w-32）にちょうど収まるかどうかで折り返しが決まり、
+                            13:25 は1行・1:23:15 は2行と行ごとに形が変わっていた */}
                         <td className="px-4 py-4 text-sm text-gray-500 font-mono">
-                          {formatTime(perf.start_seconds)}
+                          <span className="block whitespace-nowrap">
+                            {formatTime(perf.start_seconds)}
+                            {perf.end_seconds > 0 && ' ~'}
+                          </span>
                           {perf.end_seconds > 0 && (
-                            <span className="text-gray-400"> ~ {formatTime(perf.end_seconds)}</span>
+                            <span className="block whitespace-nowrap text-gray-400">
+                              {formatTime(perf.end_seconds)}
+                            </span>
                           )}
                         </td>
                         <td className="px-4 py-4">
