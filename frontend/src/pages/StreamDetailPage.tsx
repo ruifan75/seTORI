@@ -5,16 +5,17 @@ import { streamApi, performanceApi, aiApi, itunesApi, holodexApi, commentApi, ch
 import SingerSearchInput from '../components/SingerSearchInput';
 import PerformanceFields from '../components/PerformanceFields';
 import { formatTimeInput, parseTime } from '../utils/timeFormat';
-import type { Singer, CreatePerformanceItem, AINormalizationItem, Song, UpdateStreamRequest, CommentSong, SongSuggestion, EndSource, FieldChange, ArtistAliasProposal } from '../api/types';
+import type { Singer, Performance, CreatePerformanceItem, AINormalizationItem, Song, UpdateStreamRequest, CommentSong, SongSuggestion, EndSource, FieldChange, ArtistAliasProposal } from '../api/types';
 import Loading from '../components/ui/Loading';
 import Tag from '../components/ui/Tag';
 import { useToast } from '../components/ui/ToastContext';
 import { useAuthStore, hasPermission, PERM } from '../store/auth';
-import { usePlayerStore } from '../store/player';
+import { usePlayerStore, type PlayerTrack } from '../store/player';
 import YoutubePlayer from '../components/YoutubePlayer';
 import { playerSeekTo } from '../components/youtubePlayerControl';
 import type { YouTubePlayerInstance } from '../types/youtube';
 import QueueAddButton from '../components/QueueAddButton';
+import PerformanceListRow from '../components/PerformanceListRow';
 import ReportButton from '../components/ReportButton';
 import RawCommentsPanel from '../components/RawCommentsPanel';
 import SourceSongList from '../components/SourceSongList';
@@ -1136,6 +1137,23 @@ export default function StreamDetailPage() {
 
   const youtubeUrl = `https://www.youtube.com/watch?v=${stream.id}`;
 
+  // 歌唱 1 件を再生トラックへ。**表とモバイルの行で同じものを使う**
+  // （片方だけ欄が欠けると、キュー追加と報告で持ち物が変わる）
+  const toRowTrack = (perf: Performance): PlayerTrack => ({
+    performanceId: perf.id,
+    streamId: perf.stream_id,
+    songId: perf.song_id,
+    songName: perf.song_name,
+    artist: perf.original_artist,
+    artists: perf.artists ?? [],
+    artUrl: perf.arts,
+    singers: perf.singers?.map((singer) => ({ id: singer.id, name: singer.name })) ?? [],
+    streamTitle: stream.title,
+    streamDate: stream.stream_date,
+    start: perf.start_seconds,
+    end: perf.end_seconds,
+  });
+
   const setoriTimeline = stream.performances.map((perf) => {
     const end = perf.end_seconds > 0 ? perf.end_seconds : perf.start_seconds;
     return {
@@ -2016,7 +2034,23 @@ export default function StreamDetailPage() {
             </div>
           ) : (
             <div className="bg-white rounded-lg shadow-sm border">
-              <div className="overflow-x-auto min-[1300px]:max-h-[calc(100vh-14rem)] min-[1300px]:overflow-y-auto">
+              {/* 狭い画面は表をやめて縦積みの行にする。390px に 7 列は入らず、
+                  実際は横スクロール＋曲名の折り返しになっていて、列が揃っている
+                  という表の利点は失われていた */}
+              <ul className="divide-y divide-gray-100 md:hidden">
+                {stream.performances.map((perf, index) => (
+                  <PerformanceListRow
+                    key={perf.id}
+                    performance={perf}
+                    index={index}
+                    track={toRowTrack(perf)}
+                    channelOwner={channelOwner}
+                    onPlay={() => playerSeekTo('page', perf.start_seconds)}
+                  />
+                ))}
+              </ul>
+
+              <div className="hidden md:block overflow-x-auto min-[1300px]:max-h-[calc(100vh-14rem)] min-[1300px]:overflow-y-auto">
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50 sticky top-0 z-10">
                   <tr>
@@ -2044,21 +2078,7 @@ export default function StreamDetailPage() {
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
                   {stream.performances.map((perf, index) => {
-                    // キュー追加と報告で同じトラックを使う（片方だけ欄が欠けないように）
-                    const rowTrack = {
-                      performanceId: perf.id,
-                      streamId: perf.stream_id,
-                      songId: perf.song_id,
-                      songName: perf.song_name,
-                      artist: perf.original_artist,
-                      artists: perf.artists ?? [],
-                      artUrl: perf.arts,
-                      singers: perf.singers?.map((s) => ({ id: s.id, name: s.name })) ?? [],
-                      streamTitle: stream.title,
-                      streamDate: stream.stream_date,
-                      start: perf.start_seconds,
-                      end: perf.end_seconds,
-                    };
+                    const rowTrack = toRowTrack(perf);
                     const singerCount = perf.singers?.length || 0;
                     const showCount = singerCount > 3;
                     // 歌手を並べ替える：チャンネル所有者を優先

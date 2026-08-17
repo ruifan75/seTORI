@@ -14,6 +14,10 @@ type Selection =
 
 type Props = Selection & {
   className?: string;
+  // タッチ向けに当たり判定を広げたいとき（一覧の行など）に 'md'。
+  // className でサイズを上書きできないのは、既定の w-8 と足し算になり
+  // どちらが勝つか Tailwind の出力順まかせになるため
+  size?: 'sm' | 'md';
   /** トーストやボタン説明に使う名前。複数曲の場合に渡す */
   description?: string;
   playlistHeading?: string;
@@ -45,6 +49,7 @@ export default function QueueAddButton({
   track,
   tracks,
   className = '',
+  size = 'sm',
   description,
   playlistHeading,
   defaultPlaylistName = '',
@@ -110,7 +115,9 @@ export default function QueueAddButton({
         type="button"
         onClick={handleClick}
         disabled={selectedTracks.length === 0 || addMutation.isPending}
-        className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors ${className}`}
+        className={`inline-flex items-center justify-center rounded-full text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors ${
+          size === 'md' ? 'w-10 h-10' : 'w-8 h-8'
+        } ${className}`}
         title={`${subject}をキュー／プレイリストに追加`}
         aria-haspopup="menu"
         aria-expanded={open}
