@@ -1,16 +1,19 @@
+import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import Tag from './ui/Tag';
 import QueueAddButton from './QueueAddButton';
 import ReportButton from './ReportButton';
-import { SingerImage } from './SingerAvatars';
 import type { PlayerTrack } from '../store/player';
-import type { Performance, Singer } from '../api/types';
 
-// 配信のセットリスト 1 行（狭い画面向け）。
+// 歌唱 1 件を縦積みで出す行（狭い画面向け）。
 //
-// **表をやめる。** 表の利点は列が揃って見比べられることだが、390px に 7 列は
+// **表をやめる。** 表の利点は列が揃って見比べられることだが、390px に 5〜7 列は
 // 入らず、実際は横スクロール＋曲名やアーティストが 3〜4 行に折り返す形になっていて、
 // 揃っている利点はとうに失われていた。縦に積んで各行を truncate する。
+//
+// 配信のセットリストと歌手の歌唱一覧で共有する。3 行目に出す中身は違う
+// （片方は時間と歌手とタグ、もう片方は日付と歌枠）ので meta は呼び出し側から
+// 渡すが、**押したときに何が拾うか**という骨格はここに 1 つだけ置く
+// ── そこが一番間違えやすい。
 //
 // 行全体が再生ボタン。**背面に敷いた button と、その上に載る Link / 操作ボタン**
 // という形にしてある（button の中に a や button を入れると不正な HTML になる）。
@@ -20,29 +23,25 @@ import type { Performance, Singer } from '../api/types';
 // Tailwind の出力順で勝敗が決まる ── 実際それで**行全体が押せなくなっていた**
 // （孫要素の曲名リンクだけ生き残るので、動いているように見えてしまう）。
 export default function PerformanceListRow({
-  performance,
-  index,
   track,
-  channelOwner,
+  thumbnailUrl,
+  badge,
+  meta,
+  youtubeUrl,
+  playLabel,
   onPlay,
 }: {
-  performance: Performance;
-  index: number;
-  track: PlayerTrack;
-  channelOwner?: Singer | null;
+  track: PlayerTrack; // キュー追加・報告・曲名・アーティストの出どころ
+  thumbnailUrl?: string;
+  badge?: string; // 曲順など。無ければ出さない
+  // 3 行目以降（時間・歌手・タグ／日付・歌枠 など）。**並べ方は呼び出し側が決める**
+  // ── 配信詳細は 1 行に収まるが、歌手一覧は歌枠名が入るので 2 行に割る必要があり、
+  // ここで flex を決め打ちすると入りきらない方が数文字に潰れる
+  meta: ReactNode;
+  youtubeUrl: string;
+  playLabel: string; // 読み上げ文。行の役割が画面ごとに違う（ここから再生／連続再生）
   onPlay: () => void;
 }) {
-  const perf = performance;
-  const singers = sortSingers(perf.singers ?? [], channelOwner);
-  const tags = [
-    ...perf.tags.map((t) => ({ key: t.id, label: t.display_name, color: t.color })),
-    ...(perf.custom_tags ?? []).map((t) => ({ key: t, label: t, color: '#6B7280' })),
-  ];
-  // 3 行目は 1 行に収める。タグが多い配信（アコースティック＋ピアノ＋…）で
-  // 行が膨らむと、一覧としてざっと眺められなくなる
-  const shownTags = tags.slice(0, 2);
-  const restTags = tags.length - shownTags.length;
-
   return (
     <li className="relative flex items-start gap-3 px-3 py-2.5">
       {/* 行全体の再生ボタン（背面）。上に載る Link と操作ボタンが先に拾う */}
@@ -50,13 +49,13 @@ export default function PerformanceListRow({
         type="button"
         onClick={onPlay}
         className="absolute inset-0 active:bg-gray-100"
-        aria-label={`${perf.song_name} をここから再生`}
+        aria-label={playLabel}
       />
 
       {/* サムネイル：番号と再生の目印 */}
       <span className="pointer-events-none relative z-10 block h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-gray-100 shadow-sm">
-        {perf.arts ? (
-          <img src={perf.arts} alt="" loading="lazy" className="h-full w-full object-cover" />
+        {thumbnailUrl ? (
+          <img src={thumbnailUrl} alt="" loading="lazy" className="h-full w-full object-cover" />
         ) : (
           <span className="flex h-full w-full items-center justify-center">
             <svg className="h-7 w-7 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -64,9 +63,11 @@ export default function PerformanceListRow({
             </svg>
           </span>
         )}
-        <span className="absolute left-0 top-0 rounded-br-lg bg-indigo-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
-          #{index + 1}
-        </span>
+        {badge && (
+          <span className="absolute left-0 top-0 rounded-br-lg bg-indigo-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+            {badge}
+          </span>
+        )}
         {/* 押せば鳴ることを見た目でも言う（行タップ＝再生は説明が要る） */}
         <span className="absolute inset-0 flex items-center justify-center">
           <span className="flex h-7 w-7 items-center justify-center rounded-full bg-black/45">
@@ -79,49 +80,22 @@ export default function PerformanceListRow({
 
       <span className="pointer-events-none relative z-10 block min-w-0 flex-1">
         {/* 曲ページへは行きたいので、曲名だけはリンクのまま拾わせる */}
-        <Link
-          to={`/songs/${perf.song_id}`}
-          className="pointer-events-auto block truncate font-medium text-gray-900"
-        >
-          {perf.song_name}
-        </Link>
-        {perf.original_artist && (
-          <span className="block truncate text-xs text-gray-500">{perf.original_artist}</span>
+        {track.songId ? (
+          <Link
+            to={`/songs/${track.songId}`}
+            className="pointer-events-auto block truncate font-medium text-gray-900"
+          >
+            {track.songName}
+          </Link>
+        ) : (
+          <span className="block truncate font-medium text-gray-900">{track.songName}</span>
         )}
-        <span className="mt-1 flex items-center gap-2 overflow-hidden text-[11px] text-gray-400">
-          <span className="shrink-0 font-mono">
-            {formatTime(perf.start_seconds)}
-            {perf.end_seconds > 0 && `–${formatTime(perf.end_seconds)}`}
-          </span>
-          {singers.length > 0 && (
-            <span className="flex shrink-0 -space-x-1.5">
-              {singers.slice(0, 3).map((singer) => (
-                <span
-                  key={singer.id}
-                  title={singer.name}
-                  className="inline-flex h-5 w-5 overflow-hidden rounded-full border border-white bg-indigo-100 text-[8px] font-semibold text-indigo-700"
-                >
-                  <SingerImage singer={singer} />
-                </span>
-              ))}
-              {singers.length > 3 && (
-                <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full border border-white bg-gray-600 px-1 text-[8px] font-semibold text-white">
-                  +{singers.length - 3}
-                </span>
-              )}
-            </span>
-          )}
-          {shownTags.map((t) => (
-            <span key={t.key} className="shrink-0">
-              <Tag label={t.label} color={t.color} />
-            </span>
-          ))}
-          {restTags > 0 && <span className="shrink-0">+{restTags}</span>}
-        </span>
+        {track.artist && <span className="block truncate text-xs text-gray-500">{track.artist}</span>}
+        <span className="mt-1 block text-[11px] text-gray-400">{meta}</span>
       </span>
 
-      {/* 操作。再生は行タップに譲ったので 3 つに収まる */}
-      {/* 指で押すので 40px にそろえる（表の中の 32px アイコンのままだと外しやすい） */}
+      {/* 操作。再生は行タップに譲ったので 3 つに収まる。
+          指で押すので 40px にそろえる（表の中の 32px アイコンのままだと外しやすい） */}
       <span className="relative z-10 flex shrink-0 items-center">
         <QueueAddButton track={track} size="md" />
         <ReportButton
@@ -129,7 +103,7 @@ export default function PerformanceListRow({
           className="inline-flex h-10 w-10 items-center justify-center rounded-full text-gray-400 active:bg-indigo-50 active:text-indigo-600"
         />
         <a
-          href={perf.youtube_url}
+          href={youtubeUrl}
           target="_blank"
           rel="noopener noreferrer"
           className="inline-flex h-10 w-10 items-center justify-center rounded-full text-gray-400 active:bg-red-50 active:text-red-600"
@@ -145,21 +119,40 @@ export default function PerformanceListRow({
   );
 }
 
-// チャンネル所有者を先頭に（表側と同じ並び）
-function sortSingers(singers: Singer[], channelOwner?: Singer | null): Singer[] {
-  if (!channelOwner) return singers;
-  return [...singers].sort((a, b) => {
-    if (a.id === channelOwner.id) return -1;
-    if (b.id === channelOwner.id) return 1;
-    return 0;
-  });
+// 重なった歌手アイコン（3 人まで + 「+N」）。3 行目のメタとして使う。
+// SingerAvatars は中身が Link なので、行タップの上には置けない
+export function RowSingerAvatars({ singers }: { singers: { id: string; name: string; photo_url?: string }[] }) {
+  if (singers.length === 0) return null;
+  return (
+    <span className="flex shrink-0 -space-x-1.5">
+      {singers.slice(0, 3).map((singer) => (
+        <span
+          key={singer.id}
+          title={singer.name}
+          className="inline-flex h-5 w-5 items-center justify-center overflow-hidden rounded-full border border-white bg-indigo-100 text-[8px] font-semibold text-indigo-700"
+        >
+          <RowSingerImage singer={singer} />
+        </span>
+      ))}
+      {singers.length > 3 && (
+        <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full border border-white bg-gray-600 px-1 text-[8px] font-semibold text-white">
+          +{singers.length - 3}
+        </span>
+      )}
+    </span>
+  );
 }
 
-function formatTime(seconds: number): string {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
-  return h > 0
-    ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
-    : `${m}:${String(s).padStart(2, '0')}`;
+function RowSingerImage({ singer }: { singer: { id: string; name: string; photo_url?: string } }) {
+  return (
+    <img
+      src={singer.photo_url || `https://holodex.net/statics/channelImg/${singer.id}/50.png`}
+      alt=""
+      loading="lazy"
+      className="h-full w-full object-cover"
+      onError={(e) => {
+        e.currentTarget.style.display = 'none';
+      }}
+    />
+  );
 }

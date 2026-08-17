@@ -10,6 +10,8 @@ import Pagination from '../components/ui/Pagination';
 import Tag from '../components/ui/Tag';
 import ArtistLinks from '../components/ArtistLinks';
 import QueueAddButton from '../components/QueueAddButton';
+import PerformanceListRow from '../components/PerformanceListRow';
+import ReportButton from '../components/ReportButton';
 import { SortableTh, type SortDir, type SortState } from '../components/ui/Sort';
 import { useToast } from '../components/ui/ToastContext';
 import VisibilityIcon from '../components/ui/VisibilityIcon';
@@ -578,7 +580,39 @@ export default function SingerDetailPage() {
                   ランダム再生
                 </button>
               </div>
-              <div className="bg-white rounded-lg shadow-sm border overflow-x-auto">
+              <div className="bg-white rounded-lg shadow-sm border">
+              {/* 狭い画面は表をやめて縦積みの行にする（配信詳細のセットリストと同じ） */}
+              <ul className="divide-y divide-gray-100 md:hidden">
+                {performances?.performances.map((perf, perfIndex) => (
+                  <PerformanceListRow
+                    key={perf.id}
+                    track={toTrack(perf)}
+                    thumbnailUrl={perf.thumbnail_url}
+                    youtubeUrl={perf.youtube_url}
+                    playLabel={`${perf.song_name ?? '(不明)'} からこのページの歌唱を連続再生`}
+                    onPlay={() => playPerformancesFrom(perfIndex)}
+                    meta={
+                      // 日付と歌枠名を 1 行に並べると、狭い側（歌枠名）が数文字に潰れる。
+                      // どの歌枠かは曲を辿るときの手がかりなので、行を分けて幅を渡す
+                      <>
+                        <span className="block font-mono">
+                          {new Date(perf.stream_date).toLocaleDateString('ja-JP')}{' '}
+                          {formatTime(perf.start_seconds)}
+                        </span>
+                        {/* 歌枠へは行きたいのでリンクのまま拾わせる */}
+                        <Link
+                          to={`/streams/${perf.stream_id}`}
+                          className="pointer-events-auto block truncate hover:text-indigo-600"
+                        >
+                          {perf.stream_title}
+                        </Link>
+                      </>
+                    }
+                  />
+                ))}
+              </ul>
+
+              <div className="hidden md:block overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">
                     <tr>
@@ -662,6 +696,8 @@ export default function SingerDetailPage() {
                               </svg>
                             </button>
                             <QueueAddButton track={toTrack(perf)} />
+                            {/* 曲・歌枠ページと同じ報告導線をここにも置く（右側の操作をそろえる） */}
+                            <ReportButton track={toTrack(perf)} />
                             <a
                               href={perf.youtube_url}
                               target="_blank"
@@ -679,6 +715,7 @@ export default function SingerDetailPage() {
                     ))}
                   </tbody>
                 </table>
+              </div>
               </div>
 
               {performances && (

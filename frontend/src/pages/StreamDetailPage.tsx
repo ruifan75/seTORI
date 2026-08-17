@@ -15,7 +15,7 @@ import YoutubePlayer from '../components/YoutubePlayer';
 import { playerSeekTo } from '../components/youtubePlayerControl';
 import type { YouTubePlayerInstance } from '../types/youtube';
 import QueueAddButton from '../components/QueueAddButton';
-import PerformanceListRow from '../components/PerformanceListRow';
+import PerformanceListRow, { RowSingerAvatars } from '../components/PerformanceListRow';
 import ReportButton from '../components/ReportButton';
 import RawCommentsPanel from '../components/RawCommentsPanel';
 import SourceSongList from '../components/SourceSongList';
@@ -2038,16 +2038,45 @@ export default function StreamDetailPage() {
                   実際は横スクロール＋曲名の折り返しになっていて、列が揃っている
                   という表の利点は失われていた */}
               <ul className="divide-y divide-gray-100 md:hidden">
-                {stream.performances.map((perf, index) => (
-                  <PerformanceListRow
-                    key={perf.id}
-                    performance={perf}
-                    index={index}
-                    track={toRowTrack(perf)}
-                    channelOwner={channelOwner}
-                    onPlay={() => playerSeekTo('page', perf.start_seconds)}
-                  />
-                ))}
+                {stream.performances.map((perf, index) => {
+                  const tags = [
+                    ...perf.tags.map((t) => ({ key: t.id, label: t.display_name, color: t.color })),
+                    ...(perf.custom_tags ?? []).map((t) => ({ key: t, label: t, color: '#6B7280' })),
+                  ];
+                  // チャンネル所有者を先頭に（表と同じ並び）
+                  const singers = [...(perf.singers ?? [])].sort((a, b) => {
+                    if (channelOwner && a.id === channelOwner.id) return -1;
+                    if (channelOwner && b.id === channelOwner.id) return 1;
+                    return 0;
+                  });
+                  return (
+                    <PerformanceListRow
+                      key={perf.id}
+                      track={toRowTrack(perf)}
+                      thumbnailUrl={perf.arts}
+                      badge={`#${index + 1}`}
+                      youtubeUrl={perf.youtube_url}
+                      playLabel={`${perf.song_name} をここから再生`}
+                      onPlay={() => playerSeekTo('page', perf.start_seconds)}
+                      meta={
+                        <span className="flex items-center gap-2 overflow-hidden">
+                          <span className="shrink-0 font-mono">
+                            {formatTime(perf.start_seconds)}
+                            {perf.end_seconds > 0 && `–${formatTime(perf.end_seconds)}`}
+                          </span>
+                          <RowSingerAvatars singers={singers} />
+                          {/* タグは 2 つまで。多い配信で行が膨らむと一覧として眺められない */}
+                          {tags.slice(0, 2).map((t) => (
+                            <span key={t.key} className="shrink-0">
+                              <Tag label={t.label} color={t.color} />
+                            </span>
+                          ))}
+                          {tags.length > 2 && <span className="shrink-0">+{tags.length - 2}</span>}
+                        </span>
+                      }
+                    />
+                  );
+                })}
               </ul>
 
               <div className="hidden md:block overflow-x-auto min-[1300px]:max-h-[calc(100vh-14rem)] min-[1300px]:overflow-y-auto">
