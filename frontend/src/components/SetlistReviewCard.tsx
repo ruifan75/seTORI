@@ -17,6 +17,7 @@ const REASON_LABELS: Record<string, string> = {
   conflict: '既存と食い違う',
   low_conf: 'AI の確信度が低い',
   comment_only: 'コメントにのみ存在',
+  chapter_only: 'チャプターにのみ存在',
   addition: '既存の歌唱への追加',
   duplicate: '同じ曲が重複',
 };
@@ -29,7 +30,12 @@ const CONFLICT_LABELS: Record<string, string> = {
   addition: 'この配信には既にセットリストがあるため、追加は自動では行わず審査に回っています',
 };
 
-const SOURCE_LABELS: Record<string, string> = { holodex: 'Holodex', comment: 'コメント' };
+const SOURCE_LABELS: Record<string, string> = {
+  holodex: 'Holodex',
+  comment: 'コメント',
+  chapter: 'チャプター',
+  import: '配信の取り込み',
+};
 const VIA_LABELS: Record<string, string> = { rule: '規則で照合', ai: 'AI が照合' };
 
 

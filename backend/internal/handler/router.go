@@ -65,7 +65,9 @@ type Router struct {
 	aiService         *service.AIService
 	orgService        *service.OrganizationService
 	activityService   *service.ActivityService
-	clientIPResolver  *clientIPResolver
+	// 配信 1 本を環境間で運ぶ（手元で作ったセットリストを本番へ上げる経路）
+	streamTransferService *service.StreamTransferService
+	clientIPResolver      *clientIPResolver
 }
 
 // NewRouter 新しいルーターを作成
@@ -142,6 +144,8 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	batchFillRepo := repository.NewBatchFillRepository(db)
 	batchFillService := service.NewBatchFillService(streamRepo, perfRepo, batchFillRepo,
 		commentService, holodexService, chapterService, normalizationService, performanceService, suggestionService)
+	streamTransferService := service.NewStreamTransferService(streamRepo, perfRepo, singerRepo, songRepo, tagRepo,
+		performanceService, suggestionService, songMatchService)
 	driveClient := gdrive.NewClient(cfg.GoogleOAuthClientID, cfg.GoogleOAuthSecret)
 	backupService := service.NewBackupService(db, appSettingsRepo, driveClient, settingsCipher, cfg.DatabaseURL, cfg.BackupDir, cfg.BackupDockerContainer)
 	if migrated, err := backupService.EncryptPlaintextDriveToken(); err != nil {
@@ -176,39 +180,40 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	}
 
 	r := &Router{
-		db:                   db,
-		cfg:                  cfg,
-		mux:                  http.NewServeMux(),
-		songService:          songService,
-		streamService:        streamService,
-		singerService:        singerService,
-		holodexService:       holodexService,
-		commentService:       commentService,
-		endTimeEstimate:      endTimeEstimateService,
-		normalizationService: normalizationService,
-		performanceService:   performanceService,
-		filterKeywordRepo:    filterKeywordRepo,
-		tagRepo:              tagRepo,
-		aiProviderRepo:       aiProviderRepo,
-		chatEndService:       chatEndService,
-		chapterService:       chapterService,
-		artistService:        artistService,
-		batchAnalyzeService:  batchAnalyzeService,
-		batchFillService:     batchFillService,
-		authService:          authService,
-		loginLimiter:         newLoginLimiter(),
-		readingService:       readingService,
-		suggestionService:    suggestionService,
-		backupService:        backupService,
-		playlistService:      playlistService,
-		presetService:        presetService,
-		oauthService:         oauthService,
-		settingsService:      settingsService,
-		songMatchService:     songMatchService,
-		aiService:            aiService,
-		orgService:           orgService,
-		activityService:      activityService,
-		clientIPResolver:     ipResolver,
+		db:                    db,
+		cfg:                   cfg,
+		mux:                   http.NewServeMux(),
+		songService:           songService,
+		streamService:         streamService,
+		singerService:         singerService,
+		holodexService:        holodexService,
+		commentService:        commentService,
+		endTimeEstimate:       endTimeEstimateService,
+		normalizationService:  normalizationService,
+		performanceService:    performanceService,
+		filterKeywordRepo:     filterKeywordRepo,
+		tagRepo:               tagRepo,
+		aiProviderRepo:        aiProviderRepo,
+		chatEndService:        chatEndService,
+		chapterService:        chapterService,
+		artistService:         artistService,
+		batchAnalyzeService:   batchAnalyzeService,
+		batchFillService:      batchFillService,
+		authService:           authService,
+		loginLimiter:          newLoginLimiter(),
+		readingService:        readingService,
+		suggestionService:     suggestionService,
+		backupService:         backupService,
+		playlistService:       playlistService,
+		presetService:         presetService,
+		oauthService:          oauthService,
+		settingsService:       settingsService,
+		songMatchService:      songMatchService,
+		aiService:             aiService,
+		orgService:            orgService,
+		activityService:       activityService,
+		clientIPResolver:      ipResolver,
+		streamTransferService: streamTransferService,
 	}
 
 	r.setupRoutes()
@@ -281,6 +286,8 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("GET /api/streams/batch-fill/runs", r.handleListBatchFillRuns)
 	r.mux.HandleFunc("POST /api/streams/batch-fill/runs/{id}/revert", r.handleRevertBatchFill)
 	r.mux.HandleFunc("GET /api/streams/batch-fill/runs/{id}/gaps", r.handleListBatchFillGaps)
+	// 配信の書き出し / 取り込み。リテラルの import は /api/streams/{id} より優先マッチする。
+	r.mux.HandleFunc("POST /api/streams/import", r.handleImportStream)
 	r.mux.HandleFunc("POST /api/streams/batch-analyze", r.handleStartBatchAnalyze)
 	r.mux.HandleFunc("POST /api/streams/batch-analyze/cancel", r.handleCancelBatchAnalyze)
 	r.mux.HandleFunc("GET /api/streams/batch-analyze/status", r.handleBatchAnalyzeStatus)
@@ -396,6 +403,7 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("POST /api/streams/{id}/holodex-songs/analyze", r.handleAnalyzeHolodexSongs)
 
 	// Estimate end times
+	r.mux.HandleFunc("GET /api/streams/{id}/export", r.handleExportStream)
 	r.mux.HandleFunc("POST /api/streams/{id}/estimate-end-times", r.handleEstimateEndTimes)
 
 	// Create performances directly
@@ -3204,6 +3212,13 @@ func requiredPermission(method, path string) (perm string, needsAuth bool) {
 	// 一括セットリスト作成は進捗・履歴も含めて content:edit。
 	// 実行の履歴には誰が回したかが載るので、閲覧者には出さない。
 	if strings.HasPrefix(path, "/api/streams/batch-fill") {
+		return auth.PermContentEdit, true
+	}
+
+	// 配信の書き出し / 取り込みは環境間でデータを運ぶ運用機能。書き出しは GET だが、
+	// 解析キャッシュ（生コメント）まで含む一括取得なので「GET は公開」から外す。
+	if path == "/api/streams/import" ||
+		(strings.HasPrefix(path, "/api/streams/") && strings.HasSuffix(path, "/export")) {
 		return auth.PermContentEdit, true
 	}
 
