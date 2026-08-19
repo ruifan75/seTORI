@@ -102,7 +102,7 @@ func (r *StreamRepository) Create(s *models.Stream) error {
 		RETURNING created_at, updated_at`
 
 	err := r.db.QueryRow(query, s.ID, s.Title, s.StreamDate, s.DurationSeconds,
-		s.ThumbnailURL, s.HolodexData, s.HolodexHash).
+		s.ThumbnailURL, jsonbOrNull(s.HolodexData), s.HolodexHash).
 		Scan(&s.CreatedAt, &s.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("create stream: %w", err)
@@ -137,6 +137,20 @@ func (r *StreamRepository) UpdateStatus(id string, isProcessed, isHidden bool) e
 	return nil
 }
 
+// jsonbOrNull は JSONB 列へ渡す値を作る。
+//
+// lib/pq は []byte(nil) を空文字として送るので、そのまま渡すと JSONB が
+// "invalid input syntax for type json" で弾く（NULL にはならない）。
+// Holodex 同期は必ず中身を持っているので今まで表面化しなかったが、
+// 外から配信を取り込む経路のように holodex_data を持たない呼び出しでは落ちる。
+// 呼び出し側で忘れると本番で初めて落ちる種類なので、書き込みメソッド側に置く。
+func jsonbOrNull(b []byte) any {
+	if len(b) == 0 {
+		return nil
+	}
+	return b
+}
+
 // Upsert は歌枠を作成または更新する（Holodex 同期用）。
 func (r *StreamRepository) Upsert(s *models.Stream) error {
 	query := `
@@ -153,7 +167,7 @@ func (r *StreamRepository) Upsert(s *models.Stream) error {
 		RETURNING created_at, updated_at`
 
 	err := r.db.QueryRow(query, s.ID, s.Title, s.StreamDate, s.DurationSeconds,
-		s.ThumbnailURL, s.HolodexData, s.HolodexHash, s.IsHidden).
+		s.ThumbnailURL, jsonbOrNull(s.HolodexData), s.HolodexHash, s.IsHidden).
 		Scan(&s.CreatedAt, &s.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("upsert stream: %w", err)
