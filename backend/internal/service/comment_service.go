@@ -190,9 +190,15 @@ func (s *CommentService) analyzeComments(videoID string, force, dryRun, adjudica
 			case err != nil:
 				logger.Warnf("[comment] save comment_songs failed (%s): %v", videoID, err)
 			case !ok:
-				// 分析中に comment_raw が差し替わった。古い入力から作った結果なので捨てる
-				// （次の分析が新しい raw で作り直す）。
+				// 分析中に comment_raw が差し替わった。古い入力から作った結果は捨てる。
+				//
+				// **これは成功ではないので呼び出し元へ返す。** ログだけにすると、
+				// 一括分析は「err なし・Warning なし」を成功条件にしているため
+				// done に数えて再試行せず、新しい raw のキャッシュが空のまま
+				// 完了表示だけが進む。呼び出し元が新しい raw で引き直せるように
+				// 区別できる形で返す。
 				logger.Warnf("[comment] comment_raw changed during analysis (%s); discarding result", videoID)
+				return nil, ErrCommentRawChanged
 			default:
 				saved = true
 			}
@@ -206,6 +212,10 @@ func (s *CommentService) analyzeComments(videoID string, force, dryRun, adjudica
 		Stats:   buildStats(path, dryRun, saved, songs, aliasAsked, aliasLinked),
 	}, nil
 }
+
+// ErrCommentRawChanged は分析中に comment_raw が差し替わったことを示す。
+// 古い入力から作った結果は保存されていないので、呼び出し元は新しい raw で引き直すこと。
+var ErrCommentRawChanged = errors.New("分析中に comment_raw が変更されました")
 
 // ExtractSongs は「タイムスタンプ付きのテキスト」から歌唱行を抽出し、正規化して DB と照合する。
 //

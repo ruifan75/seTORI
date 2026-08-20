@@ -475,7 +475,12 @@ func (r *StreamRepository) FindStreamsForBatch(mode, singerID string, hidden *bo
 	//
 	// refresh だけは例外。あちらは RefreshCommentRaw で取り直すのが役目なので、
 	// 中身が無い配信こそ対象に入れる必要がある。
-	where := "comment_raw IS NOT NULL AND comment_raw != 'null'"
+	// refresh は raw の有無を条件にしない。取り直すのが役目なので、まだ何も入っていない
+	// 配信こそ対象に入れる必要がある。`comment_raw IS NOT NULL` を残すと、
+	// migration 014 の正規化を受けていない**新しく同期された配信は SQL NULL のまま**
+	// （streams.comment_raw に default は無く、Upsert もこの列を指定しない）なので、
+	// 「中身が無い配信こそ再取得する」という説明と食い違う。
+	where := "TRUE"
 	if mode != "refresh" {
 		where = "jsonb_typeof(comment_raw) = 'array' AND jsonb_array_length(comment_raw) > 0"
 	}

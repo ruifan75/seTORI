@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/csv"
 	"encoding/json"
@@ -818,13 +819,50 @@ func (r *Router) handleListBatchFillGaps(w http.ResponseWriter, req *http.Reques
 
 // handleStartBatchAnalyze 未処理配信の一括プレ分析を開始する（content:edit）。
 // mode / singer_id は JSON body で受け取る（後方互換で query param の mode もフォールバック）。
-func (r *Router) handleStartBatchAnalyze(w http.ResponseWriter, req *http.Request) {
+// maxBatchRequestBytes は一括処理の起動リクエストの上限。
+// 中身は mode / singer_id / hidden の 3 つだけなので、これで十分足りる。
+const maxBatchRequestBytes = 64 << 10 // 64 KiB
+
+// parseBatchAnalyzeRequest は一括分析の起動リクエストを読む。
+//
+// 空ボディは許容（既定モードにフォールバック）。それ以外は**厳しく検証する** ──
+// ここは数百本を AI にかける背景ジョブの起動口で、hidden が対象集合を 700 本近く変える。
+// 惜しい間違いを黙って既定へ倒すと、意図と違う対象で走り出したうえ 202 が返り、
+// 呼んだ側は成功したと思い込む。
+//
+// json.Decoder ではなく Unmarshal を使うのは、後続の JSON 値
+// （{"hidden":"true"}{"hidden":"false"} のような body）を Decoder が先頭だけ読んで
+// 通してしまうため。Unmarshal は top-level 値の後ろにゴミがあれば弾く。
+func parseBatchAnalyzeRequest(r io.Reader) (dto.BatchAnalyzeRequest, error) {
 	var body dto.BatchAnalyzeRequest
-	// 空ボディは許容（既定モードにフォールバック）。ただし**形が違うものは弾く** ──
-	// 例えば {"hidden": true} と JSON の真偽値で送られると、型エラーで hidden が空のまま
-	// 残り、既定（非表示を除く）で 700 本近く違う対象を走らせてしまう。
-	if err := json.NewDecoder(req.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
-		respondError(w, http.StatusBadRequest, "無効なリクエスト形式: "+err.Error())
+	raw, err := io.ReadAll(io.LimitReader(r, maxBatchRequestBytes))
+	if err != nil {
+		return body, errors.New("リクエストを読めませんでした")
+	}
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return body, nil
+	}
+
+	// hidden に JSON の null が来ても encoding/json はエラーにせず値も変えないので、
+	// 空文字（＝既定）と区別できない。明示された値が黙って既定になるのを避けるため、
+	// 先に生の形で見て弾く。
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return body, fmt.Errorf("無効なリクエスト形式: %w", err)
+	}
+	if v, ok := probe["hidden"]; ok && string(bytes.TrimSpace(v)) == "null" {
+		return body, errors.New("hidden に null は指定できません（false / true / all のいずれか、または省略）")
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		return body, fmt.Errorf("無効なリクエスト形式: %w", err)
+	}
+	return body, nil
+}
+
+func (r *Router) handleStartBatchAnalyze(w http.ResponseWriter, req *http.Request) {
+	body, err := parseBatchAnalyzeRequest(req.Body)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
