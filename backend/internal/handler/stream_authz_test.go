@@ -39,6 +39,25 @@ func TestStreamAnalysisEndpointsRequireContentEdit(t *testing.T) {
 		// 書き込み側は元から content:edit（既定で拾えていることの確認）
 		{"コメント再取得", http.MethodPost, "/api/streams/abc123/comments/sync-youtube", auth.PermContentEdit, true},
 		{"チャプター再取得", http.MethodPost, "/api/streams/abc123/chapters/sync", auth.PermContentEdit, true},
+
+		// ── ここから、判定を「語尾」「単純 prefix」で書いたときに壊れる形 ──
+		//
+		// 認可は ServeMux より前に path 文字列だけで決まるので、書き方をゆるめると
+		// 将来ルートを足したときに黙って巻き込む／素通りする。どちらも気付きにくい。
+
+		// 近い名前の別ルート：prefix だけで見ると巻き込まれ、公開のはずが 401 になる
+		{"近い名前の別ルート(analyze)", http.MethodGet, "/api/streams/batch-analyze-report", "", false},
+		{"近い名前の別ルート(fill)", http.MethodGet, "/api/streams/batch-fill-summary", "", false},
+
+		// {id} の位置に何が来ても chapters ルートには違いないので、保護されるのが正しい
+		// （ServeMux も /api/streams/{id}/chapters に id="search" として dispatch する）
+		{"ID が変わっても chapters", http.MethodGet, "/api/streams/search/chapters", auth.PermContentEdit, true},
+		// 資源名が ID の位置に来た形は配信詳細であって解析素材ではない
+		{"ID の位置に資源名", http.MethodGet, "/api/streams/comments", "", false},
+
+		// 語尾だけで見ると逆に漏れる形（サブリソースを足したとき）
+		{"サブリソース", http.MethodGet, "/api/streams/abc123/comments/raw", auth.PermContentEdit, true},
+		{"末尾スラッシュ", http.MethodGet, "/api/streams/abc123/comments/", auth.PermContentEdit, true},
 	}
 
 	for _, tc := range cases {

@@ -3207,8 +3207,12 @@ func requiredPermission(method, path string) (perm string, needsAuth bool) {
 	// batch-analyze も同じ扱いにする理由：status の current には処理中の配信タイトルが、
 	// failed_ids には配信 ID が入り、完了後も残る。非表示の配信を対象に回すと、
 	// 未ログインのポーリングで「一覧に出していない配信」の題名と ID が読めてしまう。
-	if strings.HasPrefix(path, "/api/streams/batch-fill") ||
-		strings.HasPrefix(path, "/api/streams/batch-analyze") {
+	//
+	// 判定は「完全一致か、その下のパス」で行う。単純な prefix にすると、将来
+	// /api/streams/batch-analyze-report のような別ルートを足したときに黙って
+	// 巻き込む（認可は ServeMux より前に path 文字列だけで決まるため）。
+	if isRouteOrSubpath(path, "/api/streams/batch-fill") ||
+		isRouteOrSubpath(path, "/api/streams/batch-analyze") {
 		return auth.PermContentEdit, true
 	}
 
@@ -3223,12 +3227,14 @@ func requiredPermission(method, path string) (perm string, needsAuth bool) {
 	// 実測では、未ログインの GET /api/streams/{id}/chapters がメン限配信に対して
 	// yt-dlp を起動し（3.7 秒）、結果を保存して返していた。
 	//
-	// フロントエンドからの利用も編集時に限られる（/comments は isEditing のときだけ、
-	// /chapters と /holodex-songs は呼び出し自体が無い）ので、閲覧者への影響は無い。
-	if strings.HasPrefix(path, "/api/streams/") &&
-		(strings.HasSuffix(path, "/comments") ||
-			strings.HasSuffix(path, "/chapters") ||
-			strings.HasSuffix(path, "/holodex-songs")) {
+	// フロントエンドからの利用も編集の文脈に限られるので、閲覧者への影響は無い：
+	// /comments は配信編集画面（isEditing）と提案レビュー画面の RawCommentsPanel から呼ばれ、
+	// どちらの導線も content:edit を要求する。/chapters と /holodex-songs は呼び出し自体が無い。
+	//
+	// **語尾ではなくルートの形で判定する。** 語尾だけで見ると
+	// /api/streams/search/chapters のような別の形も拾い、逆に将来
+	// /api/streams/{id}/comments/raw のようなサブリソースを足すと素通りする。
+	if isStreamSubresource(path, "comments", "chapters", "holodex-songs") {
 		return auth.PermContentEdit, true
 	}
 
@@ -3350,6 +3356,39 @@ func requiredPermission(method, path string) (perm string, needsAuth bool) {
 		return "", false
 	}
 	return auth.PermContentEdit, true
+}
+
+// isRouteOrSubpath は path が route そのものか、その下のパスかを返す。
+// strings.HasPrefix をそのまま使うと "/api/streams/batch-fill-x" のような
+// 別ルートまで一致してしまうため、境界を "/" で区切って見る。
+func isRouteOrSubpath(path, route string) bool {
+	return path == route || strings.HasPrefix(path, route+"/")
+}
+
+// isStreamSubresource は path が /api/streams/{id}/{name}（および**その配下**）かを返す。
+//
+// 配下まで含めるのは、あとから /api/streams/{id}/comments/raw のようなサブリソースを
+// 足したときに、語尾一致から外れて公開既定へ静かに落ちるのを防ぐため。
+// 保護を継承するほうが、足した人が気付かないまま素通りするより安全側に倒れる。
+// 末尾スラッシュも同じ理由で配下として扱う。
+//
+// 逆に /api/streams/{name} のように配信 ID の位置に来る形は対象外
+// （それは配信詳細であって、解析素材の経路ではない）。
+func isStreamSubresource(path string, names ...string) bool {
+	const prefix = "/api/streams/"
+	if !strings.HasPrefix(path, prefix) {
+		return false
+	}
+	parts := strings.Split(strings.TrimPrefix(path, prefix), "/")
+	if len(parts) < 2 || parts[0] == "" {
+		return false
+	}
+	for _, n := range names {
+		if parts[1] == n {
+			return true
+		}
+	}
+	return false
 }
 
 // ========== Helper Functions ==========
