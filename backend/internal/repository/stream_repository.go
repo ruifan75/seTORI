@@ -466,7 +466,19 @@ func (r *StreamRepository) FindByTagID(tagID string, limit, offset int) ([]model
 // ── 非表示に残っていた抽出結果は構造フィルタ（2026-08-05）と grouped 経路（2026-08-07）が
 // 入る前のもので、現在の規則なら落ちる行を大量に含んでいる。
 func (r *StreamRepository) FindStreamsForBatch(mode, singerID string, hidden *bool) ([]models.Stream, error) {
+	// comment_raw に中身があるものだけを対象にする。
+	//
+	// `IS NOT NULL AND != 'null'` では**空配列 `[]` が通ってしまう**。migration 014 が
+	// SQL NULL と JSON null を `[]` へ正規化したので、本番では隠し 720 本のうち 344 本が
+	// これに当たる。通すと「保存済みの入力を processing し直す」つもりの実行が、
+	// 半分は遠隔からの再取得に化ける（失敗すると 3 回試行 × 90 秒の冷却が積み上がる）。
+	//
+	// refresh だけは例外。あちらは RefreshCommentRaw で取り直すのが役目なので、
+	// 中身が無い配信こそ対象に入れる必要がある。
 	where := "comment_raw IS NOT NULL AND comment_raw != 'null'"
+	if mode != "refresh" {
+		where = "jsonb_typeof(comment_raw) = 'array' AND jsonb_array_length(comment_raw) > 0"
+	}
 	if hidden != nil {
 		if *hidden {
 			where = "is_hidden = TRUE AND " + where
@@ -685,17 +697,35 @@ func (r *StreamRepository) UpdateCommentSongs(id string, songs []byte) error {
 	return nil
 }
 
-func (r *StreamRepository) SaveCommentSongs(id string, songs []byte, hash string) error {
+// SaveCommentSongs は抽出結果を書き込む。**分析に使った comment_raw がまだ入っているときだけ**書く。
+//
+// 書き込まなかった場合は (false, nil) を返す。
+//
+// ガードが要る理由：分析は AI を挟むので数秒〜数十秒かかる。その間に Holodex 同期や
+// コメント再取得が comment_raw を差し替えると、無条件に書けば
+// 「raw は新しい内容、comment_songs と hash は古い内容から作ったもの」という組み合わせが残る。
+// 次の分析で hash が合わずに作り直されるので永続的な破損にはならないが、それまでの間、
+// 配信詳細と検索の応答は hash を確認せずにその古い結果を返す。
+//
+// 比較は SaveCommentRaw と同じく JSONB の意味的な比較（IS NOT DISTINCT FROM）に任せる。
+// バイト列ではないので、JSONB 正規化による表記の違いは無視される。
+// comment_raw は最大 12kB・平均 671 バイトなので、投げ直す費用は無視できる。
+func (r *StreamRepository) SaveCommentSongs(id string, songs []byte, hash string, rawWhenAnalyzed []byte) (bool, error) {
 	songs = util.SanitizeJSONB(songs)
+	rawWhenAnalyzed = util.SanitizeJSONB(rawWhenAnalyzed)
 	// comment_songs_analyzed_at は**ここでだけ**刻む。updated_at では代用できない
 	// （毎日回る Holodex 同期が全配信の updated_at を今日に押し上げる）。
-	_, err := r.db.Exec(`UPDATE streams
+	res, err := r.db.Exec(`UPDATE streams
 		SET comment_songs = $2, comment_songs_hash = $3, comment_songs_analyzed_at = NOW(), updated_at = NOW()
-		WHERE id = $1`, id, songs, hash)
+		WHERE id = $1 AND comment_raw IS NOT DISTINCT FROM $4`, id, songs, hash, rawWhenAnalyzed)
 	if err != nil {
-		return fmt.Errorf("save comment songs: %w", err)
+		return false, fmt.Errorf("save comment songs: %w", err)
 	}
-	return nil
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("save comment songs: %w", err)
+	}
+	return n > 0, nil
 }
 
 // SaveChapterRaw は chapter_raw を更新し、内容が変わった場合は古い章節から作られた
