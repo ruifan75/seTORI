@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -219,15 +220,23 @@ func hiddenLabel(hidden *bool) string {
 // ParseHiddenFilter は API の hidden パラメータを絞り込みへ変換する。
 // 語彙は GET /api/singers/{id}/streams?hidden= と同じ：
 // ""/"false"=非表示を除く（既定）、"true"=非表示だけ、"all"=両方。
-func ParseHiddenFilter(v string) *bool {
+//
+// **知らない値は既定へ倒さずエラーにする。** ここは読み取りではなく、
+// 数百本を AI にかける背景ジョブの起動口で、対象集合が 700 本近く変わる。
+// `hidden=TRUE` や JSON の真偽値 `true` のような惜しい間違いを既定
+// （＝非表示を除く）として受け付けると、意図と違う対象で走り出したうえに
+// 202 が返るので、呼んだ側は成功したと思い込む。
+func ParseHiddenFilter(v string) (*bool, error) {
 	switch v {
-	case "all":
-		return nil
+	case "", "false":
+		f := false
+		return &f, nil
 	case "true":
 		t := true
-		return &t
+		return &t, nil
+	case "all":
+		return nil, nil
 	default:
-		f := false
-		return &f
+		return nil, fmt.Errorf("hidden は false / true / all のいずれかで指定してください（受け取った値: %q）", v)
 	}
 }

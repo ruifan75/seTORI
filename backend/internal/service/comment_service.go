@@ -177,10 +177,23 @@ func (s *CommentService) analyzeComments(videoID string, force, dryRun, adjudica
 		logger.Warnf("[comment] skipping cache write for %s due to AI degradation: %s", videoID, aiWarning)
 	default:
 		// 照合の結果は保存しない（読み取り時に計算する）
-		if songsJSON, mErr := json.Marshal(stripMatchForStorage(songs)); mErr == nil {
-			if err := s.streamRepo.SaveCommentSongs(videoID, songsJSON, rawHash); err != nil {
+		songsJSON, mErr := json.Marshal(stripMatchForStorage(songs))
+		// 分析に使ったコメントそのものを書き込みのガードに使う。getComments が
+		// 遠隔から取り直していれば、その内容が既に comment_raw に入っている。
+		rawUsed, rErr := json.Marshal(comments)
+		switch {
+		case mErr != nil || rErr != nil:
+			logger.Warnf("[comment] skipping cache write for %s: marshal failed", videoID)
+		default:
+			ok, err := s.streamRepo.SaveCommentSongs(videoID, songsJSON, rawHash, rawUsed)
+			switch {
+			case err != nil:
 				logger.Warnf("[comment] save comment_songs failed (%s): %v", videoID, err)
-			} else {
+			case !ok:
+				// 分析中に comment_raw が差し替わった。古い入力から作った結果なので捨てる
+				// （次の分析が新しい raw で作り直す）。
+				logger.Warnf("[comment] comment_raw changed during analysis (%s); discarding result", videoID)
+			default:
 				saved = true
 			}
 		}

@@ -820,7 +820,13 @@ func (r *Router) handleListBatchFillGaps(w http.ResponseWriter, req *http.Reques
 // mode / singer_id は JSON body で受け取る（後方互換で query param の mode もフォールバック）。
 func (r *Router) handleStartBatchAnalyze(w http.ResponseWriter, req *http.Request) {
 	var body dto.BatchAnalyzeRequest
-	_ = json.NewDecoder(req.Body).Decode(&body) // 空ボディは許容（既定モードにフォールバック）
+	// 空ボディは許容（既定モードにフォールバック）。ただし**形が違うものは弾く** ──
+	// 例えば {"hidden": true} と JSON の真偽値で送られると、型エラーで hidden が空のまま
+	// 残り、既定（非表示を除く）で 700 本近く違う対象を走らせてしまう。
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
+		respondError(w, http.StatusBadRequest, "無効なリクエスト形式: "+err.Error())
+		return
+	}
 
 	mode := body.Mode
 	if mode == "" {
@@ -834,7 +840,11 @@ func (r *Router) handleStartBatchAnalyze(w http.ResponseWriter, req *http.Reques
 	if hiddenParam == "" {
 		hiddenParam = req.URL.Query().Get("hidden")
 	}
-	hidden := service.ParseHiddenFilter(hiddenParam)
+	hidden, err := service.ParseHiddenFilter(hiddenParam)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	if err := r.batchAnalyzeService.Start(mode, body.SingerID, hidden); err != nil {
 		respondError(w, http.StatusConflict, err.Error())
