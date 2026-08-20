@@ -36,6 +36,9 @@ export default function SyncPage() {
   const [syncMode, setSyncMode] = useState<'new' | 'all'>('new');
   const [batchMode, setBatchMode] = useState<string>('unanalyzed');
   const [batchSingerId, setBatchSingerId] = useState<string>(''); // '' = 全チャンネル
+  // 非表示配信の扱い。既定は従来どおり「除く」──通常運用で雑談・ゲーム配信を
+  // 毎回 AI にかけないため。非表示を回すのは抽出規則を変えた後の棚卸しという別の作業。
+  const [batchHidden, setBatchHidden] = useState<'all' | 'true' | 'false'>('false');
   const { showToast } = useToast();
   const queryClient = useQueryClient();
 
@@ -97,7 +100,7 @@ export default function SyncPage() {
   });
 
   const startBatchMutation = useMutation({
-    mutationFn: () => batchAnalyzeApi.start(batchMode, batchSingerId),
+    mutationFn: () => batchAnalyzeApi.start(batchMode, batchSingerId, batchHidden),
     onSuccess: () => {
       showToast('一括分析を開始しました（バックグラウンドで実行されます）', 'success');
       queryClient.invalidateQueries({ queryKey: ['batch-analyze-status'] });
@@ -333,6 +336,29 @@ export default function SyncPage() {
           </p>
         </div>
 
+        {/* 非表示配信の扱い */}
+        <div className="mb-4">
+          <label htmlFor="batch-hidden" className="block text-sm font-medium text-gray-900 mb-1">
+            非表示の配信
+          </label>
+          <select
+            id="batch-hidden"
+            value={batchHidden}
+            onChange={(e) => setBatchHidden(e.target.value as 'all' | 'true' | 'false')}
+            disabled={batchStatus?.running}
+            className="w-full max-w-md px-3 py-2 text-sm border border-gray-300 rounded-lg bg-white focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400 disabled:opacity-50"
+          >
+            <option value="false">対象にしない（既定）</option>
+            <option value="true">非表示だけを対象にする</option>
+            <option value="all">両方を対象にする</option>
+          </select>
+          <p className="mt-1 text-xs text-gray-500">
+            非表示は雑談・ゲーム配信が大半なので通常は対象外です。抽出の規則を変えたあと、
+            誤って非表示にした歌枠が無いか棚卸しするときだけ「非表示だけ」を選びます
+            （結果は抽出（comment_songs）に入るだけで、歌唱記録は作られません）。
+          </p>
+        </div>
+
         {batchStatus?.running ? (
           <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3 text-sm flex flex-wrap items-center gap-3">
             <svg className="animate-spin h-4 w-4 text-indigo-500 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -341,6 +367,7 @@ export default function SyncPage() {
             </svg>
             <span className="font-medium text-indigo-700">
               一括分析中（{BATCH_MODES.find((m) => m.value === batchStatus.mode)?.label ?? batchStatus.mode}
+              {batchStatus.hidden === 'true' ? ' / 非表示だけ' : batchStatus.hidden === 'all' ? ' / 非表示も含む' : ''}
               {batchStatus.singer_id
                 ? ` / ${singers.find((sg) => sg.id === batchStatus.singer_id)?.name ?? batchStatus.singer_id}`
                 : ' / 全チャンネル'}

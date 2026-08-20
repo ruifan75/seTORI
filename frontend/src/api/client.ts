@@ -520,10 +520,16 @@ export const batchAnalyzeApi = {
   // 一括プレ分析を開始（背景ジョブ・singleton）
   // mode: unanalyzed（未分析のみ）/ unprocessed（未処理すべて）/ refresh（コメント再取得）/ reanalyze（すべて再分析）
   // singerId: 対象チャンネル（空なら全チャンネル）
-  start: async (mode: string, singerId?: string): Promise<{ message: string }> => {
+  // hidden: ''/'false'（非表示を除く・既定）/ 'true'（非表示だけ）/ 'all'（両方）
+  start: async (
+    mode: string,
+    singerId?: string,
+    hidden?: 'all' | 'true' | 'false'
+  ): Promise<{ message: string }> => {
     const { data } = await api.post('/api/streams/batch-analyze', {
       mode,
       singer_id: singerId ?? '',
+      hidden: hidden ?? '',
     });
     return data;
   },

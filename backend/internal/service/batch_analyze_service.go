@@ -51,7 +51,9 @@ func NewBatchAnalyzeService(commentService *CommentService, streamRepo *reposito
 
 // Start はジョブを開始する（実行中なら ErrBatchAlreadyRunning）。
 // singerID を指定するとそのチャンネルが参加した配信のみが対象（空なら全チャンネル）。
-func (s *BatchAnalyzeService) Start(mode, singerID string) error {
+// Start は一括プレ分析を開始する。hidden は非表示配信の扱い
+// （nil=両方 / false=非表示を除く / true=非表示だけ）。
+func (s *BatchAnalyzeService) Start(mode, singerID string, hidden *bool) error {
 	switch mode {
 	case BatchModeUnanalyzed, BatchModeUnprocessed, BatchModeRefresh, BatchModeReanalyze:
 	default:
@@ -65,9 +67,9 @@ func (s *BatchAnalyzeService) Start(mode, singerID string) error {
 	}
 	s.running = true
 	s.cancelled = false
-	s.status = dto.BatchAnalyzeStatus{Running: true, Mode: mode, SingerID: singerID}
+	s.status = dto.BatchAnalyzeStatus{Running: true, Mode: mode, SingerID: singerID, Hidden: hiddenLabel(hidden)}
 
-	go s.run(mode, singerID)
+	go s.run(mode, singerID, hidden)
 	return nil
 }
 
@@ -99,7 +101,7 @@ func (s *BatchAnalyzeService) update(fn func(*dto.BatchAnalyzeStatus)) {
 	fn(&s.status)
 }
 
-func (s *BatchAnalyzeService) run(mode, singerID string) {
+func (s *BatchAnalyzeService) run(mode, singerID string, hidden *bool) {
 	defer func() {
 		s.mu.Lock()
 		s.running = false
@@ -116,7 +118,7 @@ func (s *BatchAnalyzeService) run(mode, singerID string) {
 		logger.Infof("[batch-analyze] finished: done=%d failed=%d", s.status.Done, s.status.Failed)
 	}()
 
-	streams, err := s.streamRepo.FindStreamsForBatch(mode, singerID)
+	streams, err := s.streamRepo.FindStreamsForBatch(mode, singerID, hidden)
 	if err != nil {
 		logger.Warnf("[batch-analyze] list streams failed: %v", err)
 		s.update(func(st *dto.BatchAnalyzeStatus) { st.Message = "対象の取得に失敗しました" })
@@ -127,7 +129,7 @@ func (s *BatchAnalyzeService) run(mode, singerID string) {
 	forceStart := mode == BatchModeReanalyze
 
 	s.update(func(st *dto.BatchAnalyzeStatus) { st.Total = len(streams) })
-	logger.Infof("[batch-analyze] started: mode=%s singer=%q %d streams", mode, singerID, len(streams))
+	logger.Infof("[batch-analyze] started: mode=%s singer=%q hidden=%s %d streams", mode, singerID, hiddenLabel(hidden), len(streams))
 
 	for _, stream := range streams {
 		if s.isCancelled() {
@@ -201,4 +203,31 @@ func (s *BatchAnalyzeService) sleepInterruptible(d time.Duration) bool {
 		time.Sleep(step)
 	}
 	return !s.isCancelled()
+}
+
+// hiddenLabel は非表示の扱いを画面とログ用の文字列にする（API の語彙と揃える）。
+func hiddenLabel(hidden *bool) string {
+	if hidden == nil {
+		return "all"
+	}
+	if *hidden {
+		return "true"
+	}
+	return "false"
+}
+
+// ParseHiddenFilter は API の hidden パラメータを絞り込みへ変換する。
+// 語彙は GET /api/singers/{id}/streams?hidden= と同じ：
+// ""/"false"=非表示を除く（既定）、"true"=非表示だけ、"all"=両方。
+func ParseHiddenFilter(v string) *bool {
+	switch v {
+	case "all":
+		return nil
+	case "true":
+		t := true
+		return &t
+	default:
+		f := false
+		return &f
+	}
 }

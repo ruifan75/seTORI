@@ -469,6 +469,7 @@ type BatchAnalyzeStatus struct {
 	Running   bool     `json:"running"`
 	Mode      string   `json:"mode,omitempty"`
 	SingerID  string   `json:"singer_id,omitempty"` // 対象を絞ったチャンネル（空なら全チャンネル）
+	Hidden    string   `json:"hidden,omitempty"`    // 非表示配信の扱い（false/true/all）。画面に何が走っているか出すため
 	Total     int      `json:"total"`
 	Done      int      `json:"done"`
 	Failed    int      `json:"failed"`
@@ -481,6 +482,16 @@ type BatchAnalyzeStatus struct {
 type BatchAnalyzeRequest struct {
 	Mode     string `json:"mode"`      // unanalyzed / unprocessed / refresh / reanalyze
 	SingerID string `json:"singer_id"` // 対象チャンネル（空なら全チャンネル）
+	// Hidden は非表示配信の扱い。語彙は GET /api/singers/{id}/streams?hidden= と揃える。
+	//
+	//	""/"false" … 非表示を除く（既定。従来の挙動）
+	//	"true"     … 非表示だけ
+	//	"all"      … 両方
+	//
+	// 既定を「除く」に据え置くのは、通常の運用で非表示（雑談・ゲーム配信）を
+	// 毎回 AI にかけたくないため。非表示を回すのは規則を変えた後の棚卸しという
+	// 別の作業なので、明示的に選ばせる。
+	Hidden string `json:"hidden,omitempty"`
 }
 
 // ========== 歌唱記録の直接作成 ==========
