@@ -3201,9 +3201,34 @@ func requiredPermission(method, path string) (perm string, needsAuth bool) {
 		return "", true
 	}
 
-	// 一括セットリスト作成は進捗・履歴も含めて content:edit。
+	// 一括セットリスト作成・一括プレ分析は進捗・履歴も含めて content:edit。
 	// 実行の履歴には誰が回したかが載るので、閲覧者には出さない。
-	if strings.HasPrefix(path, "/api/streams/batch-fill") {
+	//
+	// batch-analyze も同じ扱いにする理由：status の current には処理中の配信タイトルが、
+	// failed_ids には配信 ID が入り、完了後も残る。非表示の配信を対象に回すと、
+	// 未ログインのポーリングで「一覧に出していない配信」の題名と ID が読めてしまう。
+	if strings.HasPrefix(path, "/api/streams/batch-fill") ||
+		strings.HasPrefix(path, "/api/streams/batch-analyze") {
+		return auth.PermContentEdit, true
+	}
+
+	// 解析の素材を返す GET は編集者の道具であって、閲覧者向けの経路ではない。
+	// **どれもキャッシュが無ければ外部へ取りに行く**：
+	//
+	//	/comments       … Holodex / YouTube API（運用者の API キー）
+	//	/chapters       … yt-dlp（管理→設定に登録した cookies 付き＝運用者のメンバー資格）
+	//	/holodex-songs  … Holodex API。そもそもキャッシュを見ずに毎回叩く
+	//
+	// 未ログインから叩けると、匿名のリクエストに運用者の資格情報と API 枠を使わせることになる。
+	// 実測では、未ログインの GET /api/streams/{id}/chapters がメン限配信に対して
+	// yt-dlp を起動し（3.7 秒）、結果を保存して返していた。
+	//
+	// フロントエンドからの利用も編集時に限られる（/comments は isEditing のときだけ、
+	// /chapters と /holodex-songs は呼び出し自体が無い）ので、閲覧者への影響は無い。
+	if strings.HasPrefix(path, "/api/streams/") &&
+		(strings.HasSuffix(path, "/comments") ||
+			strings.HasSuffix(path, "/chapters") ||
+			strings.HasSuffix(path, "/holodex-songs")) {
 		return auth.PermContentEdit, true
 	}
 
