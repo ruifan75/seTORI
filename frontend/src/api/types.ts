@@ -451,6 +451,7 @@ export interface BatchAnalyzeStatus {
   running: boolean;
   mode?: string;
   singer_id?: string;
+  hidden?: 'all' | 'true' | 'false'; // 非表示配信の扱い（何が走っているかを画面に出すため）
   total: number;
   done: number;
   failed: number;

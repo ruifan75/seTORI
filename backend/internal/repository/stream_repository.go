@@ -453,14 +453,27 @@ func (r *StreamRepository) FindByTagID(tagID string, limit, offset int) ([]model
 // FindStreamsForBatch は一括分析の対象配信（id/title のみ）を mode と（任意の）歌手で
 // 絞り込んで古い順に返す。singerID が空なら全チャンネルが対象。
 //
-// mode 別の対象範囲（いずれも非隠し・comment_raw あり）:
+// mode 別の対象範囲（いずれも comment_raw あり）:
 //   - "unanalyzed"           : 分析結果（comment_songs）が一度も無い配信のみ
 //   - "unprocessed"/"refresh": 未処理（ユーザー未確認）の配信すべて
 //   - "reanalyze"            : comment_raw を持つ配信すべて（分析済みも対象。force で作り直す）
 //
 // singerID 指定時は stream_singers を EXISTS で絞る（owner / 参加者どちらでも一致）。
-func (r *StreamRepository) FindStreamsForBatch(mode, singerID string) ([]models.Stream, error) {
-	where := "is_hidden = FALSE AND comment_raw IS NOT NULL AND comment_raw != 'null'"
+//
+// hidden は非表示配信の扱い。nil=両方 / false=非表示を除く（既定）/ true=非表示だけ。
+// **既定を「除く」に据え置くのは、通常の運用で雑談・ゲーム配信を毎回 AI にかけないため。**
+// 非表示を回すのは抽出規則を変えた後の棚卸しという別の作業で、そのときだけ明示的に選ぶ
+// ── 非表示に残っていた抽出結果は構造フィルタ（2026-08-05）と grouped 経路（2026-08-07）が
+// 入る前のもので、現在の規則なら落ちる行を大量に含んでいる。
+func (r *StreamRepository) FindStreamsForBatch(mode, singerID string, hidden *bool) ([]models.Stream, error) {
+	where := "comment_raw IS NOT NULL AND comment_raw != 'null'"
+	if hidden != nil {
+		if *hidden {
+			where = "is_hidden = TRUE AND " + where
+		} else {
+			where = "is_hidden = FALSE AND " + where
+		}
+	}
 	switch mode {
 	case "unanalyzed":
 		where += " AND (comment_songs IS NULL OR comment_songs = 'null')"

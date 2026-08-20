@@ -829,11 +829,18 @@ func (r *Router) handleStartBatchAnalyze(w http.ResponseWriter, req *http.Reques
 	if mode == "" {
 		mode = service.BatchModeUnprocessed
 	}
-	if err := r.batchAnalyzeService.Start(mode, body.SingerID); err != nil {
+	// 非表示の扱いはクエリでも body でも受ける（他の一括操作の呼び方と揃える）
+	hiddenParam := body.Hidden
+	if hiddenParam == "" {
+		hiddenParam = req.URL.Query().Get("hidden")
+	}
+	hidden := service.ParseHiddenFilter(hiddenParam)
+
+	if err := r.batchAnalyzeService.Start(mode, body.SingerID, hidden); err != nil {
 		respondError(w, http.StatusConflict, err.Error())
 		return
 	}
-	logger.Infof("batch analyze started: mode=%s singer=%q", mode, body.SingerID)
+	logger.Infof("batch analyze started: mode=%s singer=%q hidden=%s", mode, body.SingerID, hiddenParam)
 	respondJSON(w, http.StatusAccepted, map[string]string{"message": "一括分析を開始しました"})
 }
 
