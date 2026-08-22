@@ -151,20 +151,24 @@ type ytdlpAvailability struct {
 	PlayableInEmbed sql.NullBool
 }
 
-// Resolved は**動画情報を最後まで取れたか**。
+// Resolved は**両方の値が揃ったか**。相乗り経路はこれが false なら保存しない。
 //
-// `availability` の有無では判定できない。`--ignore-no-formats-error` を付けた実行では、
-// YouTube が再生を断っても（削除・レート制限）yt-dlp は警告だけ出して**終了コード 0 で続行**し
-// （`raise_no_formats(expected=True)` → `report_warning`）、部分的なメタデータから
-// `availability = public` を出してしまう。実測でも視聴不可の hVfDBfreYNI が
-// `public|NA` を返した。
+// **片方だけでは足りない。両方が別々の入力から来ていて、片方だけ落ちうる。**
 //
-// 一方 `playable_in_embed` は抽出が最後まで通ったときにだけ埋まるので、これを
-// 「信用してよいか」の目印にする。相乗り経路はこれが false なら**保存しない**
-// ── そこで保存すると、レート制限に当たっただけの公開配信が unavailable として
-// 恒久的に記録され、二度と再試行されない。
+//	availability      … initial_data の badge から決まる（`_video.py` の `_extract_badges`）。
+//	                    initial_data は **fatal=False** で取りに行くので、
+//	                    一時的に失敗すると None になり、availability は NA になる
+//	playable_in_embed … player response から独立に取れる。上が落ちても True のまま
+//
+// つまり **cookie 有りの会限で initial_data だけ一時失敗すると `NA<TAB>True`** が
+// 終了コード 0 で返る。`playable_in_embed` だけを目印にしていると、これを信用して保存し、
+// `subscriber_only` が無いので `playable` と判定して**必ず失敗するプレイヤーを描く**。
+// しかも保存済みなので二度と調べ直さない。
+//
+// 逆に `--ignore-no-formats-error` 付きで動画が取れなかった場合は `public<TAB>NA` になる
+// （実測：視聴不可の hVfDBfreYNI）。落ちる側が入力ごとに違うので、両方を要求する。
 func (a ytdlpAvailability) Resolved() bool {
-	return a.PlayableInEmbed.Valid
+	return a.Availability != "" && a.PlayableInEmbed.Valid
 }
 
 // availabilityArgs は再生可否を拾うための引数を返す。
