@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, Link } from 'react-router-dom';
 import { streamApi, performanceApi, aiApi, itunesApi, holodexApi, commentApi, chapterApi, tagApi, artistApi } from '../api/client';
@@ -12,7 +12,7 @@ import { useToast } from '../components/ui/ToastContext';
 import { useAuthStore, hasPermission, PERM } from '../store/auth';
 import { usePlayerStore, type PlayerTrack } from '../store/player';
 import YoutubePlayer from '../components/YoutubePlayer';
-import UnplayableNotice from '../components/UnplayableNotice';
+import UnplayableNotice, { type NoticeKind } from '../components/UnplayableNotice';
 import { playerSeekTo } from '../components/youtubePlayerControl';
 import type { YouTubePlayerInstance } from '../types/youtube';
 import QueueAddButton from '../components/QueueAddButton';
@@ -171,6 +171,10 @@ export default function StreamDetailPage() {
   const canEdit = hasPermission(useAuthStore((s) => s.user), PERM.CONTENT_EDIT);
 
   const [isEditing, setIsEditing] = useState(false);
+  // 再生時に実際に失敗したエラーコード。保存済みの判定より新しい事実なので優先する。
+  const [playbackErrorCode, setPlaybackErrorCode] = useState<number | null>(null);
+  // YoutubePlayer の effect 依存に入るので、毎回作り直すとプレイヤーが再生成される。
+  const handlePlaybackError = useCallback((code: number) => setPlaybackErrorCode(code), []);
   // 編集モード左上のタブ（操作 / Holodex / コメント / 生コメント）
   const [editTab, setEditTab] = useState<'actions' | 'holodex' | 'comment' | 'chapter' | 'raw'>('actions');
   // 閲覧モードのクイック編集 UI（タグ選択・参加者追加）の開閉
@@ -1159,6 +1163,22 @@ export default function StreamDetailPage() {
     end: perf.end_seconds,
   });
 
+  // 表示する案内の種類。保存済みの判定と、実際に再生できなかった事実の両方から決める。
+  //
+  // **実測を優先する。** 保存済みの判定は古くなるし（アーカイブが後から会限化する、
+  // 権利で降ろされる）、`public` は「反証が無かった」という弱い結論でしかない
+  // （docs/STREAM_VISIBILITY.md）。エラーコード 100 は動画が無い、101/150 は
+  // 埋め込み不可（会限もここ。コードだけでは会限か埋め込み無効かを区別できない）。
+  // 2 や 5 のような一時的・環境依存のコードでは案内へ切り替えない。
+  const noticeKind: NoticeKind | null =
+    playbackErrorCode === 100
+      ? 'unavailable'
+      : playbackErrorCode === 101 || playbackErrorCode === 150
+        ? 'playback_failed'
+        : stream.playability && stream.playability !== 'unknown' && stream.playability !== 'playable'
+          ? stream.playability
+          : null;
+
   const setoriTimeline = stream.performances.map((perf) => {
     const end = perf.end_seconds > 0 ? perf.end_seconds : perf.start_seconds;
     return {
@@ -1694,13 +1714,14 @@ export default function StreamDetailPage() {
               上限そのものは 1bb43a5 で「1300px 未満でページをスクロールできるように」
               入れたものなので、直すなら上限の側の設計を見直す必要がある。issue #16 */}
           {/* 再生できないと分かっている配信にはプレイヤーを描かない。必ず失敗する
-              iframe を出してから onError: 150 で黒い枠だけが残るより、理由を出す。
+              iframe を出してから黒い枠だけが残るより、理由を出す。
               playability が undefined（判定していない応答）や unknown（未調査）の
-              ときは従来どおり描く ── 調べていないことを再生不可と読み替えない。
-              古くなることはある（アーカイブが後から会限化する等）ので、
-              PlayerBar 側の onError による退避は今までどおり残してある。 */}
-          {stream.playability && stream.playability !== 'unknown' && stream.playability !== 'playable' ? (
-            <UnplayableNotice playability={stream.playability} videoId={stream.id} />
+              ときは従来どおり描き、**実際に失敗したら onError で切り替える**
+              ── 保存済みの判定は古くなるし（アーカイブが後から会限化する、
+              権利で降ろされる）、`public` はそもそも「反証が無かった」という
+              弱い結論でしかない（docs/STREAM_VISIBILITY.md）。 */}
+          {noticeKind ? (
+            <UnplayableNotice kind={noticeKind} videoId={stream.id} />
           ) : (
             <div className="bg-black w-full aspect-video overflow-hidden">
               <YoutubePlayer
@@ -1708,6 +1729,7 @@ export default function StreamDetailPage() {
                 onReady={(player) => {
                   playerInstanceRef.current = player;
                 }}
+                onError={handlePlaybackError}
               />
             </div>
           )}

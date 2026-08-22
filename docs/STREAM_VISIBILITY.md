@@ -200,10 +200,26 @@ yt-dlp は警告だけ出して**終了コード 0 で続行し**（`raise_no_fo
 | `members_only` / `embed_disabled` / `unavailable` | 積極的な発見 | しない |
 | `playable`（`public` かつ埋め込み可） | **反証が無かっただけ** | `?recheck=1` で対象に戻る |
 
-誤って `playable` と記録したときの実害は「プレイヤーを描いて 150 で失敗する」＝
-**この機能を入れる前と同じ挙動**で、`PlayerBar` の `onError` が次へ送る。
-残る問題は「記録済みなので二度と調べ直さない」ことだけなので、そこだけ塞げばよい
-（`POST /api/availability/backfill?recheck=1`）。
+帰結の塞ぎ方は 2 つ。
+
+**① 描画時に実測へ倒す。** `YoutubePlayer` の `onError` を配信詳細で拾い、
+コード 100 なら「動画が無い」、101/150 なら「埋め込み再生できません」の案内へ切り替える。
+**保存済みの判定より新しい事実なので優先する。** これは弱い `playable` だけでなく、
+未調査（`unknown`）と、判定が古くなった場合（アーカイブが後から会限化する、
+権利で降ろされる）も同時に拾う。
+
+> コードだけでは**会限と埋め込み無効を区別できない**（どちらも 101/150）ので、
+> 推測して片方の文言を出さず、両方の可能性を書く。2 や 5 のような
+> 一時的・環境依存のコードでは切り替えない。
+>
+> `PlayerBar` の `onError`（キューを次へ送る）は**別のプレイヤー実体**で、
+> 配信詳細の `YoutubePlayer` には効かない。詳細側には長らく退避が無かった。
+
+**② 記録済みでも調べ直せるようにする。** `POST /api/availability/backfill?recheck=1`
+で弱い判定の行を対象に戻す。①は見た人にだけ効く一時的なもので、DB は直らないため。
+
+なお①の結果を DB へ書き戻すことはしない ── 未ログインの閲覧者が
+書き込めることになるため。直すのは②の運用操作で行う。
 
 **レート制限は `Video unavailable` で始まる。** YouTube の reason が `Video unavailable`、
 subreason が `This content isn't available, try again later` で、yt-dlp はこれを連結してから
