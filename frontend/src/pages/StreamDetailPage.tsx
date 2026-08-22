@@ -1687,8 +1687,11 @@ export default function StreamDetailPage() {
 
         {/* Player + Timeline - 60% */}
         <div className="flex-1 min-w-0 bg-white rounded-lg shadow-sm border flex flex-col min-h-0">
-          {/* 16:9 に固定する。flex-1 で縦に伸ばすと、プレイヤーは 16:9 のままなので
-              余った高さが黒帯として残る（審査画面の器と同じ形に揃えてある）。 */}
+          {/* 16:9 の器。プレイヤーはこれを埋める（審査画面の器と同じ形）。
+              **1300px 以上での話。** それ未満では親が sm:max-h-[40vh] で高さを絞るので、
+              この箱は縮められ 16:9 を保てない（実測 1299px で比 1.99）。
+              上限そのものは 1bb43a5 で「1300px 未満でページをスクロールできるように」
+              入れたものなので、直すなら上限の側の設計を見直す必要がある。issue #16 */}
           <div className="bg-black w-full aspect-video overflow-hidden">
             <YoutubePlayer
               videoId={stream.id}
