@@ -250,10 +250,14 @@ export default function StreamDetailPage() {
   });
 
   // 編集画面の raw comment タイムラインと生コメントタブで同じキャッシュを共有する。
+  //
+  // 取得の条件は「編集中」ではなく「編集権限がある」。閲覧中でも入力元の時間帯を
+  // 見たいことがあり、プレイヤーを 16:9 に固定した分の余白がちょうどそこに使える。
+  // 端点自体が content:edit なので、権限が無ければ呼ばない（呼んでも 401）。
   const { data: rawCommentsData } = useQuery({
     queryKey: ['raw-comments', id],
     queryFn: () => commentApi.getComments(id!),
-    enabled: !!id && isEditing,
+    enabled: !!id && canEdit,
     staleTime: Infinity,
   });
 
@@ -1177,14 +1181,14 @@ export default function StreamDetailPage() {
     };
   });
 
-  const rawCommentTimeline = isEditing
+  const rawCommentTimeline = canEdit
     ? extractRawCommentTimestamps(rawCommentsData?.comments || [])
     : [];
 
   const timelineDuration = Math.max(
     stream.duration_seconds || 0,
     ...setoriTimeline.map((s) => s.end),
-    ...(isEditing ? holodexTimeline.map((s) => s.end) : []),
+    ...(canEdit ? holodexTimeline.map((s) => s.end) : []),
     ...rawCommentTimeline.map((s) => s.start),
     1,
   );
@@ -1726,7 +1730,10 @@ export default function StreamDetailPage() {
                   </button>
                 ))}
               </div>
-              {isEditing && (
+              {/* 入力元（Holodex・生コメント）の時間帯。**編集中でなくても出す** ──
+                  プレイヤーを 16:9 に固定して空いた分をここに使う。
+                  データ自体が content:edit のときしか返らないので、閲覧者には出ない。 */}
+              {canEdit && (
                 <>
                   <div className="relative h-3 bg-blue-50 rounded-none">
                     {holodexTimeline.map((item) => (
