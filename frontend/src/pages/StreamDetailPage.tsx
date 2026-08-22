@@ -1727,6 +1727,15 @@ export default function StreamDetailPage() {
                       <span className="text-sm font-medium text-gray-700">セットリスト非公開</span>
                       <span className="text-xs text-gray-500">歌唱を編集者だけに見せる（会限など、公開可否が未確認のもの）</span>
                     </label>
+                    {/* **seTORI を伏せても Holodex のコピーは残る。** 向こうへは運用者の名義で
+                        書き込んでおり、seTORI からは取り消せない。忘れないよう出しておく。 */}
+                    {stream.is_restricted && stream.holodex_uploaded_at && (
+                      <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+                        この配信のセットリストは {new Date(stream.holodex_uploaded_at).toLocaleDateString('ja-JP')} に
+                        Holodex へ送信済みです。seTORI で非公開にしても Holodex 側のデータは残ります
+                        （seTORI からは取り消せません）。
+                      </p>
+                    )}
                   </div>
                 )}
               </>

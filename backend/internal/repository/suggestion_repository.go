@@ -258,18 +258,34 @@ func (r *SuggestionRepository) ListByCreator(userID uuid.UUID, status string, li
 		args = append(args, status)
 	}
 	// 対象が秘匿された配信に属する提案を落とす。
-	// 対象の辿り方が 2 通りあるので両方見る：
-	//   target_id  … performance を直接指す（field / perf.meta）
-	//   target_key … 配信の動画 ID（perf.missing。UUID を持たないため）
+	//
+	// **否定形（「秘匿の対象が EXISTS なら落とす」）にしないこと。**
+	// `target_id` に FK は無く、提案は対象の performance より長生きする
+	// （編集保存や一括の撤回で歌唱は消える）。否定形だと対象が消えた瞬間に
+	// サブクエリが 0 行になり、条件が true に化けて提案が**通ってしまう**
+	// ── 保存済みの曲名・配信タイトル・時刻がそこから読める。
+	//
+	// そこで**肯定形**にする：「今も存在して、かつ秘匿でない対象がある」ときだけ通す。
+	// 対象が消えていれば落ちる（fail-closed）。
+	//
+	// 配信に紐付かない対象（song / artist）は秘匿の対象外なので常に通す。
+	// 対象の辿り方は 2 通り：
+	//   target_id  … performance を指す（field / perf.meta）
+	//   target_key … 配信の動画 ID（perf.missing。UUID を持たないため target_type='stream'）
 	if access == PublicAccess {
 		where += `
-		  AND NOT EXISTS (
-			SELECT 1 FROM performances p JOIN streams st ON st.id = p.stream_id
-			WHERE p.id = edit_suggestions.target_id AND ` + NotRestricted("st") + ` = FALSE
-		  )
-		  AND NOT EXISTS (
-			SELECT 1 FROM streams st
-			WHERE st.id = edit_suggestions.target_key AND ` + NotRestricted("st") + ` = FALSE
+		  AND (
+			CASE edit_suggestions.target_type
+			WHEN 'performance' THEN EXISTS (
+				SELECT 1 FROM performances p JOIN streams st ON st.id = p.stream_id
+				WHERE p.id = edit_suggestions.target_id AND ` + NotRestricted("st") + `
+			)
+			WHEN 'stream' THEN EXISTS (
+				SELECT 1 FROM streams st
+				WHERE st.id = edit_suggestions.target_key AND ` + NotRestricted("st") + `
+			)
+			ELSE TRUE
+			END
 		  )`
 	}
 

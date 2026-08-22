@@ -1014,8 +1014,15 @@ func (s *HolodexService) normalizeHolodexInto(songs []dto.SongSuggestion) {
 	}
 }
 
-// SyncSetoriToHolodex は Holodex にデータがない場合、seTORI のデータを Holodex へ同期する。
-// 現在はリクエスト内容を表示するだけで、実際の API 呼び出しは行わない。
+// SyncSetoriToHolodex は seTORI のセットリストを Holodex へ書き戻す。
+//
+// **実際に外部へ書き込む**（`PUT https://holodex.net/api/v2/songs`）。運用者の
+// 編集トークンの名義で向こうのデータベースに残り、seTORI からは取り消せない。
+// 詳細とリスクは docs/EXTERNAL_APIS.md と CLAUDE.md §5。
+//
+// 秘匿された配信の中身は送らない（歌唱の取得が PublicAccess）。ただし
+// **送ったあとに秘匿へ変わった場合、向こうのコピーは残ったまま**なので、
+// 送信時刻を記録して編集画面に出す（migration 054）。撤回するかは人が決める。
 func (s *HolodexService) SyncSetoriToHolodex(streamID string) (*dto.SyncHolodexResponse, error) {
 	// 1. 配信情報を取得する
 	stream, err := s.streamRepo.FindByID(streamID)
@@ -1235,6 +1242,14 @@ func (s *HolodexService) SyncSetoriToHolodex(streamID string) (*dto.SyncHolodexR
 	if len(errors) > 0 {
 		message = fmt.Sprintf("同期完了：%d 曲を同期、%d 曲は登録済み、%d 曲は失敗しました", syncedCount, skippedCount, len(errors))
 		logger.Warnf("Errors during sync: %v", errors)
+	}
+
+	// 1 曲でも外へ出したなら記録する。**成功だけを数えない** ── 失敗の応答が返っても
+	// 向こうに書き込まれている可能性はあるので、送信を試みた事実として残す。
+	if syncedCount > 0 || len(errors) > 0 {
+		if err := s.streamRepo.MarkHolodexUploaded(streamID); err != nil {
+			logger.Warnf("[holodex] %s の送信記録を保存できません: %v", streamID, err)
+		}
 	}
 
 	return &dto.SyncHolodexResponse{
