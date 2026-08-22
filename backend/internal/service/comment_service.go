@@ -271,9 +271,13 @@ func (s *CommentService) ExtractSongs(texts []string) (songs []dto.CommentSong, 
 	// （3 文字以下の ASCII は単語単位で比較するので "Week End" の End が一致する。
 	// `花ざかりWeekend✿` は前が k なので残る）。issue #11。
 	//
-	// 本番データ 14 本・151 行で現行 AI の出力に辞書をかけた実測では、
-	// **辞書が落とした行は 0**。落ちた 1 行は構造フィルタ（曲名が "1"）だった。
-	// つまり辞書はもう AI の取りこぼしを拾っておらず、誤爆する余地だけが残っている。
+	// 実測（2026-08-22、本番データ 14 本・151 行）では、現行 AI の出力に辞書をかけて
+	// **落ちた行は 0**（落ちた 1 行は構造フィルタ。曲名が "1"）。
+	// ただし標本は「直近・表示中・抽出 5 曲以上」なので、grouped が成功しやすい母集団に偏る。
+	// 非表示配信、抽出が数行しかない疎な配信、grouped 失敗時の two_stage、
+	// 章節の START / 休憩 / BGM は入っていない。**この選び方の 14 本では 0 だった**、
+	// までが言えること。それでも `Week End` の誤爆は現に起きているので、
+	// 判断済みの経路で辞書を重ねる理由は無い。
 	//
 	// 辞書が要るのは AI が全部失敗して正規表現だけになったとき（path == "regex"）。
 	// そこには判断する者がいないので、当初この辞書が作られた前提がそのまま生きている。
@@ -556,6 +560,9 @@ type HashBackfillResult struct {
 	Migrated  int `json:"migrated"`   // 旧アルゴリズム hash → 正規化 hash へ書き換えた数
 	AlreadyOK int `json:"already_ok"` // 既に正規化 hash（キャッシュが有効）
 	Skipped   int `json:"skipped"`    // comment_raw が空 / hash 未設定 / 未知形式で触らなかった数
+	// NeedsReanalysis は抽出規則の版が上がったために、hash の付け替えでは救えない数。
+	// 再分析（force）でしか現行の規則に揃わない。
+	NeedsReanalysis int `json:"needs_reanalysis"`
 }
 
 // BackfillCommentSongsHashes は comment_songs_hash を現行の正規化アルゴリズムへ移行する。
@@ -586,23 +593,31 @@ func (s *CommentService) BackfillCommentSongsHashes() (HashBackfillResult, error
 			res.AlreadyOK++
 			continue
 		}
-		// 旧アルゴリズム（生 JSONB bytes の sha256）と一致するものだけ移行する。
-		// 一致しない = 由来不明なので、既存の comment_songs を誤って「有効」扱いしないよう据え置く。
+		// 旧アルゴリズム（生 JSONB bytes の sha256）かどうかを見る。
 		if row.Hash.String != hashBytes(row.CommentRaw) {
 			res.Skipped++
 			logger.Warnf("[comment] hash backfill: %s は未知形式のため据え置き（stored=%s）", row.ID, row.Hash.String)
 			continue
 		}
-		if err := s.streamRepo.UpdateCommentSongsHash(row.ID, canonical); err != nil {
-			logger.Warnf("[comment] hash backfill update failed (%s): %v", row.ID, err)
-			res.Skipped++
-			continue
-		}
-		res.Migrated++
+
+		// **旧形式でも hash を付け替えない。**
+		//
+		// この補正は「hash の表記形式だけが変わり、抽出そのものは変わっていない」ときのもの。
+		// canonical には抽出規則の版（comment.RulesVersion）が混ざっているので、
+		// ここで書き換えると**旧規則で作った comment_songs に現行版の hash を貼る**ことになり、
+		// 以後のキャッシュ判定が命中して再抽出されなくなる。
+		// 実際それをやると、辞書に消された曲は消えたまま固定される（issue #11 の Week End）。
+		//
+		// 表記形式の移行は再抽出なしでできるが、**規則の版は結果を計算し直さない限り昇格できない。**
+		// 該当行は再分析（force / batch-analyze の reanalyze）で現行規則へ揃える。
+		res.NeedsReanalysis++
 	}
 
-	logger.Infof("[comment] hash backfill 完了: total=%d migrated=%d already_ok=%d skipped=%d",
-		res.Total, res.Migrated, res.AlreadyOK, res.Skipped)
+	logger.Infof("[comment] hash backfill 完了: total=%d migrated=%d already_ok=%d skipped=%d needs_reanalysis=%d",
+		res.Total, res.Migrated, res.AlreadyOK, res.Skipped, res.NeedsReanalysis)
+	if res.NeedsReanalysis > 0 {
+		logger.Infof("[comment] %d 件は抽出規則の版が古いため hash の付け替えでは救えません。再分析してください", res.NeedsReanalysis)
+	}
 	return res, nil
 }
 

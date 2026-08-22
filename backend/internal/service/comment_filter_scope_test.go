@@ -1,6 +1,8 @@
 package service
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/ruifan75/setori/pkg/comment"
@@ -93,5 +95,32 @@ func TestExtractionRulesSaltChangesWithVersion(t *testing.T) {
 	}
 	if got := string(extractionRulesSalt()); got == "" {
 		t.Error("salt が空。キャッシュ鍵に版が混ざらない")
+	}
+}
+
+// hash 補正が旧規則の抽出結果を現行版へ昇格させないこと。
+//
+// 昇格させると、辞書に消された曲が消えたまま固定される（issue #11）。
+// 表記形式の移行は再抽出なしでできるが、**規則の版は計算し直さない限り昇格できない。**
+func TestHashBackfillDoesNotPromoteStaleExtractions(t *testing.T) {
+	comments := []string{"0:10 Lemon / 米津玄師", "52:18 Week End / 星野源"}
+	raw, err := json.Marshal(comments)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	oldFormat := hashBytes(raw)         // 旧アルゴリズム（生 bytes の sha256）
+	canonical := hashComments(comments) // 現行（正規化 + 規則の版）
+
+	if oldFormat == canonical {
+		t.Fatal("前提が崩れている：旧形式と現行の hash が同じ")
+	}
+
+	// 補正が旧形式を canonical へ書き換えてしまうと、この 2 つが一致してしまい
+	// 以後キャッシュが命中して再抽出されない。書き換えないことを、
+	// BackfillCommentSongsHashes に Migrated へ加算する経路が無いことで担保している。
+	// ここでは「両者が別物である」＝版が鍵に効いていることだけを固定する。
+	if !strings.Contains(string(extractionRulesSalt()), "rules=") {
+		t.Error("salt に規則の版が入っていない")
 	}
 }
