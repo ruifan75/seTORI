@@ -207,9 +207,9 @@ func (s *HolodexService) syncHolodexChannelInfo(channelID string) (*models.Singe
 		return nil, fmt.Errorf("get channel: %w", err)
 	}
 
-	// Upsert Singer
+	// 人がチャンネルを名指しして追加した経路（POST /api/singers）なので、新規でも一覧に出す。
 	singer := s.singerFromHolodexChannel(channel)
-	if err := s.singerRepo.Upsert(singer); err != nil {
+	if err := s.singerRepo.Upsert(singer, repository.SingerRequested); err != nil {
 		return nil, fmt.Errorf("upsert singer: %w", err)
 	}
 
@@ -265,7 +265,8 @@ func (s *HolodexService) syncYouTubeChannelInfoFromChannel(channel *youtube.Chan
 		}
 	}
 
-	if err := s.singerRepo.Upsert(singer); err != nil {
+	// Holodex に無いチャンネルの退避経路。入口は同じ POST /api/singers なので人の意図がある。
+	if err := s.singerRepo.Upsert(singer, repository.SingerRequested); err != nil {
 		return nil, fmt.Errorf("upsert singer: %w", err)
 	}
 
@@ -304,9 +305,9 @@ func (s *HolodexService) SyncChannel(channelID string, limit int, forceUpdate bo
 		return nil, fmt.Errorf("get channel: %w", err)
 	}
 
-	// Upsert Singer
+	// 同期対象として名指しされたチャンネル本人なので、新規でも一覧に出す。
 	singer := s.singerFromHolodexChannel(channel)
-	if err := s.singerRepo.Upsert(singer); err != nil {
+	if err := s.singerRepo.Upsert(singer, repository.SingerRequested); err != nil {
 		return nil, fmt.Errorf("upsert singer: %w", err)
 	}
 
@@ -504,8 +505,10 @@ func (s *HolodexService) syncVideo(video holodex.Video, channelID string, forceU
 	// 所有者と同期対象のチャンネルが違う（＝コラボで、別のチャンネルが主催）場合、
 	// stream_singers には singers への外部キーがあるため、先に所有者チャンネルを upsert する。
 	// （自チャンネル同期では所有者を SyncChannel/SyncVideo で先に upsert 済み。情報量の少ない一覧データで上書きしないよう省略）
+	// 同期を頼まれたのはこのチャンネルではなく、コラボの主催として付いてきただけなので、
+	// 新規なら非表示で作る（stream_singers の FK を満たすのが目的）。
 	if ownerID != channelID && video.Channel != nil && video.Channel.ID == ownerID {
-		s.singerRepo.Upsert(s.singerFromHolodexChannel(video.Channel))
+		s.singerRepo.Upsert(s.singerFromHolodexChannel(video.Channel), repository.SingerDiscovered)
 	}
 
 	// mentions を処理して参加者を同期する
@@ -529,7 +532,9 @@ func (s *HolodexService) syncVideo(video holodex.Video, channelID string, forceU
 		if org := strings.TrimSpace(mention.Org); org != "" {
 			singer.Organization = sql.NullString{String: org, Valid: true}
 		}
-		s.singerRepo.Upsert(singer)
+		// mention は「配信に言及されていた」だけで、こちらが追いたいチャンネルとは限らない。
+		// 新規なら非表示で作る（既存の表示設定は Upsert が触らない）。
+		s.singerRepo.Upsert(singer, repository.SingerDiscovered)
 
 		// 参加者一覧へ追加する（重複は避ける）
 		found := false
@@ -592,7 +597,9 @@ func (s *HolodexService) SyncVideo(videoID string) (*dto.SyncHolodexResponse, er
 		if org := strings.TrimSpace(video.Channel.Org); org != "" {
 			singer.Organization = sql.NullString{String: org, Valid: true}
 		}
-		s.singerRepo.Upsert(singer)
+		// 名指しされたのは動画 1 本で、その所有者が誰かは結果として分かるだけ。
+		// 自チャンネルなら既存行なので影響は無く、他人のチャンネルなら非表示で作る。
+		s.singerRepo.Upsert(singer, repository.SingerDiscovered)
 	}
 
 	result := &dto.SyncHolodexResponse{
