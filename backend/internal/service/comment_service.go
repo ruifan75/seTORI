@@ -101,9 +101,9 @@ func (s *CommentService) analyzeComments(videoID string, force, dryRun, adjudica
 	rawHash := hashStoredComments(stream.CommentRaw)
 
 	// キャッシュ命中：comment_songs は現在の comment_raw から計算済みなので、そのまま返して AI は呼ばない
-	cachedHash, _ := s.streamRepo.GetCommentSongsHash(videoID)
-	if !force && commentCacheHit(rawHash, cachedHash, stream.CommentSongs) {
-		{
+	if !force {
+		cachedHash, _ := s.streamRepo.GetCommentSongsHash(videoID)
+		if commentCacheHit(rawHash, cachedHash, stream.CommentSongs) {
 			var cached []dto.CommentSong
 			if err := json.Unmarshal(stream.CommentSongs, &cached); err == nil && len(cached) > 0 {
 				// DB 照合だけ現在の状態へ再解決する（AI は打たない）。matched_song_id は
@@ -555,38 +555,16 @@ func (s *CommentService) BackfillCommentSongs() (int, error) {
 	return count, nil
 }
 
-// isLegacyExtractionHash は保存済み hash が「古い抽出規則で作られた」印かを返す。
-//
-// 世代が 2 つある：
-//
-//	v1 … 正規化した JSON の sha256（salt 無し）
-//	v0 … 生 JSONB bytes の sha256（02dde1d が v1 へ移行済み）
-//
-// どちらも「現行の規則では作られていない」ことを意味するので、同じ扱いにする。
-func isLegacyExtractionHash(stored string, raw []byte) bool {
-	if stored == "" || len(raw) == 0 {
-		return false
-	}
-	if stored == hashBytes(raw) { // v0
-		return true
-	}
-	var comments []string
-	if err := json.Unmarshal(raw, &comments); err != nil || len(comments) == 0 {
-		return false
-	}
-	marshaled, err := json.Marshal(comments)
-	if err != nil {
-		return false
-	}
-	return stored == hashBytes(marshaled) // v1（salt 無し）
-}
-
 // commentCacheHit は保存済みの抽出結果がそのまま使えるかを返す。
 //
 // **読み取り経路と監査の両方から呼ぶこと。** 片方だけで条件を書くと、
 // 「監査は再解析不要と言うのに実際は再抽出される」というずれが生まれる。
 // 実際、この判定を写して書いていた頃の監査は 3 回ずれた
 // （v1 を落とす → hash 未設定を落とす → 空の結果を落とす）。
+//
+// force はここでは見ない。この関数が答えるのは「キャッシュが有効か」で、
+// force は「有効でも今回は使わない」という呼び出し側の方針。
+// 分けておけば、監査は force の概念を持たずに同じ判定を使える。
 //
 // rawHash が空（raw が無い／壊れている）ときは命中しない。その場合の読み取り経路は
 // キャッシュを外したあと遠隔取得を試みるので、「解析できない」ではなく「取得が要る」。
