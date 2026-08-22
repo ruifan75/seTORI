@@ -6,6 +6,20 @@ import (
 	"unicode/utf8"
 )
 
+// RulesVersion は抽出後処理（構造フィルタ・キーワード辞書の適用範囲）の版。
+//
+// **この規則を変えたら必ず上げること。** comment_songs / chapter_songs のキャッシュ鍵に
+// 混ぜてあるので、上げれば保存済みの抽出結果が自動で失効し、次に読み込んだときに
+// 新しい規則で作り直される。
+//
+// これが無かった頃、キャッシュ鍵は入力（comment_raw / chapter_raw）の hash だけだった。
+// 抽出規則を変えても raw は変わらないので**キャッシュが命中し続け、直したはずの不具合が
+// 通常の経路では直らなかった**（辞書が実在の曲を消していた件。issue #11）。
+//
+//	1 … 初出（構造フィルタ＋辞書を常に適用）
+//	2 … 辞書は AI が判断していない経路（regex 退避）にだけ適用する
+const RulesVersion = 2
+
 // FilterSongs は DB から読み込んだキーワードで楽曲以外の項目を除外する。
 // 構造的な非曲判定（絵文字のみ／引用符／罫線／過長）＋キーワード辞書の両方を適用する。
 func FilterSongs(songs []ParsedSong, filterKW, keepKW []string) []ParsedSong {

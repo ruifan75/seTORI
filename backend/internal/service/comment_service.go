@@ -213,6 +213,24 @@ func (s *CommentService) analyzeComments(videoID string, force, dryRun, adjudica
 	}, nil
 }
 
+// filterScopeForPath は抽出経路に応じて「辞書を使うか」を返す。
+//
+// production の分岐をここに閉じ込めてあるのはテストのため。呼び出し側で条件を書くと、
+// テストが同じ条件を書き写すことになり、production を変えてもテストが通ってしまう。
+//
+//	grouped / two_stage … AI が is_song を判断済み。辞書も keep も使わない
+//	regex               … 判断する者がいない。辞書と keep を使う
+//	none                … 候補行が 0。どちらでも結果は変わらない
+//
+// keep も一緒に外すのは、`filter.go` が keep を数字だけの判定より先に返すため。
+// AI 経路で keep だけ残すと、曲名が "1" の行が keep 語に救われて残ることがある。
+func filterScopeForPath(path string, filterKW, keepKW []string) (dict, keep []string) {
+	if path == "regex" {
+		return filterKW, keepKW
+	}
+	return nil, nil
+}
+
 // ErrCommentRawChanged は分析中に comment_raw が差し替わったことを示す。
 // 古い入力から作った結果は保存されていないので、呼び出し元は新しい raw で引き直すこと。
 var ErrCommentRawChanged = errors.New("分析中に comment_raw が変更されました")
@@ -262,11 +280,8 @@ func (s *CommentService) ExtractSongs(texts []string) (songs []dto.CommentSong, 
 	//
 	// 構造フィルタ（絵文字だけ・文字なし・40 字超・数字だけ）は**常に適用する**。
 	// 形の判断で AI の判断とは競合せず、ground truth 4156 件で誤殺 0 件を確認済み。
-	dictKW := filterKW
-	if path != "regex" {
-		dictKW = nil
-	}
-	filteredSongs := comment.FilterSongsWith(parsedSongs, dictKW, keepKW, true)
+	dictKW, keepForPath := filterScopeForPath(path, filterKW, keepKW)
+	filteredSongs := comment.FilterSongsWith(parsedSongs, dictKW, keepForPath, true)
 	deduped := comment.DeduplicateSongs(filteredSongs)
 	validSongs := comment.ValidateSongs(deduped)
 
@@ -431,6 +446,12 @@ func hashStoredComments(raw []byte) string {
 	return hashComments(comments)
 }
 
+// hashComments は抽出キャッシュの鍵を作る。
+//
+// **入力だけでなく抽出規則の版も混ぜる**（comment.RulesVersion）。入力の hash だけだと、
+// 抽出規則を変えても comment_raw は変わらないのでキャッシュが命中し続け、
+// 直したはずの不具合が通常の経路では直らない（辞書が実在の曲を消していた件。issue #11）。
+// 版を上げれば保存済みの結果が自動で失効し、次に読み込んだときに作り直される。
 func hashComments(comments []string) string {
 	if len(comments) == 0 {
 		return ""
@@ -439,7 +460,13 @@ func hashComments(comments []string) string {
 	if err != nil {
 		return ""
 	}
-	return hashBytes(raw)
+	return hashBytes(append(raw, extractionRulesSalt()...))
+}
+
+// extractionRulesSalt は抽出規則の版を hash へ混ぜるための塩。
+// comment / chapter の両方から使う（どちらも同じ ExtractSongs を通るため）。
+func extractionRulesSalt() []byte {
+	return []byte(fmt.Sprintf("\x1frules=%d", comment.RulesVersion))
 }
 
 // RefreshCommentRaw はコメントを取得し直して comment_raw を上書き保存する。
