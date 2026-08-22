@@ -2,7 +2,7 @@
 
 > デプロイモデル：**シングルテナント、運用者の key をすべて使用**。
 > 課金や書き込みが発生する操作は RBAC の権限で保護されています（最終セクション参照）。
-> 本ドキュメントは 2026-08-09 時点のコードに基づきます。
+> 本ドキュメントは 2026-08-22 時点のコードに基づきます（実測値は各節に測定日を記載）。
 >
 > ⚠️ **key の置き場所は `.env` ではなく DB です。** `管理 → 設定 → 外部サービス連携`
 > から登録すると `app_settings` に AES-256-GCM で暗号化して保存され、再起動なしで
@@ -94,7 +94,9 @@
 
 ### 会限（メンバー限定）は Data API では判別できない
 
-実測（2026-08-21）。`part=status,contentDetails` の応答が**会限と公開で完全に同一**：
+実測（2026-08-21）。対象は会限 `1GlkSFdnCcc`（アカペラ歌枠）と公開 `3yRak120BMc`（2nd Album）。
+`GET /youtube/v3/videos?part=status,contentDetails&id=...` の応答で、
+`status` オブジェクトが**この 2 本では完全に一致した**（全数調査ではない）：
 
 ```
 会限: {"embeddable":true, ..., "privacyStatus":"public", ...}
@@ -104,7 +106,8 @@
 `embeddable: true` と言っているが、実際には IFrame API が `onError: 150`
 （所有者が埋め込みを許可していない）で弾く。**この用途に Data API は使えない。**
 
-判別できるのは **yt-dlp の `availability`**。cookie を付けて実行すると：
+判別できるのは **yt-dlp の `availability`**。
+`yt-dlp --skip-download --print "%(availability)s" <URL>`（cookie は `--cookies`）で：
 
 | 動画 | cookie なし | cookie あり | 状態 |
 |---|---|---|---|
@@ -112,11 +115,21 @@
 | 公開 | `public` | `public` | 正常 |
 | 削除・非公開 | `Video unavailable` | `Video unavailable` | 取得不可 |
 
-live chat とチャプターで yt-dlp は元から叩くので、**追加の呼び出しは発生しない**。
-取得不可は「不確実」なので、公開しない側へ倒すこと。
+既に yt-dlp を実行する配信では、**同じ実行に出力を足せば追加プロセスは要らない**。
+ただし「全配信でいつか自動的に埋まる」わけではない ── main には `availability` の
+取得・保存がまだ無く、実行の契機も限られている：
+
+- live chat はファイルキャッシュがあると `chatend_service.go` が yt-dlp の前に return する
+- 章節 backfill は `FindIDsWithoutChapterRaw` が **`is_hidden = FALSE`** に限定しており、
+  **判定したい非表示配信をそもそも対象にしない**
+- 新規同期しただけでコメント解析も章節取得もしていない配信には、呼ぶ契機が無い
+
+なので「既存の実行に相乗りする」ことと「未実行・キャッシュ済みの配信をどう埋めるか」は
+別に決める必要がある（issue #3）。取得不可は「不確実」なので、公開しない側へ倒すこと。
 
 Holodex の `topic_id = "membersonly"` は候補の絞り込みに使えるが、**単値**なので
-`singing` などと排他になる（実測 `singing` 409 / `membersonly` 85）。バックエンドは非公開で
+`singing` などと排他になる（2026-08-21 に本番の複製 1302 本を集計したときの分布は
+`singing` 409 / `membersonly` 85。`SELECT holodex_data->>'topic_id', count(*) FROM streams GROUP BY 1`）。バックエンドは非公開で
 指定ロジックは読めない。Holodex 自身、TLdex が会限配信で表示される不具合を出しており、
 その修正は「topic を正しく見る」ではなく **「実際に再生できるかを見る」** だった
 （`Holodex/src/components/watch/WatchLiveChat.vue` の `currentTime > 0`、および CHANGELOG）。
@@ -150,7 +163,7 @@ DB セッション + `roles.permissions` に置き換わりました。判定は
 | `/api/ai-providers/*` | API キーの登録・変更 | `ai:manage` |
 | `/api/backups/*` | ダウンロード（GET）含む全操作 | `backup:manage` |
 | `GET /api/streams/{id}/comments` | Holodex / YouTube のクォータを消費（キャッシュが無いとき） | `content:edit` |
-| `GET /api/streams/{id}/chapters` | **運用者のメンバー cookie 付きで yt-dlp を起動**（同上） | `content:edit` |
+| `GET /api/streams/{id}/chapters` | **yt-dlp を起動**（cookie 設定時は運用者のメンバー資格付き。同上） | `content:edit` |
 | `GET /api/streams/{id}/holodex-songs` | Holodex を叩く（**キャッシュを見ずに毎回**） | `content:edit` |
 | `/api/streams/batch-analyze/*` | AI プロバイダーの課金。status に非表示配信の題名と ID | `content:edit` |
 
@@ -161,7 +174,7 @@ DB セッション + `roles.permissions` に置き換わりました。判定は
 > キャッシュが無いと外部へ取りに行き、運用者の API キーやメンバー cookie を使います。
 > 2026-08-22 まで既定の「安全メソッドは公開」に落ちており、未ログインの
 > `GET /api/streams/{id}/chapters` が会限配信に対して yt-dlp を起動していました
-> （実測 3.76 秒、結果を保存して返す）。**副作用や資格情報の利用がある GET を足すときは、
+> （実測 3.76 秒、結果を保存して返す。cookie が設定されていれば運用者のメンバー資格で）。**副作用や資格情報の利用がある GET を足すときは、
 > `requiredPermission` に明示的な行を書くこと。**
 >
 > 判定はルートの形で行います（`isRouteOrSubpath` / `isStreamSubresource`）。
