@@ -347,6 +347,7 @@ func (s *StreamService) toStreamResponse(stream models.Stream, tags []models.Str
 		uploaded := stream.HolodexUploadedAt.Time.Format(time.RFC3339)
 		resp.HolodexUploadedAt = &uploaded
 	}
+	resp.HolodexUploadUnknown = stream.HolodexUploadUnknown
 
 	// 生の再生可否は編集者だけに返す（判定の裏取りと backfill の進み具合を見るため）。
 	if stream.Availability.Valid {

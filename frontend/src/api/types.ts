@@ -221,9 +221,11 @@ export interface Stream {
   // 中身（セットリスト・解析結果）を公開してよいか未確認。**is_hidden とは別の軸**。
   // 立っている間、歌唱は編集者にしか返らない（曲/歌手/ランダム/プレイリストからも消える）
   is_restricted: boolean;
-  // Holodex へセットリストを送った時刻（content:edit のときだけ返る）。
-  // 秘匿にしても向こうのコピーは残るので、画面で気付けるようにする
+  // Holodex への**送信を試みた**時刻（PUT の前に記録するので「送信済み」ではない）。
+  // content:edit のときだけ返る。秘匿にしても向こうのコピーは残りうる
   holodex_uploaded_at?: string;
+  // 台帳の追跡開始より前から存在する配信。**台帳が空でも「送っていない」とは言えない**
+  holodex_upload_unknown?: boolean;
   holodex_timeline_songs?: SongSuggestion[];  // Holodex タイムライン データ
   comment_timeline_songs?: CommentSong[];     // コメント解析済みタイムライン（分析キャッシュ）
   // 解析を最後に走らせた時刻。updated_at は Holodex 同期でも動くので代用できない

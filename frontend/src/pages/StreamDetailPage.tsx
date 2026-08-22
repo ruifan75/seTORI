@@ -1727,24 +1727,29 @@ export default function StreamDetailPage() {
                       <span className="text-sm font-medium text-gray-700">セットリスト非公開</span>
                       <span className="text-xs text-gray-500">歌唱を編集者だけに見せる（会限など、公開可否が未確認のもの）</span>
                     </label>
-                    {/* **seTORI を伏せても Holodex のコピーは残る。** 向こうへは運用者の名義で
+                    {/* **seTORI を伏せても Holodex のコピーは残りうる。** 向こうへは運用者の名義で
                         書き込んでおり、seTORI からは取り消せない。
-                        
-                        判断材料を 2 つ見る。台帳（holodex_uploaded_at）は migration 054 以降の
-                        送信しか持たないので、**それが無いことを「送っていない」の根拠にはできない**
-                        ── 送信の口はそれ以前から動いていた。そこで「Holodex 側に曲がある」も
-                        合わせて見る。どちらが理由でも、確認するのは同じ Holodex のページ。
-                        
-                        文言は断定しない。台帳は PUT の**前**に書くので「送信を試みた」までしか
-                        言えず、Holodex に曲がある理由も seTORI とは限らない。 */}
+
+                        材料は 3 つ。台帳（holodex_uploaded_at）は migration 054 以降の送信しか
+                        持たず、holodex_data の曲も PUT の結果を書き戻していないので旧行では空。
+                        **どちらも無い＝送っていない、とは言えない**ので、
+                        「追跡開始より前から在る」(holodex_upload_unknown) を 3 つ目に置く。
+                        これが無いと、警告が出ないことを安全の根拠にできない。
+
+                        文言は断定しない。台帳は PUT の**前**に書くので「試みた」までしか言えず、
+                        通信に失敗していれば向こうには無い。 */}
                     {stream.is_restricted &&
-                      (stream.holodex_uploaded_at || (stream.holodex_timeline_songs?.length ?? 0) > 0) && (
+                      (stream.holodex_uploaded_at ||
+                        (stream.holodex_timeline_songs?.length ?? 0) > 0 ||
+                        stream.holodex_upload_unknown) && (
                         <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
                           {stream.holodex_uploaded_at
                             ? `${new Date(stream.holodex_uploaded_at).toLocaleDateString('ja-JP')} に Holodex への送信を試みています。`
-                            : 'Holodex 側にこの配信の曲が登録されています。'}
-                          seTORI で非公開にしても Holodex 側のデータは残ります（seTORI からは取り消せません）。
-                          必要なら Holodex 上で確認・対処してください。
+                            : (stream.holodex_timeline_songs?.length ?? 0) > 0
+                              ? 'Holodex 側にこの配信の曲が登録されています。'
+                              : 'この配信は送信記録を取り始める前からあるため、過去に Holodex へ送ったかどうか分かりません。'}
+                          seTORI で非公開にしても Holodex 側のデータは残っている可能性があります
+                          （seTORI からは取り消せません）。Holodex 上で確認してください。
                         </p>
                       )}
                   </div>

@@ -119,9 +119,13 @@ type Stream struct {
 	// 次の availability 取得で戻ってしまう。
 	IsRestricted        bool         `json:"is_restricted"`
 	RestrictionOverride sql.NullBool `json:"restriction_override"`
-	// HolodexUploadedAt は seTORI → Holodex へセットリストを送った時刻（外部コピーの台帳）。
-	// 送ったあとに秘匿へ変えても**向こうのコピーは残る**ので、編集画面で気付けるように出す。
+	// HolodexUploadedAt は seTORI → Holodex への**送信を試みた**時刻（外部コピーの台帳）。
+	// 記録は PUT の前に書くので「送信済み」ではない。秘匿へ変えても**向こうのコピーは残りうる**
+	// ので、編集画面で気付けるように出す。
 	HolodexUploadedAt sql.NullTime `json:"holodex_uploaded_at"`
+	// HolodexUploadUnknown は台帳の追跡開始より前から存在する行。
+	// **NULL の台帳を「送っていない」と読ませない**ための旗（migration 055）。
+	HolodexUploadUnknown bool `json:"holodex_upload_unknown"`
 	// 再生可否（yt-dlp 由来）。FindByID でのみ読む。3 つとも別の事実なので潰さない：
 	// AvailabilityCheckedAt が NULL なら未調査で、「調べたが公開だった」とは違う。
 	Availability          sql.NullString `json:"availability"`
