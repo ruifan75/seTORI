@@ -1,6 +1,7 @@
 package service
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -272,7 +273,7 @@ func (s *StreamService) toStreamResponse(stream models.Stream, tags []models.Str
 		StreamDate:   stream.StreamDate.Format(time.RFC3339),
 		IsProcessed:  stream.IsProcessed,
 		IsHidden:     stream.IsHidden,
-		IsRestricted: stream.IsRestricted,
+		IsRestricted: effectiveRestricted(stream),
 		CreatedAt:    stream.CreatedAt,
 		UpdatedAt:    stream.UpdatedAt,
 	}
@@ -541,13 +542,14 @@ func (s *StreamService) Update(id string, req *dto.UpdateStreamRequest) (*dto.St
 		stream.IsHidden = *req.IsHidden
 	}
 
-	// 秘匿を外すのが「中身を公開してよい」という人の判断。自動では下がらない。
+	// 秘匿の切り替えは**人の裁定として override 列へ書く**。自動判定（is_restricted）は
+	// 触らない ── 同じ列へ書くと、次の availability 取得で人の判断が消える。
 	if req.IsRestricted != nil {
-		stream.IsRestricted = *req.IsRestricted
+		stream.RestrictionOverride = sql.NullBool{Bool: *req.IsRestricted, Valid: true}
 	}
 
 	// 配信の metadata を更新する（変更可能なフィールドだけを更新し、大きな JSONB は書き戻さない）
-	if err := s.streamRepo.UpdateMetadata(id, stream.Title, stream.StreamDate, stream.IsProcessed, stream.IsHidden, stream.IsRestricted); err != nil {
+	if err := s.streamRepo.UpdateMetadata(id, stream.Title, stream.StreamDate, stream.IsProcessed, stream.IsHidden, stream.RestrictionOverride); err != nil {
 		return nil, fmt.Errorf("update stream: %w", err)
 	}
 
@@ -651,4 +653,13 @@ func playabilityOf(stream models.Stream) string {
 	//
 	// 積極的な発見（subscriber_only / 埋め込み不可 / 取得不可）はこの弱さを持たない。
 	return dto.PlayabilityPlayable
+}
+
+// effectiveRestricted は実効的な秘匿状態（人の裁定が自動判定に勝つ）。
+// SQL 側の repository.NotRestricted と同じ規則。**片方だけ変えないこと。**
+func effectiveRestricted(stream models.Stream) bool {
+	if stream.RestrictionOverride.Valid {
+		return stream.RestrictionOverride.Bool
+	}
+	return stream.IsRestricted
 }

@@ -43,3 +43,23 @@ func initialStreamHidden(topicID string, durationSeconds int, durationKnown bool
 
 	return true
 }
+
+// initialRestrictionCandidate は初回登録の時点で「会限らしい」と言えるかを見る。
+//
+// **倒す方向にしか使わない**ので、取りこぼしより過剰を選ぶ ── 見落とすと中身を公開して
+// しまうが、余分に倒しても編集者がチェックを外せばよい。
+//
+// Holodex の topic_id は単値なので `singing` などと排他になり、会限の歌枠が
+// `membersonly` にならないことがある（実測 singing 409 / membersonly 85）。
+// そのため seTORI 側のタイトル規則で付く members_only タグも併せて見る。
+func initialRestrictionCandidate(topicID string, tagIDs []string) bool {
+	if strings.EqualFold(strings.TrimSpace(topicID), "membersonly") {
+		return true
+	}
+	for _, id := range tagIDs {
+		if id == "members_only" {
+			return true
+		}
+	}
+	return false
+}

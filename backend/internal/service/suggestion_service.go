@@ -20,7 +20,9 @@ import (
 // TargetEditor は修正提案の対象（曲・アーティスト・歌唱記録）が満たすインターフェース。
 // SongService / ArtistService / PerformanceService が実装する。
 type TargetEditor interface {
-	GetEditableFields(id uuid.UUID) (map[string]string, string, error)
+	// access は読む側の立場。**秘匿された配信の歌唱は PublicAccess では取れない**
+	// （＝提案の対象にできない）。見えないものの編集は提案できない、が正しい。
+	GetEditableFields(id uuid.UUID, access repository.ViewerAccess) (map[string]string, string, error)
 	ApplyEditableFields(id uuid.UUID, fields map[string]string) error
 }
 
@@ -77,6 +79,25 @@ func (e *ConflictError) Error() string {
 
 // SuggestionActor は提案の投稿者。User が nil なら匿名投稿。
 // ClientHint は匿名投稿の同一性の手がかり（IP のハッシュ。生 IP は保持しない）。
+// actorAccess は投稿者の立場を歌唱の読み取り単位へ写す。
+//
+// **提案の投稿と自分の提案一覧はログインだけで通る**（権限は要らない）ので、
+// ここを EditorAccess で固定すると、権限の無い利用者が秘匿された配信の
+// 曲名・時刻を提案の応答から読み出せる（実測で確認した）。
+func actorAccess(actor SuggestionActor) repository.ViewerAccess {
+	if actor.System {
+		return repository.EditorAccess // seTORI 自身が積む審査待ち
+	}
+	if actor.User != nil {
+		for _, p := range actor.User.Permissions {
+			if p == "*" || p == auth.PermContentEdit {
+				return repository.EditorAccess
+			}
+		}
+	}
+	return repository.PublicAccess
+}
+
 type SuggestionActor struct {
 	User       *models.User
 	ClientHint string
@@ -153,7 +174,7 @@ func (s *SuggestionService) Create(req *dto.CreateSuggestionRequest, actor Sugge
 		return nil, err
 	}
 
-	before, label, err := editor.GetEditableFields(id)
+	before, label, err := editor.GetEditableFields(id, actorAccess(actor))
 	if err != nil {
 		return nil, err
 	}
@@ -217,7 +238,7 @@ type MissingSongCreator interface {
 	CreateFromMissingSong(p dto.MissingSongPayload) error
 	StreamLabel(streamID string) (string, error)
 	// OverlappingPerformances は提案の時間帯と重なる既存の歌唱を返す（レビュー時の注意喚起用）。
-	OverlappingPerformances(streamID string, start, end int) ([]dto.OverlapInfo, error)
+	OverlappingPerformances(streamID string, start, end int, access repository.ViewerAccess) ([]dto.OverlapInfo, error)
 }
 
 // createMissingSong は未登録曲の報告を登録する。
@@ -690,7 +711,7 @@ func (s *SuggestionService) tryAutoApply(targetType string, targetID uuid.UUID) 
 	if !ok {
 		return nil
 	}
-	current, _, err := editor.GetEditableFields(targetID)
+	current, _, err := editor.GetEditableFields(targetID, repository.EditorAccess)
 	if err != nil || current == nil {
 		return err
 	}
@@ -832,7 +853,7 @@ func (s *SuggestionService) List(status, kind string, page, limit int) (*dto.Sug
 	}
 	resp := make([]dto.SuggestionResponse, len(items))
 	for i, it := range items {
-		resp[i] = s.toSuggestionResponse(it)
+		resp[i] = s.toSuggestionResponse(it, repository.EditorAccess)
 	}
 	return &dto.SuggestionListResponse{
 		Suggestions: resp,
@@ -860,7 +881,7 @@ func (s *SuggestionService) ListMine(user *models.User, status string, page, lim
 	}
 	resp := make([]dto.SuggestionResponse, len(items))
 	for i, it := range items {
-		resp[i] = s.toSuggestionResponse(it)
+		resp[i] = s.toSuggestionResponse(it, repository.PublicAccess)
 	}
 	return &dto.SuggestionListResponse{
 		Suggestions: resp,
@@ -890,12 +911,12 @@ func (s *SuggestionService) ListGrouped(status, kind string, page, limit int) (*
 	for _, g := range groups {
 		items := make([]dto.SuggestionResponse, len(g.Suggestions))
 		for i, it := range g.Suggestions {
-			items[i] = s.toSuggestionResponse(it)
+			items[i] = s.toSuggestionResponse(it, repository.EditorAccess)
 		}
 		// 現在値はグループで1回だけ引く（提案ごとに引くと同じ対象を何度も読むことになる）
 		current := map[string]string{}
 		if editor, ok := s.editors[g.TargetType]; ok {
-			if fields, _, err := editor.GetEditableFields(g.TargetID); err == nil && fields != nil {
+			if fields, _, err := editor.GetEditableFields(g.TargetID, repository.EditorAccess); err == nil && fields != nil {
 				current = fields
 			}
 		}
@@ -967,7 +988,7 @@ func (s *SuggestionService) Merge(req *dto.MergeSuggestionsRequest, reviewer *mo
 		return nil, invalid("反映する値がありません")
 	}
 
-	current, _, err := editor.GetEditableFields(targetID)
+	current, _, err := editor.GetEditableFields(targetID, repository.EditorAccess)
 	if err != nil {
 		return nil, err
 	}
@@ -1199,7 +1220,7 @@ func changedFieldsOf(sug *models.EditSuggestion) (map[string]string, error) {
 // detectConflicts は提案時点の before_data と対象の現在値を比べ、ズレたフィールドを返す。
 // 提案が触っていないフィールド（before と after が同じ）のズレは無視する。
 func (s *SuggestionService) detectConflicts(editor TargetEditor, sug *models.EditSuggestion) (map[string]FieldConflict, error) {
-	current, _, err := editor.GetEditableFields(sug.TargetID)
+	current, _, err := editor.GetEditableFields(sug.TargetID, repository.EditorAccess)
 	if err != nil {
 		return nil, err
 	}
@@ -1393,7 +1414,10 @@ func actorLabel(actor SuggestionActor) string {
 	return "anonymous"
 }
 
-func (s *SuggestionService) toSuggestionResponse(m models.EditSuggestion) dto.SuggestionResponse {
+// access は**呼び出し元の立場**。重なり警告は秘匿された配信の曲名と時刻を含むので、
+// ここを PublicAccess で通さないと、権限の無い利用者が自分の提案一覧から中身を読める
+// （POST /api/suggestions も GET /api/suggestions/mine もログインだけで通る）。
+func (s *SuggestionService) toSuggestionResponse(m models.EditSuggestion, access repository.ViewerAccess) dto.SuggestionResponse {
 	before := map[string]string{}
 	after := map[string]string{}
 	_ = json.Unmarshal(m.BeforeData, &before)
@@ -1424,7 +1448,7 @@ func (s *SuggestionService) toSuggestionResponse(m models.EditSuggestion) dto.Su
 			// 既に登録されている曲を報告していないか、レビュー時に気づけるようにする。
 			// 重なっていても承認は止めない（メドレーなど正当に重なる歌唱があるため）。
 			if (m.Status == "pending" || m.Status == "conflict") && s.missing != nil {
-				if ov, err := s.missing.OverlappingPerformances(p.StreamID, p.StartSeconds, p.EndSeconds); err == nil && len(ov) > 0 {
+				if ov, err := s.missing.OverlappingPerformances(p.StreamID, p.StartSeconds, p.EndSeconds, access); err == nil && len(ov) > 0 {
 					resp.Overlaps = ov
 				}
 			}

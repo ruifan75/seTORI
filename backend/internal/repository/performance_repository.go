@@ -381,7 +381,11 @@ func (r *PerformanceRepository) FindByID(id uuid.UUID, access ViewerAccess) (*Pe
 // FindOverlapping は配信内で [start, end) と時間が重なる歌唱を返す。
 // end = 0 は「動画の最後まで」なので終端なしとして扱う。
 // 未登録曲の追加提案をレビューするとき、既に登録済みの曲を指していないか気づくために使う。
-func (r *PerformanceRepository) FindOverlapping(streamID string, start, end int, excludeID uuid.UUID) ([]PerformanceWithDetails, error) {
+// access を取るのは**10 個目の reader だから**。提案の重なり警告からここへ到達でき、
+// その端点（POST /api/suggestions と GET /api/suggestions/mine）は**ログインだけで通る**。
+// access が無かった頃は、権限の無い利用者が end_seconds=0 の提案を投げるだけで
+// 秘匿された配信の曲名と時刻を overlaps として受け取れた（実測）。
+func (r *PerformanceRepository) FindOverlapping(streamID string, start, end int, excludeID uuid.UUID, access ViewerAccess) ([]PerformanceWithDetails, error) {
 	// 区間の重なり判定：既存の開始 < 提案の終了 && 提案の開始 < 既存の終了
 	// 0（終端なし）は非常に大きい値として扱う
 	const openEnd = 1 << 30
@@ -394,7 +398,7 @@ func (r *PerformanceRepository) FindOverlapping(streamID string, start, end int,
 		  AND p.id <> $4
 		  AND p.start_seconds < $3
 		  AND $2 < (CASE WHEN p.end_seconds = 0 THEN `+fmt.Sprint(openEnd)+` ELSE p.end_seconds END)
-		ORDER BY p.start_seconds`, streamID, start, proposedEnd, excludeID)
+		ORDER BY p.start_seconds`+access.restrictClause(), streamID, start, proposedEnd, excludeID)
 }
 
 // Update 既存の演出を ID を保ったまま更新する。
@@ -868,6 +872,20 @@ const (
 	EditorAccess
 )
 
+// NotRestricted は「実効的に秘匿されていない」を表す SQL 式を返す。
+//
+// **人の裁定が自動判定に勝つ。** restriction_override は NULL＝未裁定 /
+// TRUE＝伏せる / FALSE＝公開してよい で、is_restricted（自動判定の候補）より優先する。
+// 1 列で兼ねていた頃は、人が解除しても次の availability 取得で戻っていた
+// （会限は chapters / live chat / backfill から繰り返し取り直される）。
+//
+// alias は streams のテーブル別名。**別名を引数にしているのは、歌唱を数える SQL が
+// st / s / 別名なしと揃っていないため** ── 揃えるより、渡し忘れをコンパイルで
+// 止めるほうが確実。
+func NotRestricted(alias string) string {
+	return "NOT COALESCE(" + alias + ".restriction_override, " + alias + ".is_restricted)"
+}
+
 // restrictClause は WHERE / JOIN の条件へ足す文字列を返す。
 // **プレースホルダを含めない**（クエリごとに $N の番号が違うため、
 // 番号を持ち込むと足す場所ごとにずれる）。
@@ -875,7 +893,7 @@ func (a ViewerAccess) restrictClause() string {
 	if a == EditorAccess {
 		return ""
 	}
-	return " AND st.is_restricted = FALSE"
+	return " AND " + NotRestricted("st")
 }
 
 const perfDetailSelect = `
