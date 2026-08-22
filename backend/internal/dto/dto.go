@@ -222,11 +222,16 @@ type StreamResponse struct {
 	IsHidden             bool                `json:"is_hidden"`
 	HolodexTimelineSongs []SongSuggestion    `json:"holodex_timeline_songs,omitempty"` // holodex_data から解析
 	CommentTimelineSongs []CommentSong       `json:"comment_timeline_songs,omitempty"` // comment_songs から解析（分析済みキャッシュ）
-	HasCommentRaw        bool                `json:"has_comment_raw"`                  // comment_raw に解析可能なコメントがあるか
-	ChapterTimelineSongs []CommentSong       `json:"chapter_timeline_songs,omitempty"` // chapter_songs から解析（分析済みキャッシュ）
+	// HasCommentRaw は comment_raw に解析可能なコメントがあるか。
+	// **非編集者には省略する**（nil）。false を返すと「非開示」ではなく「入力が無い」に
+	// 見えてしまい、応答が実態と食い違う。
+	HasCommentRaw        *bool         `json:"has_comment_raw,omitempty"`
+	ChapterTimelineSongs []CommentSong `json:"chapter_timeline_songs,omitempty"` // chapter_songs から解析（分析済みキャッシュ）
 	// ChapterCount は配信者が付けた章節の数。-1 は「まだ調べていない」で、0（＝調べたが
 	// 章節が無い）とは別。同じ見た目にすると取得を試す導線が消える。
-	ChapterCount int `json:"chapter_count"`
+	// **非編集者には省略する**（nil）。0 は「調べたが章節が無い」を意味するので、
+	// 伏せる代わりに 0 を返すと別の事実を主張することになる。
+	ChapterCount *int `json:"chapter_count,omitempty"`
 	// CommentSongsAnalyzedAt は解析を最後に走らせた時刻。updated_at では代用できない
 	// （毎日回る Holodex 同期が全配信の updated_at を今日に押し上げる）。
 	CommentSongsAnalyzedAt *string   `json:"comment_songs_analyzed_at,omitempty"`
