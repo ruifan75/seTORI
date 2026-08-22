@@ -62,8 +62,10 @@ export default function YoutubePlayer({ videoId, onReady }: YoutubePlayerProps) 
         const origin = window.location.origin;
         const player = new YT.Player(mount, {
           origin,
+          // **器に合わせる。** 固定値にすると器の高さと食い違い、余った分が黒帯として残る。
+          // 縦横比は呼び出し側の器（aspect-video）が決める。
           width: '100%',
-          height: '390',
+          height: '100%',
           videoId: videoId,
           playerVars: {
             autoplay: 0,

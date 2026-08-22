@@ -1683,7 +1683,9 @@ export default function StreamDetailPage() {
 
         {/* Player + Timeline - 60% */}
         <div className="flex-1 min-w-0 bg-white rounded-lg shadow-sm border flex flex-col min-h-0">
-          <div className="bg-black flex-1 min-h-[200px] sm:min-h-[280px] flex items-center overflow-hidden">
+          {/* 16:9 に固定する。flex-1 で縦に伸ばすと、プレイヤーは 16:9 のままなので
+              余った高さが黒帯として残る（審査画面の器と同じ形に揃えてある）。 */}
+          <div className="bg-black w-full aspect-video overflow-hidden">
             <YoutubePlayer
               videoId={stream.id}
               onReady={(player) => {
