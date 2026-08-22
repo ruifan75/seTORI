@@ -92,6 +92,37 @@
 - **制限**：デフォルトでプロジェクトあたり 10,000 units/日。`commentThreads.list` と `channels.list` は 1 request あたり 1 unit（コメントは 100 件ごとに 1 request）。取得するのはトップレベルコメントのみで、live chat replay は従来どおり yt-dlp を使用する
 （拍手による終了時間の推定。BOT 判定を避けるための cookie 設定は `docs/DATA_COMPLETION.md`）。
 
+### 会限（メンバー限定）は Data API では判別できない
+
+実測（2026-08-21）。`part=status,contentDetails` の応答が**会限と公開で完全に同一**：
+
+```
+会限: {"embeddable":true, ..., "privacyStatus":"public", ...}
+公開: {"embeddable":true, ..., "privacyStatus":"public", ...}
+```
+
+`embeddable: true` と言っているが、実際には IFrame API が `onError: 150`
+（所有者が埋め込みを許可していない）で弾く。**この用途に Data API は使えない。**
+
+判別できるのは **yt-dlp の `availability`**。cookie を付けて実行すると：
+
+| 動画 | cookie なし | cookie あり | 状態 |
+|---|---|---|---|
+| 会限 | ERROR（members on level …） | **`subscriber_only`** | 会限 |
+| 公開 | `public` | `public` | 正常 |
+| 削除・非公開 | `Video unavailable` | `Video unavailable` | 取得不可 |
+
+live chat とチャプターで yt-dlp は元から叩くので、**追加の呼び出しは発生しない**。
+取得不可は「不確実」なので、公開しない側へ倒すこと。
+
+Holodex の `topic_id = "membersonly"` は候補の絞り込みに使えるが、**単値**なので
+`singing` などと排他になる（実測 `singing` 409 / `membersonly` 85）。バックエンドは非公開で
+指定ロジックは読めない。Holodex 自身、TLdex が会限配信で表示される不具合を出しており、
+その修正は「topic を正しく見る」ではなく **「実際に再生できるかを見る」** だった
+（`Holodex/src/components/watch/WatchLiveChat.vue` の `currentTime > 0`、および CHANGELOG）。
+
+→ **Holodex は候補抽出に、`availability` は判定に**、と役割を分ける。設計は issue #3。
+
 ## 5. iTunes Search / Lookup API（key 不要）
 
 - **コード位置**：`pkg/itunes/client.go` — `GET itunes.apple.com/search`（`entity=song&country=JP&limit=10`）と `GET .../lookup?id=`（`country=JP&lang=ja_jp`）。30s タイムアウト付き。
@@ -118,9 +149,25 @@ DB セッション + `roles.permissions` に置き換わりました。判定は
 | `POST /api/streams/{id}/comments/analyze` | AI プロバイダーの課金 | `content:edit` |
 | `/api/ai-providers/*` | API キーの登録・変更 | `ai:manage` |
 | `/api/backups/*` | ダウンロード（GET）含む全操作 | `backup:manage` |
+| `GET /api/streams/{id}/comments` | Holodex / YouTube のクォータを消費（キャッシュが無いとき） | `content:edit` |
+| `GET /api/streams/{id}/chapters` | **運用者のメンバー cookie 付きで yt-dlp を起動**（同上） | `content:edit` |
+| `GET /api/streams/{id}/holodex-songs` | Holodex を叩く（**キャッシュを見ずに毎回**） | `content:edit` |
+| `/api/streams/batch-analyze/*` | AI プロバイダーの課金。status に非表示配信の題名と ID | `content:edit` |
 
 方針は「読み取りは基本公開、書き込みはログイン + 権限、管理系リソースは
 読み取りも専用権限」。匿名で通るのは閲覧と、限定公開プレイリストの共有リンクだけです。
+
+> ⚠️ **GET だからといって安全とは限りません。** 上の 3 つの GET はどれも
+> キャッシュが無いと外部へ取りに行き、運用者の API キーやメンバー cookie を使います。
+> 2026-08-22 まで既定の「安全メソッドは公開」に落ちており、未ログインの
+> `GET /api/streams/{id}/chapters` が会限配信に対して yt-dlp を起動していました
+> （実測 3.76 秒、結果を保存して返す）。**副作用や資格情報の利用がある GET を足すときは、
+> `requiredPermission` に明示的な行を書くこと。**
+>
+> 判定はルートの形で行います（`isRouteOrSubpath` / `isStreamSubresource`）。
+> 単純な prefix / suffix にすると、将来 `/api/streams/batch-analyze-report` のような
+> 別ルートを巻き込んだり、`/api/streams/{id}/comments/raw` のようなサブリソースを
+> 素通りさせたりします。認可は ServeMux より前に path 文字列だけで決まるためです。
 
 > ⚠️ 新しいロールに権限を配るときは `sync:run` に注意してください。
 > Holodex への書き込みは**運用者本人の名義**で残り、取り消せません。
