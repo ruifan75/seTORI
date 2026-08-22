@@ -92,7 +92,8 @@ func (s *StreamService) GetAll(page, limit int, sort, dir string) (*dto.StreamLi
 	// DTO に変換する
 	streamResponses := make([]dto.StreamResponse, len(streams))
 	for i, stream := range streams {
-		streamResponses[i] = s.toStreamResponse(stream, tagsMap[stream.ID], participantsMap[stream.ID], ownersMap[stream.ID])
+		// 一覧は解析結果を載せない（編集画面だけが読むもの）
+		streamResponses[i] = s.toStreamResponse(stream, tagsMap[stream.ID], participantsMap[stream.ID], ownersMap[stream.ID], false)
 	}
 
 	totalPages := (total + limit - 1) / limit
@@ -125,7 +126,8 @@ func (s *StreamService) composeStreamList(streams []models.Stream, total, page, 
 
 	streamResponses := make([]dto.StreamResponse, len(streams))
 	for i, stream := range streams {
-		streamResponses[i] = s.toStreamResponse(stream, tagsMap[stream.ID], participantsMap[stream.ID], ownersMap[stream.ID])
+		// 一覧は解析結果を載せない（編集画面だけが読むもの）
+		streamResponses[i] = s.toStreamResponse(stream, tagsMap[stream.ID], participantsMap[stream.ID], ownersMap[stream.ID], false)
 	}
 
 	return &dto.StreamListResponse{
@@ -208,7 +210,9 @@ func (s *StreamService) GetPerformancesByTag(tagID string, page, limit int) (*dt
 }
 
 // GetByID は歌枠の詳細（セットリストを含む）を取得する。
-func (s *StreamService) GetByID(id string) (*dto.StreamDetailResponse, error) {
+// GetByID は配信の詳細を返す。includeAnalysis は解析結果を載せるか
+// （toStreamResponse のコメント参照。呼び出し側が権限を見て決める）。
+func (s *StreamService) GetByID(id string, includeAnalysis bool) (*dto.StreamDetailResponse, error) {
 	stream, err := s.streamRepo.FindByID(id)
 	if err != nil {
 		return nil, fmt.Errorf("get stream: %w", err)
@@ -220,7 +224,7 @@ func (s *StreamService) GetByID(id string) (*dto.StreamDetailResponse, error) {
 	tags, _ := s.streamRepo.GetTags(stream.ID)
 	participants, _ := s.streamRepo.GetSingers(stream.ID)
 	channelOwner, _ := s.streamRepo.GetChannelOwner(stream.ID)
-	streamResp := s.toStreamResponse(*stream, tags, participants, channelOwner)
+	streamResp := s.toStreamResponse(*stream, tags, participants, channelOwner, includeAnalysis)
 
 	// 歌唱一覧を取得する
 	performances, err := s.perfRepo.FindByStreamID(id)
@@ -240,7 +244,19 @@ func (s *StreamService) GetByID(id string) (*dto.StreamDetailResponse, error) {
 }
 
 // toStreamResponse は Model を DTO に変換する。**照合はしない**（理由は下の comment_songs の節）。
-func (s *StreamService) toStreamResponse(stream models.Stream, tags []models.StreamTag, participants []models.Singer, channelOwner *models.Singer) dto.StreamResponse {
+// toStreamResponse は配信を応答へ写す。
+//
+// includeAnalysis は解析結果（Holodex / コメント / チャプターのタイムライン）を載せるか。
+// **これらは編集画面だけが読む中間生成物** ── フロントエンドでの参照はすべて
+// StreamDetailPage の isEditing の内側にあり、閲覧者向けの画面はどれも使っていない。
+//
+// 一覧・検索では常に false。載せる理由が無いうえ、GET /api/streams/search は
+// 非表示の配信も意図的に含めるので、載せると「一覧に出していない配信の抽出結果」が
+// 未ログインから**列挙できる**（comment のタイムラインは元コメントの原文を含む）。
+//
+// 引数にして呼び出し側に選ばせているのは、あとから応答を返す経路が増えたときに
+// 黙って載せてしまわないため（コンパイルが通らないので判断を迫られる）。
+func (s *StreamService) toStreamResponse(stream models.Stream, tags []models.StreamTag, participants []models.Singer, channelOwner *models.Singer, includeAnalysis bool) dto.StreamResponse {
 	resp := dto.StreamResponse{
 		ID:          stream.ID,
 		Title:       stream.Title,
@@ -306,6 +322,14 @@ func (s *StreamService) toStreamResponse(stream models.Stream, tags []models.Str
 			ownerResp.Organization = &channelOwner.Organization.String
 		}
 		resp.ChannelOwner = &ownerResp
+	}
+
+	// 解析結果（各タイムライン・分析時刻・入力の有無）は編集画面だけが読む中間生成物。
+	// 閲覧向けの応答には載せない ── 一覧と検索は非表示の配信も含むので、
+	// 載せると「一覧に出していない配信の抽出結果」が未ログインから列挙できてしまう
+	// （コメントのタイムラインは元コメントの原文を含む）。
+	if !includeAnalysis {
+		return resp
 	}
 
 	// Holodex の timeline データを解析して追加する（完全な Video JSON から songs を抽出）
@@ -517,8 +541,9 @@ func (s *StreamService) Update(id string, req *dto.UpdateStreamRequest) (*dto.St
 		}
 	}
 
-	// 更新後のデータを返す
-	return s.GetByID(id)
+	// 更新後のデータを返す。Update は content:edit の経路なので解析結果も載せる
+	// （編集画面がそのまま使う）。
+	return s.GetByID(id, true)
 }
 
 // ========== ホーム（ランダム再生） ==========
