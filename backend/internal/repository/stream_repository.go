@@ -425,9 +425,18 @@ func (r *StreamRepository) SetInitialVisibility(streamID string, hidden bool) er
 	return nil
 }
 
-// MarkHolodexUploaded は Holodex へ送った時刻を記録する（外部コピーの台帳。migration 054）。
-// **最新の 1 回だけ持つ。** 何度送っても向こうにあるのは最新の内容なので、履歴は要らない。
-func (r *StreamRepository) MarkHolodexUploaded(streamID string) error {
+// MarkHolodexUploadAttempt は Holodex への**送信を試みた**時刻を記録する
+// （外部コピーの台帳。migration 054）。
+//
+// **「送信済み」ではない。** 呼ぶのは PUT の前で、実際に届いたかは分からない
+// （通信で失敗することも、Holodex 側が拒むこともある）。安全側に倒すための記録なので、
+// 過剰に残るぶんには構わない。
+//
+// **最新の 1 回だけ持つ。** 履歴を持たないのは、この値を「いつ送ったか」ではなく
+// 「外部にコピーがあるかもしれない」の旗として使うため。
+// なお**再送しても向こうが最新になるとは限らない** ── 既に iTunes ID がある曲は
+// PUT せず飛ばし、削除の呼び出しも無いので、こちらで直した内容が向こうに古いまま残りうる。
+func (r *StreamRepository) MarkHolodexUploadAttempt(streamID string) error {
 	_, err := r.db.Exec(`UPDATE streams SET holodex_uploaded_at = NOW() WHERE id = $1`, streamID)
 	if err != nil {
 		return fmt.Errorf("mark holodex uploaded: %w", err)

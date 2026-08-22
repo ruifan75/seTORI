@@ -1022,7 +1022,10 @@ func (s *HolodexService) normalizeHolodexInto(songs []dto.SongSuggestion) {
 //
 // 秘匿された配信の中身は送らない（歌唱の取得が PublicAccess）。ただし
 // **送ったあとに秘匿へ変わった場合、向こうのコピーは残ったまま**なので、
-// 送信時刻を記録して編集画面に出す（migration 054）。撤回するかは人が決める。
+// 送信を試みた時刻を記録して編集画面に出す（migration 054）。撤回するかは人が決める。
+//
+// 記録は**送信の前**に書き、書けなければ送らない。記録が「送信済み」ではなく
+// 「送信を試みた」を意味するのはこのため ── 実際に届いたかは Holodex 側でしか確かめられない。
 func (s *HolodexService) SyncSetoriToHolodex(streamID string) (*dto.SyncHolodexResponse, error) {
 	// 1. 配信情報を取得する
 	stream, err := s.streamRepo.FindByID(streamID)
@@ -1095,6 +1098,14 @@ func (s *HolodexService) SyncSetoriToHolodex(streamID string) (*dto.SyncHolodexR
 		// 編集画面で秘匿を外したうえで実行する。
 		perfs, err := s.perfRepo.FindByStreamID(streamID, repository.PublicAccess)
 		if err == nil && len(perfs) > 0 {
+			// **外部へ送る前に台帳を書く。書けなければ送らない。**
+			// 外部 API と DB は同じ transaction に入れられないので、どちらかに倒すしかない。
+			// 送ってから記録すると、PUT の直後に落ちた場合に「Holodex にはあるが記録は無い」
+			// が残り、**警告が出ないことを安全の根拠にできなくなる**。
+			// 逆に先に書けば、送信に失敗しても記録だけが残る（＝過剰な警告）で済む。
+			if err := s.streamRepo.MarkHolodexUploadAttempt(streamID); err != nil {
+				return nil, fmt.Errorf("送信の記録に失敗したため中止しました: %w", err)
+			}
 			for _, perf := range perfs {
 				if s.songRepo != nil {
 					song, err := s.songRepo.FindByID(perf.SongID)
@@ -1242,14 +1253,6 @@ func (s *HolodexService) SyncSetoriToHolodex(streamID string) (*dto.SyncHolodexR
 	if len(errors) > 0 {
 		message = fmt.Sprintf("同期完了：%d 曲を同期、%d 曲は登録済み、%d 曲は失敗しました", syncedCount, skippedCount, len(errors))
 		logger.Warnf("Errors during sync: %v", errors)
-	}
-
-	// 1 曲でも外へ出したなら記録する。**成功だけを数えない** ── 失敗の応答が返っても
-	// 向こうに書き込まれている可能性はあるので、送信を試みた事実として残す。
-	if syncedCount > 0 || len(errors) > 0 {
-		if err := s.streamRepo.MarkHolodexUploaded(streamID); err != nil {
-			logger.Warnf("[holodex] %s の送信記録を保存できません: %v", streamID, err)
-		}
 	}
 
 	return &dto.SyncHolodexResponse{

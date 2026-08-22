@@ -1728,14 +1728,25 @@ export default function StreamDetailPage() {
                       <span className="text-xs text-gray-500">歌唱を編集者だけに見せる（会限など、公開可否が未確認のもの）</span>
                     </label>
                     {/* **seTORI を伏せても Holodex のコピーは残る。** 向こうへは運用者の名義で
-                        書き込んでおり、seTORI からは取り消せない。忘れないよう出しておく。 */}
-                    {stream.is_restricted && stream.holodex_uploaded_at && (
-                      <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
-                        この配信のセットリストは {new Date(stream.holodex_uploaded_at).toLocaleDateString('ja-JP')} に
-                        Holodex へ送信済みです。seTORI で非公開にしても Holodex 側のデータは残ります
-                        （seTORI からは取り消せません）。
-                      </p>
-                    )}
+                        書き込んでおり、seTORI からは取り消せない。
+                        
+                        判断材料を 2 つ見る。台帳（holodex_uploaded_at）は migration 054 以降の
+                        送信しか持たないので、**それが無いことを「送っていない」の根拠にはできない**
+                        ── 送信の口はそれ以前から動いていた。そこで「Holodex 側に曲がある」も
+                        合わせて見る。どちらが理由でも、確認するのは同じ Holodex のページ。
+                        
+                        文言は断定しない。台帳は PUT の**前**に書くので「送信を試みた」までしか
+                        言えず、Holodex に曲がある理由も seTORI とは限らない。 */}
+                    {stream.is_restricted &&
+                      (stream.holodex_uploaded_at || (stream.holodex_timeline_songs?.length ?? 0) > 0) && (
+                        <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+                          {stream.holodex_uploaded_at
+                            ? `${new Date(stream.holodex_uploaded_at).toLocaleDateString('ja-JP')} に Holodex への送信を試みています。`
+                            : 'Holodex 側にこの配信の曲が登録されています。'}
+                          seTORI で非公開にしても Holodex 側のデータは残ります（seTORI からは取り消せません）。
+                          必要なら Holodex 上で確認・対処してください。
+                        </p>
+                      )}
                   </div>
                 )}
               </>

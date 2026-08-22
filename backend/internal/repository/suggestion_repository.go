@@ -284,7 +284,11 @@ func (r *SuggestionRepository) ListByCreator(userID uuid.UUID, status string, li
 				SELECT 1 FROM streams st
 				WHERE st.id = edit_suggestions.target_key AND ` + NotRestricted("st") + `
 			)
-			ELSE TRUE
+			-- 配信に紐付かない対象は秘匿の対象外。**明示した種類だけ通す** ──
+			-- ELSE TRUE にすると、将来知らない target_type が増えたときに公開側へ倒れる。
+			WHEN 'song' THEN TRUE
+			WHEN 'artist' THEN TRUE
+			ELSE FALSE
 			END
 		  )`
 	}
