@@ -1,6 +1,7 @@
 package service
 
 import (
+	"database/sql"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -124,6 +125,41 @@ func TestBothCacheKeysConsumeSalt(t *testing.T) {
 
 	if !strings.Contains(string(extractionRulesSalt()), "rules=") {
 		t.Error("salt に規則の版が入っていない")
+	}
+}
+
+// キャッシュ判定は読み取り経路と監査で同じ関数を使う。
+//
+// **写して書くとずれる。** 実際この PR の中で 3 回ずれた
+// （v1 を落とす → hash 未設定を落とす → 空の結果を落とす）。
+// 読み取り経路が要求する条件をここで固定する。
+func TestCommentCacheHit(t *testing.T) {
+	comments := []string{"0:10 Lemon / 米津玄師"}
+	canonical := hashComments(comments)
+	songs := []byte(`[{"start":10,"name":"Lemon"}]`)
+	valid := func(v string) sql.NullString { return sql.NullString{String: v, Valid: true} }
+
+	for _, tt := range []struct {
+		label  string
+		raw    string
+		stored sql.NullString
+		songs  []byte
+		want   bool
+	}{
+		{"現行の鍵・結果あり", canonical, valid(canonical), songs, true},
+		{"hash 未設定", canonical, sql.NullString{}, songs, false},
+		{"鍵が古い", canonical, valid("old"), songs, false},
+		{"結果が空配列", canonical, valid(canonical), []byte(`[]`), false},
+		{"結果が JSON null", canonical, valid(canonical), []byte(`null`), false},
+		{"結果が decode 不能", canonical, valid(canonical), []byte(`{`), false},
+		{"raw が無い", "", valid(canonical), songs, false},
+		{"結果の bytes が無い", canonical, valid(canonical), nil, false},
+	} {
+		t.Run(tt.label, func(t *testing.T) {
+			if got := commentCacheHit(tt.raw, tt.stored, tt.songs); got != tt.want {
+				t.Errorf("= %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 

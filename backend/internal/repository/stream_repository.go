@@ -224,16 +224,23 @@ type CommentHashRow struct {
 	ID         string
 	CommentRaw []byte
 	Hash       sql.NullString
+	// CommentSongs は保存済みの抽出結果そのもの。**空配列も含めて渡す。**
+	// キャッシュ判定は decode 後に 1 曲以上あることまで見るので、
+	// 「空の結果 + 現行 hash」の行も再抽出される。行ごと落とすとそれを数え落とす。
+	CommentSongs []byte
 }
 
-// FindCommentHashRows は comment_songs を持つ全歌回の (id, comment_raw, comment_songs_hash) を返す。
+// FindCommentHashRows は comment_songs を持つ全歌回の
+// (id, comment_raw, comment_songs_hash, comment_songs) を返す。
 // 抽出キャッシュの世代を数える監査に使う（BackfillCommentSongsHashes）。
 // 以前はここから hash を書き換えていたが、canonical に抽出規則の版が混ざってからは
 // **数えるだけ**（旧規則の結果へ現行版の hash を貼ると誤りが固定されるため）。
 func (r *StreamRepository) FindCommentHashRows() ([]CommentHashRow, error) {
+	// **空配列を除外しない。** キャッシュ判定は decode 後に 1 曲以上あることまで要求するので、
+	// comment_songs = '[]' の行も次の解析で再抽出される。ここで落とすと監査から消える。
 	rows, err := r.db.Query(`
-		SELECT id, comment_raw, comment_songs_hash FROM streams
-		WHERE comment_songs IS NOT NULL AND comment_songs::text NOT IN ('null', '[]')`)
+		SELECT id, comment_raw, comment_songs_hash, comment_songs FROM streams
+		WHERE comment_songs IS NOT NULL`)
 	if err != nil {
 		return nil, fmt.Errorf("query comment hash rows: %w", err)
 	}
@@ -242,7 +249,7 @@ func (r *StreamRepository) FindCommentHashRows() ([]CommentHashRow, error) {
 	var out []CommentHashRow
 	for rows.Next() {
 		var row CommentHashRow
-		if err := rows.Scan(&row.ID, &row.CommentRaw, &row.Hash); err != nil {
+		if err := rows.Scan(&row.ID, &row.CommentRaw, &row.Hash, &row.CommentSongs); err != nil {
 			return nil, fmt.Errorf("scan comment hash row: %w", err)
 		}
 		out = append(out, row)

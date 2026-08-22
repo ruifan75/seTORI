@@ -2,6 +2,7 @@ package service
 
 import (
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -100,9 +101,9 @@ func (s *CommentService) analyzeComments(videoID string, force, dryRun, adjudica
 	rawHash := hashStoredComments(stream.CommentRaw)
 
 	// キャッシュ命中：comment_songs は現在の comment_raw から計算済みなので、そのまま返して AI は呼ばない
-	if !force && rawHash != "" && len(stream.CommentSongs) > 0 {
-		cachedHash, _ := s.streamRepo.GetCommentSongsHash(videoID)
-		if cachedHash.Valid && cachedHash.String == rawHash {
+	cachedHash, _ := s.streamRepo.GetCommentSongsHash(videoID)
+	if !force && commentCacheHit(rawHash, cachedHash, stream.CommentSongs) {
+		{
 			var cached []dto.CommentSong
 			if err := json.Unmarshal(stream.CommentSongs, &cached); err == nil && len(cached) > 0 {
 				// DB 照合だけ現在の状態へ再解決する（AI は打たない）。matched_song_id は
@@ -580,13 +581,37 @@ func isLegacyExtractionHash(stored string, raw []byte) bool {
 	return stored == hashBytes(marshaled) // v1（salt 無し）
 }
 
+// commentCacheHit は保存済みの抽出結果がそのまま使えるかを返す。
+//
+// **読み取り経路と監査の両方から呼ぶこと。** 片方だけで条件を書くと、
+// 「監査は再解析不要と言うのに実際は再抽出される」というずれが生まれる。
+// 実際、この判定を写して書いていた頃の監査は 3 回ずれた
+// （v1 を落とす → hash 未設定を落とす → 空の結果を落とす）。
+//
+// rawHash が空（raw が無い／壊れている）ときは命中しない。その場合の読み取り経路は
+// キャッシュを外したあと遠隔取得を試みるので、「解析できない」ではなく「取得が要る」。
+func commentCacheHit(rawHash string, storedHash sql.NullString, storedSongs []byte) bool {
+	if rawHash == "" || len(storedSongs) == 0 {
+		return false
+	}
+	if !storedHash.Valid || storedHash.String != rawHash {
+		return false
+	}
+	var cached []dto.CommentSong
+	if err := json.Unmarshal(storedSongs, &cached); err != nil {
+		return false
+	}
+	return len(cached) > 0
+}
+
 // HashBackfillResult は comment_songs_hash 補正の結果内訳。
 type HashBackfillResult struct {
 	Total int `json:"total"` // comment_songs を持つ歌枠の数
 	// Migrated は常に 0。書き換えをやめたので残っているのは API 互換のためだけ。
 	Migrated  int `json:"migrated"`
 	AlreadyOK int `json:"already_ok"` // 現行版の hash。次の解析でキャッシュに命中する
-	// Skipped は comment_raw が空／壊れていて、そもそも解析できない数。
+	// Skipped は常に 0。分類を commentCacheHit に一本化したので使わなくなった
+	// （raw が無い行も「次の解析で再抽出される」側に入る。取得は読み取り経路が試みる）。
 	Skipped int `json:"skipped"`
 	// NeedsReanalysis は次に解析したときキャッシュに命中しない数
 	// （hash 未設定・旧世代・未知値をすべて含む）。force でなくても再抽出される。
@@ -605,9 +630,15 @@ type HashBackfillResult struct {
 // 新しい形式が増えたときに監査の答えが実装からずれる。実際、v0 だけを見ていた版は
 // 本番の v1 474 行を取りこぼし、hash 未設定の 263 行も数え落としていた。
 //
-//	stored == canonical … already_ok（そのまま使われる）
-//	stored != canonical … needs_reanalysis（NULL・v0・v1・未知値をすべて含む）
-//	canonical == ""     … skipped（raw が空／壊れていて、そもそも解析できない）
+// 判定は commentCacheHit に集約してある（読み取り経路と同じ関数）。写して書くとずれる ──
+// 実際 3 回ずれた（v1 を落とす → hash 未設定を落とす → 空の結果を落とす）。
+//
+//	キャッシュ命中する   … already_ok
+//	命中しない           … needs_reanalysis
+//
+// 「命中しない」には、hash が無い／現行の鍵と違う／保存結果が空・decode 不能／
+// ローカルの raw が無い、がすべて入る。最後のものだけは遠隔取得が要る
+// （読み取り経路はキャッシュを外したあと getComments を試みる）ので、内訳をログに出す。
 func (s *CommentService) BackfillCommentSongsHashes() (HashBackfillResult, error) {
 	rows, err := s.streamRepo.FindCommentHashRows()
 	if err != nil {
@@ -615,36 +646,34 @@ func (s *CommentService) BackfillCommentSongsHashes() (HashBackfillResult, error
 	}
 
 	res := HashBackfillResult{Total: len(rows)}
-	var legacyV0, legacyV1, noHash int
+	var noRaw, noHash, staleHash, emptyResult int
 	for _, row := range rows {
 		canonical := hashStoredComments(row.CommentRaw)
-		if canonical == "" {
-			// raw が空／壊れている。hash を計算できないので再解析もできない
-			res.Skipped++
-			continue
-		}
-		if row.Hash.Valid && row.Hash.String == canonical {
+		if commentCacheHit(canonical, row.Hash, row.CommentSongs) {
 			res.AlreadyOK++
 			continue
 		}
 
-		// ここから下は「次の解析でキャッシュに命中しない」＝再抽出される行。
-		// force でなくても再抽出されるので、放っておいても現行規則へ揃う。
+		// 命中しない＝次に解析したとき再抽出される。force でなくても再抽出される。
 		res.NeedsReanalysis++
 
-		// 内訳はログにだけ出す（何が起きているかを運用者が掴めるように）
+		// 内訳はログにだけ出す（何が起きているかを掴むため）。
+		// **世代名は付けない** ── raw bytes と正規化後が一致する行では v0 と v1 の
+		// hash が同値になるので、「どちらで作られたか」は hash からは決められない。
 		switch {
+		case canonical == "":
+			noRaw++ // ローカルの raw では判定できない。読み取り経路は遠隔取得を試みる
 		case !row.Hash.Valid || row.Hash.String == "":
 			noHash++
-		case row.Hash.String == hashBytes(row.CommentRaw):
-			legacyV0++
-		case isLegacyExtractionHash(row.Hash.String, row.CommentRaw):
-			legacyV1++
+		case row.Hash.String != canonical:
+			staleHash++ // 現行の cache key と一致しない（旧規則・旧形式・未知値のいずれか）
+		default:
+			emptyResult++ // hash は現行だが、保存結果が空／decode できない
 		}
 	}
 
-	logger.Infof("[comment] hash 監査の内訳: v0=%d v1=%d hash未設定=%d その他=%d",
-		legacyV0, legacyV1, noHash, res.NeedsReanalysis-legacyV0-legacyV1-noHash)
+	logger.Infof("[comment] 監査の内訳: raw無し=%d hash無し=%d 鍵が不一致=%d 結果が空=%d",
+		noRaw, noHash, staleHash, emptyResult)
 	logger.Infof("[comment] hash backfill 完了: total=%d migrated=%d already_ok=%d skipped=%d needs_reanalysis=%d",
 		res.Total, res.Migrated, res.AlreadyOK, res.Skipped, res.NeedsReanalysis)
 	if res.NeedsReanalysis > 0 {
