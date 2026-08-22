@@ -172,9 +172,22 @@ export default function StreamDetailPage() {
 
   const [isEditing, setIsEditing] = useState(false);
   // 再生時に実際に失敗したエラーコード。保存済みの判定より新しい事実なので優先する。
-  const [playbackErrorCode, setPlaybackErrorCode] = useState<number | null>(null);
-  // YoutubePlayer の effect 依存に入るので、毎回作り直すとプレイヤーが再生成される。
-  const handlePlaybackError = useCallback((code: number) => setPlaybackErrorCode(code), []);
+  //
+  // **配信 ID を一緒に持つこと。** `/streams/:id` は同じルートなので、別の配信へ
+  // 移っても このコンポーネントは作り直されず state が残る。コードだけを持つと、
+  // 会限で 150 を受けたあと公開配信へ移動したときにそちらも案内になり、
+  // プレイヤーを描かないので戻る道も無い。前のプレイヤーから遅れて届く
+  // イベントを取り違えないためにも要る。
+  const [playbackError, setPlaybackError] = useState<{ videoId: string; code: number } | null>(null);
+  // YoutubePlayer の effect 依存に入る。id が変わるときはプレイヤー自体も作り直すので、
+  // ここが変わって困ることは無い（毎レンダー変わるのは困る）。
+  const handlePlaybackError = useCallback(
+    (code: number) => {
+      if (!id) return;
+      setPlaybackError({ videoId: id, code });
+    },
+    [id],
+  );
   // 編集モード左上のタブ（操作 / Holodex / コメント / 生コメント）
   const [editTab, setEditTab] = useState<'actions' | 'holodex' | 'comment' | 'chapter' | 'raw'>('actions');
   // 閲覧モードのクイック編集 UI（タグ選択・参加者追加）の開閉
@@ -1170,6 +1183,8 @@ export default function StreamDetailPage() {
   // （docs/STREAM_VISIBILITY.md）。エラーコード 100 は動画が無い、101/150 は
   // 埋め込み不可（会限もここ。コードだけでは会限か埋め込み無効かを区別できない）。
   // 2 や 5 のような一時的・環境依存のコードでは案内へ切り替えない。
+  // 今開いている配信で起きた失敗だけを見る（別の配信のものは無視する）。
+  const playbackErrorCode = playbackError?.videoId === stream.id ? playbackError.code : null;
   const noticeKind: NoticeKind | null =
     playbackErrorCode === 100
       ? 'unavailable'
