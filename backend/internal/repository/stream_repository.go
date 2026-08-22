@@ -77,14 +77,15 @@ func (r *StreamRepository) FindAll(limit, offset int, includeHidden bool, sort, 
 // FindByID は動画 ID で歌枠を取得する。
 func (r *StreamRepository) FindByID(id string) (*models.Stream, error) {
 	query := `
-		SELECT id, title, stream_date, duration_seconds, thumbnail_url, holodex_data, holodex_hash, comment_raw, comment_songs, comment_songs_analyzed_at, chapter_raw, chapter_songs, is_processed, is_hidden, created_at, updated_at
+		SELECT id, title, stream_date, duration_seconds, thumbnail_url, holodex_data, holodex_hash, comment_raw, comment_songs, comment_songs_analyzed_at, chapter_raw, chapter_songs, is_processed, is_hidden, availability, playable_in_embed, availability_checked_at, created_at, updated_at
 		FROM streams WHERE id = $1`
 
 	var s models.Stream
 	err := r.db.QueryRow(query, id).Scan(
 		&s.ID, &s.Title, &s.StreamDate, &s.DurationSeconds,
 		&s.ThumbnailURL, &s.HolodexData, &s.HolodexHash, &s.CommentRaw, &s.CommentSongs, &s.CommentSongsAnalyzedAt,
-		&s.ChapterRaw, &s.ChapterSongs, &s.IsProcessed, &s.IsHidden, &s.CreatedAt, &s.UpdatedAt)
+		&s.ChapterRaw, &s.ChapterSongs, &s.IsProcessed, &s.IsHidden,
+		&s.Availability, &s.PlayableInEmbed, &s.AvailabilityCheckedAt, &s.CreatedAt, &s.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -793,6 +794,47 @@ func (r *StreamRepository) FindIDsWithoutChapterRaw() ([]string, error) {
 		ORDER BY stream_date DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("query streams without chapter_raw: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan stream id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// SaveAvailability は yt-dlp から拾った再生可否を保存する。
+//
+// **checked_at は必ず一緒に書く。** これが NULL のままだと未調査と区別できず、
+// 「調べたが値が取れなかった」配信を毎回調べ直すことになる。
+func (r *StreamRepository) SaveAvailability(id string, availability sql.NullString, playableInEmbed sql.NullBool) error {
+	_, err := r.db.Exec(`
+		UPDATE streams
+		SET availability = $2, playable_in_embed = $3, availability_checked_at = NOW()
+		WHERE id = $1`, id, availability, playableInEmbed)
+	if err != nil {
+		return fmt.Errorf("save availability: %w", err)
+	}
+	return nil
+}
+
+// FindIDsWithoutAvailability は再生可否を**まだ調べていない**配信の ID を返す（backfill 用）。
+//
+// **FindIDsWithoutChapterRaw と違い、非表示配信を除かない。** 会限の歌枠はどれも
+// 非表示に置かれているので、除くと判定したい配信がまるごと対象から落ちる
+// （チャプター側は「表示中の配信のセットリストを埋める」のが目的なので除いて正しい）。
+func (r *StreamRepository) FindIDsWithoutAvailability() ([]string, error) {
+	rows, err := r.db.Query(`
+		SELECT id FROM streams
+		WHERE availability_checked_at IS NULL
+		ORDER BY stream_date DESC`)
+	if err != nil {
+		return nil, fmt.Errorf("query streams without availability: %w", err)
 	}
 	defer rows.Close()
 

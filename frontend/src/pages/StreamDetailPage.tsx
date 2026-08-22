@@ -12,6 +12,7 @@ import { useToast } from '../components/ui/ToastContext';
 import { useAuthStore, hasPermission, PERM } from '../store/auth';
 import { usePlayerStore, type PlayerTrack } from '../store/player';
 import YoutubePlayer from '../components/YoutubePlayer';
+import UnplayableNotice from '../components/UnplayableNotice';
 import { playerSeekTo } from '../components/youtubePlayerControl';
 import type { YouTubePlayerInstance } from '../types/youtube';
 import QueueAddButton from '../components/QueueAddButton';
@@ -1692,14 +1693,24 @@ export default function StreamDetailPage() {
               この箱は縮められ 16:9 を保てない（実測 1299px で比 1.99）。
               上限そのものは 1bb43a5 で「1300px 未満でページをスクロールできるように」
               入れたものなので、直すなら上限の側の設計を見直す必要がある。issue #16 */}
-          <div className="bg-black w-full aspect-video overflow-hidden">
-            <YoutubePlayer
-              videoId={stream.id}
-              onReady={(player) => {
-                playerInstanceRef.current = player;
-              }}
-            />
-          </div>
+          {/* 再生できないと分かっている配信にはプレイヤーを描かない。必ず失敗する
+              iframe を出してから onError: 150 で黒い枠だけが残るより、理由を出す。
+              playability が undefined（判定していない応答）や unknown（未調査）の
+              ときは従来どおり描く ── 調べていないことを再生不可と読み替えない。
+              古くなることはある（アーカイブが後から会限化する等）ので、
+              PlayerBar 側の onError による退避は今までどおり残してある。 */}
+          {stream.playability && stream.playability !== 'unknown' && stream.playability !== 'playable' ? (
+            <UnplayableNotice playability={stream.playability} videoId={stream.id} />
+          ) : (
+            <div className="bg-black w-full aspect-video overflow-hidden">
+              <YoutubePlayer
+                videoId={stream.id}
+                onReady={(player) => {
+                  playerInstanceRef.current = player;
+                }}
+              />
+            </div>
+          )}
 
           <div className="border-t py-3 px-0 shrink-0">
             {/* YouTube の進捗バーと左右端を揃える（デスクトップ UI は左側の余白が少し広い）。 */}

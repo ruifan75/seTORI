@@ -108,12 +108,17 @@ type Stream struct {
 	CommentSongs           []byte `json:"comment_songs"` // JSONB - Parsed songs (undeduped)
 	// チャプター経路（3 つ目の入力元）。FindByID でのみ読む。
 	// ChapterRaw が NULL は「まだ調べていない」、[] は「調べたが章節が無い」で意味が違う。
-	ChapterRaw   []byte    `json:"chapter_raw"`   // JSONB - yt-dlp が返した章節
-	ChapterSongs []byte    `json:"chapter_songs"` // JSONB - 章節から抽出した楽曲
-	IsProcessed  bool      `json:"is_processed"`  // 処理済み
-	IsHidden     bool      `json:"is_hidden"`     // 初回登録時に判定し、その後は手動編集のみ
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ChapterRaw   []byte `json:"chapter_raw"`   // JSONB - yt-dlp が返した章節
+	ChapterSongs []byte `json:"chapter_songs"` // JSONB - 章節から抽出した楽曲
+	IsProcessed  bool   `json:"is_processed"`  // 処理済み
+	IsHidden     bool   `json:"is_hidden"`     // 初回登録時に判定し、その後は手動編集のみ
+	// 再生可否（yt-dlp 由来）。FindByID でのみ読む。3 つとも別の事実なので潰さない：
+	// AvailabilityCheckedAt が NULL なら未調査で、「調べたが公開だった」とは違う。
+	Availability          sql.NullString `json:"availability"`
+	PlayableInEmbed       sql.NullBool   `json:"playable_in_embed"`
+	AvailabilityCheckedAt sql.NullTime   `json:"availability_checked_at"`
+	CreatedAt             time.Time      `json:"created_at"`
+	UpdatedAt             time.Time      `json:"updated_at"`
 }
 
 // StreamSearchFilters 配信検索で組み合わせられる条件。
