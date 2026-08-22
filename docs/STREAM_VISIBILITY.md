@@ -108,22 +108,43 @@ Holodex の `topic_id` は単値で `singing` と排他になるため取りこ�
 **倒す方向にしか使わない**ので害はない（取りこぼしは `members_only` タグと
 `availability` が拾う）。
 
-### 落とす場所は 9 つ ＋ プレイリスト
+### 落とす場所（**次に監査するときのチェックリスト。網羅である**）
 
 歌唱を返すクエリすべてに `ViewerAccess` を必須の引数で通す
 （`PublicAccess` / `EditorAccess`）。**新しい読み取りを足した人が決めずには
 コンパイルできない**ようにするため。
 
-`FindByStreamID` / `FindBySongID` / `FindByTagID` / `FindByID` / `FindBySingerID` /
-`FindRandom` / `FindByPreset` / `FindIDsByPreset` / `CountByPreset` /
-`PlaylistRepository.ListItems`
+**① 歌唱の行を返す（11）**
+
+`PerformanceRepository` の `FindByStreamID` / `FindBySongID` / `FindByTagID` / `FindByID` /
+`FindBySingerID` / `FindRandom` / `FindByPreset` / `FindIDsByPreset` / `CountByPreset` /
+**`FindOverlapping`**、`PlaylistRepository.ListItems`
+
+**② 歌唱を*参照する*が行は返さない（7）** ── ここが 2 回とも見落とした場所
+
+| 場所 | 何が漏れるか |
+|---|---|
+| `SongRepository.GetPerformanceCount` / **`GetPerformanceCounts`**（複数形） | 曲詳細・曲一覧の件数 |
+| `SongRepository` の **`songListOrder`**（`sort=performances`） | 並び順から件数が推測できる |
+| `SingerRepository.GetPerformanceCount` | 歌手の歌唱数 |
+| **`ArtistRepository.FindSongsByArtist`** | アーティスト詳細の各曲件数と既定順 |
+| `TagRepository.SearchPerformanceTags` | 歌唱タグの使用件数 |
+| `StreamRepository.SearchStreams` の vocalist / 歌唱タグのサブクエリ | 「この配信でこの人が歌った」 |
+| **`mergeCandidateSelect`** の `perf_count_new` / `perf_count_old` | 統合候補の件数（streams を JOIN すらしていなかった） |
+| `playlistSelectWithMeta` の `item_count` | 見えていない項目の件数 |
+
+**③ 保存済みのコピー（1）** ── 対象が**あとから**秘匿になっても失効しない
+
+`SuggestionRepository.ListByCreator`。提案は投稿時の値を非正規化して持つ
+（`target_label` / `before_data` / `after_data` / `current_song_name`）ので、
+クエリに条件を足すだけでは足りず、**保存済みの提案そのものを落とす**必要がある。
+migration 052/053 は既存 86 本を一括で秘匿にしたので、そこに提案があれば同じことが起きる
+（`GET /api/suggestions/mine` は**ログインだけ**で通る）。
+**一覧と COUNT の両方**に掛けること ── DTO で落とすと「何件伏せたか」が残る。
 
 - **count も通す**（`FindBySongID` などは COUNT を別に撃つ）。DTO で落とすと
   件数から存在が漏れ、ページングも合わなくなる
-- **「歌唱の行を返すクエリ」だけでは足りない。** 歌唱を*参照する*集計と検索も同じ規則で濾す：
-  `SongRepository.GetPerformanceCount` / `SingerRepository.GetPerformanceCount` /
-  `TagRepository.SearchPerformanceTags` / `SearchStreams` の vocalist・歌唱タグの
-  サブクエリ / プレイリストの `item_count`。
+- **「歌唱の行を返すクエリ」だけでは足りない。** 上の②の一覧を見ること。
   実測で、曲の件数は 11 と出るのに一覧には 10 件しか返らず、`vocalist_id=` で検索すると
   秘匿配信が 1 件ヒットしていた（＝「この配信でこの人が歌った」が判定できた）
 - **提案の経路も塞ぐ。** `FindOverlapping` は 10 個目の reader で、

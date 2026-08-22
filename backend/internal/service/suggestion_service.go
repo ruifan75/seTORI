@@ -878,7 +878,8 @@ func (s *SuggestionService) ListMine(user *models.User, status string, page, lim
 	if limit < 1 || limit > 100 {
 		limit = 20
 	}
-	items, total, err := s.repo.ListByCreator(user.ID, status, limit, (page-1)*limit)
+	// 自分の提案でも、対象が秘匿になっていれば中身は返さない（保存済みのコピーも失効させる）。
+	items, total, err := s.repo.ListByCreator(user.ID, status, limit, (page-1)*limit, actorAccess(SuggestionActor{User: user}))
 	if err != nil {
 		return nil, err
 	}
