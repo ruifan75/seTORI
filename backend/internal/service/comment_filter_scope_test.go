@@ -124,3 +124,36 @@ func TestHashBackfillDoesNotPromoteStaleExtractions(t *testing.T) {
 		t.Error("salt に規則の版が入っていない")
 	}
 }
+
+// 旧世代の hash を両方とも「再分析が要る」と数えること。
+//
+// 本番に実際に残っているのは v1（正規化・salt 無し）で、v0（生 bytes）は
+// 02dde1d が移行済み。v0 だけを見ていると本番の該当行が「未知形式」に落ち、
+// needs_reanalysis が 0 と表示されて**運用者が「再解析不要」と誤判断する**。
+func TestIsLegacyExtractionHash(t *testing.T) {
+	comments := []string{"0:10 Lemon / 米津玄師", "52:18 Week End / 星野源"}
+	// DB から返る raw はカンマ後に空白が入りうる（正規化前）
+	raw := []byte(`["0:10 Lemon / 米津玄師", "52:18 Week End / 星野源"]`)
+	marshaled, err := json.Marshal(comments)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tt := range []struct {
+		label  string
+		stored string
+		want   bool
+	}{
+		{"v1（正規化・salt 無し。本番の実体）", hashBytes(marshaled), true},
+		{"v0（生 bytes）", hashBytes(raw), true},
+		{"現行 v2（salt あり）", hashComments(comments), false},
+		{"無関係な値", "deadbeef", false},
+		{"空", "", false},
+	} {
+		t.Run(tt.label, func(t *testing.T) {
+			if got := isLegacyExtractionHash(tt.stored, raw); got != tt.want {
+				t.Errorf("= %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

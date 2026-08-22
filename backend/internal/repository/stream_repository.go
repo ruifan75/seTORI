@@ -227,7 +227,9 @@ type CommentHashRow struct {
 }
 
 // FindCommentHashRows は comment_songs を持つ全歌回の (id, comment_raw, comment_songs_hash) を返す。
-// comment_songs_hash のアルゴリズム移行（旧: 生bytes sha → 新: 正規化 sha）補正に使う。
+// 抽出キャッシュの世代を数える監査に使う（BackfillCommentSongsHashes）。
+// 以前はここから hash を書き換えていたが、canonical に抽出規則の版が混ざってからは
+// **数えるだけ**（旧規則の結果へ現行版の hash を貼ると誤りが固定されるため）。
 func (r *StreamRepository) FindCommentHashRows() ([]CommentHashRow, error) {
 	rows, err := r.db.Query(`
 		SELECT id, comment_raw, comment_songs_hash FROM streams
