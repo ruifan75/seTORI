@@ -554,6 +554,32 @@ func (s *CommentService) BackfillCommentSongs() (int, error) {
 	return count, nil
 }
 
+// isLegacyExtractionHash は保存済み hash が「古い抽出規則で作られた」印かを返す。
+//
+// 世代が 2 つある：
+//
+//	v1 … 正規化した JSON の sha256（salt 無し）
+//	v0 … 生 JSONB bytes の sha256（02dde1d が v1 へ移行済み）
+//
+// どちらも「現行の規則では作られていない」ことを意味するので、同じ扱いにする。
+func isLegacyExtractionHash(stored string, raw []byte) bool {
+	if stored == "" || len(raw) == 0 {
+		return false
+	}
+	if stored == hashBytes(raw) { // v0
+		return true
+	}
+	var comments []string
+	if err := json.Unmarshal(raw, &comments); err != nil || len(comments) == 0 {
+		return false
+	}
+	marshaled, err := json.Marshal(comments)
+	if err != nil {
+		return false
+	}
+	return stored == hashBytes(marshaled) // v1（salt 無し）
+}
+
 // HashBackfillResult は comment_songs_hash 補正の結果内訳。
 type HashBackfillResult struct {
 	Total     int `json:"total"`      // comment_songs を持つ歌枠の数
@@ -561,7 +587,7 @@ type HashBackfillResult struct {
 	AlreadyOK int `json:"already_ok"` // 既に正規化 hash（キャッシュが有効）
 	Skipped   int `json:"skipped"`    // comment_raw が空 / hash 未設定 / 未知形式で触らなかった数
 	// NeedsReanalysis は抽出規則の版が上がったために、hash の付け替えでは救えない数。
-	// 再分析（force）でしか現行の規則に揃わない。
+	// hash が合わないので、次に分析したとき（force でなくても）再抽出されて揃う。
 	NeedsReanalysis int `json:"needs_reanalysis"`
 }
 
@@ -573,7 +599,9 @@ type HashBackfillResult struct {
 //
 // comment_raw は不変なので AI は一切呼ばない。安全のため、保存済み hash が
 // 旧アルゴリズム（生bytes sha）と一致する場合のみ正規化 hash へ差し替える。
-// 既に正規化済み・hash 未設定・未知形式のものは触らない（冪等・再実行安全）。
+// **もう書き換えはしない。監査用。** canonical に抽出規則の版が混ざったので、
+// 旧規則で作った結果へ現行版の hash を貼ると、辞書に消された曲が消えたまま固定される。
+// 何件が古い規則のままかを数えて返すだけ（該当行は次の分析で自動的に作り直される）。
 
 func (s *CommentService) BackfillCommentSongsHashes() (HashBackfillResult, error) {
 	rows, err := s.streamRepo.FindCommentHashRows()
@@ -593,8 +621,15 @@ func (s *CommentService) BackfillCommentSongsHashes() (HashBackfillResult, error
 			res.AlreadyOK++
 			continue
 		}
-		// 旧アルゴリズム（生 JSONB bytes の sha256）かどうかを見る。
-		if row.Hash.String != hashBytes(row.CommentRaw) {
+		// 現行版でない＝抽出規則が古い。**世代は 2 つあるので両方を認識する。**
+		//
+		//	v1 … 正規化した JSON の sha256（salt 無し）。**本番に実際に残っているのはこれ**
+		//	     （2026-08-22 の実測で 474 行）
+		//	v0 … 生 JSONB bytes の sha256。02dde1d が v1 へ移行済みなので実測 0 行
+		//
+		// v0 だけを見ていると、本番の 474 行が「未知形式」として skipped に落ちる。
+		// needs_reanalysis が 0 と表示され、**運用者が「再解析不要」と誤って判断する**。
+		if !isLegacyExtractionHash(row.Hash.String, row.CommentRaw) {
 			res.Skipped++
 			logger.Warnf("[comment] hash backfill: %s は未知形式のため据え置き（stored=%s）", row.ID, row.Hash.String)
 			continue
@@ -602,14 +637,14 @@ func (s *CommentService) BackfillCommentSongsHashes() (HashBackfillResult, error
 
 		// **旧形式でも hash を付け替えない。**
 		//
-		// この補正は「hash の表記形式だけが変わり、抽出そのものは変わっていない」ときのもの。
+		// この補正は元々「hash の表記形式だけが変わり、抽出そのものは変わっていない」ときのもの。
 		// canonical には抽出規則の版（comment.RulesVersion）が混ざっているので、
 		// ここで書き換えると**旧規則で作った comment_songs に現行版の hash を貼る**ことになり、
 		// 以後のキャッシュ判定が命中して再抽出されなくなる。
 		// 実際それをやると、辞書に消された曲は消えたまま固定される（issue #11 の Week End）。
 		//
 		// 表記形式の移行は再抽出なしでできるが、**規則の版は結果を計算し直さない限り昇格できない。**
-		// 該当行は再分析（force / batch-analyze の reanalyze）で現行規則へ揃える。
+		// 該当行は次に分析したとき（force でなくても hash が合わないので再抽出される）に揃う。
 		res.NeedsReanalysis++
 	}
 
