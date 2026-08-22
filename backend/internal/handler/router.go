@@ -3316,9 +3316,10 @@ func requiredPermission(method, path string) (perm string, needsAuth bool) {
 	// 実測では、未ログインの GET /api/streams/{id}/chapters がメン限配信に対して
 	// yt-dlp を起動し（3.7 秒）、結果を保存して返していた。
 	//
-	// フロントエンドからの利用も編集の文脈に限られるので、閲覧者への影響は無い：
-	// /comments は配信編集画面（isEditing）と提案レビュー画面の RawCommentsPanel から呼ばれ、
-	// どちらの導線も content:edit を要求する。/chapters と /holodex-songs は呼び出し自体が無い。
+	// フロントエンドからの利用も content:edit を持つ利用者に限られるので、閲覧者への影響は無い：
+	// /comments は配信詳細（**編集中でなくても、権限があれば入力元の時間帯を出すため**）と
+	// 提案レビュー画面の RawCommentsPanel から呼ばれ、どちらも canEdit で条件付けてある。
+	// /chapters と /holodex-songs は呼び出し自体が無い。
 	//
 	// **語尾ではなくルートの形で判定する。** 語尾だけで見ると
 	// /api/streams/search/chapters のような別の形も拾い、逆に将来
