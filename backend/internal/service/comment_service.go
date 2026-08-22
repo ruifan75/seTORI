@@ -582,27 +582,32 @@ func isLegacyExtractionHash(stored string, raw []byte) bool {
 
 // HashBackfillResult は comment_songs_hash 補正の結果内訳。
 type HashBackfillResult struct {
-	Total     int `json:"total"`      // comment_songs を持つ歌枠の数
-	Migrated  int `json:"migrated"`   // 旧アルゴリズム hash → 正規化 hash へ書き換えた数
-	AlreadyOK int `json:"already_ok"` // 既に正規化 hash（キャッシュが有効）
-	Skipped   int `json:"skipped"`    // comment_raw が空 / hash 未設定 / 未知形式で触らなかった数
-	// NeedsReanalysis は抽出規則の版が上がったために、hash の付け替えでは救えない数。
-	// hash が合わないので、次に分析したとき（force でなくても）再抽出されて揃う。
+	Total int `json:"total"` // comment_songs を持つ歌枠の数
+	// Migrated は常に 0。書き換えをやめたので残っているのは API 互換のためだけ。
+	Migrated  int `json:"migrated"`
+	AlreadyOK int `json:"already_ok"` // 現行版の hash。次の解析でキャッシュに命中する
+	// Skipped は comment_raw が空／壊れていて、そもそも解析できない数。
+	Skipped int `json:"skipped"`
+	// NeedsReanalysis は次に解析したときキャッシュに命中しない数
+	// （hash 未設定・旧世代・未知値をすべて含む）。force でなくても再抽出される。
 	NeedsReanalysis int `json:"needs_reanalysis"`
 }
 
-// BackfillCommentSongsHashes は comment_songs_hash を現行の正規化アルゴリズムへ移行する。
+// BackfillCommentSongsHashes は抽出キャッシュの状態を数える。**書き換えは一切しない（監査用）。**
 //
-// 背景: 以前は生の JSONB bytes の sha256 を保存していたが、現在のキャッシュ判定は
-// 「unmarshal → json.Marshal → sha256」の正規化 hash を使う。旧形式で保存された
-// 歌枠は hash が永遠に一致せず、force=false でも毎回 AI 再分析されていた。
+// 元は hash の表記形式を移行する処理だった（生 JSONB bytes の sha256 → 正規化 hash）。
+// いまは canonical に抽出規則の版（comment.RulesVersion）が混ざっているので、
+// 旧規則で作った comment_songs へ現行版の hash を貼ると
+// **辞書に消された曲が消えたまま固定される**（issue #11 の Week End）。
+// 表記形式の移行は再抽出なしでできるが、規則の版は結果を計算し直さない限り昇格できない。
 //
-// comment_raw は不変なので AI は一切呼ばない。安全のため、保存済み hash が
-// 旧アルゴリズム（生bytes sha）と一致する場合のみ正規化 hash へ差し替える。
-// **もう書き換えはしない。監査用。** canonical に抽出規則の版が混ざったので、
-// 旧規則で作った結果へ現行版の hash を貼ると、辞書に消された曲が消えたまま固定される。
-// 何件が古い規則のままかを数えて返すだけ（該当行は次の分析で自動的に作り直される）。
-
+// **分類は「次に解析したときキャッシュに命中するか」で行う。** 世代を列挙すると、
+// 新しい形式が増えたときに監査の答えが実装からずれる。実際、v0 だけを見ていた版は
+// 本番の v1 474 行を取りこぼし、hash 未設定の 263 行も数え落としていた。
+//
+//	stored == canonical … already_ok（そのまま使われる）
+//	stored != canonical … needs_reanalysis（NULL・v0・v1・未知値をすべて含む）
+//	canonical == ""     … skipped（raw が空／壊れていて、そもそも解析できない）
 func (s *CommentService) BackfillCommentSongsHashes() (HashBackfillResult, error) {
 	rows, err := s.streamRepo.FindCommentHashRows()
 	if err != nil {
@@ -610,44 +615,36 @@ func (s *CommentService) BackfillCommentSongsHashes() (HashBackfillResult, error
 	}
 
 	res := HashBackfillResult{Total: len(rows)}
+	var legacyV0, legacyV1, noHash int
 	for _, row := range rows {
 		canonical := hashStoredComments(row.CommentRaw)
-		// comment_raw が空／壊れている、または hash 未設定ならキャッシュ対象外なので触らない
-		if canonical == "" || !row.Hash.Valid || row.Hash.String == "" {
+		if canonical == "" {
+			// raw が空／壊れている。hash を計算できないので再解析もできない
 			res.Skipped++
 			continue
 		}
-		if row.Hash.String == canonical {
+		if row.Hash.Valid && row.Hash.String == canonical {
 			res.AlreadyOK++
 			continue
 		}
-		// 現行版でない＝抽出規則が古い。**世代は 2 つあるので両方を認識する。**
-		//
-		//	v1 … 正規化した JSON の sha256（salt 無し）。**本番に実際に残っているのはこれ**
-		//	     （2026-08-22 の実測で 474 行）
-		//	v0 … 生 JSONB bytes の sha256。02dde1d が v1 へ移行済みなので実測 0 行
-		//
-		// v0 だけを見ていると、本番の 474 行が「未知形式」として skipped に落ちる。
-		// needs_reanalysis が 0 と表示され、**運用者が「再解析不要」と誤って判断する**。
-		if !isLegacyExtractionHash(row.Hash.String, row.CommentRaw) {
-			res.Skipped++
-			logger.Warnf("[comment] hash backfill: %s は未知形式のため据え置き（stored=%s）", row.ID, row.Hash.String)
-			continue
-		}
 
-		// **旧形式でも hash を付け替えない。**
-		//
-		// この補正は元々「hash の表記形式だけが変わり、抽出そのものは変わっていない」ときのもの。
-		// canonical には抽出規則の版（comment.RulesVersion）が混ざっているので、
-		// ここで書き換えると**旧規則で作った comment_songs に現行版の hash を貼る**ことになり、
-		// 以後のキャッシュ判定が命中して再抽出されなくなる。
-		// 実際それをやると、辞書に消された曲は消えたまま固定される（issue #11 の Week End）。
-		//
-		// 表記形式の移行は再抽出なしでできるが、**規則の版は結果を計算し直さない限り昇格できない。**
-		// 該当行は次に分析したとき（force でなくても hash が合わないので再抽出される）に揃う。
+		// ここから下は「次の解析でキャッシュに命中しない」＝再抽出される行。
+		// force でなくても再抽出されるので、放っておいても現行規則へ揃う。
 		res.NeedsReanalysis++
+
+		// 内訳はログにだけ出す（何が起きているかを運用者が掴めるように）
+		switch {
+		case !row.Hash.Valid || row.Hash.String == "":
+			noHash++
+		case row.Hash.String == hashBytes(row.CommentRaw):
+			legacyV0++
+		case isLegacyExtractionHash(row.Hash.String, row.CommentRaw):
+			legacyV1++
+		}
 	}
 
+	logger.Infof("[comment] hash 監査の内訳: v0=%d v1=%d hash未設定=%d その他=%d",
+		legacyV0, legacyV1, noHash, res.NeedsReanalysis-legacyV0-legacyV1-noHash)
 	logger.Infof("[comment] hash backfill 完了: total=%d migrated=%d already_ok=%d skipped=%d needs_reanalysis=%d",
 		res.Total, res.Migrated, res.AlreadyOK, res.Skipped, res.NeedsReanalysis)
 	if res.NeedsReanalysis > 0 {
