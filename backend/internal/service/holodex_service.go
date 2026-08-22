@@ -1074,7 +1074,10 @@ func (s *HolodexService) SyncSetoriToHolodex(streamID string) (*dto.SyncHolodexR
 	var errors []string
 
 	if s.perfRepo != nil {
-		perfs, err := s.perfRepo.FindByStreamID(streamID)
+		// **Holodex への書き戻しは公開行為**（運用者の名義で外部に残る）。
+		// 秘匿された配信の中身はここから出さない ── 公開してよいと決まってから、
+		// 編集画面で秘匿を外したうえで実行する。
+		perfs, err := s.perfRepo.FindByStreamID(streamID, repository.PublicAccess)
 		if err == nil && len(perfs) > 0 {
 			for _, perf := range perfs {
 				if s.songRepo != nil {

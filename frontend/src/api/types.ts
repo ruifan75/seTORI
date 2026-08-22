@@ -218,6 +218,9 @@ export interface Stream {
   channel_owner?: Singer;  // チャンネルオーナー
   is_processed: boolean;   // 処理済み
   is_hidden: boolean;      // 非表示（初回登録後は手動編集のみ）
+  // 中身（セットリスト・解析結果）を公開してよいか未確認。**is_hidden とは別の軸**。
+  // 立っている間、歌唱は編集者にしか返らない（曲/歌手/ランダム/プレイリストからも消える）
+  is_restricted: boolean;
   holodex_timeline_songs?: SongSuggestion[];  // Holodex タイムライン データ
   comment_timeline_songs?: CommentSong[];     // コメント解析済みタイムライン（分析キャッシュ）
   // 解析を最後に走らせた時刻。updated_at は Holodex 同期でも動くので代用できない
@@ -269,6 +272,8 @@ export interface UpdateStreamRequest {
   participant_ids?: string[];
   is_processed?: boolean;
   is_hidden?: boolean;
+  // false にするのが「中身を公開してよい」という人の判断。自動では下がらない
+  is_restricted?: boolean;
 }
 
 // ========== パフォーマンス ==========

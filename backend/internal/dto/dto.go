@@ -210,18 +210,21 @@ type StreamTagResponse struct {
 }
 
 type StreamResponse struct {
-	ID                   string              `json:"id"`
-	Title                string              `json:"title"`
-	StreamDate           string              `json:"stream_date"`
-	DurationSeconds      *int32              `json:"duration_seconds,omitempty"`
-	ThumbnailURL         *string             `json:"thumbnail_url,omitempty"`
-	Tags                 []StreamTagResponse `json:"tags"`
-	Participants         []SingerResponse    `json:"participants"`
-	ChannelOwner         *SingerResponse     `json:"channel_owner,omitempty"` // チャンネル所有者
-	IsProcessed          bool                `json:"is_processed"`
-	IsHidden             bool                `json:"is_hidden"`
-	HolodexTimelineSongs []SongSuggestion    `json:"holodex_timeline_songs,omitempty"` // holodex_data から解析
-	CommentTimelineSongs []CommentSong       `json:"comment_timeline_songs,omitempty"` // comment_songs から解析（分析済みキャッシュ）
+	ID              string              `json:"id"`
+	Title           string              `json:"title"`
+	StreamDate      string              `json:"stream_date"`
+	DurationSeconds *int32              `json:"duration_seconds,omitempty"`
+	ThumbnailURL    *string             `json:"thumbnail_url,omitempty"`
+	Tags            []StreamTagResponse `json:"tags"`
+	Participants    []SingerResponse    `json:"participants"`
+	ChannelOwner    *SingerResponse     `json:"channel_owner,omitempty"` // チャンネル所有者
+	IsProcessed     bool                `json:"is_processed"`
+	IsHidden        bool                `json:"is_hidden"`
+	// IsRestricted は中身を公開してよいか未確認の配信。**閲覧者にも返す**
+	// （画面で「セットリストは未公開」と言うために要る）。旗そのものは秘密ではない。
+	IsRestricted         bool             `json:"is_restricted"`
+	HolodexTimelineSongs []SongSuggestion `json:"holodex_timeline_songs,omitempty"` // holodex_data から解析
+	CommentTimelineSongs []CommentSong    `json:"comment_timeline_songs,omitempty"` // comment_songs から解析（分析済みキャッシュ）
 	// HasCommentRaw は comment_raw に解析可能なコメントがあるか。
 	// **非編集者には省略する**（nil）。false を返すと「非開示」ではなく「入力が無い」に
 	// 見えてしまい、応答が実態と食い違う。
@@ -287,6 +290,9 @@ type UpdateStreamRequest struct {
 	ParticipantIDs []string `json:"participant_ids,omitempty"`
 	IsProcessed    *bool    `json:"is_processed,omitempty"`
 	IsHidden       *bool    `json:"is_hidden,omitempty"`
+	// IsRestricted を false にするのが「中身を公開してよい」という人の判断。
+	// 自動では下がらない（SaveAvailability は立てるだけ）。
+	IsRestricted *bool `json:"is_restricted,omitempty"`
 }
 
 // ========== 歌唱 ==========

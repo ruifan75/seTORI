@@ -1704,17 +1704,30 @@ export default function StreamDetailPage() {
                   </div>
                 )}
 
-                {/* 非表示 */}
+                {/* 非表示・セットリスト非公開。**別の軸**なので並べて出す */}
                 {canEdit && (
-                  <label className="mt-4 flex items-center gap-2 cursor-pointer w-fit">
-                    <input
-                      type="checkbox"
-                      checked={stream.is_hidden}
-                      onChange={(e) => quickSaveStream({ is_hidden: e.target.checked })}
-                      className="w-4 h-4 text-red-600 border-gray-300 rounded focus:ring-red-500"
-                    />
-                    <span className="text-sm font-medium text-gray-700">非表示</span>
-                  </label>
+                  <div className="mt-4 space-y-2">
+                    <label className="flex items-center gap-2 cursor-pointer w-fit">
+                      <input
+                        type="checkbox"
+                        checked={stream.is_hidden}
+                        onChange={(e) => quickSaveStream({ is_hidden: e.target.checked })}
+                        className="w-4 h-4 text-red-600 border-gray-300 rounded focus:ring-red-500"
+                      />
+                      <span className="text-sm font-medium text-gray-700">非表示</span>
+                      <span className="text-xs text-gray-500">一覧・発見面から外す（中身は誰でも読める）</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer w-fit">
+                      <input
+                        type="checkbox"
+                        checked={stream.is_restricted}
+                        onChange={(e) => quickSaveStream({ is_restricted: e.target.checked })}
+                        className="w-4 h-4 text-red-600 border-gray-300 rounded focus:ring-red-500"
+                      />
+                      <span className="text-sm font-medium text-gray-700">セットリスト非公開</span>
+                      <span className="text-xs text-gray-500">歌唱を編集者だけに見せる（会限など、公開可否が未確認のもの）</span>
+                    </label>
+                  </div>
                 )}
               </>
             </div>
@@ -1844,6 +1857,11 @@ export default function StreamDetailPage() {
           <div className="flex items-center gap-3">
             <h2 className="text-2xl font-bold text-gray-900">
               セットリスト ({isEditing ? editableSongs.length : stream.performances.length}曲)
+              {stream.is_restricted && (
+                <span className="ml-2 align-middle text-xs font-normal px-2 py-0.5 rounded bg-amber-100 text-amber-800">
+                  非公開
+                </span>
+              )}
             </h2>
             {!isEditing && (
               <div className="flex items-center gap-1.5">
@@ -2090,7 +2108,12 @@ export default function StreamDetailPage() {
           /* Read-only Setlist */
           stream.performances.length === 0 ? (
             <div className="text-center py-12 text-gray-500 bg-white rounded-lg border">
-              セットリストがまだ登録されていません
+              {/* **「登録されていない」と「見せていない」は別の事実。** 秘匿された配信では
+                  歌唱が返らないので performances は 0 件になるが、無いとは限らない。
+                  同じ文言にすると、利用者には「誰もまだ作っていない」に見える。 */}
+              {stream.is_restricted
+                ? 'この配信のセットリストは公開していません'
+                : 'セットリストがまだ登録されていません'}
             </div>
           ) : (
             <div className="bg-white rounded-lg shadow-sm border">

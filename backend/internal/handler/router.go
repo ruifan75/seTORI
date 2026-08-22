@@ -1836,9 +1836,9 @@ func (r *Router) handleGetStream(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// 解析結果（各タイムライン）は編集画面だけが読む中間生成物なので、
-	// 編集権限を持つ利用者にだけ載せる。
-	result, err := r.streamService.GetByID(id, userHasPermission(req, auth.PermContentEdit))
+	// 解析結果（各タイムライン）は編集画面だけが読む中間生成物、
+	// 秘匿された配信の歌唱は公開可否が未確認のもの。どちらも編集者にだけ載せる。
+	result, err := r.streamService.GetByID(id, viewerAccess(req))
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -2329,7 +2329,8 @@ func (r *Router) handleGetPerformance(w http.ResponseWriter, req *http.Request) 
 		respondError(w, http.StatusBadRequest, "無効な歌唱ID")
 		return
 	}
-	perf, err := r.performanceService.GetByID(id)
+	// **この端点は公開**（未ログインで 200）。秘匿された配信の歌唱はここから読めない。
+	perf, err := r.performanceService.GetByID(id, viewerAccess(req))
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -3332,6 +3333,18 @@ func authorize(method, path string, user *models.User) bool {
 //
 // 方針：GET などの読み取りは基本公開（閲覧）。書き込みは content:edit。
 // 管理系リソース（ユーザー/ロール/AIプロバイダー/ログ/同期）は読み取りも含めて専用権限が必要。
+// viewerAccess はリクエストの権限を歌唱の読み取り単位へ写す。
+//
+// **bool を配り歩かない。** 「解析結果を載せるか」と「秘匿された配信の中身を返すか」は
+// 別の判断だが、今はどちらも content:edit で決まる。同じ述語を 2 つの bool で持つと、
+// 片方だけ渡し忘れても型が通ってしまう。
+func viewerAccess(req *http.Request) repository.ViewerAccess {
+	if userHasPermission(req, auth.PermContentEdit) {
+		return repository.EditorAccess
+	}
+	return repository.PublicAccess
+}
+
 func requiredPermission(method, path string) (perm string, needsAuth bool) {
 	if method == http.MethodOptions {
 		return "", false

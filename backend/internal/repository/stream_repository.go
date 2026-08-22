@@ -77,14 +77,14 @@ func (r *StreamRepository) FindAll(limit, offset int, includeHidden bool, sort, 
 // FindByID は動画 ID で歌枠を取得する。
 func (r *StreamRepository) FindByID(id string) (*models.Stream, error) {
 	query := `
-		SELECT id, title, stream_date, duration_seconds, thumbnail_url, holodex_data, holodex_hash, comment_raw, comment_songs, comment_songs_analyzed_at, chapter_raw, chapter_songs, is_processed, is_hidden, availability, playable_in_embed, availability_checked_at, created_at, updated_at
+		SELECT id, title, stream_date, duration_seconds, thumbnail_url, holodex_data, holodex_hash, comment_raw, comment_songs, comment_songs_analyzed_at, chapter_raw, chapter_songs, is_processed, is_hidden, is_restricted, availability, playable_in_embed, availability_checked_at, created_at, updated_at
 		FROM streams WHERE id = $1`
 
 	var s models.Stream
 	err := r.db.QueryRow(query, id).Scan(
 		&s.ID, &s.Title, &s.StreamDate, &s.DurationSeconds,
 		&s.ThumbnailURL, &s.HolodexData, &s.HolodexHash, &s.CommentRaw, &s.CommentSongs, &s.CommentSongsAnalyzedAt,
-		&s.ChapterRaw, &s.ChapterSongs, &s.IsProcessed, &s.IsHidden,
+		&s.ChapterRaw, &s.ChapterSongs, &s.IsProcessed, &s.IsHidden, &s.IsRestricted,
 		&s.Availability, &s.PlayableInEmbed, &s.AvailabilityCheckedAt, &s.CreatedAt, &s.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -113,15 +113,15 @@ func (r *StreamRepository) Create(s *models.Stream) error {
 
 // UpdateMetadata は利用者が編集できる metadata フィールドだけを更新し、大きな JSONB（holodex_data / comment_*）には触れない。
 // 通常の情報更新で問題を含む可能性のある JSONB データを書き戻さないため。
-func (r *StreamRepository) UpdateMetadata(id string, title string, streamDate time.Time, isProcessed, isHidden bool) error {
+func (r *StreamRepository) UpdateMetadata(id string, title string, streamDate time.Time, isProcessed, isHidden, isRestricted bool) error {
 	query := `
 		UPDATE streams
-		SET title = $2, stream_date = $3, is_processed = $4, is_hidden = $5, updated_at = NOW()
+		SET title = $2, stream_date = $3, is_processed = $4, is_hidden = $5, is_restricted = $6, updated_at = NOW()
 		WHERE id = $1
 		RETURNING updated_at`
 
 	var updatedAt time.Time
-	err := r.db.QueryRow(query, id, title, streamDate, isProcessed, isHidden).Scan(&updatedAt)
+	err := r.db.QueryRow(query, id, title, streamDate, isProcessed, isHidden, isRestricted).Scan(&updatedAt)
 	if err != nil {
 		return fmt.Errorf("update stream metadata: %w", err)
 	}
@@ -815,7 +815,10 @@ func (r *StreamRepository) FindIDsWithoutChapterRaw() ([]string, error) {
 func (r *StreamRepository) SaveAvailability(id string, availability sql.NullString, playableInEmbed sql.NullBool) error {
 	_, err := r.db.Exec(`
 		UPDATE streams
-		SET availability = $2, playable_in_embed = $3, availability_checked_at = NOW()
+		SET availability = $2, playable_in_embed = $3, availability_checked_at = NOW(),
+		    -- 会限と分かったら秘匿を立てる。**外しはしない**（public は「反証が無かった」
+		    -- という弱い結論なので、それで秘匿を解くと誤って公開する。解くのは人の判断）。
+		    is_restricted = is_restricted OR $2 = 'subscriber_only'
 		WHERE id = $1`, id, availability, playableInEmbed)
 	if err != nil {
 		return fmt.Errorf("save availability: %w", err)

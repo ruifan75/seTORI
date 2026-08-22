@@ -158,15 +158,16 @@ func (r *PerformanceRepository) attachTagsAndSingers(performances []PerformanceW
 }
 
 // FindByStreamID は配信 ID に紐付くすべての歌唱を取得する（歌枠詳細ページ用）。
-func (r *PerformanceRepository) FindByStreamID(streamID string) ([]PerformanceWithDetails, error) {
+func (r *PerformanceRepository) FindByStreamID(streamID string, access ViewerAccess) ([]PerformanceWithDetails, error) {
 	query := `
 		SELECT p.id, p.stream_id, p.song_id, p.start_seconds, p.end_seconds, p.order_index,
 		       p.holodex_song_id, p.custom_tags, p.created_at, p.end_source, p.end_confirmed,
 		       s.name AS song_name, s.original_artist, s.arts, si.itunes_id
 		FROM performances p
 		JOIN songs s ON p.song_id = s.id
+		JOIN streams st ON st.id = p.stream_id
 		LEFT JOIN song_itunes si ON si.song_id = s.id AND si.is_primary
-		WHERE p.stream_id = $1
+		WHERE p.stream_id = $1` + access.restrictClause() + `
 		ORDER BY p.start_seconds ASC`
 
 	rows, err := r.db.Query(query, streamID)
@@ -212,13 +213,13 @@ func (r *PerformanceRepository) FindByStreamID(streamID string) ([]PerformanceWi
 
 // FindBySongID は楽曲 ID に紐付くすべての歌唱を取得する（逆引きの中核機能）。
 // 非表示でない配信の歌唱だけを表示する。
-func (r *PerformanceRepository) FindBySongID(songID uuid.UUID, limit, offset int) ([]PerformanceWithDetails, int, error) {
+func (r *PerformanceRepository) FindBySongID(songID uuid.UUID, limit, offset int, access ViewerAccess) ([]PerformanceWithDetails, int, error) {
 	var total int
 	err := r.db.QueryRow(`
 		SELECT COUNT(*)
 		FROM performances p
 		JOIN streams st ON p.stream_id = st.id
-		WHERE p.song_id = $1 AND st.is_hidden = FALSE
+		WHERE p.song_id = $1 AND st.is_hidden = FALSE`+access.restrictClause()+`
 	`, songID).Scan(&total)
 	if err != nil {
 		return nil, 0, fmt.Errorf("count performances: %w", err)
@@ -232,7 +233,7 @@ func (r *PerformanceRepository) FindBySongID(songID uuid.UUID, limit, offset int
 		FROM performances p
 		JOIN streams st ON p.stream_id = st.id
 		JOIN songs s ON p.song_id = s.id
-		WHERE p.song_id = $1 AND st.is_hidden = FALSE
+		WHERE p.song_id = $1 AND st.is_hidden = FALSE` + access.restrictClause() + `
 		ORDER BY st.stream_date DESC
 		LIMIT $2 OFFSET $3`
 
@@ -280,14 +281,14 @@ func (r *PerformanceRepository) FindBySongID(songID uuid.UUID, limit, offset int
 }
 
 // FindByTagID は指定の演出タグが付いた演出を新しい順で返す（タグ検索用、非表示配信は除外）。
-func (r *PerformanceRepository) FindByTagID(tagID string, limit, offset int) ([]PerformanceWithDetails, int, error) {
+func (r *PerformanceRepository) FindByTagID(tagID string, limit, offset int, access ViewerAccess) ([]PerformanceWithDetails, int, error) {
 	var total int
 	err := r.db.QueryRow(`
 		SELECT COUNT(*)
 		FROM performances p
 		JOIN streams st ON p.stream_id = st.id
 		JOIN performance_performance_tags ppt ON ppt.performance_id = p.id
-		WHERE ppt.tag_id = $1 AND st.is_hidden = FALSE
+		WHERE ppt.tag_id = $1 AND st.is_hidden = FALSE`+access.restrictClause()+`
 	`, tagID).Scan(&total)
 	if err != nil {
 		return nil, 0, fmt.Errorf("count performances by tag: %w", err)
@@ -302,7 +303,7 @@ func (r *PerformanceRepository) FindByTagID(tagID string, limit, offset int) ([]
 		JOIN streams st ON p.stream_id = st.id
 		JOIN songs s ON p.song_id = s.id
 		JOIN performance_performance_tags ppt ON ppt.performance_id = p.id
-		WHERE ppt.tag_id = $1 AND st.is_hidden = FALSE
+		WHERE ppt.tag_id = $1 AND st.is_hidden = FALSE` + access.restrictClause() + `
 		ORDER BY st.stream_date DESC, p.order_index ASC
 		LIMIT $2 OFFSET $3`
 
@@ -364,9 +365,10 @@ func (r *PerformanceRepository) Create(p *models.Performance) error {
 }
 
 // FindByID は歌唱1件を配信・楽曲情報付きで取得する。見つからなければ nil。
-// perfDetailSelect を使うため、非表示配信の歌唱も返る（編集・提案の対象になりうるため）。
-func (r *PerformanceRepository) FindByID(id uuid.UUID) (*PerformanceWithDetails, error) {
-	perfs, err := r.queryPerformanceDetails(perfDetailSelect+` WHERE p.id = $1`, id)
+// perfDetailSelect を使うため、**非表示**配信の歌唱も返る（編集・提案の対象になりうるため）。
+// **秘匿**された配信は access で落とす ── この端点は公開なので、既定に頼らない。
+func (r *PerformanceRepository) FindByID(id uuid.UUID, access ViewerAccess) (*PerformanceWithDetails, error) {
+	perfs, err := r.queryPerformanceDetails(perfDetailSelect+` WHERE p.id = $1`+access.restrictClause(), id)
 	if err != nil {
 		return nil, err
 	}
@@ -768,14 +770,14 @@ func (r *PerformanceRepository) DeleteByStreamID(streamID string) error {
 
 // FindBySingerID は歌手 ID に紐付くすべての歌唱を取得する（ページング対応）。
 // 非表示でない配信の歌唱だけを表示する。
-func (r *PerformanceRepository) FindBySingerID(singerID string, limit, offset int, sort, dir string) ([]PerformanceWithDetails, int, error) {
+func (r *PerformanceRepository) FindBySingerID(singerID string, limit, offset int, sort, dir string, access ViewerAccess) ([]PerformanceWithDetails, int, error) {
 	var total int
 	err := r.db.QueryRow(`
 		SELECT COUNT(DISTINCT p.id)
 		FROM performances p
 		JOIN performance_singers ps ON p.id = ps.performance_id
 		JOIN streams st ON p.stream_id = st.id
-		WHERE ps.singer_id = $1 AND st.is_hidden = FALSE
+		WHERE ps.singer_id = $1 AND st.is_hidden = FALSE`+access.restrictClause()+`
 	`, singerID).Scan(&total)
 	if err != nil {
 		return nil, 0, fmt.Errorf("count performances: %w", err)
@@ -799,7 +801,7 @@ func (r *PerformanceRepository) FindBySingerID(singerID string, limit, offset in
 		JOIN performance_singers ps ON p.id = ps.performance_id
 		JOIN streams st ON p.stream_id = st.id
 		JOIN songs s ON p.song_id = s.id
-		WHERE ps.singer_id = $1 AND st.is_hidden = FALSE
+		WHERE ps.singer_id = $1 AND st.is_hidden = FALSE` + access.restrictClause() + `
 		ORDER BY ` + order + `
 		LIMIT $2 OFFSET $3`
 
@@ -849,6 +851,33 @@ func (r *PerformanceRepository) FindBySingerID(singerID string, limit, offset in
 // ========== ホーム：ランダム再生 ==========
 
 // perfDetailSelect は配信・楽曲情報付きで歌唱を引く共通 SELECT（FindByTagID と同形）。
+// ViewerAccess は歌唱を読む側の立場。**秘匿された配信（streams.is_restricted）の中身を
+// 返してよいか**を決める。
+//
+// 引数として必須にしてあるのは、**新しい読み取りを足した人が決めずには
+// コンパイルできないようにする**ため（docs/STREAM_VISIBILITY.md）。
+// 「共通の変換層で落とす」では足りない ── 歌唱を返すクエリはここだけで 9 つあり、
+// SELECT を各自で書いているものが混ざっているうえ、DTO まで持っていくと
+// **total とページングを計算した後**なので件数から存在が漏れる。
+type ViewerAccess int
+
+const (
+	// PublicAccess … 未ログインを含む一般の閲覧者。秘匿された配信の歌唱は返さない。
+	PublicAccess ViewerAccess = iota
+	// EditorAccess … content:edit を持つ利用者。秘匿された配信も編集対象なので返す。
+	EditorAccess
+)
+
+// restrictClause は WHERE / JOIN の条件へ足す文字列を返す。
+// **プレースホルダを含めない**（クエリごとに $N の番号が違うため、
+// 番号を持ち込むと足す場所ごとにずれる）。
+func (a ViewerAccess) restrictClause() string {
+	if a == EditorAccess {
+		return ""
+	}
+	return " AND st.is_restricted = FALSE"
+}
+
 const perfDetailSelect = `
 	SELECT p.id, p.stream_id, p.song_id, p.start_seconds, p.end_seconds, p.order_index,
 	       p.holodex_song_id, p.custom_tags, p.created_at, p.end_source, p.end_confirmed,
@@ -894,7 +923,7 @@ func (r *PerformanceRepository) queryPerformanceDetails(query string, args ...in
 
 // FindRandom は曲単位で重複しないランダムな歌唱を返す。
 // 非表示に加え、再生できない可能性が高い メン限・アーカイブなし の配信も除外する。
-func (r *PerformanceRepository) FindRandom(limit int, excludedSongIDs []string) ([]PerformanceWithDetails, error) {
+func (r *PerformanceRepository) FindRandom(limit int, excludedSongIDs []string, access ViewerAccess) ([]PerformanceWithDetails, error) {
 	if excludedSongIDs == nil {
 		excludedSongIDs = []string{}
 	}
@@ -903,7 +932,7 @@ func (r *PerformanceRepository) FindRandom(limit int, excludedSongIDs []string) 
 			SELECT DISTINCT ON (p.song_id) p.id
 			FROM performances p
 			JOIN streams st ON p.stream_id = st.id
-			WHERE st.is_hidden = FALSE
+			WHERE st.is_hidden = FALSE` + access.restrictClause() + `
 			  AND NOT (p.song_id = ANY($2::uuid[]))
 			  AND NOT EXISTS (
 				SELECT 1 FROM stream_stream_tags sst
@@ -936,8 +965,10 @@ type PresetFilter struct {
 // 条件の有無を SQL 文字列の組み立てではなく引数で表しているのは、プリセットが
 // 「歌手あり・タグなし」「タグあり・歌手あり」などの組み合わせで増えるため。
 // 分岐で文を作ると、増えるたびに検証していない SQL が生まれる。
-const presetWhere = `
-	WHERE st.is_hidden = FALSE
+// **const ではなく関数**にしてある：秘匿の条件は読む側の立場で変わるため。
+func presetWhere(access ViewerAccess) string {
+	return `
+	WHERE st.is_hidden = FALSE` + access.restrictClause() + `
 	  AND NOT EXISTS (
 		SELECT 1 FROM stream_stream_tags hid
 		WHERE hid.stream_id = st.id AND hid.tag_id IN ('members_only', 'unarchived')
@@ -957,6 +988,7 @@ const presetWhere = `
 	  AND (NOT $4 OR (
 		SELECT count(*) FROM performance_singers ms WHERE ms.performance_id = p.id
 	  ) > 1)`
+}
 
 // presetArgs は presetWhere へ渡す $1〜$4 を作る。
 //
@@ -984,18 +1016,20 @@ const presetOrder = `st.stream_date DESC, p.order_index, p.start_seconds, p.id`
 
 // presetLatestPerSong は条件に合う歌唱を曲ごとに 1 件（最新の配信のもの）へ畳む CTE。
 // 同じ曲を何度も歌っているため、畳まないと一覧が同じ曲で埋まる。
-const presetLatestPerSong = `
+func presetLatestPerSong(access ViewerAccess) string {
+	return `
 	WITH latest_per_song AS (
 		SELECT DISTINCT ON (p.song_id) p.id
 		FROM performances p
 		JOIN streams st ON st.id = p.stream_id
-	` + presetWhere + `
+	` + presetWhere(access) + `
 		ORDER BY p.song_id, ` + presetOrder + `
 	)`
+}
 
 // FindByPreset は条件に合う歌唱を新しい配信の順で返す（曲ごとに最新の 1 件）。
-func (r *PerformanceRepository) FindByPreset(f PresetFilter, limit int) ([]PerformanceWithDetails, error) {
-	query := presetLatestPerSong + perfDetailSelect + `
+func (r *PerformanceRepository) FindByPreset(f PresetFilter, limit int, access ViewerAccess) ([]PerformanceWithDetails, error) {
+	query := presetLatestPerSong(access) + perfDetailSelect + `
 		JOIN latest_per_song lps ON lps.id = p.id
 		ORDER BY ` + presetOrder + `
 		LIMIT $5`
@@ -1004,8 +1038,8 @@ func (r *PerformanceRepository) FindByPreset(f PresetFilter, limit int) ([]Perfo
 
 // FindIDsByPreset は FindByPreset と同じ並びの歌唱 ID だけを返す（プレイリストへのコピー用）。
 // 明細を組み立てると歌手・タグを 1 件ずつ引くことになるので、ID で足りる経路は分けている。
-func (r *PerformanceRepository) FindIDsByPreset(f PresetFilter, limit int) ([]uuid.UUID, error) {
-	query := presetLatestPerSong + `
+func (r *PerformanceRepository) FindIDsByPreset(f PresetFilter, limit int, access ViewerAccess) ([]uuid.UUID, error) {
+	query := presetLatestPerSong(access) + `
 		SELECT p.id
 		FROM performances p
 		JOIN streams st ON st.id = p.stream_id
@@ -1030,12 +1064,12 @@ func (r *PerformanceRepository) FindIDsByPreset(f PresetFilter, limit int) ([]uu
 }
 
 // CountByPreset は条件に合う曲数を返す（FindByPreset と同じく曲単位で数える）。
-func (r *PerformanceRepository) CountByPreset(f PresetFilter) (int, error) {
+func (r *PerformanceRepository) CountByPreset(f PresetFilter, access ViewerAccess) (int, error) {
 	query := `
 		SELECT count(DISTINCT p.song_id)
 		FROM performances p
 		JOIN streams st ON st.id = p.stream_id
-	` + presetWhere
+	` + presetWhere(access)
 
 	var count int
 	if err := r.db.QueryRow(query, presetArgs(f)...).Scan(&count); err != nil {

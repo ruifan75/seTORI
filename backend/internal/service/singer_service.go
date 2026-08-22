@@ -244,7 +244,8 @@ func (s *SingerService) GetPerformances(singerID string, page, limit int, sort, 
 		return nil, nil
 	}
 
-	performances, total, err := s.perfRepo.FindBySingerID(singerID, limit, offset, sort, dir)
+	// 歌手ページは発見面。秘匿された配信の歌唱は出さない。
+	performances, total, err := s.perfRepo.FindBySingerID(singerID, limit, offset, sort, dir, repository.PublicAccess)
 	if err != nil {
 		return nil, fmt.Errorf("get performances: %w", err)
 	}

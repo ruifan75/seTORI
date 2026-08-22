@@ -181,7 +181,8 @@ func (s *StreamService) GetPerformancesByTag(tagID string, page, limit int) (*dt
 	}
 	offset := (page - 1) * limit
 
-	performances, total, err := s.perfRepo.FindByTagID(tagID, limit, offset)
+	// タグページは発見面。秘匿された配信の歌唱は出さない。
+	performances, total, err := s.perfRepo.FindByTagID(tagID, limit, offset, repository.PublicAccess)
 	if err != nil {
 		return nil, fmt.Errorf("get performances by tag: %w", err)
 	}
@@ -212,7 +213,8 @@ func (s *StreamService) GetPerformancesByTag(tagID string, page, limit int) (*dt
 // GetByID は歌枠の詳細（セットリストを含む）を取得する。
 // GetByID は配信の詳細を返す。includeAnalysis は解析結果を載せるか
 // （toStreamResponse のコメント参照。呼び出し側が権限を見て決める）。
-func (s *StreamService) GetByID(id string, includeAnalysis bool) (*dto.StreamDetailResponse, error) {
+func (s *StreamService) GetByID(id string, access repository.ViewerAccess) (*dto.StreamDetailResponse, error) {
+	includeAnalysis := access == repository.EditorAccess
 	stream, err := s.streamRepo.FindByID(id)
 	if err != nil {
 		return nil, fmt.Errorf("get stream: %w", err)
@@ -231,7 +233,10 @@ func (s *StreamService) GetByID(id string, includeAnalysis bool) (*dto.StreamDet
 	streamResp.Playability = playabilityOf(*stream)
 
 	// 歌唱一覧を取得する
-	performances, err := s.perfRepo.FindByStreamID(id)
+	// **秘匿された配信の歌唱はここで落とす。** 詳細そのものは 200 のまま返す
+	// ── タイトルは YouTube 側でも会限バッジ付きで見えるので秘密ではない。
+	// 伏せたいのは「こちらが作ったセットリスト」であって、配信の存在ではない。
+	performances, err := s.perfRepo.FindByStreamID(id, access)
 	if err != nil {
 		return nil, fmt.Errorf("get performances: %w", err)
 	}
@@ -262,13 +267,14 @@ func (s *StreamService) GetByID(id string, includeAnalysis bool) (*dto.StreamDet
 // 黙って載せてしまわないため（コンパイルが通らないので判断を迫られる）。
 func (s *StreamService) toStreamResponse(stream models.Stream, tags []models.StreamTag, participants []models.Singer, channelOwner *models.Singer, includeAnalysis bool) dto.StreamResponse {
 	resp := dto.StreamResponse{
-		ID:          stream.ID,
-		Title:       stream.Title,
-		StreamDate:  stream.StreamDate.Format(time.RFC3339),
-		IsProcessed: stream.IsProcessed,
-		IsHidden:    stream.IsHidden,
-		CreatedAt:   stream.CreatedAt,
-		UpdatedAt:   stream.UpdatedAt,
+		ID:           stream.ID,
+		Title:        stream.Title,
+		StreamDate:   stream.StreamDate.Format(time.RFC3339),
+		IsProcessed:  stream.IsProcessed,
+		IsHidden:     stream.IsHidden,
+		IsRestricted: stream.IsRestricted,
+		CreatedAt:    stream.CreatedAt,
+		UpdatedAt:    stream.UpdatedAt,
 	}
 
 	if stream.DurationSeconds.Valid {
@@ -535,8 +541,13 @@ func (s *StreamService) Update(id string, req *dto.UpdateStreamRequest) (*dto.St
 		stream.IsHidden = *req.IsHidden
 	}
 
+	// 秘匿を外すのが「中身を公開してよい」という人の判断。自動では下がらない。
+	if req.IsRestricted != nil {
+		stream.IsRestricted = *req.IsRestricted
+	}
+
 	// 配信の metadata を更新する（変更可能なフィールドだけを更新し、大きな JSONB は書き戻さない）
-	if err := s.streamRepo.UpdateMetadata(id, stream.Title, stream.StreamDate, stream.IsProcessed, stream.IsHidden); err != nil {
+	if err := s.streamRepo.UpdateMetadata(id, stream.Title, stream.StreamDate, stream.IsProcessed, stream.IsHidden, stream.IsRestricted); err != nil {
 		return nil, fmt.Errorf("update stream: %w", err)
 	}
 
@@ -559,9 +570,9 @@ func (s *StreamService) Update(id string, req *dto.UpdateStreamRequest) (*dto.St
 		}
 	}
 
-	// 更新後のデータを返す。Update は content:edit の経路なので解析結果も載せる
-	// （編集画面がそのまま使う）。
-	return s.GetByID(id, true)
+	// 更新後のデータを返す。Update は content:edit の経路なので解析結果も秘匿された
+	// 歌唱も載せる（編集画面がそのまま使う）。
+	return s.GetByID(id, repository.EditorAccess)
 }
 
 // ========== ホーム（ランダム再生） ==========
@@ -587,7 +598,8 @@ func (s *StreamService) GetRandomPerformances(limit int, excludedSongIDs []strin
 	if limit < 1 || limit > 100 {
 		limit = 50
 	}
-	perfs, err := s.perfRepo.FindRandom(limit, excludedSongIDs)
+	// ランダム再生は発見面。秘匿された配信の歌唱は出さない。
+	perfs, err := s.perfRepo.FindRandom(limit, excludedSongIDs, repository.PublicAccess)
 	if err != nil {
 		return nil, fmt.Errorf("get random performances: %w", err)
 	}
