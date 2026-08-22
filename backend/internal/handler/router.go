@@ -1748,7 +1748,9 @@ func (r *Router) handleGetStream(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	result, err := r.streamService.GetByID(id)
+	// 解析結果（各タイムライン）は編集画面だけが読む中間生成物なので、
+	// 編集権限を持つ利用者にだけ載せる。
+	result, err := r.streamService.GetByID(id, userHasPermission(req, auth.PermContentEdit))
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
