@@ -133,7 +133,8 @@ func (s *SongService) GetPerformances(songID uuid.UUID, page, limit int) (*dto.S
 	}
 	offset := (page - 1) * limit
 
-	performances, total, err := s.perfRepo.FindBySongID(songID, limit, offset)
+	// 曲ページは発見面。秘匿された配信の歌唱は出さない。
+	performances, total, err := s.perfRepo.FindBySongID(songID, limit, offset, repository.PublicAccess)
 	if err != nil {
 		return nil, fmt.Errorf("get performances: %w", err)
 	}

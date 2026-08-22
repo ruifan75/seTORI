@@ -112,6 +112,9 @@ type Stream struct {
 	ChapterSongs []byte `json:"chapter_songs"` // JSONB - 章節から抽出した楽曲
 	IsProcessed  bool   `json:"is_processed"`  // 処理済み
 	IsHidden     bool   `json:"is_hidden"`     // 初回登録時に判定し、その後は手動編集のみ
+	// IsRestricted は中身（歌唱記録・解析結果）を公開してよいか未確認、という旗。
+	// **is_hidden とは別の軸**（is_hidden は「一覧の既定から外す」だけで認可境界ではない）。
+	IsRestricted bool `json:"is_restricted"`
 	// 再生可否（yt-dlp 由来）。FindByID でのみ読む。3 つとも別の事実なので潰さない：
 	// AvailabilityCheckedAt が NULL なら未調査で、「調べたが公開だった」とは違う。
 	Availability          sql.NullString `json:"availability"`

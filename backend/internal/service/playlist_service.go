@@ -244,7 +244,7 @@ func (s *PlaylistService) ListItems(id uuid.UUID, viewerID *uuid.UUID) ([]reposi
 	if p == nil || !canView(p, viewerID) {
 		return nil, ErrPlaylistNotFound
 	}
-	return s.repo.ListItems(id)
+	return s.repo.ListItems(id, repository.PublicAccess)
 }
 
 // ListItemsByShareSlug は限定公開 URL からの項目取得。
@@ -260,7 +260,7 @@ func (s *PlaylistService) ListItemsByShareSlug(slug string, viewerID *uuid.UUID)
 	if meta.Visibility == models.PlaylistPrivate && !isOwner {
 		return nil, ErrPlaylistNotFound
 	}
-	return s.repo.ListItems(meta.ID)
+	return s.repo.ListItems(meta.ID, repository.PublicAccess)
 }
 
 func (s *PlaylistService) AddItem(id, userID uuid.UUID, performanceIDStr string) error {

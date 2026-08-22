@@ -144,7 +144,8 @@ func (s *PresetService) followedSet(viewerID *uuid.UUID) (map[string]bool, error
 }
 
 func (s *PresetService) toResponse(p *Preset, followed map[string]bool) (dto.PresetPlaylistResponse, error) {
-	count, err := s.perfRepo.CountByPreset(p.Filter)
+	// プリセットは閲覧者向けの面なので、編集者にも秘匿された配信は出さない。
+	count, err := s.perfRepo.CountByPreset(p.Filter, repository.PublicAccess)
 	if err != nil {
 		return dto.PresetPlaylistResponse{}, err
 	}
@@ -229,7 +230,7 @@ func (s *PresetService) ListItems(key string, limit int) ([]repository.Performan
 	if preset == nil {
 		return nil, ErrPresetNotFound
 	}
-	return s.perfRepo.FindByPreset(preset.Filter, preset.itemLimit(limit))
+	return s.perfRepo.FindByPreset(preset.Filter, preset.itemLimit(limit), repository.PublicAccess)
 }
 
 func (s *PresetService) Follow(userID uuid.UUID, key string) error {
@@ -257,7 +258,7 @@ func (s *PresetService) AddToPlaylist(userID uuid.UUID, key string, req *dto.Add
 		return nil, ErrPresetNotFound
 	}
 
-	ids, err := s.perfRepo.FindIDsByPreset(preset.Filter, preset.itemLimit(0))
+	ids, err := s.perfRepo.FindIDsByPreset(preset.Filter, preset.itemLimit(0), repository.PublicAccess)
 	if err != nil {
 		return nil, err
 	}

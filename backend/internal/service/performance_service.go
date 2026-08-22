@@ -225,8 +225,9 @@ var (
 )
 
 // GetByID は歌唱1件を配信・楽曲情報付きで返す。見つからなければ (nil, nil)。
-func (s *PerformanceService) GetByID(id uuid.UUID) (*repository.PerformanceWithDetails, error) {
-	return s.perfRepo.FindByID(id)
+// access は呼び出し側が決める ── この端点は**公開**なので、既定を持たせない。
+func (s *PerformanceService) GetByID(id uuid.UUID, access repository.ViewerAccess) (*repository.PerformanceWithDetails, error) {
+	return s.perfRepo.FindByID(id, access)
 }
 
 // UpdatePerformance は歌唱1件を部分更新する。nil のフィールドは現状のまま。
@@ -236,7 +237,7 @@ func (s *PerformanceService) GetByID(id uuid.UUID) (*repository.PerformanceWithD
 // 1件だけ直す必要があるため、こちらを使う。performance ID は変えない
 // （プレイリストが performance_id を参照しているため）。
 func (s *PerformanceService) UpdatePerformance(id uuid.UUID, req *dto.UpdatePerformanceRequest) (*repository.PerformanceWithDetails, error) {
-	cur, err := s.perfRepo.FindByID(id)
+	cur, err := s.perfRepo.FindByID(id, repository.EditorAccess)
 	if err != nil {
 		return nil, fmt.Errorf("find performance: %w", err)
 	}
@@ -298,7 +299,7 @@ func (s *PerformanceService) UpdatePerformance(id uuid.UUID, req *dto.UpdatePerf
 		}
 	}
 
-	updated, err := s.perfRepo.FindByID(id)
+	updated, err := s.perfRepo.FindByID(id, repository.EditorAccess)
 	if err != nil {
 		return nil, fmt.Errorf("reload performance: %w", err)
 	}
@@ -468,7 +469,7 @@ func (s *PerformanceService) defaultSingerIDs(streamID string) []string {
 
 // SongLabelOf は歌唱の現在の曲名と表示ラベルを返す。歌唱が無ければ空文字。
 func (s *PerformanceService) SongLabelOf(performanceID uuid.UUID) (string, string, error) {
-	perf, err := s.perfRepo.FindByID(performanceID)
+	perf, err := s.perfRepo.FindByID(performanceID, repository.EditorAccess)
 	if err != nil {
 		return "", "", fmt.Errorf("find performance: %w", err)
 	}
@@ -526,7 +527,7 @@ func (s *PerformanceService) ApplySongSwap(performanceID uuid.UUID, p dto.SongSw
 // 自動反映は autoApplyFields の allowlist で時間軸だけに絞ってあるので、
 // ここに足しても中央値の計算には回らない。
 func (s *PerformanceService) GetEditableFields(id uuid.UUID) (map[string]string, string, error) {
-	perf, err := s.perfRepo.FindByID(id)
+	perf, err := s.perfRepo.FindByID(id, repository.EditorAccess)
 	if err != nil {
 		return nil, "", err
 	}
@@ -586,8 +587,8 @@ func (s *PerformanceService) ApplyEditableFields(id uuid.UUID, fields map[string
 // DeleteByStreamID は指定した配信の歌唱記録をすべて削除する（セットリストを明示的に全削除する場合に使用）。
 // 編集時の保存は ReconcilePerformances による差分更新を使い、ここは通らない。
 func (s *PerformanceService) DeleteByStreamID(streamID string) error {
-	// すべての歌唱を取得する
-	performances, err := s.perfRepo.FindByStreamID(streamID)
+	// **削除は必ず全件見る。** 秘匿を理由に取りこぼすと、消したつもりの歌唱が残る。
+	performances, err := s.perfRepo.FindByStreamID(streamID, repository.EditorAccess)
 	if err != nil {
 		return fmt.Errorf("find performances: %w", err)
 	}

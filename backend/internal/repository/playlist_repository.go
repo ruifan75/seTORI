@@ -274,10 +274,15 @@ func (r *PlaylistRepository) Reorder(playlistID uuid.UUID, performanceIDs []uuid
 
 // ListItems はプレイリストの歌唱を並び順で返す（配信・楽曲・タグ・歌手つき）。
 // 非表示配信の歌唱も本人のプレイリストには残す（勝手に消えると混乱するため）。
-func (r *PlaylistRepository) ListItems(playlistID uuid.UUID) ([]PerformanceWithDetails, error) {
+// ListItems はプレイリストの中身を返す。
+//
+// **非表示配信の歌唱は意図的に残す**（利用者が自分で入れたものを黙って消さない）が、
+// **秘匿された配信の歌唱は落とす** ── 公開範囲が「公開」「限定公開」のプレイリストは
+// 共有リンクだけで未ログインから読めるので、ここを通すと秘匿の意味が無くなる。
+func (r *PlaylistRepository) ListItems(playlistID uuid.UUID, access ViewerAccess) ([]PerformanceWithDetails, error) {
 	query := perfDetailSelect + `
 		JOIN playlist_items pi ON pi.performance_id = p.id
-		WHERE pi.playlist_id = $1
+		WHERE pi.playlist_id = $1` + access.restrictClause() + `
 		ORDER BY pi.position ASC`
 	return r.perf.queryPerformanceDetails(query, playlistID)
 }
