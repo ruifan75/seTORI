@@ -823,15 +823,29 @@ func (r *StreamRepository) SaveAvailability(id string, availability sql.NullStri
 	return nil
 }
 
-// FindIDsWithoutAvailability は再生可否を**まだ調べていない**配信の ID を返す（backfill 用）。
+// FindIDsNeedingAvailability は再生可否を調べる対象の ID を返す（backfill 用）。
 //
 // **FindIDsWithoutChapterRaw と違い、非表示配信を除かない。** 会限の歌枠はどれも
 // 非表示に置かれているので、除くと判定したい配信がまるごと対象から落ちる
 // （チャプター側は「表示中の配信のセットリストを埋める」のが目的なので除いて正しい）。
-func (r *StreamRepository) FindIDsWithoutAvailability() ([]string, error) {
+//
+// includeWeak を立てると、**弱い判定で確定している行も対象に戻す**。
+// `public` は yt-dlp が「反証が無かった」ときに出す既定の結論であって、
+// 公開だと確かめた証拠ではない（`_availability` は 5 つの材料が全部揃えば public を返し、
+// 会限かどうかを決める badge が取れなかった場合も「揃った」と数える）。
+// つまり **会限の配信が public と記録されうる**。害は「プレイヤーを描いて 150 で失敗する」
+// ＝この機能を入れる前と同じ挙動だが、記録済みだと二度と調べ直さないのが問題なので、
+// 調べ直す口をここに用意しておく。
+func (r *StreamRepository) FindIDsNeedingAvailability(includeWeak bool) ([]string, error) {
+	// 弱い判定＝「public かつ埋め込み可」。subscriber_only / 埋め込み不可 / 取得不可は
+	// どれも積極的な発見なので、調べ直す理由が無い。
+	where := "availability_checked_at IS NULL"
+	if includeWeak {
+		where += " OR (availability = 'public' AND playable_in_embed IS TRUE)"
+	}
 	rows, err := r.db.Query(`
 		SELECT id FROM streams
-		WHERE availability_checked_at IS NULL
+		WHERE ` + where + `
 		ORDER BY stream_date DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("query streams without availability: %w", err)

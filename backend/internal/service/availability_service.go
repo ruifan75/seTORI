@@ -134,12 +134,16 @@ func (s *AvailabilityService) save(videoID string, a ytdlpAvailability) error {
 }
 
 // Backfill は未調査の配信をまとめて調べる（非同期。進捗はログに出す）。
-// 対象に非表示を含めるのは FindIDsWithoutAvailability の注意書きのとおり。
+// 対象に非表示を含めるのは FindIDsNeedingAvailability の注意書きのとおり。
+//
+// recheckWeak を立てると、`public` で確定している行も調べ直す。
+// **`public` は「反証が無かった」という結論であって、公開だと確かめた証拠ではない**
+// ── yt-dlp は会限を決める badge が取れなかった場合も public を出す。
 //
 // **実際に使う並列数を返す。** 丸めた値を呼び出し側へ返さないと、応答は
 // 要求どおりの数を示しているのに実際は 8 で走る、という食い違いになる。
-func (s *AvailabilityService) Backfill(concurrency int) (targets, effectiveConcurrency int, err error) {
-	ids, err := s.streamRepo.FindIDsWithoutAvailability()
+func (s *AvailabilityService) Backfill(concurrency int, recheckWeak bool) (targets, effectiveConcurrency int, err error) {
+	ids, err := s.streamRepo.FindIDsNeedingAvailability(recheckWeak)
 	if err != nil {
 		return 0, 0, err
 	}

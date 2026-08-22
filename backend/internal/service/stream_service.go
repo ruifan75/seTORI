@@ -622,5 +622,18 @@ func playabilityOf(stream models.Stream) string {
 	if !stream.PlayableInEmbed.Bool {
 		return dto.PlayabilityEmbedDisabled
 	}
+	// ここに来たのは `public` かつ埋め込み可。**これは「反証が無かった」という結論で、
+	// 公開だと確かめた証拠ではない。** yt-dlp の `_availability` は 5 つの材料が
+	// 全部 non-None なら public を返すが、会限かどうかを決める badge が
+	// 取れなかった場合も（initial_data に contents はあるが
+	// videoPrimaryInfoRenderer が欠けた等）needs_subscription は False になり、
+	// 「揃った」と数えられる。つまり**会限が public と記録されうる**。
+	//
+	// そのときの実害は「プレイヤーを描いて 150 で失敗する」＝この機能を入れる前と
+	// 同じ挙動で、`PlayerBar` の onError が次の曲へ送る。**残る問題は記録済みに
+	// なることだけ**なので、`POST /api/availability/backfill?recheck=1` で
+	// この判定の行を調べ直せるようにしてある。
+	//
+	// 積極的な発見（subscriber_only / 埋め込み不可 / 取得不可）はこの弱さを持たない。
 	return dto.PlayabilityPlayable
 }
