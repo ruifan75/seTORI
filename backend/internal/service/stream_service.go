@@ -629,10 +629,13 @@ func playabilityOf(stream models.Stream) string {
 	// videoPrimaryInfoRenderer が欠けた等）needs_subscription は False になり、
 	// 「揃った」と数えられる。つまり**会限が public と記録されうる**。
 	//
-	// そのときの実害は「プレイヤーを描いて 150 で失敗する」＝この機能を入れる前と
-	// 同じ挙動で、`PlayerBar` の onError が次の曲へ送る。**残る問題は記録済みに
-	// なることだけ**なので、`POST /api/availability/backfill?recheck=1` で
-	// この判定の行を調べ直せるようにしてある。
+	// 帰結は 2 か所で塞いである：
+	//   - 配信詳細は `YoutubePlayer` の onError を拾って案内へ切り替える
+	//     （実測のほうが新しい事実なので、保存済みの判定より優先する）
+	//   - `POST /api/availability/backfill?recheck=1` でこの判定の行を調べ直せる
+	//
+	// **`PlayerBar` の onError は別のプレイヤー実体**なので、配信詳細には効かない。
+	// ここを取り違えて「退避があるから安全」と考えないこと。
 	//
 	// 積極的な発見（subscriber_only / 埋め込み不可 / 取得不可）はこの弱さを持たない。
 	return dto.PlayabilityPlayable

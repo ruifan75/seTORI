@@ -5,9 +5,13 @@ import type { YouTubePlayerEvent, YouTubePlayerInstance } from '../types/youtube
 interface YoutubePlayerProps {
   videoId: string;
   onReady?: (player: YouTubePlayerInstance) => void;
+  // 再生できなかったときのエラーコード（100=動画が無い / 101・150=埋め込み不可）。
+  // 保存済みの判定は古くなるうえ `public` は弱い結論なので、実際に失敗した事実は
+  // ここでしか得られない。
+  onError?: (code: number) => void;
 }
 
-export default function YoutubePlayer({ videoId, onReady }: YoutubePlayerProps) {
+export default function YoutubePlayer({ videoId, onReady, onError }: YoutubePlayerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   // 「どの動画を・何回目の読み込みで」初期化したか。
@@ -88,6 +92,12 @@ export default function YoutubePlayer({ videoId, onReady }: YoutubePlayerProps) 
               }
               onReady?.(event.target);
             },
+            // 保存済みの playability は古くなるし、`public` は「反証が無かった」
+            // という弱い結論でしかない（docs/STREAM_VISIBILITY.md）。実際に
+            // 再生できなかったという事実はここでしか分からないので、必ず拾う。
+            onError: (event) => {
+              onError?.(event.data);
+            },
           },
         });
         setPlayerInstance('page', player);
@@ -118,7 +128,7 @@ export default function YoutubePlayer({ videoId, onReady }: YoutubePlayerProps) 
     return () => {
       // プレイヤーを破棄しない（自動クリーンアップされるため）
     };
-  }, [videoId, onReady, reloadNonce]);
+  }, [videoId, onReady, onError, reloadNonce]);
 
   return (
     <div className="relative w-full h-full">

@@ -6,7 +6,16 @@ import type { Playability } from '../api/types';
 // あるアカウントでログインしていても再生できないので、「入れば見られる」とは書かない。
 // 削除・非公開はそもそも YouTube 側にも無いが、リンクは残す ── 復活したり
 // 別の場所へ移っていたりするので、行き止まりにしないため。
-const MESSAGES: Record<Exclude<Playability, 'unknown' | 'playable'>, { title: string; detail: string }> = {
+// NoticeKind は保存済みの判定に加えて、再生時に実際に失敗した場合を持つ。
+// **エラーコードからは会限と埋め込み無効を区別できない**（どちらも 101/150）ので、
+// 推測して片方の文言を出さず、両方の可能性を書く。
+export type NoticeKind = Exclude<Playability, 'unknown' | 'playable'> | 'playback_failed';
+
+const MESSAGES: Record<NoticeKind, { title: string; detail: string }> = {
+  playback_failed: {
+    title: 'この配信は再生できませんでした',
+    detail: 'YouTube が埋め込み再生を許可していません。メンバー限定配信か、配信者が外部サイトでの再生を無効にしている可能性があります。',
+  },
   members_only: {
     title: 'メンバー限定の配信です',
     detail: 'YouTube がメンバー限定配信の埋め込み再生を許可していないため、ここでは再生できません。メンバーシップに加入していても同じです。',
@@ -22,13 +31,13 @@ const MESSAGES: Record<Exclude<Playability, 'unknown' | 'playable'>, { title: st
 };
 
 export default function UnplayableNotice({
-  playability,
+  kind,
   videoId,
 }: {
-  playability: Exclude<Playability, 'unknown' | 'playable'>;
+  kind: NoticeKind;
   videoId: string;
 }) {
-  const { title, detail } = MESSAGES[playability];
+  const { title, detail } = MESSAGES[kind];
   return (
     <div className="w-full aspect-video bg-gray-900 text-gray-100 flex items-center justify-center p-6">
       <div className="max-w-md text-center space-y-2">

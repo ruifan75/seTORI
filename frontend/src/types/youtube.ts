@@ -21,6 +21,12 @@ export interface YouTubePlayerStateChangeEvent extends YouTubePlayerEvent {
   data: number;
 }
 
+// onError の data はエラーコード。2=パラメータ不正 / 5=HTML5 / 100=動画が無い /
+// 101・150=埋め込みが許可されていない（会限もここに来る）
+export interface YouTubePlayerErrorEvent extends YouTubePlayerEvent {
+  data: number;
+}
+
 interface YouTubePlayerOptions {
   origin?: string;
   width?: string;
@@ -31,7 +37,7 @@ interface YouTubePlayerOptions {
   events?: {
     onReady?: (event: YouTubePlayerEvent) => void;
     onStateChange?: (event: YouTubePlayerStateChangeEvent) => void;
-    onError?: (event: YouTubePlayerEvent) => void;
+    onError?: (event: YouTubePlayerErrorEvent) => void;
   };
 }
 
