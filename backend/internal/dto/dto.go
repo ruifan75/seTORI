@@ -428,9 +428,13 @@ type BatchFillStatus struct {
 	Created        int      `json:"created"`
 	Review         int      `json:"review"`
 	// Gaps は「DB にあるが入力元に無い」歌唱の件数（force 実行のみ）。
-	Gaps    int    `json:"gaps"`
-	AIAsked int    `json:"ai_asked"`
-	Message string `json:"message,omitempty"`
+	Gaps    int `json:"gaps"`
+	AIAsked int `json:"ai_asked"`
+	// Skipped は入力元を確定できず、この実行では扱わなかった配信の数。
+	// Done に混ぜない ── 「扱った」と「扱えなかった」は運用上まったく違う意味を持つ。
+	Skipped    int      `json:"skipped"`
+	SkippedIDs []string `json:"skipped_ids,omitempty"`
+	Message    string   `json:"message,omitempty"`
 }
 
 type AnalyzeCommentsResponse struct {
