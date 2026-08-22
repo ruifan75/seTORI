@@ -163,7 +163,7 @@ DB セッション + `roles.permissions` に置き換わりました。判定は
 | `/api/ai-providers/*` | API キーの登録・変更 | `ai:manage` |
 | `/api/backups/*` | ダウンロード（GET）含む全操作 | `backup:manage` |
 | `GET /api/streams/{id}/comments` | Holodex / YouTube のクォータを消費（キャッシュが無いとき） | `content:edit` |
-| `GET /api/streams/{id}/chapters` | **yt-dlp を起動**（cookie 設定時は運用者のメンバー資格付き。同上） | `content:edit` |
+| `GET /api/streams/{id}/chapters` | **yt-dlp を起動**（cookie が設定済みかつ準備成功時は運用者のメンバー資格付き。同上） | `content:edit` |
 | `GET /api/streams/{id}/holodex-songs` | Holodex を叩く（**キャッシュを見ずに毎回**） | `content:edit` |
 | `/api/streams/batch-analyze/*` | AI プロバイダーの課金。status に非表示配信の題名と ID | `content:edit` |
 
@@ -171,10 +171,14 @@ DB セッション + `roles.permissions` に置き換わりました。判定は
 読み取りも専用権限」。匿名で通るのは閲覧と、限定公開プレイリストの共有リンクだけです。
 
 > ⚠️ **GET だからといって安全とは限りません。** 上の 3 つの GET はどれも
-> キャッシュが無いと外部へ取りに行き、運用者の API キーやメンバー cookie を使います。
+> キャッシュが無いと外部へ取りに行き、運用者の API キーやメンバー cookie を**使うことがあります**
+> （cookie が付くのは設定済みかつ一時ファイルの準備に成功したときだけ。
+> `prepareCookies()` は未設定・作成失敗・書き込み失敗のいずれでも空パスを返す）。
+> ただし外部プロセスを起動する以上、cookie の有無にかかわらず保護は要ります。
 > 2026-08-22 まで既定の「安全メソッドは公開」に落ちており、未ログインの
 > `GET /api/streams/{id}/chapters` が会限配信に対して yt-dlp を起動していました
-> （実測 3.76 秒、結果を保存して返す。cookie が設定されていれば運用者のメンバー資格で）。**副作用や資格情報の利用がある GET を足すときは、
+> （実測 3.76 秒、結果を保存して返す。cookie が設定済みかつ準備に成功していれば
+> 運用者のメンバー資格で）。**副作用や資格情報の利用がある GET を足すときは、
 > `requiredPermission` に明示的な行を書くこと。**
 >
 > 判定はルートの形で行います（`isRouteOrSubpath` / `isStreamSubresource`）。
