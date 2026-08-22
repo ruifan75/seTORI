@@ -119,6 +119,9 @@ type Stream struct {
 	// 次の availability 取得で戻ってしまう。
 	IsRestricted        bool         `json:"is_restricted"`
 	RestrictionOverride sql.NullBool `json:"restriction_override"`
+	// HolodexUploadedAt は seTORI → Holodex へセットリストを送った時刻（外部コピーの台帳）。
+	// 送ったあとに秘匿へ変えても**向こうのコピーは残る**ので、編集画面で気付けるように出す。
+	HolodexUploadedAt sql.NullTime `json:"holodex_uploaded_at"`
 	// 再生可否（yt-dlp 由来）。FindByID でのみ読む。3 つとも別の事実なので潰さない：
 	// AvailabilityCheckedAt が NULL なら未調査で、「調べたが公開だった」とは違う。
 	Availability          sql.NullString `json:"availability"`

@@ -120,7 +120,7 @@ Holodex の `topic_id` は単値で `singing` と排他になるため取りこ�
 `FindBySingerID` / `FindRandom` / `FindByPreset` / `FindIDsByPreset` / `CountByPreset` /
 **`FindOverlapping`**、`PlaylistRepository.ListItems`
 
-**② 歌唱を*参照する*が行は返さない（7）** ── ここが 2 回とも見落とした場所
+**② 歌唱を*参照する*が行は返さない（8）** ── ここが 2 回とも見落とした場所
 
 | 場所 | 何が漏れるか |
 |---|---|
@@ -133,14 +133,38 @@ Holodex の `topic_id` は単値で `singing` と排他になるため取りこ�
 | **`mergeCandidateSelect`** の `perf_count_new` / `perf_count_old` | 統合候補の件数（streams を JOIN すらしていなかった） |
 | `playlistSelectWithMeta` の `item_count` | 見えていない項目の件数 |
 
-**③ 保存済みのコピー（1）** ── 対象が**あとから**秘匿になっても失効しない
+> ①は `CountByPreset` を含む。あれは行ではなく件数を返すが、
+> `ViewerAccess` を引数に取る同じ仲間なのでここに置く。②は引数を持たず、
+> SQL に条件を直書きしている場所。
 
-`SuggestionRepository.ListByCreator`。提案は投稿時の値を非正規化して持つ
-（`target_label` / `before_data` / `after_data` / `current_song_name`）ので、
-クエリに条件を足すだけでは足りず、**保存済みの提案そのものを落とす**必要がある。
-migration 052/053 は既存 86 本を一括で秘匿にしたので、そこに提案があれば同じことが起きる
-（`GET /api/suggestions/mine` は**ログインだけ**で通る）。
+**③ 保存済みのコピー（2）** ── 対象が**あとから**秘匿になっても失効しない
+
+**a. 提案（`SuggestionRepository.ListByCreator`）**
+
+提案は投稿時の値を非正規化して持つ（`target_label` / `before_data` / `after_data` /
+`current_song_name`）ので、クエリに条件を足すだけでは足りず、**保存済みの提案そのものを
+落とす**必要がある。migration 052/053 は既存 86 本を一括で秘匿にしたので、
+そこに提案があれば同じことが起きる（`GET /api/suggestions/mine` は**ログインだけ**で通る）。
+
+**条件は肯定形で書くこと。** 「秘匿の対象が `EXISTS` なら落とす」という否定形は、
+対象が削除されるとサブクエリが 0 行になって条件が true に化け、**提案が通ってしまう**。
+`edit_suggestions.target_id` に FK は無く、歌唱は編集保存や一括の撤回で消えるので実際に起きる。
+「今も存在して、かつ秘匿でない対象がある」ときだけ通す（対象が消えていれば落ちる）。
+
 **一覧と COUNT の両方**に掛けること ── DTO で落とすと「何件伏せたか」が残る。
+
+**b. Holodex へ送ったセットリスト（外部のコピー）**
+
+`SyncSetoriToHolodex` は運用者の名義で **Holodex のデータベースへ実際に書き込む**
+（`PUT https://holodex.net/api/v2/songs`）。秘匿された配信は送らないが、
+**送ったあとに秘匿へ変わった場合、向こうのコピーは残る。seTORI からは取り消せない**
+（そもそも Holodex が公開している API ではない）。
+
+自動で撤回はしない ── 外部への書き込みは運用者の判断で行うもので、
+秘匿の旗が立った拍子に seTORI が勝手に外部 API を叩くべきではない。
+代わりに**送信時刻を記録し**（`streams.holodex_uploaded_at`、migration 054）、
+秘匿された配信にその記録があれば編集画面で警告を出す。
+記録が無いと「何を外へ出したか」を後から辿れない。
 
 - **count も通す**（`FindBySongID` などは COUNT を別に撃つ）。DTO で落とすと
   件数から存在が漏れ、ページングも合わなくなる
