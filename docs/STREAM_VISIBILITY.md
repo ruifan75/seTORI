@@ -44,15 +44,33 @@ Holodex の分類もタイトルキーワード規則も自動判定であり、
 > 保証ではない。**歌唱を作った瞬間に上の経路から読める。**
 > 会限のように内容の公開可否が決まっていないものを、この列を頼りに保存しないこと。
 
-### 秘匿を入れるなら route の列挙ではなく共通層で
+### 秘匿を入れるなら route の列挙では足りない
 
 上の表は例示で、**これを route 単位で塞いでも漏れる**。実際この表は
 2 回のレビューを経てもまだ増えた（global search と歌手配下一覧は 2 巡目で見つかった）。
 
-配信と歌唱を返す共通の変換層（`toStreamResponse` / `queryPerformanceDetails` の側）で
-判定を強制するほうが、新しい route を足したときに素通りしない。
-PR #6 が解析結果でやったのと同じ形 ── 引数にして呼び出し側に選ばせれば、
-足した人はコンパイルが通らないので判断を迫られる。
+ただし **route 単位が正しい場所もある。** `/comments` `/chapters` `/holodex-songs` のように
+**endpoint 全体が編集者専用**なら、いまの `requiredPermission` が正しい。
+route の列挙が不適切なのは、**同じ endpoint の中で行ごとに秘匿を分ける**場合。
+`availability` やチャンネル同意は配信ごとに違うので、path 文字列しか見ない
+`requiredPermission` では原理的に判定できない。
+
+行ごとの秘匿を入れるなら、**viewer の文脈を受け取る visibility policy を 1 つ作り、
+それを明示的に通す**設計にすること。「共通の変換層で落とす」だけでは足りない：
+
+- `StreamService.GetByID` は `toStreamResponse` を呼んだ**後**に
+  `FindByStreamID` の結果を `Performances` へ詰める。変換層で落としても歌唱は残る
+- `GET /api/search` は `SearchStreamItem` を直接組み立て、歌手配下一覧は
+  `SingerService` の別の converter を使う。`StreamService.toStreamResponse` は共通点ではない
+- `PerformanceRepository` も、`queryPerformanceDetails` を通るのは `FindByID` /
+  overlap / playlist / random / preset だけ。`FindByStreamID` `FindBySongID`
+  `FindByTagID` `FindBySingerID` はそれぞれ独自の query を持つ
+- DTO 変換の時点で落とすと、**`total` とページングを計算した後**なので、
+  件数から存在が漏れ、空行も残る
+
+つまり一覧 query（**count を含む**）・詳細 service・DTO の全部に access mode を通す必要がある。
+**新しい呼び出し元が access mode 無しではコンパイルできない形にすること** ──
+PR #6 が解析結果でやったのと同じ考え方だが、通す場所はこちらのほうが多い。
 
 ### 歌唱を作るなら公開まで含めて設計する
 
