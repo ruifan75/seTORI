@@ -219,6 +219,12 @@ func (r *SingerRepository) ensureOrganization(org sql.NullString) error {
 }
 
 // Create は新しい歌手を作成する。
+//
+// **現在この関数に呼び出し元は無い**（Update も同じ）。歌手を作る経路は
+// すべて Holodex 同期を通り、Upsert に集約されている。
+// 復活させるときは is_hidden の既定を決めること ── ここは列に入れていないので
+// DB default の false（＝一覧に出る）になる。同期経由で作るなら Upsert に
+// SingerOrigin を渡すほうが正しい。
 func (r *SingerRepository) Create(s *models.Singer) error {
 	if err := r.ensureOrganization(s.Organization); err != nil {
 		return err
@@ -259,16 +265,40 @@ func (r *SingerRepository) Update(s *models.Singer) error {
 	return nil
 }
 
+// SingerOrigin は Upsert が**行を新規作成するとき**の既定の可視性を決める。
+// 既存行には効かない（後述）。
+//
+// 同期は「人が名指ししたチャンネル」と「その副産物として流れ込んだチャンネル」の
+// 両方を作る。後者はコラボ相手・mention 先で、一覧に出したいものではない。
+// 実際、既定が false だった頃の本番は 148 件中 147 件を手で隠していた＝既定が逆だった。
+//
+// bool ではなく型にしてあるのは、呼び出し側で `Upsert(singer, true)` と書かれても
+// どちらの意味か読めないため。引数を必須にしているのは、
+// **新しい呼び出し元が origin を決めずにはコンパイルできないようにする**ため。
+type SingerOrigin int
+
+const (
+	// SingerRequested … 人がそのチャンネルを名指しで追加・同期した。既定で一覧に出す。
+	SingerRequested SingerOrigin = iota
+	// SingerDiscovered … 配信の同期に付随して見つかった（所有者・mention）。既定で非表示。
+	// 編集者は一覧の include_hidden で見つけられる。
+	SingerDiscovered
+)
+
+func (o SingerOrigin) hiddenOnInsert() bool { return o == SingerDiscovered }
+
 // Upsert は歌手を作成または更新する（Holodex 同期用）。
-// is_hidden は意図的に触らない：同期は繰り返し走るので、ここで書き戻すと
-// 手動で非表示にしたチャンネルが次の同期で一覧に戻ってしまう。
-func (r *SingerRepository) Upsert(s *models.Singer) error {
+//
+// **is_hidden を書くのは INSERT のときだけで、既存行では意図的に触らない。**
+// 同期は繰り返し走るので、conflict 側で書き戻すと手動で非表示にしたチャンネルが
+// 次の同期で一覧に戻ってしまう。ON CONFLICT の SET に is_hidden を足さないこと。
+func (r *SingerRepository) Upsert(s *models.Singer, origin SingerOrigin) error {
 	if err := r.ensureOrganization(s.Organization); err != nil {
 		return err
 	}
 	query := `
-		INSERT INTO singers (id, name, english_name, photo_url, organization, metadata_source)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO singers (id, name, english_name, photo_url, organization, metadata_source, is_hidden)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		ON CONFLICT (id) DO UPDATE SET
 			name = EXCLUDED.name,
 			english_name = EXCLUDED.english_name,
@@ -276,11 +306,11 @@ func (r *SingerRepository) Upsert(s *models.Singer) error {
 			organization = EXCLUDED.organization,
 			metadata_source = EXCLUDED.metadata_source,
 			updated_at = NOW()
-		RETURNING created_at, updated_at`
+		RETURNING created_at, updated_at, is_hidden`
 
 	source := normalizeSingerMetadataSource(s.MetadataSource)
-	err := r.db.QueryRow(query, s.ID, s.Name, s.EnglishName, s.PhotoURL, s.Organization, source).
-		Scan(&s.CreatedAt, &s.UpdatedAt)
+	err := r.db.QueryRow(query, s.ID, s.Name, s.EnglishName, s.PhotoURL, s.Organization, source, origin.hiddenOnInsert()).
+		Scan(&s.CreatedAt, &s.UpdatedAt, &s.IsHidden)
 	if err != nil {
 		return fmt.Errorf("upsert singer: %w", err)
 	}
