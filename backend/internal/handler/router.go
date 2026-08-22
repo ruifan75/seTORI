@@ -2632,7 +2632,10 @@ func (r *Router) handleBackfillAvailability(w http.ResponseWriter, req *http.Req
 		}
 	}
 	// 並列数は service 側で丸められる。要求値ではなく**実際に使う値**を返す。
-	n, effective, err := r.availabilityService.Backfill(concurrency)
+	// recheck=1 で、`public` と記録済みの行も調べ直す。yt-dlp の public は
+	// 「反証が無かった」という結論なので、会限が public と記録されることがある。
+	recheck := req.URL.Query().Get("recheck") == "1"
+	n, effective, err := r.availabilityService.Backfill(concurrency, recheck)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -2641,6 +2644,7 @@ func (r *Router) handleBackfillAvailability(w http.ResponseWriter, req *http.Req
 		"message":     "再生可否の取得を開始しました（バックグラウンド、ログ参照）",
 		"targets":     n,
 		"concurrency": effective,
+		"recheck":     recheck,
 	})
 }
 

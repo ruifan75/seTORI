@@ -179,6 +179,32 @@ yt-dlp は警告だけ出して**終了コード 0 で続行し**（`raise_no_fo
    → `unavailable` として保存
 3. それ以外 → **保存しない**（未調査のまま残り、次の backfill が拾い直す）
 
+#### `public` は「反証が無かった」であって、公開だと確かめた証拠ではない
+
+これは**どの経路でも 塞ぐこと できない**。`_availability`（`common.py`）は 5 つの材料が
+全部 non-None なら `public` を返す。会限かどうかを決めるのは initial_data の badge だが、
+
+- initial_data の完全性は **`contents` の有無だけ**で判定される（`_video.py:3871-3875`）
+- `contents` はあるが `videoPrimaryInfoRenderer`（＝badge の入れ物）が欠けた応答は通る
+- そのとき `needs_subscription` は `_has_badge(...) or False` ＝ **False** になり、
+  「材料は揃った」と数えられる
+
+つまり **会限の配信が `public<TAB>True` で返りうる**。`availability` と
+`playable_in_embed` の両方が埋まっているので、値の有無を見るどんな条件でも弾けない。
+**専用の `Fetch` も同じ**（これは formats の話ではないので、フラグの有無に関係しない）。
+
+そこで**弱さを消そうとせず、弱さの帰結を消す**：
+
+| 判定 | 性格 | 調べ直す |
+|---|---|---|
+| `members_only` / `embed_disabled` / `unavailable` | 積極的な発見 | しない |
+| `playable`（`public` かつ埋め込み可） | **反証が無かっただけ** | `?recheck=1` で対象に戻る |
+
+誤って `playable` と記録したときの実害は「プレイヤーを描いて 150 で失敗する」＝
+**この機能を入れる前と同じ挙動**で、`PlayerBar` の `onError` が次へ送る。
+残る問題は「記録済みなので二度と調べ直さない」ことだけなので、そこだけ塞げばよい
+（`POST /api/availability/backfill?recheck=1`）。
+
 **レート制限は `Video unavailable` で始まる。** YouTube の reason が `Video unavailable`、
 subreason が `This content isn't available, try again later` で、yt-dlp はこれを連結してから
 rate-limited の案内を足す（`extractor/youtube/_video.py`）。
