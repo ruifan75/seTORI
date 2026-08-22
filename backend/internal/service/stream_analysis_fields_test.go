@@ -20,6 +20,9 @@ func TestToStreamResponseAnalysisFields(t *testing.T) {
 		Title:      "テスト配信",
 		StreamDate: time.Now(),
 		// 解析結果を一通り持たせる（落ちるべきものが本当に落ちるかを見るため）
+		// HolodexData を持たせないと holodex_timeline_songs を固定できず、
+		// 将来この組み立てだけが早期 return より前へ動いても気付けない。
+		HolodexData:            []byte(`{"id":"abc123","songs":[{"name":"Holodex の曲","start":30,"end":90}]}`),
 		CommentSongs:           []byte(`[{"start":10,"name":"曲","original_comment":"0:10 曲"}]`),
 		ChapterSongs:           []byte(`[{"start":20,"name":"章節の曲"}]`),
 		CommentRaw:             []byte(`["0:10 曲"]`),
@@ -66,13 +69,9 @@ func TestToStreamResponseAnalysisFields(t *testing.T) {
 		}
 	})
 
-	t.Run("編集者には載せる", func(t *testing.T) {
+	t.Run("編集者には 6 つとも載せる", func(t *testing.T) {
 		got := keysOf(t, true)
-		// holodex_timeline_songs は HolodexData を持たせていないので対象外
-		for _, k := range []string{
-			"comment_timeline_songs", "chapter_timeline_songs",
-			"comment_songs_analyzed_at", "has_comment_raw", "chapter_count",
-		} {
+		for _, k := range analysisKeys {
 			if !got[k] {
 				t.Errorf("%s が編集者向けの応答に載っていない（編集画面が壊れる）", k)
 			}
@@ -82,15 +81,29 @@ func TestToStreamResponseAnalysisFields(t *testing.T) {
 	// chapter_count は 3 態（-1 未調査 / 0 調べたが無い / 正の数）。
 	// 伏せるときに 0 を返すと「調べたが無い」という別の事実を主張してしまうので、
 	// ポインタにして省略する形になっている。
-	t.Run("未調査の章節を 0 と偽らない", func(t *testing.T) {
-		s2 := stream
-		s2.ChapterRaw = nil // 未調査
-		resp := svc.toStreamResponse(s2, nil, nil, nil, true)
-		if resp.ChapterCount == nil || *resp.ChapterCount != -1 {
-			t.Errorf("編集者には -1（未調査）を返すべき: %v", resp.ChapterCount)
+	t.Run("chapter_count の 3 態", func(t *testing.T) {
+		cases := []struct {
+			label string
+			raw   []byte
+			want  int
+		}{
+			{"まだ調べていない", nil, -1},
+			{"調べたが章節が無い", []byte(`[]`), 0},
+			{"章節がある", []byte(`[{"start_time":0,"title":"A"},{"start_time":9,"title":"B"}]`), 2},
 		}
-		if got := svc.toStreamResponse(s2, nil, nil, nil, false); got.ChapterCount != nil {
-			t.Errorf("閲覧者には省略すべき: %v", *got.ChapterCount)
+		for _, c := range cases {
+			t.Run(c.label, func(t *testing.T) {
+				s2 := stream
+				s2.ChapterRaw = c.raw
+				got := svc.toStreamResponse(s2, nil, nil, nil, true)
+				if got.ChapterCount == nil || *got.ChapterCount != c.want {
+					t.Errorf("編集者 = %v, want %d", got.ChapterCount, c.want)
+				}
+				// 伏せるときに 0 を返すと「調べたが章節が無い」という別の事実になる
+				if v := svc.toStreamResponse(s2, nil, nil, nil, false); v.ChapterCount != nil {
+					t.Errorf("閲覧者には省略すべき: %v", *v.ChapterCount)
+				}
+			})
 		}
 	})
 }
