@@ -13,13 +13,23 @@
 
 `comment_songs` は**源**であって、答えを貼って回る場所ではない。
 配信を開いただけの `GET /api/streams/{id}` も一覧も照合しない。
-照合が走るのは「どの入力元から取り込むかを決めて編集フォームへ読み込む」操作だけ：
+照合が走るのは**入力元を取り込む操作**で、対話（編集フォームへ読み込む）と
+一括の両方にある：
 
-| 端点 | 何をするか |
-|---|---|
-| `POST /api/streams/{id}/comments/analyze` | 抽出（キャッシュ）→ 照合 → AI 判定 |
-| `POST /api/streams/{id}/holodex-songs/analyze` | 正規化 → 照合 → AI 判定 |
-| `POST /api/streams/{id}/chapters/analyze` | 章節の取得（キャッシュ）→ 抽出 → 照合 → AI 判定 |
+| 端点 | 規則照合 | AI 判定 |
+|---|---|---|
+| `POST /api/streams/{id}/comments/analyze` | ○ | ○ |
+| `POST /api/streams/{id}/holodex-songs/analyze` | ○ | ○ |
+| `POST /api/streams/{id}/chapters/analyze` | ○ | ○ |
+| `POST /api/streams/batch-analyze` | ○ | **×**（下記） |
+| `POST /api/streams/batch-fill` | ○ | ○ |
+| `GET /api/streams/{id}`・一覧 | × | × |
+
+**一括プレ分析（batch-analyze）は AI の照合判定を呼ばない。** `AnalyzeCommentsForBatch` は
+抽出まで（キャッシュ命中ならそれも飛ばす）で、規則照合は表示のために当たるが、
+決まらない行を AI へ回すのは**取り込むとき**＝ batch-fill と対話の analyze だけ。
+`comment_songs` へ保存する前に `stripMatchForStorage` が照合結果を落とすので、
+保存されるのは抽出・正規化・拍手 end だけ、という約束は変わらない。
 
 理由は `SONG_MATCHING.md` の「照合は保存しない」に書いた通りで、
 保存すると曲が増えるたび・統合するたびに古くなり、それを追いかける仕組みが要る。
@@ -96,10 +106,21 @@ AI が `same_artist=true` を返したら `artist_alias` として申し送る�
 以前ここを非表示込みにできなかったのは、`is_hidden` が発見面しか止めないので
 **作った瞬間に未ログインから読めた**から。
 
-PR #19（issue #4）で `streams.is_restricted` が入り、秘匿された配信の歌唱は
-`content:edit` にしか返らなくなった。会限の歌枠は migration 052/053 で既に旗が立っている
-ので、**歌唱を作っても公開されない**。一括を非表示込みへ広げるなら、いま止めているのは
-「雑談を AI にかけたくない」というコストの話だけで、公開の危険は別の列が持っている。
+PR #19（issue #4）で `streams.is_restricted` が入り、**実効的に秘匿された配信**の歌唱は
+`content:edit` にしか返らなくなった。会限の歌枠は migration 052/053 で旗が立っている。
+
+> ⚠️ **`is_hidden = true` は `is_restricted = true` を意味しない。**
+> 秘匿の旗は availability / Holodex topic / `members_only` タグという**候補**から立てたもので、
+> 非表示の全体を覆う不変条件ではない。実測（1307 本）：
+>
+> | | 秘匿でない | 秘匿 |
+> |---|---:|---:|
+> | 表示 | 583 | 1 |
+> | **非表示** | **638** | 85 |
+>
+> つまり**非表示のうち 638 本は秘匿されていない**。ここへ一括を広げて歌唱を作ると、
+> `PublicAccess` の `FindByStreamID` がそれを返し、匿名の配信詳細から読める。
+> 広げてよいのは**既に実効的に秘匿されている行だけ**で、「非表示だから安全」ではない。
 
 読み書きの内訳は `docs/STREAM_VISIBILITY.md`。一括は `EditorAccess` で既存の歌唱を読む
 （秘匿された配信も編集対象になりうるため）。

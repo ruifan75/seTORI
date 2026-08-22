@@ -100,9 +100,19 @@
 - **コード位置**：`pkg/ai/groq.go` — OpenAI 互換 `POST {base_url}/chat/completions`。デフォルトは Groq（model `llama-3.3-70b-versatile`）、temperature 0.1、max_tokens 2048。
 - **用途と呼び出しトリガー**：
   1. **曲名正規化**：`internal/service/normalization_service.go` の `BatchAINormalization` — バッチで元の曲名を正規化（演出版表記除去、読み仮名生成、バージョンタグ検出）。失敗時は純粋な DB 照合に降格。トリガー：`POST /api/ai/normalize`。
-  2. **コメント hybrid 解析**：`internal/service/comment_service.go` の `AnalyzeComments` → `pkg/comment/ai_parser.go` の `ParseCommentsWithAI` — **AI がどの行が楽曲で start/end 秒数を担当**、正規表現が曲名/アーティスト文字列を抽出（LLM が日本語曲名を書き換えないように）。edit 時（ユーザーが「分析」を押したとき）に実行。key 未設定または AI 失敗時は自動で純粋正規表現に戻る。トリガー：`POST /api/streams/{id}/comments/analyze`。
+  2. **コメント解析**：`internal/service/comment_service.go` の `analyzeComments`。
+     **本線は `ParseNormalizeAndDedupWithAI`（grouped）**で、AI が抽出・正規化・重複排除を
+     まとめて返す（正規化名・読み仮名も AI 側）。`ParseCommentsWithAI` の 2 段階
+     （AI が行と秒数、正規表現が曲名／アーティスト）は**その退避先**で、
+     さらに失敗すると純粋正規表現へ落ちる。経路は 3 段階で退避する
+     ── 詳細と実例は `docs/AI_PIPELINE.md`。
+     トリガー：`POST /api/streams/{id}/comments/analyze` と一括（`batch-analyze` / `batch-fill`）。
+     **AI 経路には除外キーワードの辞書を渡さない**（`filterScopeForPath`。
+     AI が既に `is_song` を判断しているため。regex 経路だけ辞書を使う）。
 - **⚠️ リスク**：トークン課金。公開環境であなたの key を使うと、1 ユーザーで請求を爆発させたりクォータを消費し尽くす可能性があります。key 未設定時は AI ステップがフォールトトレラント（生データ / 純粋正規表現結果を返却）。
-- **将来の強化**：AI に曲名/アーティストも返してもらうことは可能ですが、「verbatim 部分文字列検証」のガードレールを付けてから採用し、さもなくば正規表現分割に戻してください。
+- **ガードレール**：grouped では AI が曲名も返すため、`pkg/comment` 側で
+  「元コメントに現れない文字列を作らせない」検証を通す。落ちたら 2 段階、
+  さらに落ちたら純粋正規表現へ退避する（`docs/AI_PIPELINE.md` の「経路は 3 段階で退避する」）。
 
 ## 4. YouTube Data API（読、任意） — `YOUTUBE_API_KEY`
 
