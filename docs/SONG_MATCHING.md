@@ -517,7 +517,14 @@ Departures 〜あなたにおくるアイの歌〜 / EGOIST → EGOIST
 ## 照合は保存しない
 
 `comment_songs` / `holodex_songs` に保存するのは **抽出・正規化・拍手 end まで**。
-照合（どの楽曲か）は配信詳細を読むたびに計算する（`ResolveForDisplay`）。
+照合（どの楽曲か）は保存せず、**入力元を編集フォームへ読み込むときに**計算する
+（`ResolveForDisplay`）。
+
+**「配信詳細を読むたび」ではない。** 走るのは
+`POST /api/streams/{id}/comments/analyze` と `.../holodex-songs/analyze`、
+`.../chapters/analyze` の 3 つだけで、**`GET /api/streams/{id}` や一覧では引かない**。
+`comment_songs` は源であって、開くたびに答えを付けて回る場所ではない
+（`docs/SETLIST_FLOW.md` の「照合は保存しない、読み込みのときだけ計算する」と同じ）。
 
 分けるのは、2 つの半分でコストと寿命がまるで違うから：
 
