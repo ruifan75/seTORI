@@ -153,15 +153,32 @@ PR #6 が解析結果でやったのと同じ考え方だが、通す場所は�
 実測：到達できない proxy を挟むと、公開動画の `wB3qGgT1XIQ` が exit=1・stdout 空で返る
 ── 削除済みと**同じ形**である。
 
-そこで記録するのは次の 2 つだけ：
+**`unavailable` を記録できるのは専用の `Fetch` だけ。相乗り経路は記録しない。**
+相乗りは `--ignore-no-formats-error` を付けているので、YouTube が再生を断っても
+yt-dlp は警告だけ出して**終了コード 0 で続行し**（`raise_no_formats(expected=True)` →
+`report_warning`）、部分的なメタデータから `availability = public` を出す。
+実測でも視聴不可の `hVfDBfreYNI` が `public|NA` を返した。
+そこで相乗りは **`playable_in_embed` が埋まったときだけ**保存する（`Resolved()`）
+── 抽出が最後まで通った証拠がこれしかないため。
 
-1. yt-dlp が構造化された値を返した（`availability` か `playable_in_embed` のどちらか）
-2. cookie を実際に渡したうえで、stderr が「動画が無い」と読める
-   （`Video unavailable` ほか。`isVideoGone`）
+専用の `Fetch` はフラグを付けないので、取れなければ非ゼロで終わる。そのうえで：
 
-**文言に依存するが、外したときは安全側へ倒れる** ── 一致しなければ未調査のまま残り、
-次の backfill が拾い直す。会限を文字列で見分けるのは逆に危険なので、そちらは
-cookie を入れて `subscriber_only` という構造化された値で受け取る。
+1. 終了コード 0 かつ値が取れた → そのまま保存
+2. 非ゼロ ＋ cookie を実際に渡した ＋ **一時障害ではない** ＋ stderr が「動画が無い」と読める
+   → `unavailable` として保存
+3. それ以外 → **保存しない**（未調査のまま残り、次の backfill が拾い直す）
+
+**レート制限は `Video unavailable` で始まる。** YouTube の reason が `Video unavailable`、
+subreason が `This content isn't available, try again later` で、yt-dlp はこれを連結してから
+rate-limited の案内を足す（`extractor/youtube/_video.py`）。
+つまり **`Video unavailable` だけで消失と判定すると、レート制限に当たった公開配信を
+恒久的に `unavailable` として記録する**。backfill は 700 件超を並列で回すので、これは
+起きにくい事故ではなく起こしにいく事故になる。`isTransientFailure` を
+**`isVideoGone` より先に**通すこと（順序は `availability_failure_test.go` で固定してある）。
+
+文言に依存するのは避けたかったが、ここでは**外したときに安全側へ倒れる** ──
+一致しなければ未調査のまま残るだけ。会限を文字列で見分けるのは逆に危険なので、
+そちらは cookie を入れて `subscriber_only` という構造化された値で受け取る。
 
 cookie の判定は `HasCookies()` ではなく**実際に渡せたか**で見る
 （`prepareCookies()` は一時ファイルの作成・書き込みに失敗すると空パスを返すので、

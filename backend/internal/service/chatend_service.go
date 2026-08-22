@@ -294,7 +294,11 @@ func (s *ChatEndService) EstimateEnds(videoID string, starts []int) (map[int]int
 // 記録すると、次に cookie を入れたときの調べ直しが対象から漏れる）。
 func (s *ChatEndService) saveAvailability(videoID, stdout string) {
 	a := parseYtdlpAvailability(lastNonEmptyLine(stdout))
-	if !a.Known() {
+	// **抽出が最後まで通ったときだけ保存する**（Resolved の注意書き）。この経路は
+	// --ignore-no-formats-error を付けているので、レート制限や削除でも終了コード 0 で
+	// availability=public が返る。ここで保存すると、一時的にレート制限へ当たった
+	// 公開配信が unavailable として恒久的に記録され、二度と調べ直されない。
+	if !a.Resolved() {
 		return
 	}
 	var avail sql.NullString
