@@ -1239,7 +1239,7 @@ export default function StreamDetailPage() {
       <div className="flex flex-col min-[1300px]:flex-row gap-6 w-full min-h-0 min-[1300px]:h-full min-[1300px]:overflow-hidden">
       {/* Left Column - Stream Info + YouTube Player */}
       {/* モバイル（<sm）は情報カードとプレイヤーを縦積みにし高さ制限も外す。sm〜1300px は左右並び+40vh 制限 */}
-      <div className="w-full min-[1300px]:basis-2/5 min-[1300px]:shrink-0 min-[1300px]:self-stretch flex flex-col sm:flex-row min-[1300px]:grid min-[1300px]:grid-rows-[2fr_3fr] gap-4 min-h-0 min-[1300px]:overflow-hidden shrink-0 max-h-none sm:max-h-[40vh] min-[1300px]:max-h-none">
+      <div className="w-full min-[1300px]:basis-2/5 min-[1300px]:shrink-0 min-[1300px]:self-stretch flex flex-col sm:flex-row min-[1300px]:grid min-[1300px]:grid-rows-[minmax(0,1fr)_auto] gap-4 min-h-0 min-[1300px]:overflow-hidden shrink-0 max-h-none sm:max-h-[40vh] min-[1300px]:max-h-none">
         {/* Stream Header - 40% */}
         <div className="flex-1 min-w-0 bg-white rounded-lg shadow-sm border overflow-y-auto min-h-0">
           {isEditing ? (
