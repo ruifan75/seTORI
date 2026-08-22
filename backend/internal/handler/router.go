@@ -835,24 +835,50 @@ const maxBatchRequestBytes = 64 << 10 // 64 KiB
 // 通してしまうため。Unmarshal は top-level 値の後ろにゴミがあれば弾く。
 func parseBatchAnalyzeRequest(r io.Reader) (dto.BatchAnalyzeRequest, error) {
 	var body dto.BatchAnalyzeRequest
-	raw, err := io.ReadAll(io.LimitReader(r, maxBatchRequestBytes))
+
+	// 上限は「切り捨て」ではなく「拒否」。LimitReader で黙って切ると、正しい object が
+	// ちょうど上限で終わってその後ろに別の JSON 値がある body を先頭だけで受理してしまう。
+	raw, err := io.ReadAll(io.LimitReader(r, maxBatchRequestBytes+1))
 	if err != nil {
 		return body, errors.New("リクエストを読めませんでした")
 	}
-	if len(bytes.TrimSpace(raw)) == 0 {
-		return body, nil
+	if len(raw) > maxBatchRequestBytes {
+		return body, errors.New("リクエストが大きすぎます")
+	}
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 {
+		return body, nil // 空ボディは既定へ
 	}
 
-	// hidden に JSON の null が来ても encoding/json はエラーにせず値も変えないので、
-	// 空文字（＝既定）と区別できない。明示された値が黙って既定になるのを避けるため、
-	// 先に生の形で見て弾く。
-	var probe map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &probe); err != nil {
+	// **まず生の形で検証してから型へ落とす。**
+	//
+	// 型へ直接落とすと、惜しい間違いが黙って既定になる経路がいくつも残る：
+	//   - encoding/java の JSON キー照合は**大文字小文字を無視する**ので、
+	//     {"Hidden": null} は Hidden フィールドに一致しつつ null で値が変わらない
+	//   - body 全体が null でも Unmarshal は成功する
+	//   - キーの打ち間違い（"hiddden"）は未知フィールドとして捨てられる
+	//   - mode / singer_id の null もそれぞれ既定・全チャンネルへ落ちる
+	//
+	// ここは部分更新の DTO と違い「既定へ倒さないこと」自体が安全要件なので、
+	// top-level が object であること・キーが完全一致であること・値が null でないことを
+	// 生の map で確かめる。
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
 		return body, fmt.Errorf("無効なリクエスト形式: %w", err)
 	}
-	if v, ok := probe["hidden"]; ok && string(bytes.TrimSpace(v)) == "null" {
-		return body, errors.New("hidden に null は指定できません（false / true / all のいずれか、または省略）")
+	if fields == nil {
+		return body, errors.New("リクエスト本体が null です")
 	}
+	allowed := map[string]bool{"mode": true, "singer_id": true, "hidden": true}
+	for k, v := range fields {
+		if !allowed[k] {
+			return body, fmt.Errorf("知らない項目です: %q（mode / singer_id / hidden のみ）", k)
+		}
+		if string(bytes.TrimSpace(v)) == "null" {
+			return body, fmt.Errorf("%s に null は指定できません", k)
+		}
+	}
+
 	if err := json.Unmarshal(raw, &body); err != nil {
 		return body, fmt.Errorf("無効なリクエスト形式: %w", err)
 	}
@@ -2402,6 +2428,12 @@ func (r *Router) handleAnalyzeComments(w http.ResponseWriter, req *http.Request)
 		result, err = r.commentService.AnalyzeComments(videoID, force)
 	}
 	if err != nil {
+		// 分析中にコメントが差し替わっただけなので、やり直せば通る。
+		// 500 だと利用者にはサーバーの故障に見え、再実行すべきだと分からない。
+		if errors.Is(err, service.ErrCommentRawChanged) {
+			respondError(w, http.StatusConflict, err.Error())
+			return
+		}
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

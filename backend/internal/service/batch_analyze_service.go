@@ -175,6 +175,17 @@ func (s *BatchAnalyzeService) processOne(videoID string, forceStart bool) bool {
 		if err == nil && resp.Warning == "" {
 			return true
 		}
+		// 分析中にコメントが差し替わっただけなら、待たずに読み直す。
+		// 90 秒の冷却は AI プロバイダーの劣化明けを待つためのもので、
+		// 競合に使うと 1 回で 90 秒・2 回で 180 秒待ってから failed になる。
+		if errors.Is(err, ErrCommentRawChanged) {
+			logger.Warnf("[batch-analyze] %s attempt %d: コメントが変わったので読み直します", videoID, attempt)
+			force = true
+			if attempt == batchMaxAttempts {
+				return false
+			}
+			continue
+		}
 		if err != nil {
 			logger.Warnf("[batch-analyze] %s attempt %d failed: %v", videoID, attempt, err)
 		} else {

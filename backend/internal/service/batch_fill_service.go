@@ -362,7 +362,26 @@ func (s *BatchFillService) loadRows(streamID string) []*fillRow {
 		logger.Warnf("[batch-fill] Holodex 読み込み失敗 (%s): %v", streamID, err)
 	}
 
-	if resp, err := s.commentService.AnalyzeCommentsForBatch(streamID, false); err == nil && resp != nil {
+	resp, err := s.commentService.AnalyzeCommentsForBatch(streamID, false)
+	switch {
+	case errors.Is(err, ErrCommentRawChanged):
+		// 分析中にコメントが差し替わって結果が捨てられた状態。
+		// **「コメントが無い」と同じ扱いにしてはいけない** ── 空のまま先へ進むと、
+		// Holodex に曲が無ければチャプターへ落ち、曲があってもコメント固有の差分を
+		// 丸ごと落とす。入力元が無いのではなく、新しい raw で引き直すべき状態なので、
+		// 一度だけ読み直す（次も競合するなら、その配信はこの実行では諦める）。
+		logger.Warnf("[batch-fill] 分析中にコメントが変わりました (%s)。読み直します", streamID)
+		if retry, rErr := s.commentService.AnalyzeCommentsForBatch(streamID, true); rErr == nil && retry != nil {
+			resp = retry
+		} else {
+			logger.Warnf("[batch-fill] コメントの読み直しに失敗 (%s): %v", streamID, rErr)
+			resp = nil
+		}
+	case err != nil:
+		logger.Warnf("[batch-fill] コメント分析に失敗 (%s): %v", streamID, err)
+		resp = nil
+	}
+	if resp != nil {
 		s.normalization.ResolveForDisplay(resp.Songs)
 		for _, cs := range resp.Songs {
 			commentRows = append(commentRows, commentSongToFillRow(streamID, cs))

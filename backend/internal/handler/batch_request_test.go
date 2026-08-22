@@ -27,6 +27,19 @@ func TestParseBatchAnalyzeRequest(t *testing.T) {
 		{"後続の JSON 値", `{"hidden":"true"}{"hidden":"false"}`, true, "", ""},
 		{"末尾のゴミ", `{"hidden":"true"} trailing`, true, "", ""},
 		{"壊れた JSON", `{"hidden":`, true, "", ""},
+
+		// ── ここから、raw map で見ないと素通りする形 ──
+		//
+		// encoding/json の JSON キー照合は大文字小文字を無視するので、
+		// 型へ直接落とすだけでは大小文字違いの null が既定へ倒れる。
+		{"大文字キーの null", `{"mode":"reanalyze","Hidden":null}`, true, "", ""},
+		{"大文字キー", `{"mode":"reanalyze","Hidden":"true"}`, true, "", ""},
+		{"body 全体が null", `null`, true, "", ""},
+		{"キーの打ち間違い", `{"mode":"reanalyze","hiddden":"true"}`, true, "", ""},
+		{"mode に null", `{"mode":null,"hidden":"true"}`, true, "", ""},
+		{"singer_id に null", `{"singer_id":null}`, true, "", ""},
+		{"object でない", `["reanalyze"]`, true, "", ""},
+		{"文字列だけ", `"reanalyze"`, true, "", ""},
 	}
 
 	for _, tt := range tests {
