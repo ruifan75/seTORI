@@ -151,9 +151,20 @@ type ytdlpAvailability struct {
 	PlayableInEmbed sql.NullBool
 }
 
-// Known は何か 1 つでも値が取れたか。両方 NA なら保存しても意味が無い。
-func (a ytdlpAvailability) Known() bool {
-	return a.Availability != "" || a.PlayableInEmbed.Valid
+// Resolved は**動画情報を最後まで取れたか**。
+//
+// `availability` の有無では判定できない。`--ignore-no-formats-error` を付けた実行では、
+// YouTube が再生を断っても（削除・レート制限）yt-dlp は警告だけ出して**終了コード 0 で続行**し
+// （`raise_no_formats(expected=True)` → `report_warning`）、部分的なメタデータから
+// `availability = public` を出してしまう。実測でも視聴不可の hVfDBfreYNI が
+// `public|NA` を返した。
+//
+// 一方 `playable_in_embed` は抽出が最後まで通ったときにだけ埋まるので、これを
+// 「信用してよいか」の目印にする。相乗り経路はこれが false なら**保存しない**
+// ── そこで保存すると、レート制限に当たっただけの公開配信が unavailable として
+// 恒久的に記録され、二度と再試行されない。
+func (a ytdlpAvailability) Resolved() bool {
+	return a.PlayableInEmbed.Valid
 }
 
 // availabilityArgs は再生可否を拾うための引数を返す。

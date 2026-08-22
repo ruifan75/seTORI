@@ -97,6 +97,10 @@ func (s *AvailabilityService) Fetch(videoID string) (ytdlpAvailability, error) {
 			return a, fmt.Errorf("動画情報を取得できません（cookie 無しのため会限と区別できず、判定は保存しません）: %s",
 				ytdlpErrorLine(stderr.String()))
 		}
+		if isTransientFailure(stderr.String()) {
+			return a, fmt.Errorf("一時的な失敗のため保存しません（時間をおいて再実行してください）: %s",
+				ytdlpErrorLine(stderr.String()))
+		}
 		if !isVideoGone(stderr.String()) {
 			return a, fmt.Errorf("動画情報を取得できません（一時的な失敗の可能性があるため保存しません。再実行してください）: %s",
 				ytdlpErrorLine(stderr.String()))
@@ -108,6 +112,10 @@ func (s *AvailabilityService) Fetch(videoID string) (ytdlpAvailability, error) {
 		return a, fmt.Errorf("動画情報を取得できません: %s", ytdlpErrorLine(stderr.String()))
 	}
 
+	// 終了コード 0 でも中身が空なら保存しない（NULL/NULL を書くと unavailable になる）。
+	if !a.Resolved() && a.Availability == "" {
+		return a, fmt.Errorf("yt-dlp が再生可否を返しませんでした（保存しません）")
+	}
 	if err := s.save(videoID, a); err != nil {
 		return a, err
 	}
@@ -171,6 +179,35 @@ func (s *AvailabilityService) Backfill(concurrency int) (targets, effectiveConcu
 	return len(ids), concurrency, nil
 }
 
+// isTransientFailure は「今回はたまたま取れなかった」を見る。**isVideoGone より先に見ること。**
+//
+// **レート制限は "Video unavailable" で始まる。** YouTube が返す reason が
+// `Video unavailable`、subreason が `This content isn't available, try again later` で、
+// yt-dlp はこれを連結してから rate-limited の案内を足す
+// （`extractor/youtube/_video.py`。wiki: Extractors#this-content-isnt-available-try-again-later）。
+// つまり **"Video unavailable" だけで消失と判定すると、レート制限に当たった公開配信を
+// 恒久的に unavailable として記録する**。backfill は 700 件超を並列で回すので、
+// これは起きにくい事故ではなく、起こしにいく事故になる。
+func isTransientFailure(stderr string) bool {
+	for _, marker := range []string{
+		"try again later",
+		"rate-limited",
+		"HTTP Error 429",
+		"Too Many Requests",
+		"Unable to download", // API ページ・webpage の取得失敗（通信障害）
+		"Unable to connect",  // proxy / DNS
+		"timed out",
+		"Temporary failure",
+		"captcha",            // captcha を要求されている＝この実行が通らないだけ
+		"Sign in to confirm", // BOT 判定（呼び出し側でも見ているが、ここでも落とす）
+	} {
+		if strings.Contains(stderr, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 // isVideoGone は stderr が「その動画はもう無い」と言っているかを見る。
 //
 // **一致しなければ保存しない**ので、文言が変わったときは「未調査のまま」に倒れる。
@@ -181,7 +218,7 @@ func (s *AvailabilityService) Backfill(concurrency int) (targets, effectiveConcu
 //	存在しない ID     ERROR: [youtube] xxx: Video unavailable
 //	権利で降ろされた  ERROR: [youtube] xxx: Video unavailable. This video is not available
 //
-// 一時障害はこの形にならない（"Unable to download API page: ..." など）。
+// **同じ "Video unavailable" でレート制限も来る**ので、必ず isTransientFailure を先に通すこと。
 func isVideoGone(stderr string) bool {
 	for _, marker := range []string{
 		"Video unavailable",
