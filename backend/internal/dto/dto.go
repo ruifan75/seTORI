@@ -234,10 +234,41 @@ type StreamResponse struct {
 	ChapterCount *int `json:"chapter_count,omitempty"`
 	// CommentSongsAnalyzedAt は解析を最後に走らせた時刻。updated_at では代用できない
 	// （毎日回る Holodex 同期が全配信の updated_at を今日に押し上げる）。
-	CommentSongsAnalyzedAt *string   `json:"comment_songs_analyzed_at,omitempty"`
-	CreatedAt              time.Time `json:"created_at"`
-	UpdatedAt              time.Time `json:"updated_at"`
+	CommentSongsAnalyzedAt *string `json:"comment_songs_analyzed_at,omitempty"`
+	// Playability は**閲覧者にも返す**（プレイヤーを描くかどうかの判断に要る）。
+	// 会限の動画は YouTube が埋め込みを塞いでいるので、描いてから onError: 150 で
+	// 失敗させるより最初から描かないほうがよい。値は dto.Playability* を参照。
+	//
+	// **詳細（GetByID）でだけ入る。** 一覧・検索の SELECT は元の 3 列を読んでいないので、
+	// そこで組み立てると全部 unknown になり、実態と食い違う主張をすることになる。
+	// 省略時は「この応答は判定していない」で、受け手は従来どおり描いてよい。
+	Playability string `json:"playability,omitempty"`
+	// 生の値は編集者だけに返す。判断材料であって閲覧者が使うものではない。
+	Availability          *string   `json:"availability,omitempty"`
+	PlayableInEmbed       *bool     `json:"playable_in_embed,omitempty"`
+	AvailabilityCheckedAt *string   `json:"availability_checked_at,omitempty"`
+	CreatedAt             time.Time `json:"created_at"`
+	UpdatedAt             time.Time `json:"updated_at"`
 }
+
+// Playability は「この配信を埋め込みプレイヤーで再生できるか」の判定結果。
+//
+// 生の availability / playable_in_embed から導く（両方を見る必要がある：
+// **`--ignore-no-formats-error` が付いた実行では、視聴できない動画でも
+// availability が public で返る**ので、availability 単独では信用できない）。
+const (
+	// PlayabilityUnknown … まだ調べていない。従来どおりプレイヤーを描く
+	// （調べていないことを「再生不可」と読み替えると全配信のプレイヤーが消える）。
+	PlayabilityUnknown = "unknown"
+	// PlayabilityPlayable … 埋め込み再生できる。
+	PlayabilityPlayable = "playable"
+	// PlayabilityMembersOnly … 会限。メンバー資格があっても埋め込みでは再生できない。
+	PlayabilityMembersOnly = "members_only"
+	// PlayabilityEmbedDisabled … 公開だが所有者が埋め込みを切っている（onError: 150 の別の原因）。
+	PlayabilityEmbedDisabled = "embed_disabled"
+	// PlayabilityUnavailable … 動画情報を取得できない（削除・非公開・権利で降ろされた）。
+	PlayabilityUnavailable = "unavailable"
+)
 
 type StreamListResponse struct {
 	Streams    []StreamResponse   `json:"streams"`

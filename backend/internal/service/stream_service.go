@@ -225,6 +225,10 @@ func (s *StreamService) GetByID(id string, includeAnalysis bool) (*dto.StreamDet
 	participants, _ := s.streamRepo.GetSingers(stream.ID)
 	channelOwner, _ := s.streamRepo.GetChannelOwner(stream.ID)
 	streamResp := s.toStreamResponse(*stream, tags, participants, channelOwner, includeAnalysis)
+	// 再生可否は**詳細でだけ**返す。閲覧者にも要る（プレイヤーを描くかの判断）が、
+	// 一覧・検索の SELECT はこの 3 列を読んでいないので、そこで値を組み立てると
+	// 全部 unknown という**別の事実の主張**になる（chapter_count を省略するのと同じ理由）。
+	streamResp.Playability = playabilityOf(*stream)
 
 	// 歌唱一覧を取得する
 	performances, err := s.perfRepo.FindByStreamID(id)
@@ -330,6 +334,18 @@ func (s *StreamService) toStreamResponse(stream models.Stream, tags []models.Str
 	// （コメントのタイムラインは元コメントの原文を含む）。
 	if !includeAnalysis {
 		return resp
+	}
+
+	// 生の再生可否は編集者だけに返す（判定の裏取りと backfill の進み具合を見るため）。
+	if stream.Availability.Valid {
+		resp.Availability = &stream.Availability.String
+	}
+	if stream.PlayableInEmbed.Valid {
+		resp.PlayableInEmbed = &stream.PlayableInEmbed.Bool
+	}
+	if stream.AvailabilityCheckedAt.Valid {
+		checked := stream.AvailabilityCheckedAt.Time.Format(time.RFC3339)
+		resp.AvailabilityCheckedAt = &checked
 	}
 
 	// Holodex の timeline データを解析して追加する（完全な Video JSON から songs を抽出）
@@ -576,4 +592,35 @@ func (s *StreamService) GetRandomPerformances(limit int, excludedSongIDs []strin
 		return nil, fmt.Errorf("get random performances: %w", err)
 	}
 	return s.ComposePerformanceList(perfs), nil
+}
+
+// playabilityOf は保存済みの再生可否から、プレイヤーを描くかどうかの判定を導く。
+//
+// **availability だけでは決められない。** 本番の 2 経路は
+// `--ignore-no-formats-error` を付けて yt-dlp を呼んでおり、そのとき
+// 視聴できない動画でも availability は "public" で返る（実測：削除済みの
+// hVfDBfreYNI がフラグ有りで public、無しで "Video unavailable"）。
+// 動画情報を最後まで取れたかどうかは playable_in_embed の有無に出るので、
+// 両方を見る。
+//
+// **会限の判定を先に置くこと。** 実測（1GlkSFdnCcc、cookie 有り）では
+// 会限の配信が `subscriber_only` かつ **playable_in_embed = true** を返す。
+// yt-dlp は「埋め込み可」と言っているが、IFrame API は同じ動画で onError: 150 を返す。
+// playable_in_embed を先に見ると、会限が playable に分類されて
+// 必ず失敗するプレイヤーを描くことになる。
+func playabilityOf(stream models.Stream) string {
+	if !stream.AvailabilityCheckedAt.Valid {
+		return dto.PlayabilityUnknown
+	}
+	if stream.Availability.Valid && stream.Availability.String == "subscriber_only" {
+		return dto.PlayabilityMembersOnly
+	}
+	if !stream.PlayableInEmbed.Valid {
+		// 調べたのに埋め込み可否が取れなかった＝動画情報を最後まで取れていない。
+		return dto.PlayabilityUnavailable
+	}
+	if !stream.PlayableInEmbed.Bool {
+		return dto.PlayabilityEmbedDisabled
+	}
+	return dto.PlayabilityPlayable
 }

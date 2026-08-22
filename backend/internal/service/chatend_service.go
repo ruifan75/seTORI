@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -228,6 +229,9 @@ func (s *ChatEndService) fetchLiveChat(videoID string) (string, error) {
 		"--ignore-no-formats-error",
 		"-o", base + ".%(ext)s",
 	}
+	// ついでに再生可否を拾う（追加のリクエストは発生しない）。この実行は
+	// live chat をファイルへ書くので --no-simulate が要る（ytdlp.go の注意書き）。
+	args = append(args, availabilityArgs(true)...)
 	// cookie があれば渡す。YouTube に BOT 判定されている環境ではこれが無いと落ちる。
 	if cookiePath, cleanup := s.prepareCookies(); cookiePath != "" {
 		defer cleanup()
@@ -238,9 +242,14 @@ func (s *ChatEndService) fetchLiveChat(videoID string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, s.path, args...)
-	var stderr bytes.Buffer
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	runErr := cmd.Run()
+
+	// 再生可否は chat の取得に失敗していても拾えることがある（会限は
+	// 「chat は取れないが subscriber_only とは分かる」）ので、先に保存する。
+	s.saveAvailability(videoID, stdout.String())
 
 	// 警告だけで終了コードが非 0 になることがあるので、まずファイルの有無で判断する。
 	if _, err := os.Stat(chat); err == nil {
@@ -278,4 +287,21 @@ func (s *ChatEndService) EstimateEnds(videoID string, starts []int) (map[int]int
 		duration = int(stream.DurationSeconds.Int32)
 	}
 	return s.DetectEnds(videoID, duration, starts), nil
+}
+
+// saveAvailability は yt-dlp の --print 出力から再生可否を拾って保存する。
+// 取れなかったときは何も書かない（未調査のまま残す ── 「調べたが不明」を
+// 記録すると、次に cookie を入れたときの調べ直しが対象から漏れる）。
+func (s *ChatEndService) saveAvailability(videoID, stdout string) {
+	a := parseYtdlpAvailability(lastNonEmptyLine(stdout))
+	if !a.Known() {
+		return
+	}
+	var avail sql.NullString
+	if a.Availability != "" {
+		avail = sql.NullString{String: a.Availability, Valid: true}
+	}
+	if err := s.streamRepo.SaveAvailability(videoID, avail, a.PlayableInEmbed); err != nil {
+		logger.Warnf("[chatend] %s の再生可否を保存できません: %v", videoID, err)
+	}
 }

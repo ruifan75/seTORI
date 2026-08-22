@@ -114,6 +114,58 @@ PR #6 が解析結果でやったのと同じ考え方だが、通す場所は�
 **秘匿は `is_hidden` とは別の軸で持つ**。判定材料は yt-dlp の `availability`
 （`subscriber_only`）と、チャンネル単位の同意フラグ。設計は issue #4。
 
+### 再生可否（`availability` / `playable_in_embed`）
+
+判定材料のうち、**yt-dlp 側は実装済み**（issue #3）。`streams` の 3 列で持つ。
+
+| 列 | 意味 |
+|---|---|
+| `availability` | yt-dlp の生の値（`public` / `subscriber_only` / `unlisted` …） |
+| `playable_in_embed` | 埋め込み再生の可否。公開でも所有者が切っていると false |
+| `availability_checked_at` | いつ調べたか。**NULL＝未調査**で、「調べたが公開だった」とは別 |
+
+閲覧者へは導出した `playability` だけを返す（`unknown` / `playable` /
+`members_only` / `embed_disabled` / `unavailable`）。生の 3 列は `content:edit` のみ。
+
+**`availability` 単独では判定できない。** 本番の live chat / チャプター取得は
+どちらも `--ignore-no-formats-error` を付けて yt-dlp を呼んでおり
+（そうしないとフォーマット一覧が空のときに落ちる）、**このフラグが付いていると
+視聴できない動画でも `availability` が `public` で返る**。実測：
+
+| 動画 | フラグあり | フラグなし |
+|---|---|---|
+| `hVfDBfreYNI`（実際は視聴不可） | `public` + `playable_in_embed=NA` | `ERROR: Video unavailable` |
+| `wB3qGgT1XIQ`（公開） | `public` + `playable_in_embed=True` | 同じ |
+
+そのため導出は両方を見る。`playable_in_embed` が取れていなければ
+「動画情報を最後まで取れなかった」＝ `unavailable`。
+
+**会限の判定を先に置くこと。** 実測（`1GlkSFdnCcc`、cookie 有り）では会限が
+`subscriber_only` かつ **`playable_in_embed = true`** を返す。yt-dlp は
+「埋め込み可」と言うが、IFrame API は同じ動画で `onError: 150` を返す。
+`playable_in_embed` を先に見ると会限が `playable` に分類され、
+必ず失敗するプレイヤーを描くことになる。
+
+**cookie が無いときは失敗を記録しない。** 未設定だと「削除された」と
+「会限で見えない」が同じ失敗になり、会限の歌枠に「削除された可能性があります」と
+出してしまう。エラー文字列で見分ける手は取らない（yt-dlp の文言は版で変わる）。
+
+埋める経路は 3 つ。**相乗りだけでは埋まらない**ので専用の backfill がある：
+
+| 経路 | 追加リクエスト | 埋まらない場合 |
+|---|---|---|
+| live chat の取得に相乗り | なし | ファイルキャッシュがあると yt-dlp 自体を呼ばない |
+| チャプター取得に相乗り | なし | backfill が `is_hidden = FALSE` 限定 |
+| `POST /api/availability/backfill` | あり（未調査のみ） | ─ |
+
+**backfill は非表示を除かない。** 会限の歌枠はどれも非表示側にあるので、
+除くと判定したい配信がまるごと落ちる（チャプター側は「表示中の配信の
+セットリストを埋める」のが目的なので除いて正しい）。
+
+`--print` を既存の実行へ足すときの注意は `internal/service/ytdlp.go` に書いてある
+（**`--print` は `--simulate` を含む**ので、ファイルを書く実行には `--no-simulate` が要る。
+足しただけだと live chat が黙って落ちてこなくなる）。
+
 ## 初回判定の優先順位
 
 配信を初めて登録するときだけ、Holodex topic のタグとタイトルキーワードのタグを
