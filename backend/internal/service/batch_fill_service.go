@@ -277,7 +277,16 @@ func (s *BatchFillService) run(runID uuid.UUID, mode string, singerIDs []string,
 		}
 		s.update(func(st *dto.BatchFillStatus) { st.Current = stream.ID })
 
-		rows := s.loadRows(stream.ID)
+		rows, ok := s.loadRows(stream.ID)
+		if !ok {
+			// 入力元を確定できなかった配信。Done に数えると「扱った」ように見えるので
+			// 失敗として残す（別ソースで代用したセットリストを作るよりよい）。
+			s.update(func(st *dto.BatchFillStatus) {
+				st.Skipped++
+				st.SkippedIDs = append(st.SkippedIDs, stream.ID)
+			})
+			continue
+		}
 		if len(rows) == 0 {
 			s.update(func(st *dto.BatchFillStatus) { st.Done++ })
 			continue
@@ -351,7 +360,13 @@ func (s *BatchFillService) run(runID uuid.UUID, mode string, singerIDs []string,
 // Holodex の曲は **iTunes ID を持っている**（最も強い証拠で、曲名が食い違っていても照合できる）。
 // ただし Holodex のセットリストは欠けていることがあるので、コメント側の曲数が明らかに多ければ
 // その配信は人に見てもらう（黙って少ない方を採らない）。
-func (s *BatchFillService) loadRows(streamID string) []*fillRow {
+// loadRows は 1 配信ぶんの入力元を読む。
+//
+// 第 2 返り値が false なら「この配信は今回は扱えない」。**行が 0 件なのとは違う。**
+// コメントが競合で読めなかっただけなのに 0 件として返すと、呼び出し側は
+// 入力元が無いと解釈してチャプターや Holodex 単独へ進み、あるはずのコメント固有の曲を
+// 落としたセットリストを作ってしまう。
+func (s *BatchFillService) loadRows(streamID string) ([]*fillRow, bool) {
 	var holodexRows, commentRows []*fillRow
 
 	if sugs, err := s.holodexService.AnalyzeHolodexSongsForBatch(streamID, false); err == nil {
@@ -368,15 +383,16 @@ func (s *BatchFillService) loadRows(streamID string) []*fillRow {
 		// 分析中にコメントが差し替わって結果が捨てられた状態。
 		// **「コメントが無い」と同じ扱いにしてはいけない** ── 空のまま先へ進むと、
 		// Holodex に曲が無ければチャプターへ落ち、曲があってもコメント固有の差分を
-		// 丸ごと落とす。入力元が無いのではなく、新しい raw で引き直すべき状態なので、
-		// 一度だけ読み直す（次も競合するなら、その配信はこの実行では諦める）。
+		// 丸ごと落とす。入力元が無いのではなく、新しい raw で引き直すべき状態。
 		logger.Warnf("[batch-fill] 分析中にコメントが変わりました (%s)。読み直します", streamID)
-		if retry, rErr := s.commentService.AnalyzeCommentsForBatch(streamID, true); rErr == nil && retry != nil {
-			resp = retry
-		} else {
-			logger.Warnf("[batch-fill] コメントの読み直しに失敗 (%s): %v", streamID, rErr)
-			resp = nil
+		retry, rErr := s.commentService.AnalyzeCommentsForBatch(streamID, true)
+		if rErr != nil || retry == nil {
+			// **二度目も駄目ならこの配信ごと諦める。** ここで resp=nil にして先へ進むと、
+			// 「コメントを諦めて別ソースで続行」になり、最初に直したかった取りこぼしが戻る。
+			logger.Warnf("[batch-fill] コメントの読み直しに失敗 (%s): %v。この配信は今回は扱いません", streamID, rErr)
+			return nil, false
 		}
+		resp = retry
 	case err != nil:
 		logger.Warnf("[batch-fill] コメント分析に失敗 (%s): %v", streamID, err)
 		resp = nil
@@ -403,11 +419,11 @@ func (s *BatchFillService) loadRows(streamID string) []*fillRow {
 		if len(chapterRows) > 0 {
 			logger.Infof("[batch-fill] %s: Holodex もコメントも無いのでチャプターから %d 曲を審査へ", streamID, len(chapterRows))
 		}
-		return chapterRows
+		return chapterRows, true
 	}
 
 	if len(holodexRows) == 0 {
-		return commentRows
+		return commentRows, true
 	}
 
 	// Holodex を入力元に採るが、**コメントにしか無い曲を落とさない**。
@@ -436,7 +452,7 @@ func (s *BatchFillService) loadRows(streamID string) []*fillRow {
 		logger.Infof("[batch-fill] %s: Holodex %d 曲 / コメント %d 曲 ── コメントにしか無い %d 曲を審査へ",
 			streamID, len(holodexRows), len(commentRows), extra)
 	}
-	return rows
+	return rows, true
 }
 
 // loadChapterRows は保存済みのチャプターから作業単位を作る。

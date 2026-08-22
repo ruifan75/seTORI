@@ -1304,6 +1304,9 @@ export interface BatchFillStatus {
   /** 「DB にあるが入力元に無い」歌唱の件数（force 実行のみ） */
   gaps: number;
   ai_asked: number;
+  // 入力元を確定できず今回は扱わなかった配信（done とは別に数える）
+  skipped?: number;
+  skipped_ids?: string[];
   message?: string;
 }
 
