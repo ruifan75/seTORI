@@ -42,9 +42,15 @@ const playlistSelect = `
 	SELECT p.id, p.user_id, p.name, p.description, p.visibility, p.share_slug, p.created_at, p.updated_at
 	FROM playlists p`
 
-const playlistSelectWithMeta = `
+// **中身と同じ規則で数える。** ListItems が秘匿された歌唱を落とすのにここで全部数えると、
+// 公開プレイリストで item_count と実際の件数がずれ、「見えていない項目が何件あるか」が漏れる。
+// const にできないのは NotRestricted を挟むため。
+var playlistSelectWithMeta = `
 	SELECT p.id, p.user_id, p.name, p.description, p.visibility, p.share_slug, p.created_at, p.updated_at,
-	       (SELECT count(*) FROM playlist_items pi WHERE pi.playlist_id = p.id) AS item_count,
+	       (SELECT count(*) FROM playlist_items pi
+	         JOIN performances pf ON pf.id = pi.performance_id
+	         JOIN streams st ON st.id = pf.stream_id
+	        WHERE pi.playlist_id = p.id AND ` + NotRestricted("st") + `) AS item_count,
 	       COALESCE(NULLIF(u.display_name, ''), u.username) AS owner_name
 	FROM playlists p
 	JOIN users u ON u.id = p.user_id`

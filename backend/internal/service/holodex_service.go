@@ -492,6 +492,15 @@ func (s *HolodexService) syncVideo(video holodex.Video, channelID string, forceU
 		if err := s.streamRepo.SetInitialVisibility(video.ID, initialHidden); err != nil {
 			return "", fmt.Errorf("set initial stream visibility: %w", err)
 		}
+
+		// **会限は同期の時点で倒しておく。** availability を取りに行くのは yt-dlp を
+		// 呼んだときだけなので、それを待つ間このデータは公開側に置かれることになる。
+		// 材料（Holodex の topic / タイトル規則で付く members_only タグ）はここで揃っている。
+		if initialRestrictionCandidate(video.TopicID, tagIDs) {
+			if err := s.streamRepo.SetRestrictionCandidate(video.ID); err != nil {
+				return "", fmt.Errorf("set restriction candidate: %w", err)
+			}
+		}
 	}
 
 	// 動画の所有者（アップロード元チャンネル）。コラボ動画の所有者は主催チャンネルであり、同期対象のチャンネルとは限らない。

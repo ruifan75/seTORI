@@ -202,14 +202,15 @@ func (r *SongRepository) Delete(id uuid.UUID) error {
 	return nil
 }
 
-// GetPerformanceCount は楽曲の歌唱回数を取得する（非表示でない配信だけを集計）。
+// GetPerformanceCount は楽曲の歌唱回数を取得する（非表示・秘匿でない配信だけを集計）。
+// **件数も秘匿の対象。** 一覧から歌唱を落としても、件数が合わなければ存在が漏れる。
 func (r *SongRepository) GetPerformanceCount(songID uuid.UUID) (int, error) {
 	var count int
 	err := r.db.QueryRow(`
 		SELECT COUNT(*)
 		FROM performances p
 		JOIN streams st ON p.stream_id = st.id
-		WHERE p.song_id = $1 AND st.is_hidden = FALSE
+		WHERE p.song_id = $1 AND st.is_hidden = FALSE AND `+NotRestricted("st")+`
 	`, songID).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("get performance count: %w", err)

@@ -181,7 +181,8 @@ func (s *ArtistService) Merge(sourceID, targetID uuid.UUID) (*dto.ArtistResponse
 
 // GetEditableFields は修正提案の対象となる編集可能フィールドと表示ラベルを返す。
 // 見つからなければ (nil, "", nil)。TargetEditor インターフェースを満たす。
-func (s *ArtistService) GetEditableFields(id uuid.UUID) (map[string]string, string, error) {
+// access は使わない（アーティストは配信に紐付かないので秘匿の対象外）。interface を揃えるために受け取る。
+func (s *ArtistService) GetEditableFields(id uuid.UUID, _ repository.ViewerAccess) (map[string]string, string, error) {
 	a, err := s.artistRepo.FindByID(id)
 	if err != nil {
 		return nil, "", err

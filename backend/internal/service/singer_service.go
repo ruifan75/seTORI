@@ -334,13 +334,14 @@ func nullableTrimmedString(value *string) sql.NullString {
 // toStreamResponse は Model を DTO に変換する。
 func (s *SingerService) toStreamResponse(stream models.Stream, tags []models.StreamTag, participants []models.Singer) dto.StreamResponse {
 	resp := dto.StreamResponse{
-		ID:          stream.ID,
-		Title:       stream.Title,
-		StreamDate:  stream.StreamDate.Format(time.RFC3339),
-		IsProcessed: stream.IsProcessed,
-		IsHidden:    stream.IsHidden,
-		CreatedAt:   stream.CreatedAt,
-		UpdatedAt:   stream.UpdatedAt,
+		ID:           stream.ID,
+		Title:        stream.Title,
+		StreamDate:   stream.StreamDate.Format(time.RFC3339),
+		IsProcessed:  stream.IsProcessed,
+		IsHidden:     stream.IsHidden,
+		IsRestricted: effectiveRestricted(stream),
+		CreatedAt:    stream.CreatedAt,
+		UpdatedAt:    stream.UpdatedAt,
 	}
 
 	if stream.DurationSeconds.Valid {

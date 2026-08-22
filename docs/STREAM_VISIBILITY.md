@@ -66,17 +66,47 @@ Holodex の分類もタイトルキーワード規則も自動判定であり、
 画面では「登録されていない」と「見せていない」を**別の文言にする**
 ── 同じにすると「まだ誰も作っていない」に見え、二重に作業させることになる。
 
-### 立てるのは自動、外すのは人
+### 自動判定と人の裁定は別の列に持つ
 
-| 動き | 誰が | 備考 |
+**1 列だと人の判断が消える。** 会限は chapters / live chat / availability backfill から
+繰り返し取り直されるので、次の順で必ず戻っていた：
+
+1. `availability` が `subscriber_only` → 秘匿が立つ
+2. 編集者が「公開してよい」と判断して外す
+3. 何かの取得で同じ動画をもう一度読む
+4. `is_restricted OR subscriber_only` で **また立つ**
+
+そこで `organization` / `organization_override` と同じ形にする（CLAUDE.md §3.5）。
+
+| 列 | 誰が書くか | 意味 |
 |---|---|---|
-| 立てる | `SaveAvailability` が `subscriber_only` を観測したとき | 積極的な発見なので信用してよい |
-| 立てる | migration 052 の初期化（`availability` と Holodex topic から） | **過剰に倒す**。取りこぼすと公開してしまうため |
-| **外す** | 人が編集画面で外す（`PUT /api/streams/{id}`） | ＝「公開してよい」という判断 |
+| `is_restricted` | 自動（同期の候補判定・`SaveAvailability`） | 会限らしいという**検出** |
+| `restriction_override` | 人だけ（`PUT /api/streams/{id}`） | NULL＝未裁定 / TRUE＝伏せる / FALSE＝公開してよい |
+
+読むときは `COALESCE(restriction_override, is_restricted)`（SQL は `repository.NotRestricted`、
+Go は `effectiveRestricted`。**片方だけ変えないこと**）。
+
+**自動判定の側は凍結しない。** `singers.is_hidden` のように固めると、後から会限化した
+配信を検出できなくなる。人の裁定が勝つので、検出が立ち続けていても表示は変わらない。
 
 **自動では外れない。** `availability = public` は「反証が無かった」という弱い結論なので
-（issue #3）、それで秘匿を解くと誤って公開する。`SaveAvailability` の SQL は
-`is_restricted = is_restricted OR $2 = 'subscriber_only'` で、立てる方向にしか動かない。
+（issue #3）、それで秘匿を解くと誤って公開する。`SaveAvailability` は立てる方向にしか動かない。
+
+### 候補は 3 つの材料から、全部の時点で倒す
+
+| いつ | 材料 |
+|---|---|
+| migration 052 / 053（既存行） | `availability = subscriber_only` / Holodex `topic_id = membersonly` / `members_only` タグ |
+| 初回同期（新しい行） | Holodex `topic_id` / `members_only` タグ（`initialRestrictionCandidate`） |
+| yt-dlp を呼んだとき | `availability = subscriber_only` |
+
+**初回同期の判定が要る理由**：`StreamRepository.Upsert` は `is_restricted` を INSERT 列に
+持たないので既定の `false` で入る。`availability` は yt-dlp を呼ぶまで埋まらないので、
+それを待つ間、新しく同期された会限配信は公開側に置かれてしまう。
+
+Holodex の `topic_id` は単値で `singing` と排他になるため取りこぼすが、
+**倒す方向にしか使わない**ので害はない（取りこぼしは `members_only` タグと
+`availability` が拾う）。
 
 ### 落とす場所は 9 つ ＋ プレイリスト
 
@@ -90,6 +120,18 @@ Holodex の分類もタイトルキーワード規則も自動判定であり、
 
 - **count も通す**（`FindBySongID` などは COUNT を別に撃つ）。DTO で落とすと
   件数から存在が漏れ、ページングも合わなくなる
+- **「歌唱の行を返すクエリ」だけでは足りない。** 歌唱を*参照する*集計と検索も同じ規則で濾す：
+  `SongRepository.GetPerformanceCount` / `SingerRepository.GetPerformanceCount` /
+  `TagRepository.SearchPerformanceTags` / `SearchStreams` の vocalist・歌唱タグの
+  サブクエリ / プレイリストの `item_count`。
+  実測で、曲の件数は 11 と出るのに一覧には 10 件しか返らず、`vocalist_id=` で検索すると
+  秘匿配信が 1 件ヒットしていた（＝「この配信でこの人が歌った」が判定できた）
+- **提案の経路も塞ぐ。** `FindOverlapping` は 10 個目の reader で、
+  `POST /api/suggestions` と `GET /api/suggestions/mine` は**ログインだけで通る**。
+  実測：権限の無い利用者が `end_seconds=0`（＝全既存歌唱に重なる）の提案を投げ、
+  自分の提案一覧を開くだけで、秘匿された配信の曲名と開始・終了秒が `overlaps` に返っていた。
+  `TargetEditor.GetEditableFields` にも access を通し、**見えないものは提案の対象にもできない**
+  ようにしてある
 - **プレイリストは秘匿だけ落とし、非表示は残す**。非表示は利用者が自分で入れたものなので
   黙って消さないが、公開・限定公開のプレイリストは未ログインから読めるので秘匿は通せない
 - **Holodex への書き戻しも `PublicAccess`**。あれは運用者の名義で外部に残る公開行為なので、

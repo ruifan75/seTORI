@@ -112,9 +112,13 @@ type Stream struct {
 	ChapterSongs []byte `json:"chapter_songs"` // JSONB - 章節から抽出した楽曲
 	IsProcessed  bool   `json:"is_processed"`  // 処理済み
 	IsHidden     bool   `json:"is_hidden"`     // 初回登録時に判定し、その後は手動編集のみ
-	// IsRestricted は中身（歌唱記録・解析結果）を公開してよいか未確認、という旗。
-	// **is_hidden とは別の軸**（is_hidden は「一覧の既定から外す」だけで認可境界ではない）。
-	IsRestricted bool `json:"is_restricted"`
+	// 秘匿（中身を公開してよいか）。**is_hidden とは別の軸**で、しかも 2 列に分ける：
+	//   IsRestricted        … 自動判定の候補（Holodex topic / members_only タグ / availability）
+	//   RestrictionOverride … 人の裁定。NULL＝未裁定 / true＝伏せる / false＝公開してよい
+	// 実効値は COALESCE(override, is_restricted)。1 列だと、人が解除しても
+	// 次の availability 取得で戻ってしまう。
+	IsRestricted        bool         `json:"is_restricted"`
+	RestrictionOverride sql.NullBool `json:"restriction_override"`
 	// 再生可否（yt-dlp 由来）。FindByID でのみ読む。3 つとも別の事実なので潰さない：
 	// AvailabilityCheckedAt が NULL なら未調査で、「調べたが公開だった」とは違う。
 	Availability          sql.NullString `json:"availability"`

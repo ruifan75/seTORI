@@ -328,8 +328,8 @@ func (s *PerformanceService) StreamLabel(streamID string) (string, error) {
 // OverlappingPerformances は提案の時間帯と重なる既存の歌唱を返す。
 // レビュー時に「もう登録されている曲を報告していないか」へ気づけるようにするための情報で、
 // 重なっていても承認は止めない（メドレーや掛け合いなど、正当に重なる歌唱があるため）。
-func (s *PerformanceService) OverlappingPerformances(streamID string, start, end int) ([]dto.OverlapInfo, error) {
-	perfs, err := s.perfRepo.FindOverlapping(streamID, start, end, uuid.Nil)
+func (s *PerformanceService) OverlappingPerformances(streamID string, start, end int, access repository.ViewerAccess) ([]dto.OverlapInfo, error) {
+	perfs, err := s.perfRepo.FindOverlapping(streamID, start, end, uuid.Nil, access)
 	if err != nil {
 		return nil, err
 	}
@@ -526,8 +526,8 @@ func (s *PerformanceService) ApplySongSwap(performanceID uuid.UUID, p dto.SongSw
 // （`artists.aliases` を読点区切りで持っているのと同じ手）。
 // 自動反映は autoApplyFields の allowlist で時間軸だけに絞ってあるので、
 // ここに足しても中央値の計算には回らない。
-func (s *PerformanceService) GetEditableFields(id uuid.UUID) (map[string]string, string, error) {
-	perf, err := s.perfRepo.FindByID(id, repository.EditorAccess)
+func (s *PerformanceService) GetEditableFields(id uuid.UUID, access repository.ViewerAccess) (map[string]string, string, error) {
+	perf, err := s.perfRepo.FindByID(id, access)
 	if err != nil {
 		return nil, "", err
 	}

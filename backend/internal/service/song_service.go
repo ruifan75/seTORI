@@ -288,7 +288,8 @@ func nullStr(ns sql.NullString) string {
 
 // GetEditableFields は修正提案の対象となる編集可能フィールドと表示ラベルを返す。
 // 見つからなければ (nil, "", nil)。TargetEditor インターフェースを満たす。
-func (s *SongService) GetEditableFields(id uuid.UUID) (map[string]string, string, error) {
+// access は使わない（楽曲は配信に紐付かないので秘匿の対象外）。interface を揃えるために受け取る。
+func (s *SongService) GetEditableFields(id uuid.UUID, _ repository.ViewerAccess) (map[string]string, string, error) {
 	song, err := s.songRepo.FindByID(id)
 	if err != nil {
 		return nil, "", err

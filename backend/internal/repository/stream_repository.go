@@ -41,13 +41,13 @@ func (r *StreamRepository) FindAll(limit, offset int, includeHidden bool, sort, 
 	var query string
 	if includeHidden {
 		query = `
-			SELECT id, title, stream_date, duration_seconds, thumbnail_url, holodex_data, holodex_hash, comment_raw, comment_songs, is_processed, is_hidden, created_at, updated_at
+			SELECT id, title, stream_date, duration_seconds, thumbnail_url, holodex_data, holodex_hash, comment_raw, comment_songs, is_processed, is_hidden, is_restricted, restriction_override, created_at, updated_at
 			FROM streams
 			ORDER BY ` + order + `
 			LIMIT $1 OFFSET $2`
 	} else {
 		query = `
-			SELECT id, title, stream_date, duration_seconds, thumbnail_url, holodex_data, holodex_hash, comment_raw, comment_songs, is_processed, is_hidden, created_at, updated_at
+			SELECT id, title, stream_date, duration_seconds, thumbnail_url, holodex_data, holodex_hash, comment_raw, comment_songs, is_processed, is_hidden, is_restricted, restriction_override, created_at, updated_at
 			FROM streams
 			WHERE is_hidden = FALSE
 			ORDER BY ` + order + `
@@ -64,7 +64,7 @@ func (r *StreamRepository) FindAll(limit, offset int, includeHidden bool, sort, 
 	for rows.Next() {
 		var s models.Stream
 		err := rows.Scan(&s.ID, &s.Title, &s.StreamDate, &s.DurationSeconds,
-			&s.ThumbnailURL, &s.HolodexData, &s.HolodexHash, &s.CommentRaw, &s.CommentSongs, &s.IsProcessed, &s.IsHidden, &s.CreatedAt, &s.UpdatedAt)
+			&s.ThumbnailURL, &s.HolodexData, &s.HolodexHash, &s.CommentRaw, &s.CommentSongs, &s.IsProcessed, &s.IsHidden, &s.IsRestricted, &s.RestrictionOverride, &s.CreatedAt, &s.UpdatedAt)
 		if err != nil {
 			return nil, 0, fmt.Errorf("scan stream: %w", err)
 		}
@@ -77,14 +77,14 @@ func (r *StreamRepository) FindAll(limit, offset int, includeHidden bool, sort, 
 // FindByID は動画 ID で歌枠を取得する。
 func (r *StreamRepository) FindByID(id string) (*models.Stream, error) {
 	query := `
-		SELECT id, title, stream_date, duration_seconds, thumbnail_url, holodex_data, holodex_hash, comment_raw, comment_songs, comment_songs_analyzed_at, chapter_raw, chapter_songs, is_processed, is_hidden, is_restricted, availability, playable_in_embed, availability_checked_at, created_at, updated_at
+		SELECT id, title, stream_date, duration_seconds, thumbnail_url, holodex_data, holodex_hash, comment_raw, comment_songs, comment_songs_analyzed_at, chapter_raw, chapter_songs, is_processed, is_hidden, is_restricted, restriction_override, availability, playable_in_embed, availability_checked_at, created_at, updated_at
 		FROM streams WHERE id = $1`
 
 	var s models.Stream
 	err := r.db.QueryRow(query, id).Scan(
 		&s.ID, &s.Title, &s.StreamDate, &s.DurationSeconds,
 		&s.ThumbnailURL, &s.HolodexData, &s.HolodexHash, &s.CommentRaw, &s.CommentSongs, &s.CommentSongsAnalyzedAt,
-		&s.ChapterRaw, &s.ChapterSongs, &s.IsProcessed, &s.IsHidden, &s.IsRestricted,
+		&s.ChapterRaw, &s.ChapterSongs, &s.IsProcessed, &s.IsHidden, &s.IsRestricted, &s.RestrictionOverride,
 		&s.Availability, &s.PlayableInEmbed, &s.AvailabilityCheckedAt, &s.CreatedAt, &s.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -113,15 +113,17 @@ func (r *StreamRepository) Create(s *models.Stream) error {
 
 // UpdateMetadata は利用者が編集できる metadata フィールドだけを更新し、大きな JSONB（holodex_data / comment_*）には触れない。
 // 通常の情報更新で問題を含む可能性のある JSONB データを書き戻さないため。
-func (r *StreamRepository) UpdateMetadata(id string, title string, streamDate time.Time, isProcessed, isHidden, isRestricted bool) error {
+// restrictionOverride は人の裁定（NULL＝未裁定）。**自動判定の is_restricted は書かない** ──
+// 人が触った事実と、検出が言っていることは別の列に残す。
+func (r *StreamRepository) UpdateMetadata(id string, title string, streamDate time.Time, isProcessed, isHidden bool, restrictionOverride sql.NullBool) error {
 	query := `
 		UPDATE streams
-		SET title = $2, stream_date = $3, is_processed = $4, is_hidden = $5, is_restricted = $6, updated_at = NOW()
+		SET title = $2, stream_date = $3, is_processed = $4, is_hidden = $5, restriction_override = $6, updated_at = NOW()
 		WHERE id = $1
 		RETURNING updated_at`
 
 	var updatedAt time.Time
-	err := r.db.QueryRow(query, id, title, streamDate, isProcessed, isHidden, isRestricted).Scan(&updatedAt)
+	err := r.db.QueryRow(query, id, title, streamDate, isProcessed, isHidden, restrictionOverride).Scan(&updatedAt)
 	if err != nil {
 		return fmt.Errorf("update stream metadata: %w", err)
 	}
@@ -174,7 +176,7 @@ func (r *StreamRepository) Delete(id string) error {
 // FindWithoutCommentSongs は comment_raw を持つすべての配信を取得する（backfill／再生成用）。
 func (r *StreamRepository) FindWithoutCommentSongs() ([]models.Stream, error) {
 	query := `
-		SELECT id, title, stream_date, duration_seconds, thumbnail_url, holodex_data, holodex_hash, comment_raw, comment_songs, is_processed, is_hidden, created_at, updated_at
+		SELECT id, title, stream_date, duration_seconds, thumbnail_url, holodex_data, holodex_hash, comment_raw, comment_songs, is_processed, is_hidden, is_restricted, restriction_override, created_at, updated_at
 		FROM streams
 		WHERE comment_raw IS NOT NULL AND comment_raw != 'null'`
 
@@ -188,7 +190,7 @@ func (r *StreamRepository) FindWithoutCommentSongs() ([]models.Stream, error) {
 	for rows.Next() {
 		var s models.Stream
 		err := rows.Scan(&s.ID, &s.Title, &s.StreamDate, &s.DurationSeconds,
-			&s.ThumbnailURL, &s.HolodexData, &s.HolodexHash, &s.CommentRaw, &s.CommentSongs, &s.IsProcessed, &s.IsHidden, &s.CreatedAt, &s.UpdatedAt)
+			&s.ThumbnailURL, &s.HolodexData, &s.HolodexHash, &s.CommentRaw, &s.CommentSongs, &s.IsProcessed, &s.IsHidden, &s.IsRestricted, &s.RestrictionOverride, &s.CreatedAt, &s.UpdatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("scan stream: %w", err)
 		}
@@ -270,7 +272,7 @@ func (r *StreamRepository) UpdateCommentSongsHash(id, hash string) error {
 // FindByDateRange は日付範囲で歌枠を取得する。
 func (r *StreamRepository) FindByDateRange(start, end time.Time) ([]models.Stream, error) {
 	query := `
-		SELECT id, title, stream_date, duration_seconds, thumbnail_url, holodex_data, holodex_hash, comment_raw, comment_songs, is_processed, is_hidden, created_at, updated_at
+		SELECT id, title, stream_date, duration_seconds, thumbnail_url, holodex_data, holodex_hash, comment_raw, comment_songs, is_processed, is_hidden, is_restricted, restriction_override, created_at, updated_at
 		FROM streams
 		WHERE stream_date >= $1 AND stream_date <= $2
 		ORDER BY stream_date DESC`
@@ -285,7 +287,7 @@ func (r *StreamRepository) FindByDateRange(start, end time.Time) ([]models.Strea
 	for rows.Next() {
 		var s models.Stream
 		err := rows.Scan(&s.ID, &s.Title, &s.StreamDate, &s.DurationSeconds,
-			&s.ThumbnailURL, &s.HolodexData, &s.HolodexHash, &s.CommentRaw, &s.CommentSongs, &s.IsProcessed, &s.IsHidden, &s.CreatedAt, &s.UpdatedAt)
+			&s.ThumbnailURL, &s.HolodexData, &s.HolodexHash, &s.CommentRaw, &s.CommentSongs, &s.IsProcessed, &s.IsHidden, &s.IsRestricted, &s.RestrictionOverride, &s.CreatedAt, &s.UpdatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("scan stream: %w", err)
 		}
@@ -423,6 +425,24 @@ func (r *StreamRepository) SetInitialVisibility(streamID string, hidden bool) er
 	return nil
 }
 
+// SetRestrictionCandidate は自動判定の側（is_restricted）を立てる。
+//
+// **新規同期にも効かせるために要る。** Upsert は is_restricted を INSERT 列に持たないので
+// 既定の false で入り、yt-dlp が availability を取りに行くまで公開側に置かれてしまう。
+// 会限と分かる材料（Holodex の topic / members_only タグ）は同期の時点で揃っているので、
+// そこで倒しておく。
+//
+// **立てるだけで外さない。** 人の裁定は restriction_override に載るので、ここは触らない。
+func (r *StreamRepository) SetRestrictionCandidate(streamID string) error {
+	_, err := r.db.Exec(`
+		UPDATE streams SET is_restricted = TRUE, updated_at = NOW()
+		WHERE id = $1 AND NOT is_restricted`, streamID)
+	if err != nil {
+		return fmt.Errorf("set restriction candidate: %w", err)
+	}
+	return nil
+}
+
 // FindByTagID は指定タグが付いた配信を新しい順で返す（タグ検索用、非表示は除外）。
 func (r *StreamRepository) FindByTagID(tagID string, limit, offset int) ([]models.Stream, int, error) {
 	var total int
@@ -451,7 +471,7 @@ func (r *StreamRepository) FindByTagID(tagID string, limit, offset int) ([]model
 	for rows.Next() {
 		var s models.Stream
 		err := rows.Scan(&s.ID, &s.Title, &s.StreamDate, &s.DurationSeconds,
-			&s.ThumbnailURL, &s.HolodexData, &s.HolodexHash, &s.CommentRaw, &s.CommentSongs, &s.IsProcessed, &s.IsHidden, &s.CreatedAt, &s.UpdatedAt)
+			&s.ThumbnailURL, &s.HolodexData, &s.HolodexHash, &s.CommentRaw, &s.CommentSongs, &s.IsProcessed, &s.IsHidden, &s.IsRestricted, &s.RestrictionOverride, &s.CreatedAt, &s.UpdatedAt)
 		if err != nil {
 			return nil, 0, fmt.Errorf("scan stream: %w", err)
 		}
@@ -557,8 +577,11 @@ func (r *StreamRepository) SearchStreams(filters models.StreamSearchFilters, lim
 		args = append(args, pq.Array(filters.ParticipantIDs))
 		i++
 	}
+	// **歌手・歌唱タグでの絞り込みは「誰が何を歌ったか」そのもの**なので、
+	// 秘匿された配信は突き合わせの対象から外す。配信のタイトルは公開してよいが、
+	// 「この配信でこの人が歌った」は伏せている中身の一部。
 	if len(filters.VocalistIDs) > 0 {
-		where += fmt.Sprintf(" AND (SELECT COUNT(DISTINCT ps.singer_id) FROM performances p JOIN performance_singers ps ON ps.performance_id = p.id WHERE p.stream_id = s.id AND ps.singer_id = ANY($%d)) = %d", i, len(filters.VocalistIDs))
+		where += fmt.Sprintf(" AND (SELECT COUNT(DISTINCT ps.singer_id) FROM performances p JOIN performance_singers ps ON ps.performance_id = p.id JOIN streams st ON st.id = p.stream_id WHERE p.stream_id = s.id AND "+NotRestricted("st")+" AND ps.singer_id = ANY($%d)) = %d", i, len(filters.VocalistIDs))
 		args = append(args, pq.Array(filters.VocalistIDs))
 		i++
 	}
@@ -568,7 +591,7 @@ func (r *StreamRepository) SearchStreams(filters models.StreamSearchFilters, lim
 		i++
 	}
 	if len(filters.PerformanceTagIDs) > 0 {
-		where += fmt.Sprintf(" AND (SELECT COUNT(DISTINCT ppt.tag_id) FROM performances p JOIN performance_performance_tags ppt ON ppt.performance_id = p.id WHERE p.stream_id = s.id AND ppt.tag_id = ANY($%d)) = %d", i, len(filters.PerformanceTagIDs))
+		where += fmt.Sprintf(" AND (SELECT COUNT(DISTINCT ppt.tag_id) FROM performances p JOIN performance_performance_tags ppt ON ppt.performance_id = p.id JOIN streams st ON st.id = p.stream_id WHERE p.stream_id = s.id AND "+NotRestricted("st")+" AND ppt.tag_id = ANY($%d)) = %d", i, len(filters.PerformanceTagIDs))
 		args = append(args, pq.Array(filters.PerformanceTagIDs))
 		i++
 	}
@@ -596,7 +619,7 @@ func (r *StreamRepository) SearchStreams(filters models.StreamSearchFilters, lim
 	for rows.Next() {
 		var s models.Stream
 		err := rows.Scan(&s.ID, &s.Title, &s.StreamDate, &s.DurationSeconds,
-			&s.ThumbnailURL, &s.HolodexData, &s.HolodexHash, &s.CommentRaw, &s.CommentSongs, &s.IsProcessed, &s.IsHidden, &s.CreatedAt, &s.UpdatedAt)
+			&s.ThumbnailURL, &s.HolodexData, &s.HolodexHash, &s.CommentRaw, &s.CommentSongs, &s.IsProcessed, &s.IsHidden, &s.IsRestricted, &s.RestrictionOverride, &s.CreatedAt, &s.UpdatedAt)
 		if err != nil {
 			return nil, 0, fmt.Errorf("scan stream: %w", err)
 		}
@@ -816,8 +839,10 @@ func (r *StreamRepository) SaveAvailability(id string, availability sql.NullStri
 	_, err := r.db.Exec(`
 		UPDATE streams
 		SET availability = $2, playable_in_embed = $3, availability_checked_at = NOW(),
-		    -- 会限と分かったら秘匿を立てる。**外しはしない**（public は「反証が無かった」
-		    -- という弱い結論なので、それで秘匿を解くと誤って公開する。解くのは人の判断）。
+		    -- 会限と分かったら**自動判定の側だけ**立てる。restriction_override（人の裁定）は
+		    -- 触らない ── 触ると「公開してよい」と決めた配信が、次の取得で伏せ直される。
+		    -- 外しもしない（public は「反証が無かった」という弱い結論なので、
+		    -- それで秘匿を解くと誤って公開する）。
 		    is_restricted = is_restricted OR $2 = 'subscriber_only'
 		WHERE id = $1`, id, availability, playableInEmbed)
 	if err != nil {
@@ -1098,7 +1123,7 @@ func (r *StreamRepository) FindBySingerID(singerID string, limit, offset int, fi
 	}
 
 	query := fmt.Sprintf(`
-		SELECT s.id, s.title, s.stream_date, s.duration_seconds, s.thumbnail_url, s.holodex_data, s.holodex_hash, s.is_processed, s.is_hidden, s.created_at, s.updated_at
+		SELECT s.id, s.title, s.stream_date, s.duration_seconds, s.thumbnail_url, s.holodex_data, s.holodex_hash, s.is_processed, s.is_hidden, s.is_restricted, s.restriction_override, s.created_at, s.updated_at
 		FROM streams s
 		JOIN stream_singers ss ON s.id = ss.stream_id
 		WHERE %s
@@ -1116,7 +1141,7 @@ func (r *StreamRepository) FindBySingerID(singerID string, limit, offset int, fi
 	for rows.Next() {
 		var s models.Stream
 		err := rows.Scan(&s.ID, &s.Title, &s.StreamDate, &s.DurationSeconds,
-			&s.ThumbnailURL, &s.HolodexData, &s.HolodexHash, &s.IsProcessed, &s.IsHidden, &s.CreatedAt, &s.UpdatedAt)
+			&s.ThumbnailURL, &s.HolodexData, &s.HolodexHash, &s.IsProcessed, &s.IsHidden, &s.IsRestricted, &s.RestrictionOverride, &s.CreatedAt, &s.UpdatedAt)
 		if err != nil {
 			return nil, 0, fmt.Errorf("scan stream: %w", err)
 		}
