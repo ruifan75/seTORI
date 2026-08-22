@@ -397,8 +397,9 @@ func (r *PerformanceRepository) FindOverlapping(streamID string, start, end int,
 		WHERE p.stream_id = $1
 		  AND p.id <> $4
 		  AND p.start_seconds < $3
-		  AND $2 < (CASE WHEN p.end_seconds = 0 THEN `+fmt.Sprint(openEnd)+` ELSE p.end_seconds END)
-		ORDER BY p.start_seconds`+access.restrictClause(), streamID, start, proposedEnd, excludeID)
+		  AND $2 < (CASE WHEN p.end_seconds = 0 THEN `+fmt.Sprint(openEnd)+` ELSE p.end_seconds END)`+
+		access.restrictClause()+`
+		ORDER BY p.start_seconds`, streamID, start, proposedEnd, excludeID)
 }
 
 // Update 既存の演出を ID を保ったまま更新する。
@@ -887,8 +888,16 @@ func NotRestricted(alias string) string {
 }
 
 // restrictClause は WHERE / JOIN の条件へ足す文字列を返す。
+//
 // **プレースホルダを含めない**（クエリごとに $N の番号が違うため、
 // 番号を持ち込むと足す場所ごとにずれる）。
+//
+// **ORDER BY より前に連結すること。** 後ろに付けると
+// `ORDER BY p.start_seconds AND NOT COALESCE(...)` になり、Postgres は
+// 「argument of AND must be type boolean, not type integer」で落ちる。
+// 呼び出し側がそのエラーを握りつぶしていると**結果は常に空**になり、
+// 「秘匿が効いている」ように見えてしまう ── 実際に一度そう見えた。
+// 濾せているかは、**秘匿でない配信でちゃんと返ること**まで確かめないと分からない。
 func (a ViewerAccess) restrictClause() string {
 	if a == EditorAccess {
 		return ""

@@ -240,7 +240,7 @@ func (r *ArtistRepository) FindSongsByArtist(artistID uuid.UUID, limit, offset i
 		SELECT s.id, s.name, s.name_reading, s.original_artist, s.original_artist_reading, s.arts,
 		       s.created_at, s.updated_at,
 		       (SELECT COUNT(*) FROM performances p JOIN streams st ON st.id = p.stream_id
-		        WHERE p.song_id = s.id AND st.is_hidden = FALSE) AS perf_count
+		        WHERE p.song_id = s.id AND st.is_hidden = FALSE AND `+NotRestricted("st")+`) AS perf_count
 		FROM songs s
 		JOIN song_artists sa ON sa.song_id = s.id
 		WHERE sa.artist_id = $1

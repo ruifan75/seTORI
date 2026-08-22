@@ -455,12 +455,18 @@ func (r *SongMatchRepository) ListOpenMergeCandidates(limit int) ([]MergeCandida
 // mergeCandidateSelect は候補一覧の共通 SELECT。
 // iTunes ID を一緒に引くのは、編曲の違いを人が判断する材料
 // （収録アルバム・再生時間）をフロントが引けるようにするため。
-const mergeCandidateSelect = `
+// **件数は秘匿を濾す。** この SELECT は公開の GET /api/songs/{id}/merge-candidates と
+// 編集者向けの一覧で共用されるが、件数だけは公開側に合わせて常に濾す
+// ── 編集者は歌唱一覧そのものを見られるので、ここで秘匿分を数えても得られる情報は無く、
+// 逆に濾さないと公開側で「詳細の件数」と食い違う。
+var mergeCandidateSelect = `
 	SELECT c.id, c.score, c.reason, c.status, c.origin,
 	       n.id, n.name, n.name_reading, n.original_artist, n.original_artist_reading, n.arts, n.created_at, n.updated_at,
 	       e.id, e.name, e.name_reading, e.original_artist, e.original_artist_reading, e.arts, e.created_at, e.updated_at,
-	       (SELECT COUNT(*) FROM performances p WHERE p.song_id = n.id),
-	       (SELECT COUNT(*) FROM performances p WHERE p.song_id = e.id),
+	       (SELECT COUNT(*) FROM performances p JOIN streams st ON st.id = p.stream_id
+	         WHERE p.song_id = n.id AND st.is_hidden = FALSE AND ` + NotRestricted("st") + `),
+	       (SELECT COUNT(*) FROM performances p JOIN streams st ON st.id = p.stream_id
+	         WHERE p.song_id = e.id AND st.is_hidden = FALSE AND ` + NotRestricted("st") + `),
 	       ARRAY(SELECT si.itunes_id FROM song_itunes si WHERE si.song_id = n.id ORDER BY si.is_primary DESC),
 	       ARRAY(SELECT si.itunes_id FROM song_itunes si WHERE si.song_id = e.id ORDER BY si.is_primary DESC),
 	       c.same_composition, c.same_arrangement, COALESCE(c.recommendation, ''),

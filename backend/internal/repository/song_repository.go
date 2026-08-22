@@ -27,7 +27,7 @@ func songListOrder(sort, dir string) string {
 	case "performances":
 		return fmt.Sprintf(
 			`(SELECT COUNT(*) FROM performances p JOIN streams st ON st.id = p.stream_id `+
-				`WHERE p.song_id = songs.id AND st.is_hidden = FALSE) %s, `, dirOr(dir, "desc")) +
+				`WHERE p.song_id = songs.id AND st.is_hidden = FALSE AND `+NotRestricted("st")+`) %s, `, dirOr(dir, "desc")) +
 			nameSortOrder("name", "name_reading")
 	default:
 		return nameSortOrderDir("name", "name_reading", dir)
@@ -234,7 +234,7 @@ func (r *SongRepository) GetPerformanceCounts(songIDs []uuid.UUID) (map[uuid.UUI
 		SELECT p.song_id, COUNT(*)
 		FROM performances p
 		JOIN streams st ON p.stream_id = st.id
-		WHERE p.song_id = ANY($1::uuid[]) AND st.is_hidden = FALSE
+		WHERE p.song_id = ANY($1::uuid[]) AND st.is_hidden = FALSE AND ` + NotRestricted("st") + `
 		GROUP BY p.song_id`
 
 	rows, err := r.db.Query(query, pq.Array(ids))
