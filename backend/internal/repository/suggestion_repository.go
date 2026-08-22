@@ -241,12 +241,36 @@ func (r *SuggestionRepository) ListGroupedByTarget(status, kind string, limit, o
 
 // ListByCreator は指定した利用者が出した提案をページングして返す（status が空なら全件）。
 // 「自分の提案」画面で、取り下げや結果の確認に使う。
-func (r *SuggestionRepository) ListByCreator(userID uuid.UUID, status string, limit, offset int) ([]models.EditSuggestion, int, error) {
+//
+// **access は「今」の可視性で効く。** 提案は投稿時の値を非正規化して持っている
+// （target_label / before_data / after_data / payload の current_song_name）ので、
+// 対象が**あとから**秘匿になっても、保存済みのコピーはそのまま読めてしまう。
+// 実際 migration 052/053 は既存の 86 本を一括で秘匿にしたので、
+// そこに提案が 1 件でもあれば、投稿者はその中身を読み続けられる。
+//
+// **一覧と COUNT の両方に同じ条件を掛ける。** DTO の側で落とすと、件数とページングが
+// 合わなくなり、伏せたはずの提案が「何件あるか」だけ残る。
+func (r *SuggestionRepository) ListByCreator(userID uuid.UUID, status string, limit, offset int, access ViewerAccess) ([]models.EditSuggestion, int, error) {
 	where := "WHERE created_by = $1"
 	args := []any{userID}
 	if status != "" {
 		where += " AND status = $2"
 		args = append(args, status)
+	}
+	// 対象が秘匿された配信に属する提案を落とす。
+	// 対象の辿り方が 2 通りあるので両方見る：
+	//   target_id  … performance を直接指す（field / perf.meta）
+	//   target_key … 配信の動画 ID（perf.missing。UUID を持たないため）
+	if access == PublicAccess {
+		where += `
+		  AND NOT EXISTS (
+			SELECT 1 FROM performances p JOIN streams st ON st.id = p.stream_id
+			WHERE p.id = edit_suggestions.target_id AND ` + NotRestricted("st") + ` = FALSE
+		  )
+		  AND NOT EXISTS (
+			SELECT 1 FROM streams st
+			WHERE st.id = edit_suggestions.target_key AND ` + NotRestricted("st") + ` = FALSE
+		  )`
 	}
 
 	var total int
