@@ -383,5 +383,7 @@ func hashChapters(chapters []Chapter) string {
 	if err != nil {
 		return ""
 	}
-	return hashBytes(raw)
+	// コメントと同じく抽出規則の版を混ぜる（同じ ExtractSongs を通るので、
+	// 規則を変えたら章節のキャッシュも失効させないと古い結果が残る）
+	return hashBytes(append(raw, extractionRulesSalt()...))
 }
