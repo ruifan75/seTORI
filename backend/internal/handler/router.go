@@ -2631,7 +2631,8 @@ func (r *Router) handleBackfillAvailability(w http.ResponseWriter, req *http.Req
 			concurrency = v
 		}
 	}
-	n, err := r.availabilityService.Backfill(concurrency)
+	// 並列数は service 側で丸められる。要求値ではなく**実際に使う値**を返す。
+	n, effective, err := r.availabilityService.Backfill(concurrency)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -2639,7 +2640,7 @@ func (r *Router) handleBackfillAvailability(w http.ResponseWriter, req *http.Req
 	respondJSON(w, http.StatusAccepted, map[string]interface{}{
 		"message":     "再生可否の取得を開始しました（バックグラウンド、ログ参照）",
 		"targets":     n,
-		"concurrency": concurrency,
+		"concurrency": effective,
 	})
 }
 
