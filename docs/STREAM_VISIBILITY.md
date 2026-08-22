@@ -158,8 +158,19 @@ PR #6 が解析結果でやったのと同じ考え方だが、通す場所は�
 yt-dlp は警告だけ出して**終了コード 0 で続行し**（`raise_no_formats(expected=True)` →
 `report_warning`）、部分的なメタデータから `availability = public` を出す。
 実測でも視聴不可の `hVfDBfreYNI` が `public|NA` を返した。
-そこで相乗りは **`playable_in_embed` が埋まったときだけ**保存する（`Resolved()`）
-── 抽出が最後まで通った証拠がこれしかないため。
+そこで相乗りは **`availability` と `playable_in_embed` の両方が揃ったときだけ**保存する
+（`Resolved()`）。**片方では足りない ── 2 つは別の入力から来ていて、別々に落ちる**：
+
+| 値 | 出どころ | 落ち方 |
+|---|---|---|
+| `availability` | initial_data の badge | initial_data は **`fatal=False`** で取るので、一時失敗すると `NA` |
+| `playable_in_embed` | player response | 上が落ちても `True` のまま |
+
+つまり **cookie 有りの会限で initial_data だけ一時失敗すると `NA<TAB>True`** が
+終了コード 0 で返る。`playable_in_embed` だけを目印にしていると、これを信用して保存し、
+`subscriber_only` が無いので **`playable` と判定して必ず失敗するプレイヤーを描く**。
+しかも保存済みなので二度と調べ直さない。逆に動画そのものを取れないときは
+`public<TAB>NA` になる（実測：`hVfDBfreYNI`）── 落ちる側が場合によって違う。
 
 専用の `Fetch` はフラグを付けないので、取れなければ非ゼロで終わる。そのうえで：
 
@@ -173,8 +184,10 @@ subreason が `This content isn't available, try again later` で、yt-dlp は�
 rate-limited の案内を足す（`extractor/youtube/_video.py`）。
 つまり **`Video unavailable` だけで消失と判定すると、レート制限に当たった公開配信を
 恒久的に `unavailable` として記録する**。backfill は 700 件超を並列で回すので、これは
-起きにくい事故ではなく起こしにいく事故になる。`isTransientFailure` を
-**`isVideoGone` より先に**通すこと（順序は `availability_failure_test.go` で固定してある）。
+起きにくい事故ではなく起こしにいく事故になる。判定は `classifyFetchFailure` に閉じ込めてある
+── 述語を 2 つ順に呼ぶ形にすると、順序を入れ替えても型は通りテストも書きにくい。
+`availability_failure_test.go` は**決定そのもの**を検査するので、順序を逆にすると落ちる
+（実際に入れ替えて確認済み）。
 
 文言に依存するのは避けたかったが、ここでは**外したときに安全側へ倒れる** ──
 一致しなければ未調査のまま残るだけ。会限を文字列で見分けるのは逆に危険なので、

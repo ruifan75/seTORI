@@ -97,15 +97,15 @@ func (s *AvailabilityService) Fetch(videoID string) (ytdlpAvailability, error) {
 			return a, fmt.Errorf("動画情報を取得できません（cookie 無しのため会限と区別できず、判定は保存しません）: %s",
 				ytdlpErrorLine(stderr.String()))
 		}
-		if isTransientFailure(stderr.String()) {
+		switch classifyFetchFailure(stderr.String()) {
+		case failureTransient:
 			return a, fmt.Errorf("一時的な失敗のため保存しません（時間をおいて再実行してください）: %s",
 				ytdlpErrorLine(stderr.String()))
-		}
-		if !isVideoGone(stderr.String()) {
-			return a, fmt.Errorf("動画情報を取得できません（一時的な失敗の可能性があるため保存しません。再実行してください）: %s",
+		case failureUnknown:
+			return a, fmt.Errorf("動画情報を取得できません（原因を判別できないため保存しません。再実行してください）: %s",
 				ytdlpErrorLine(stderr.String()))
 		}
-		// 動画が無いことが確かめられた。availability は空、playable_in_embed は NULL。
+		// failureVideoGone。availability は空、playable_in_embed は NULL。
 		if err := s.save(videoID, a); err != nil {
 			return a, err
 		}
@@ -179,7 +179,35 @@ func (s *AvailabilityService) Backfill(concurrency int) (targets, effectiveConcu
 	return len(ids), concurrency, nil
 }
 
-// isTransientFailure は「今回はたまたま取れなかった」を見る。**isVideoGone より先に見ること。**
+// failureKind は取得に失敗したときの扱い。
+type failureKind int
+
+const (
+	// failureTransient … 今回はたまたま取れなかった。記録せず、次の backfill に任せる。
+	failureTransient failureKind = iota
+	// failureVideoGone … 動画そのものが無い。unavailable として記録してよい。
+	failureVideoGone
+	// failureUnknown … どちらとも読めない。記録しない（安全側）。
+	failureUnknown
+)
+
+// classifyFetchFailure は stderr から失敗の種類を決める。
+//
+// **判定の順序がこの関数の中身そのもの。** 一時障害と消失は同じ文字列で来ることがあるので
+// （下記）、一時障害を先に見る。呼び出し側が 2 つの述語を順に呼ぶ形にしていると、
+// 順序を入れ替えても型は通りテストも書きにくいので、決定をここに閉じ込めてある。
+func classifyFetchFailure(stderr string) failureKind {
+	if isTransientFailure(stderr) {
+		return failureTransient
+	}
+	if isVideoGone(stderr) {
+		return failureVideoGone
+	}
+	return failureUnknown
+}
+
+// isTransientFailure は「今回はたまたま取れなかった」を見る。
+// **単独で使わないこと**（classifyFetchFailure を通す）。
 //
 // **レート制限は "Video unavailable" で始まる。** YouTube が返す reason が
 // `Video unavailable`、subreason が `This content isn't available, try again later` で、
@@ -218,7 +246,8 @@ func isTransientFailure(stderr string) bool {
 //	存在しない ID     ERROR: [youtube] xxx: Video unavailable
 //	権利で降ろされた  ERROR: [youtube] xxx: Video unavailable. This video is not available
 //
-// **同じ "Video unavailable" でレート制限も来る**ので、必ず isTransientFailure を先に通すこと。
+// **同じ "Video unavailable" でレート制限も来る**ので、必ず classifyFetchFailure を通すこと
+// （この関数を単独で呼ぶと、その順序が失われる）。
 func isVideoGone(stderr string) bool {
 	for _, marker := range []string{
 		"Video unavailable",
