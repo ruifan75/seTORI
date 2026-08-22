@@ -116,12 +116,16 @@ ZIGG-ZAGG (feat. 初音ミク) / Junky
 
 1. `SongRepository` の `Create` / `Update` がキーも同時に書く（サービス層に任せない）
 2. アーティストの改名・統合は同じトランザクションでキーを追随させる
-3. `song_match_keys` は**計算元の曲名・アーティストを控えている**。起動時に `songs` と
-   突き合わせ、ズレていれば作り直す
+3. `song_match_keys` は**計算元の曲名・アーティストを控えている**。
+   `RebuildStale` が `songs` と突き合わせ、ズレていれば作り直す
 
-3 のおかげで「キー更新を呼び忘れた経路」があっても再起動で直る。
-正規化ルールを変えたときは `songmatch.RulesVersion` を上げれば、
-やはり起動時に全件が作り直される（マイグレーションを書く必要はない）。
+> ⚠️ **3 は今のところ production では走っていない。** `RebuildKeys`（→ `RebuildStale`）を
+> 呼んでいるのは `cmd/setoribench/main.go` だけで、サーバーの起動処理からは呼ばれていない
+> （関数コメントは「起動時に呼ぶ」と書いてあるが、その呼び出しが無い）。
+>
+> つまり **`songmatch.RulesVersion` を上げても production のキーは旧版のまま**で、
+> 「マイグレーションを書く必要はない」も成立しない。上げるなら、
+> 起動時の呼び出しを足すか、一度手で流す必要がある。issue #21。
 
 ## 照合が外れたときの受け皿（`song_merge_candidates`）
 
@@ -517,7 +521,16 @@ Departures 〜あなたにおくるアイの歌〜 / EGOIST → EGOIST
 ## 照合は保存しない
 
 `comment_songs` / `holodex_songs` に保存するのは **抽出・正規化・拍手 end まで**。
-照合（どの楽曲か）は配信詳細を読むたびに計算する（`ResolveForDisplay`）。
+照合（どの楽曲か）は保存せず、**入力元を編集フォームへ読み込むときに**計算する
+（`ResolveForDisplay`）。
+
+**「配信詳細を読むたび」ではない。** 走るのは**入力元を取り込む操作**だけで、
+**`GET /api/streams/{id}` や一覧では引かない**。対話の analyze 3 端点のほか、
+一括（`batch-analyze` / `batch-fill`）も通る ── 経路の一覧は
+`docs/SETLIST_FLOW.md` の「照合は保存しない、読み込みのときだけ計算する」。
+
+保存の前に `stripMatchForStorage` が照合結果を落とすので、
+`comment_songs` に残るのは抽出・正規化・拍手 end だけ。
 
 分けるのは、2 つの半分でコストと寿命がまるで違うから：
 
@@ -568,8 +581,15 @@ go run ./cmd/setoribench -mode stored          # 本番と同じ（除外キー�
 go run ./cmd/setoribench -mode stored -nofilter # フィルタの寄与を見るとき
 ```
 
-`-nofilter` は**管理画面の除外キーワードを無効にする**デバッグ用の口。
-既定（フィルタ有効）が本番の姿なので、基準値はそちらで取る。
+`-nofilter` は `FilterSongsWith` を**丸ごと飛ばす**デバッグ用の口
+（除外キーワードだけでなく構造フィルタも切れる）。
+
+> ⚠️ **どちらのモードも現在の production と一致しない。** ベンチは `-nofilter` が無ければ
+> 全 mode に `filterKW` / `keepKW` を渡すが、production の grouped / two_stage は
+> `filterScopeForPath` によって**辞書を渡さない**（PR #13。`Week End` が辞書に当たって
+> 消えたため）。したがって下の「フィルタ有効」列は **2026-08-13 時点の historical baseline**
+> であって「本番の姿」ではなく、差の 286 件も現行の本番における辞書の寄与ではない。
+> ベンチ側を production に合わせるのは issue #14。
 
 測ったときの手元 DB：楽曲 820・別名義を持つアーティスト 10・歌唱 4268・
 否定の記録 43（曲 16 / 歌手 27）。評価対象は performances と comment_raw の
@@ -577,7 +597,7 @@ go run ./cmd/setoribench -mode stored -nofilter # フィルタの寄与を見る
 
 **抽出**（照合の前段。ここが崩れると照合の数字も読めない）
 
-| | フィルタ有効（本番の姿） | `-nofilter` |
+| | フィルタ有効（当時の基準値） | `-nofilter` |
 |---|---:|---:|
 | precision | **0.906** | 0.853 |
 | recall | 0.975 | 0.976 |
