@@ -241,7 +241,32 @@ func (s *CommentService) ExtractSongs(texts []string) (songs []dto.CommentSong, 
 	if err != nil {
 		logger.Warnf("failed to load filter keywords, skipping filter: %v", err)
 	}
-	filteredSongs := comment.FilterSongs(parsedSongs, filterKW, keepKW)
+
+	// **キーワード辞書は AI が歌唱かどうかを判断していない経路にだけ適用する。**
+	//
+	// grouped も two_stage も、プロンプトで「雑談・開演・終了・告知・スパチャ読み・
+	// 実況メモ・絵文字だけの行・リスナーの感想」を除外している。辞書と同じ category を、
+	// **行の文脈まで見て**判断しているということ。辞書は文字列しか見えないので、
+	// 後段に置くと賢いほうの判断を馬鹿なほうが上書きする。
+	//
+	// 実害が出ていた：`Week End / 星野源` は `end` に当たって消えていた
+	// （3 文字以下の ASCII は単語単位で比較するので "Week End" の End が一致する。
+	// `花ざかりWeekend✿` は前が k なので残る）。issue #11。
+	//
+	// 本番データ 14 本・151 行で現行 AI の出力に辞書をかけた実測では、
+	// **辞書が落とした行は 0**。落ちた 1 行は構造フィルタ（曲名が "1"）だった。
+	// つまり辞書はもう AI の取りこぼしを拾っておらず、誤爆する余地だけが残っている。
+	//
+	// 辞書が要るのは AI が全部失敗して正規表現だけになったとき（path == "regex"）。
+	// そこには判断する者がいないので、当初この辞書が作られた前提がそのまま生きている。
+	//
+	// 構造フィルタ（絵文字だけ・文字なし・40 字超・数字だけ）は**常に適用する**。
+	// 形の判断で AI の判断とは競合せず、ground truth 4156 件で誤殺 0 件を確認済み。
+	dictKW := filterKW
+	if path != "regex" {
+		dictKW = nil
+	}
+	filteredSongs := comment.FilterSongsWith(parsedSongs, dictKW, keepKW, true)
 	deduped := comment.DeduplicateSongs(filteredSongs)
 	validSongs := comment.ValidateSongs(deduped)
 
