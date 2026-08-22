@@ -11,7 +11,8 @@
 -- そこで「この行は追跡の開始より前から存在する」という事実そのものを持つ。
 --   TRUE  … 追跡開始より前からある。過去に送信された可能性を否定できない
 --   FALSE … 追跡開始後に作られた。台帳が NULL なら本当に送っていない
--- 新しい行は既定の FALSE で入るので、時間が経つほど TRUE は減っていく。
+-- 新しい行は既定の FALSE で入るので **TRUE は以後増えない**。ただし自動では減りもしない
+-- （解除する UPDATE は無い）。確認済みとして外す運用が要るなら、それは別に設計する。
 ALTER TABLE streams
     ADD COLUMN IF NOT EXISTS holodex_upload_unknown BOOLEAN NOT NULL DEFAULT FALSE;
 
