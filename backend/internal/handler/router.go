@@ -2663,8 +2663,8 @@ func (r *Router) handleBackfillCommentSongs(w http.ResponseWriter, req *http.Req
 	})
 }
 
-// handleBackfillCommentSongsHashes は comment_songs_hash の状態を数える（**監査用。書き換えない**）
-// （旧: 生bytes sha → 新: 正規化 sha）。AI は呼ばず、キャッシュが効かなくなっていた歌枠を修復する。
+// handleBackfillCommentSongsHashes は抽出キャッシュの状態を数える（**監査用。書き換えない**）。
+// 何件が次の解析で再抽出されるかを返す。詳細は BackfillCommentSongsHashes のコメント。
 func (r *Router) handleBackfillCommentSongsHashes(w http.ResponseWriter, req *http.Request) {
 	res, err := r.commentService.BackfillCommentSongsHashes()
 	if err != nil {
