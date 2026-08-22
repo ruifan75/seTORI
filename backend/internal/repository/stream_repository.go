@@ -77,14 +77,14 @@ func (r *StreamRepository) FindAll(limit, offset int, includeHidden bool, sort, 
 // FindByID は動画 ID で歌枠を取得する。
 func (r *StreamRepository) FindByID(id string) (*models.Stream, error) {
 	query := `
-		SELECT id, title, stream_date, duration_seconds, thumbnail_url, holodex_data, holodex_hash, comment_raw, comment_songs, comment_songs_analyzed_at, chapter_raw, chapter_songs, is_processed, is_hidden, is_restricted, restriction_override, holodex_uploaded_at, availability, playable_in_embed, availability_checked_at, created_at, updated_at
+		SELECT id, title, stream_date, duration_seconds, thumbnail_url, holodex_data, holodex_hash, comment_raw, comment_songs, comment_songs_analyzed_at, chapter_raw, chapter_songs, is_processed, is_hidden, is_restricted, restriction_override, holodex_uploaded_at, holodex_upload_unknown, availability, playable_in_embed, availability_checked_at, created_at, updated_at
 		FROM streams WHERE id = $1`
 
 	var s models.Stream
 	err := r.db.QueryRow(query, id).Scan(
 		&s.ID, &s.Title, &s.StreamDate, &s.DurationSeconds,
 		&s.ThumbnailURL, &s.HolodexData, &s.HolodexHash, &s.CommentRaw, &s.CommentSongs, &s.CommentSongsAnalyzedAt,
-		&s.ChapterRaw, &s.ChapterSongs, &s.IsProcessed, &s.IsHidden, &s.IsRestricted, &s.RestrictionOverride, &s.HolodexUploadedAt,
+		&s.ChapterRaw, &s.ChapterSongs, &s.IsProcessed, &s.IsHidden, &s.IsRestricted, &s.RestrictionOverride, &s.HolodexUploadedAt, &s.HolodexUploadUnknown,
 		&s.Availability, &s.PlayableInEmbed, &s.AvailabilityCheckedAt, &s.CreatedAt, &s.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil

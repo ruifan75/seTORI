@@ -246,9 +246,13 @@ type StreamResponse struct {
 	// そこで組み立てると全部 unknown になり、実態と食い違う主張をすることになる。
 	// 省略時は「この応答は判定していない」で、受け手は従来どおり描いてよい。
 	Playability string `json:"playability,omitempty"`
-	// HolodexUploadedAt は Holodex へ送った時刻。**編集者だけ**に返す。
-	// 秘匿にしても向こうのコピーは残るので、そこに気付ける材料として要る。
+	// HolodexUploadedAt は Holodex への**送信を試みた**時刻（PUT の前に記録するので
+	// 「送信済み」ではない）。**編集者だけ**に返す。
+	// 秘匿にしても向こうのコピーは残りうるので、そこに気付ける材料として要る。
 	HolodexUploadedAt *string `json:"holodex_uploaded_at,omitempty"`
+	// HolodexUploadUnknown は台帳の追跡開始より前から存在する配信。
+	// 台帳が空でも「送っていない」とは言えないことを画面へ伝える。**編集者だけ**。
+	HolodexUploadUnknown bool `json:"holodex_upload_unknown,omitempty"`
 	// 生の値は編集者だけに返す。判断材料であって閲覧者が使うものではない。
 	Availability          *string   `json:"availability,omitempty"`
 	PlayableInEmbed       *bool     `json:"playable_in_embed,omitempty"`
