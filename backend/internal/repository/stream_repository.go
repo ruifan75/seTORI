@@ -456,7 +456,7 @@ func (r *StreamRepository) FindByTagID(tagID string, limit, offset int) ([]model
 	}
 
 	rows, err := r.db.Query(`
-		SELECT s.id, s.title, s.stream_date, s.duration_seconds, s.thumbnail_url, s.holodex_data, s.holodex_hash, s.comment_raw, s.comment_songs, s.is_processed, s.is_hidden, s.created_at, s.updated_at
+		SELECT s.id, s.title, s.stream_date, s.duration_seconds, s.thumbnail_url, s.holodex_data, s.holodex_hash, s.comment_raw, s.comment_songs, s.is_processed, s.is_hidden, s.is_restricted, s.restriction_override, s.created_at, s.updated_at
 		FROM streams s
 		JOIN stream_stream_tags sst ON sst.stream_id = s.id
 		WHERE sst.tag_id = $1 AND s.is_hidden = FALSE
@@ -602,7 +602,7 @@ func (r *StreamRepository) SearchStreams(filters models.StreamSearchFilters, lim
 	}
 
 	query := fmt.Sprintf(`
-		SELECT s.id, s.title, s.stream_date, s.duration_seconds, s.thumbnail_url, s.holodex_data, s.holodex_hash, s.comment_raw, s.comment_songs, s.is_processed, s.is_hidden, s.created_at, s.updated_at
+		SELECT s.id, s.title, s.stream_date, s.duration_seconds, s.thumbnail_url, s.holodex_data, s.holodex_hash, s.comment_raw, s.comment_songs, s.is_processed, s.is_hidden, s.is_restricted, s.restriction_override, s.created_at, s.updated_at
 		FROM streams s
 		%s
 		ORDER BY s.stream_date DESC

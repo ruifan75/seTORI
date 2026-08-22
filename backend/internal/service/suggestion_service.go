@@ -505,7 +505,10 @@ func reviewerLabel(u *models.User) string {
 // SongSwapper は「この歌唱は別の曲だ」という指摘を反映する。PerformanceService が実装する。
 type SongSwapper interface {
 	// SongLabelOf は歌唱の現在の曲名と、対象の表示ラベルを返す。歌唱が無ければ空文字。
-	SongLabelOf(performanceID uuid.UUID) (songName string, label string, err error)
+	// access は読む側の立場。**field 提案だけでなく perf.meta（曲の差し替え）も塞ぐ**
+	// ── ここを EditorAccess で固定すると、秘匿された歌唱の UUID を知っている
+	// 非編集者が perf.meta を投稿し、自分の提案一覧から曲名と配信タイトルを読める。
+	SongLabelOf(performanceID uuid.UUID, access repository.ViewerAccess) (songName string, label string, err error)
 	// ApplySongSwap は歌唱の曲を差し替える（未登録の曲名なら曲も作る）。
 	ApplySongSwap(performanceID uuid.UUID, p dto.SongSwapPayload) error
 }
@@ -537,7 +540,7 @@ func (s *SuggestionService) createSongSwap(req *dto.CreateSuggestionRequest, act
 		}
 	}
 
-	currentSong, label, err := s.swapper.SongLabelOf(perfID)
+	currentSong, label, err := s.swapper.SongLabelOf(perfID, actorAccess(actor))
 	if err != nil {
 		return nil, err
 	}
@@ -592,7 +595,7 @@ func (s *SuggestionService) approveSongSwap(sug *models.EditSuggestion, reviewer
 	}
 
 	if !force {
-		currentSong, label, err := s.swapper.SongLabelOf(sug.TargetID)
+		currentSong, label, err := s.swapper.SongLabelOf(sug.TargetID, repository.EditorAccess)
 		if err != nil {
 			return err
 		}
@@ -1170,7 +1173,8 @@ func (s *SuggestionService) ApproveWithEdits(id uuid.UUID, reviewer *models.User
 	}
 
 	if !force {
-		conflicts, err := s.detectConflicts(editor, sug)
+		// 承認は content:edit の経路なので、秘匿された対象も現在値を読む。
+		conflicts, err := s.detectConflicts(editor, sug, repository.EditorAccess)
 		if err != nil {
 			return err
 		}
@@ -1219,8 +1223,8 @@ func changedFieldsOf(sug *models.EditSuggestion) (map[string]string, error) {
 
 // detectConflicts は提案時点の before_data と対象の現在値を比べ、ズレたフィールドを返す。
 // 提案が触っていないフィールド（before と after が同じ）のズレは無視する。
-func (s *SuggestionService) detectConflicts(editor TargetEditor, sug *models.EditSuggestion) (map[string]FieldConflict, error) {
-	current, _, err := editor.GetEditableFields(sug.TargetID, repository.EditorAccess)
+func (s *SuggestionService) detectConflicts(editor TargetEditor, sug *models.EditSuggestion, access repository.ViewerAccess) (map[string]FieldConflict, error) {
+	current, _, err := editor.GetEditableFields(sug.TargetID, access)
 	if err != nil {
 		return nil, err
 	}
@@ -1462,7 +1466,7 @@ func (s *SuggestionService) toSuggestionResponse(m models.EditSuggestion, access
 			resp.SongSwap = &p
 			// 提案後に曲が差し替えられていないかを一覧の時点で見せる
 			if (m.Status == "pending" || m.Status == "conflict") && s.swapper != nil && p.CurrentSongName != "" {
-				if cur, label, err := s.swapper.SongLabelOf(m.TargetID); err == nil && label != "" && cur != p.CurrentSongName {
+				if cur, label, err := s.swapper.SongLabelOf(m.TargetID, access); err == nil && label != "" && cur != p.CurrentSongName {
 					resp.Conflicts = map[string]dto.FieldConflict{
 						"song": {Expected: p.CurrentSongName, Current: cur},
 					}
@@ -1475,7 +1479,7 @@ func (s *SuggestionService) toSuggestionResponse(m models.EditSuggestion, access
 	// pending の間に対象が変わっていないかを一覧の時点で見せる（承認前に気付けるように）。
 	if m.Status == "pending" || m.Status == "conflict" {
 		if editor, ok := s.editors[m.TargetType]; ok {
-			if conflicts, err := s.detectConflicts(editor, &m); err == nil && len(conflicts) > 0 {
+			if conflicts, err := s.detectConflicts(editor, &m, access); err == nil && len(conflicts) > 0 {
 				resp.Conflicts = map[string]dto.FieldConflict{}
 				for k, c := range conflicts {
 					resp.Conflicts[k] = dto.FieldConflict{Expected: c.Expected, Current: c.Current}

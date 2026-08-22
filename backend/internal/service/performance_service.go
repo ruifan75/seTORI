@@ -468,8 +468,8 @@ func (s *PerformanceService) defaultSingerIDs(streamID string) []string {
 // ========== 曲の差し替え提案（SongSwapper） ==========
 
 // SongLabelOf は歌唱の現在の曲名と表示ラベルを返す。歌唱が無ければ空文字。
-func (s *PerformanceService) SongLabelOf(performanceID uuid.UUID) (string, string, error) {
-	perf, err := s.perfRepo.FindByID(performanceID, repository.EditorAccess)
+func (s *PerformanceService) SongLabelOf(performanceID uuid.UUID, access repository.ViewerAccess) (string, string, error) {
+	perf, err := s.perfRepo.FindByID(performanceID, access)
 	if err != nil {
 		return "", "", fmt.Errorf("find performance: %w", err)
 	}
