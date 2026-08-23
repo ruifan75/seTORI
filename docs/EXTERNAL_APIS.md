@@ -217,14 +217,25 @@ DB セッション + `roles.permissions` に置き換わりました。判定は
 
 | 端点 | ① 入力 raw の取得 | ② 抽出/正規化 AI | ③ 拍手 end |
 |---|---|---|---|
-| `comments/analyze` | `comment_raw` が空なら **Holodex / YouTube を叩く** | 分析 cache miss / `?force` | ②へ進み、抽出が非空で、live chat のファイル cache が miss なら **yt-dlp** |
+| `comments/analyze` | `comment_raw` が空なら **Holodex / YouTube を叩く** | 分析 cache miss / `?force=true` | ②へ進み、抽出が非空で、live chat のファイル cache が miss なら **yt-dlp** |
 | `chapters/analyze` | `chapter_raw` が NULL または `?force=true` なら **yt-dlp** | 同上 | 同上 **yt-dlp** |
 | `holodex-songs/analyze` | 保存済み `holodex_data` を読むだけ | 正規化 cache miss / `?force=true` | 同上 **yt-dlp** |
 
 - **③ は ② まで進んだときだけ。** 分析結果が命中していれば、`.live_chat.json` を消してあっても
   yt-dlp は起動しない（cache 応答を返して終わる）。
-  「cache 済みの analyze で拍手 end を補える」と読まないこと ── 補うなら
-  `POST /api/streams/{id}/analyze-chat-ends` か `POST /api/chat-ends/backfill`
+  「cache 済みの analyze で拍手 end を補える」と読まないこと。
+- **あとから拍手 end を補う経路は入力元ごとに違う。**
+
+  | 補いたい対象 | 経路 |
+  |---|---|
+  | `comment_songs` | `POST /api/streams/{id}/analyze-chat-ends`、`POST /api/chat-ends/backfill` |
+  | `chapter_songs` | `POST .../chapters/analyze?force=true`（分析 cache を外す。前段の取得と AI も再発生） |
+  | `holodex_songs_normalized` | `POST .../holodex-songs/analyze?force=true`（同上） |
+
+  > 上の 2 端点が**書き戻すのは `comment_songs` だけ**（`UpdateCommentSongs`）。
+  > `comment_songs` が空の配信では yt-dlp すら起動せず、backfill の対象条件も
+  > `comment_songs` が非空であること。chapter / Holodex の cache には効かないので、
+  > 成功応答を見て「補完済み」と思わないこと。
 - **分析 cache 命中でも照合 AI は走る**（未決着の行があるとき。肯定を保存しないため）
 - `batch-analyze` の `refresh` は対象ごとに `RefreshCommentRaw` から始まり、
   `reanalyze` は分析 cache を無視する。どちらも非キャッシュ経路では ③ まで届く
@@ -244,7 +255,7 @@ DB セッション + `roles.permissions` に置き換わりました。判定は
 | `POST /api/streams/{id}/comments/analyze` | 上表 | `content:edit` |
 | `POST /api/streams/{id}/chapters/analyze` | 上表 | `content:edit` |
 | `POST /api/streams/{id}/holodex-songs/analyze` | 上表 | `content:edit` |
-| `POST /api/streams/batch-analyze`（実行） | 上表を対象配信ぶん | `content:edit` |
+| `POST /api/streams/batch-analyze`（実行） | 上表の **comments 経路**を対象配信ぶん（章節・Holodex は回さない） | `content:edit` |
 | `POST /api/streams/batch-fill`（実行） | 上表を対象配信ぶん＋未決着表記の照合 AI | `content:edit` |
 | `GET /api/streams/batch-analyze/status`、`.../batch-fill/*` の状態・履歴 | **外部呼び出し無し**（メモリ／DB を読むだけ） | `content:edit` |
 | `POST /api/availability/backfill` | **yt-dlp を起動**。既定は未調査のみ、`?recheck=1` では調査済みの弱い判定（`public` かつ埋め込み可）も対象。非表示も含む | `content:edit` |
