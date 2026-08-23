@@ -520,7 +520,8 @@ Departures 〜あなたにおくるアイの歌〜 / EGOIST → EGOIST
 
 ## 照合は保存しない
 
-`comment_songs` / `holodex_songs` に保存するのは **抽出・正規化・拍手 end まで**。
+`comment_songs` / `chapter_songs` / `holodex_songs_normalized` に保存するのは
+**抽出・正規化・拍手 end まで**。
 照合（どの楽曲か）は保存せず、**入力元を編集フォームへ読み込むときに**計算する
 （`ResolveForDisplay`）。
 
@@ -532,13 +533,34 @@ Departures 〜あなたにおくるアイの歌〜 / EGOIST → EGOIST
 保存の前に `stripMatchForStorage` が照合結果を落とすので、
 `comment_songs` に残るのは抽出・正規化・拍手 end だけ。
 
-分けるのは、2 つの半分でコストと寿命がまるで違うから：
+分けるのは、保存する側としない側でコストと寿命がまるで違うから。
+**保存する側も入力元ごとに失効の条件が違う**ので、一つに畳まないこと：
 
-| | 抽出・正規化・拍手 end | 照合 |
+| 保存するもの | 列 | キャッシュキー | 失効するとき |
+|---|---|---|---|
+| コメントの抽出・正規化 | `comment_songs` / `_hash` | `comment_raw` ＋ **`comment.RulesVersion`** | raw が変わる／版を上げる |
+| チャプターの抽出 | `chapter_songs` / `_hash` | `chapter_raw` ＋ **`comment.RulesVersion`** | 同上（抽出は `ExtractSongs` を共有） |
+| Holodex の正規化 | `holodex_songs_normalized` / `_hash` | **`holodex_hash` だけ** | Holodex のデータが変わったときだけ |
+
+> ⚠️ **`comment.RulesVersion` を上げても Holodex キャッシュは失効しない。**
+> 塩（`extractionRulesSalt`）を混ぜているのは comment と chapter だけで、
+> Holodex 経路は `holodex_hash` の一致しか見ない。
+>
+> **拍手 end はさらに別。** `POST /api/chat-ends/backfill` は raw も hash も版も変えずに
+> `comment_songs` を書き換える（yt-dlp 自体も別のファイルキャッシュを持つ）。
+> つまり「raw か規則版が変わったときだけ古くなる」ではない。
+
+保存しない側（照合）も、**規則照合と AI 判定でコストが 3 桁違う**：
+
+| | 規則照合（`ResolveForDisplay`） | AI 判定（`AdjudicateMatches`） |
 |---|---|---|
-| コスト | AI・yt-dlp。15 秒〜数分、課金あり | 索引を引くだけ。数ミリ秒 |
-| 依存先 | `comment_raw` ＋ **抽出規則の版** | `songs`（毎日変わる） |
-| 古くなるか | raw か規則版が変わったとき（どちらも再解析まで古いまま） | **常になる** |
+| コスト | 索引を引くだけ。数ミリ秒 | **AI 課金**。候補ゼロなら楽曲カタログ全体を送る |
+| いつ | 入力元を取り込むたび | 規則で決まらない行が残ったときだけ |
+| 保存 | しない | **肯定はしない**（否定だけ checks へ） |
+
+肯定を保存しないので、**抽出がキャッシュ命中でも未決着の行があれば AI に再課金される**
+（同じ配信で analyze をもう一度押す、`batch-fill` を流し直す、など）。
+「キャッシュ命中＝無料」ではない。
 
 保存していた頃は、古くなる側を追いかけるために `backfill-matches` という端点、
 `comment_songs_hash` を壊さないための注意書き、「候補が変わったか」の差分判定が要り、
