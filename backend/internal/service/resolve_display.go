@@ -9,7 +9,9 @@ import (
 	"github.com/ruifan75/setori/pkg/songmatch"
 )
 
-// 照合（どの楽曲か）は**保存しない**。読み取るたびに現在の DB で計算する。
+// 照合（どの楽曲か）は**保存しない**。**入力元を取り込むとき**にその時点の DB で計算する
+// ── 対話の analyze 3 端点と一括（batch-analyze / batch-fill）。
+// `GET /api/streams/{id}` や一覧からは呼ばない。
 //
 // 保存していた頃は、曲が増えたり統合したり別名義を学ぶたびに、保存済みの
 // matched_song_id が黙って古くなっていた。それを追いかけるために
@@ -19,7 +21,9 @@ import (
 //
 // 照合は索引を引くだけで数ミリ秒なので、読み取り時に計算すればこれらは全部要らない。
 // 保存に値するのは AI を使う抽出と正規化、そして live chat の拍手 end だけ
-// ── どれも元データが変わらない限り不変で、作り直すのに時間と金がかかる。
+// ── どれも作り直すのに時間と金がかかる。ただし**不変ではない**：
+// comment_raw が変われば当然、同じ raw でも `comment.RulesVersion` を上げれば失効するし、
+// 拍手 end は専用の backfill で後から入ることもある。
 
 // resolveOne は 1 件を照合し、変更履歴を添えて返す。
 // コメント経路（CommentSong）と Holodex 経路（SongSuggestion）で共用する
@@ -87,7 +91,8 @@ func (s *NormalizationService) resolveOne(rawName, rawArtist, normName, normArti
 // ResolveForDisplay は保存済みの解析結果に現在の DB 照合を当て、
 // 併せて「どの処理でその欄が変わったか」を記録する。**何も保存しない。**
 //
-// 呼ぶのは画面に出す直前（配信詳細の読み取り、解析の応答）。
+// 呼ぶのは**入力元を取り込むとき**（対話の analyze、一括の取り込み）。
+// 配信詳細の読み取りからは呼ばない ── 開いただけで照合を走らせる場所ではない。
 func (s *NormalizationService) ResolveForDisplay(songs []dto.CommentSong) {
 	if s == nil || s.matchService == nil {
 		return
