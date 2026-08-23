@@ -577,8 +577,8 @@ go run ./cmd/setoribench -mode stored -noalias   # 別名義（artists.aliases�
 再現手順。**AI は呼ばないので何度でも無料で回せる。**
 
 ```
-go run ./cmd/setoribench -mode stored          # 本番と同じ（除外キーワードが効く）
-go run ./cmd/setoribench -mode stored -nofilter # フィルタの寄与を見るとき
+go run ./cmd/setoribench -mode stored          # 全フィルタ有効（2026-08-13 当時の基準）
+go run ./cmd/setoribench -mode stored -nofilter # FilterSongsWith を丸ごと飛ばす
 ```
 
 `-nofilter` は `FilterSongsWith` を**丸ごと飛ばす**デバッグ用の口
@@ -604,8 +604,11 @@ go run ./cmd/setoribench -mode stored -nofilter # フィルタの寄与を見る
 | true positives | 4126 | 4127 |
 | false positives | 428 | 714 |
 
-差の 286 件が**管理画面の除外キーワードの寄与**で、`幕開け`(83)・`閉幕`(78)・
-`スパチャ読み`(71) がその大半を占める。この 3 語はいずれも登録済みで、
+差の 286 件は**当時の全フィルタ（辞書＋構造）の寄与**で、`幕開け`(83)・`閉幕`(78)・
+`スパチャ読み`(71) がその大半を占める。
+
+> `-nofilter` は構造フィルタも一緒に切るので、**この比較だけでは辞書と構造の寄与を
+> 分離できない**。上に挙げた 3 語は辞書側だが、286 件すべてが辞書由来とは言えない。この 3 語はいずれも登録済みで、
 本番の再解析済み 5432 行にこれらは **0 行**しか残っていない
 （残っているのは正規表現時代の 1798 行の方）。
 
