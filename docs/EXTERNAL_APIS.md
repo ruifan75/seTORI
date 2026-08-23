@@ -164,7 +164,7 @@
 |---|---|
 | live chat の取得に相乗り | なし（`--no-simulate` が要る。`DATA_COMPLETION.md`） |
 | チャプター取得に相乗り | なし |
-| `POST /api/availability/backfill` | あり（未調査のみ。**非表示を除かない**） |
+| `POST /api/availability/backfill` | あり。既定は未調査のみ、`?recheck=1` で弱い判定も。**非表示を除かない** |
 
 **相乗りだけでは埋まらない**ので専用の backfill がある ── live chat はファイルキャッシュが
 あると yt-dlp の前に return し、章節 backfill は `is_hidden = FALSE` に限定されていて
@@ -217,8 +217,9 @@ DB セッション + `roles.permissions` に置き換わりました。判定は
 | `POST /api/streams/{id}/comments/analyze` | AI プロバイダーの課金 | `content:edit` |
 | `POST /api/streams/{id}/chapters/analyze` | AI プロバイダーの課金（`ExtractSongs` を共有） | `content:edit` |
 | `POST /api/streams/{id}/holodex-songs/analyze` | AI プロバイダーの課金（正規化＋照合判定） | `content:edit` |
-| `POST /api/streams/batch-analyze`、`/api/streams/batch-fill` | **対象に選ばれ、再解析が必要な配信ぶん**の AI（全配信ではない。範囲は `AI_PIPELINE.md`）。実行履歴に配信名が載る | `content:edit` |
-| `POST /api/availability/backfill` | **全対象へ yt-dlp を起動**（未調査のみ。非表示も含む） | `content:edit` |
+| `POST /api/streams/batch-analyze` | **抽出**の AI。対象に選ばれ、かつ再解析が必要な配信ぶん（範囲は `AI_PIPELINE.md`） | `content:edit` |
+| `POST /api/streams/batch-fill` | 抽出の AI に加えて、**未決着の表記に対する照合 AI**。抽出がキャッシュ命中でも照合 AI は走る（肯定は保存されないため）。実行履歴に配信名が載る | `content:edit` |
+| `POST /api/availability/backfill` | **yt-dlp を起動**。既定は未調査のみ、`?recheck=1` では調査済みの弱い判定（`public` かつ埋め込み可）も対象。非表示も含む | `content:edit` |
 | `POST /api/streams/{id}/availability` | yt-dlp を 1 回起動 | `content:edit` |
 | `POST /api/ai/backfill-readings` | AI プロバイダーの課金（曲名・アーティスト各 30 件） | `content:edit` |
 | `POST /api/songs/merge-candidates/scan` | AI プロバイダーの課金（登録曲を丸ごと見せる） | `content:edit` |

@@ -170,7 +170,8 @@ func (s *BatchAnalyzeService) processOne(videoID string, forceStart bool) bool {
 			return false
 		}
 
-		// 一括分析は抽出までにとどめる。照合の AI 判定は人が読み込むときの仕事
+		// 一括プレ分析は抽出までにとどめる。**この経路では**照合の AI 判定を行わない
+		// ── 行うのは対話の analyze と、歌唱を作る batch-fill。
 		resp, err := s.commentService.AnalyzeCommentsForBatch(videoID, force)
 		if err == nil && resp.Warning == "" {
 			return true
