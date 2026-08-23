@@ -211,18 +211,27 @@ DB セッション + `roles.permissions` に置き換わりました。判定は
 同じ端点でも、**mode/force × 分析キャッシュ × live chat キャッシュ**で外部呼び出しの数が変わる。
 「章節 analyze は AI だけ」と見積もると、運用者の cookie 付き yt-dlp を 2 回起動することになる。
 
-| 端点 | 入力の取得 | 抽出/正規化 AI | 拍手 end |
-|---|---|---|---|
-| `comments/analyze` | `comment_raw` が空なら **Holodex / YouTube を叩く** | 抽出キャッシュ miss のとき | live chat キャッシュ miss なら **yt-dlp** |
-| `chapters/analyze` | `chapter_raw` が NULL または `?force=true` なら **yt-dlp** | 抽出キャッシュ miss のとき | 同上 **yt-dlp** |
-| `holodex-songs/analyze` | 保存済み `holodex_data` を読むだけ | 正規化キャッシュ miss または `?force=true` | 同上 **yt-dlp** |
+**「キャッシュ」は 2 段ある。** 入力の raw（`comment_raw` / `chapter_raw`）と、
+そこから作った分析結果（`comment_songs` / `chapter_songs` / `holodex_songs_normalized`）。
+**分析結果が命中するとその場で return する**ので、後ろの段階には進まない。
 
-- **キャッシュは入力元ごとに別。** 章節キャッシュが命中しても live chat キャッシュは別物なので、
-  拍手 end のために yt-dlp が走ることがある
-- **キャッシュ命中でも照合 AI は走る**（未決着の行があるとき。肯定を保存しないため）
+| 端点 | ① 入力 raw の取得 | ② 抽出/正規化 AI | ③ 拍手 end |
+|---|---|---|---|
+| `comments/analyze` | `comment_raw` が空なら **Holodex / YouTube を叩く** | 分析 cache miss / `?force` | ②へ進み、抽出が非空で、live chat のファイル cache が miss なら **yt-dlp** |
+| `chapters/analyze` | `chapter_raw` が NULL または `?force=true` なら **yt-dlp** | 同上 | 同上 **yt-dlp** |
+| `holodex-songs/analyze` | 保存済み `holodex_data` を読むだけ | 正規化 cache miss / `?force=true` | 同上 **yt-dlp** |
+
+- **③ は ② まで進んだときだけ。** 分析結果が命中していれば、`.live_chat.json` を消してあっても
+  yt-dlp は起動しない（cache 応答を返して終わる）。
+  「cache 済みの analyze で拍手 end を補える」と読まないこと ── 補うなら
+  `POST /api/streams/{id}/analyze-chat-ends` か `POST /api/chat-ends/backfill`
+- **分析 cache 命中でも照合 AI は走る**（未決着の行があるとき。肯定を保存しないため）
 - `batch-analyze` の `refresh` は対象ごとに `RefreshCommentRaw` から始まり、
-  `reanalyze` は抽出キャッシュを無視する。どちらも非キャッシュ経路では拍手 end の yt-dlp まで届く
-- `batch-fill` は Holodex・コメント・（必要なら）章節の各キャッシュを読み、miss なら上表と同じ段階を通る
+  `reanalyze` は分析 cache を無視する。どちらも非キャッシュ経路では ③ まで届く
+- **`batch-fill` は章節の raw を取りに行かない。** `AnalyzeChaptersForBatch` は
+  `chapter_raw` が無ければ空で return する（`adjudicate=false` の約束。
+  誰も見ていない配信のために yt-dlp を焚かない）。章節を使うなら
+  **先に `POST /api/chapters/backfill` を流しておく**
 
 **この表は網羅を意図している。** 課金・外部プロセス・外部書き込みを起こすルートを足したら、
 ここにも足すこと。
@@ -232,11 +241,11 @@ DB セッション + `roles.permissions` に置き換わりました。判定は
 | `POST /api/sync/holodex/to-holodex/{id}` | **あなたの Holodex アカウント名義**で書き込み | `sync:run` |
 | `POST /api/sync/holodex`、`.../video/{id}` | Holodex / YouTube のクォータを消費 | `sync:run` |
 | `POST /api/ai/normalize` | AI プロバイダーの課金 | `content:edit` |
-| `POST /api/streams/{id}/comments/analyze` | 下表 | `content:edit` |
-| `POST /api/streams/{id}/chapters/analyze` | 下表 | `content:edit` |
-| `POST /api/streams/{id}/holodex-songs/analyze` | 下表 | `content:edit` |
-| `POST /api/streams/batch-analyze`（実行） | 下表を対象配信ぶん | `content:edit` |
-| `POST /api/streams/batch-fill`（実行） | 下表を対象配信ぶん＋未決着表記の照合 AI | `content:edit` |
+| `POST /api/streams/{id}/comments/analyze` | 上表 | `content:edit` |
+| `POST /api/streams/{id}/chapters/analyze` | 上表 | `content:edit` |
+| `POST /api/streams/{id}/holodex-songs/analyze` | 上表 | `content:edit` |
+| `POST /api/streams/batch-analyze`（実行） | 上表を対象配信ぶん | `content:edit` |
+| `POST /api/streams/batch-fill`（実行） | 上表を対象配信ぶん＋未決着表記の照合 AI | `content:edit` |
 | `GET /api/streams/batch-analyze/status`、`.../batch-fill/*` の状態・履歴 | **外部呼び出し無し**（メモリ／DB を読むだけ） | `content:edit` |
 | `POST /api/availability/backfill` | **yt-dlp を起動**。既定は未調査のみ、`?recheck=1` では調査済みの弱い判定（`public` かつ埋め込み可）も対象。非表示も含む | `content:edit` |
 | `POST /api/streams/{id}/availability` | yt-dlp を 1 回起動 | `content:edit` |
@@ -253,7 +262,7 @@ DB セッション + `roles.permissions` に置き換わりました。判定は
 | `GET /api/streams/{id}/comments` | Holodex / YouTube のクォータを消費（キャッシュが無いとき） | `content:edit` |
 | `GET /api/streams/{id}/chapters` | **yt-dlp を起動**（cookie が設定済みかつ準備成功時は運用者のメンバー資格付き。同上） | `content:edit` |
 | `GET /api/streams/{id}/holodex-songs` | Holodex を叩く（**キャッシュを見ずに毎回**） | `content:edit` |
-| `/api/streams/batch-analyze/*` | AI プロバイダーの課金。status に非表示配信の題名と ID | `content:edit` |
+| `/api/streams/batch-analyze/*`（status / cancel） | **外部呼び出し無し**。ただし status に非表示配信の題名と ID が載るので `content:edit`（実行そのものは上の行） | `content:edit` |
 
 方針は「読み取りは基本公開、書き込みはログイン + 権限、管理系リソースは
 読み取りも専用権限」。匿名で通るのは閲覧と、限定公開プレイリストの共有リンクだけです。
