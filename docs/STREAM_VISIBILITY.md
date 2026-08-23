@@ -449,7 +449,7 @@ cookie の判定は `HasCookies()` ではなく**実際に渡せたか**で見�
 |---|---|---|
 | live chat の取得に相乗り | なし | ファイルキャッシュがあると yt-dlp 自体を呼ばない |
 | チャプター取得に相乗り | なし | backfill が `is_hidden = FALSE` 限定 |
-| `POST /api/availability/backfill` | あり（未調査のみ） | ─ |
+| `POST /api/availability/backfill` | あり（既定は未調査のみ／`?recheck=1` で弱い判定も） | ─ |
 
 **backfill は非表示を除かない。** 会限の歌枠はどれも非表示側にあるので、
 除くと判定したい配信がまるごと落ちる（チャプター側は「表示中の配信の
