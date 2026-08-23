@@ -538,9 +538,9 @@ Departures 〜あなたにおくるアイの歌〜 / EGOIST → EGOIST
 
 | 保存するもの | 列 | キャッシュキー | 失効するとき |
 |---|---|---|---|
-| コメントの抽出・正規化 | `comment_songs` / `_hash` | `comment_raw` ＋ **`comment.RulesVersion`** | raw が変わる／版を上げる |
-| チャプターの抽出 | `chapter_songs` / `_hash` | `chapter_raw` ＋ **`comment.RulesVersion`** | 同上（抽出は `ExtractSongs` を共有） |
-| Holodex の正規化 | `holodex_songs_normalized` / `_hash` | **`holodex_hash` だけ** | Holodex のデータが変わったときだけ |
+| コメントの抽出・正規化 | `comment_songs` / `comment_songs_hash` | `comment_raw` ＋ **`comment.RulesVersion`** | raw が変わる／版を上げる |
+| チャプターの抽出 | `chapter_songs` / `chapter_songs_hash` | `chapter_raw` ＋ **`comment.RulesVersion`** | 同上（抽出は `ExtractSongs` を共有） |
+| Holodex の正規化 | `holodex_songs_normalized` / `holodex_songs_hash` | **`holodex_hash` だけ** | Holodex のデータが変わったときだけ |
 
 > ⚠️ **`comment.RulesVersion` を上げても Holodex キャッシュは失効しない。**
 > 塩（`extractionRulesSalt`）を混ぜているのは comment と chapter だけで、
