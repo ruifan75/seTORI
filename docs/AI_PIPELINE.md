@@ -260,10 +260,18 @@ comment / chapter 両方のキャッシュが一斉に**失効する**。
 >
 > | | 作り直す経路 |
 > |---|---|
-> | `comment_songs` | `batch-analyze`（全件）、対話の `/comments/analyze` |
+> | `comment_songs` | `batch-analyze`。**ただし全件ではない**（下記）／対話の `/comments/analyze` |
 > | `chapter_songs` | **一括で全件を回す経路が無い**。`batch-fill` が `AnalyzeChaptersForBatch` を呼ぶのは Holodex もコメントも空の配信だけ。`POST /api/chapters/backfill` は `chapter_raw` を取るだけで再抽出しない。確実なのは配信ごとの `/chapters/analyze` |
 >
-> つまり両方を持つ配信で version を上げて一括を流すと、**コメント側だけ新しくなる**。
+> **`batch-analyze` も「全件」ではない。** 既定（`{}`）は未処理かつ表示中のみ。
+> 最大範囲の `{"mode":"reanalyze","hidden":"all"}` でも、対象は
+> **`comment_raw` が非空の JSON 配列**の行だけ（`refresh` は raw 条件を外す代わりに
+> `is_processed = FALSE` に限られる）。したがって
+> **処理済みで `comment_songs` はあるが `comment_raw` が NULL / `[]`** の配信は、
+> version を上げて一括を流しても古いまま残る。そこは配信ごとの
+> `/comments/analyze`（遠隔取得へ進む）でしか直せない。
+>
+> つまり現状、**comment 側にも chapter 側にも完全な一括再構築口は無い**。
 >
 > `songmatch.RulesVersion` は同じ「version を混ぜる」手だが、**効き方が違う**。
 > あちらは起動時の再構築を前提にしているのに production では走っていない（issue #21）。
@@ -439,8 +447,10 @@ production の 2 段階は正規化の呼び出しが別途要る。
 | 配信詳細の `GET`・一覧 | × | 閲覧者が通るだけの経路。見ているだけで AI を呼ぶことになる |
 | `?dry_run=true` | × | 判定は checks テーブルへの書き込みを伴う |
 
-**判定の結果は保存されない（肯定は）。** 残るのは否定（`song_identity_checks`）だけで、
-肯定は応答に載るだけ。`stripMatchForStorage` がキャッシュへ書く前に照合結果を落とす。
+**判定の結果は保存されない（肯定は）。** 残るのは否定
+（曲は `song_identity_checks`、歌手の別人判定は `artist_alias_checks`）だけで、
+肯定は応答に載るだけ。保存前に照合結果を落とす（コメント経路は `stripMatchForStorage`、
+Holodex 経路は `stripMatchFromSuggestions`）。
 
 したがって**「一度誰かが読み込めば以後は無料」ではない**。同じ配信で analyze を
 もう一度押せば、キャッシュ命中でも未決着の行は再び AI に当たる（`adjudicateAll` は

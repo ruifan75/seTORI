@@ -112,6 +112,9 @@
      および一括（`batch-analyze` / `batch-fill`）。
      **AI 経路には除外キーワードの辞書を渡さない**（`filterScopeForPath`。
      AI が既に `is_song` を判断しているため。regex 経路だけ辞書を使う）。
+  3. **読み仮名の補完**：`POST /api/ai/backfill-readings`（曲名・アーティスト各 30 件）。
+  4. **重複楽曲の走査・判定**：`POST /api/songs/merge-candidates/scan`（登録曲を丸ごと見せる）、
+     `POST /api/songs/merge-candidates/adjudicate`。
 - **⚠️ リスク**：トークン課金。公開環境であなたの key を使うと、1 ユーザーで請求を爆発させたりクォータを消費し尽くす可能性があります。key 未設定時は AI ステップがフォールトトレラント（生データ / 純粋正規表現結果を返却）。
 - **ガードレール**：grouped では AI が曲名も返すため、`pkg/comment` 側で
   「元コメントに現れない文字列を作らせない」検証を通す。落ちたら 2 段階、
@@ -217,6 +220,13 @@ DB セッション + `roles.permissions` に置き換わりました。判定は
 | `POST /api/streams/batch-analyze`、`/api/streams/batch-fill` | 全配信ぶんの AI。実行履歴に配信名が載る | `content:edit` |
 | `POST /api/availability/backfill` | **全対象へ yt-dlp を起動**（未調査のみ。非表示も含む） | `content:edit` |
 | `POST /api/streams/{id}/availability` | yt-dlp を 1 回起動 | `content:edit` |
+| `POST /api/ai/backfill-readings` | AI プロバイダーの課金（曲名・アーティスト各 30 件） | `content:edit` |
+| `POST /api/songs/merge-candidates/scan` | AI プロバイダーの課金（登録曲を丸ごと見せる） | `content:edit` |
+| `POST /api/songs/merge-candidates/adjudicate` | AI プロバイダーの課金 | `content:edit` |
+| `POST /api/streams/{id}/analyze-chat-ends`、`.../chat-end-estimate` | **yt-dlp を起動**（live chat。キャッシュが無いとき） | `content:edit` |
+| `POST /api/chat-ends/backfill` | **全配信へ yt-dlp** | `content:edit` |
+| `POST /api/streams/{id}/chapters/sync`、`POST /api/chapters/backfill` | **yt-dlp を起動** | `content:edit` |
+| `POST /api/streams/{id}/comments/sync-youtube` | YouTube Data API のクォータを消費 | `content:edit` |
 | `/api/ai-providers/*` | API キーの登録・変更 | `ai:manage` |
 | `/api/backups/*` | ダウンロード（GET）含む全操作 | `backup:manage` |
 | `GET /api/streams/{id}/comments` | Holodex / YouTube のクォータを消費（キャッシュが無いとき） | `content:edit` |
