@@ -967,7 +967,9 @@ func (s *HolodexService) analyzeHolodexSongs(videoID string, force, adjudicate b
 //
 // 呼ぶのは利用者が「Holodex から読み込む」を押したときだけ。
 // 配信詳細を開いただけの GET からは呼ばない（見ているだけで AI を呼ぶことになる）。
-// 判定は保存されるので、一度誰かが読み込めば以後の閲覧は無料でその結果を受け取る。
+// **保存されるのは否定だけ**（song_identity_checks）。肯定はその応答に載るだけで、
+// stripMatchForStorage がキャッシュへ書く前に落とす。したがって「一度読み込めば以後無料」
+// ではなく、同じ配信をもう一度 analyze すれば未決着の行は再び AI に当たる。
 func (s *HolodexService) adjudicateSuggestions(songs []dto.SongSuggestion) {
 	if s.normalizationService == nil {
 		return
