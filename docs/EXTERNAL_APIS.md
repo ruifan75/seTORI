@@ -206,6 +206,24 @@ Holodex の `topic_id = "membersonly"` は候補の絞り込みに使えるが�
 DB セッション + `roles.permissions` に置き換わりました。判定は
 `internal/handler/router.go` の `requiredPermission` 一箇所にあります。
 
+### analyze 系は「AI 1 回」ではない ── 段階で数える
+
+同じ端点でも、**mode/force × 分析キャッシュ × live chat キャッシュ**で外部呼び出しの数が変わる。
+「章節 analyze は AI だけ」と見積もると、運用者の cookie 付き yt-dlp を 2 回起動することになる。
+
+| 端点 | 入力の取得 | 抽出/正規化 AI | 拍手 end |
+|---|---|---|---|
+| `comments/analyze` | `comment_raw` が空なら **Holodex / YouTube を叩く** | 抽出キャッシュ miss のとき | live chat キャッシュ miss なら **yt-dlp** |
+| `chapters/analyze` | `chapter_raw` が NULL または `?force=true` なら **yt-dlp** | 抽出キャッシュ miss のとき | 同上 **yt-dlp** |
+| `holodex-songs/analyze` | 保存済み `holodex_data` を読むだけ | 正規化キャッシュ miss または `?force=true` | 同上 **yt-dlp** |
+
+- **キャッシュは入力元ごとに別。** 章節キャッシュが命中しても live chat キャッシュは別物なので、
+  拍手 end のために yt-dlp が走ることがある
+- **キャッシュ命中でも照合 AI は走る**（未決着の行があるとき。肯定を保存しないため）
+- `batch-analyze` の `refresh` は対象ごとに `RefreshCommentRaw` から始まり、
+  `reanalyze` は抽出キャッシュを無視する。どちらも非キャッシュ経路では拍手 end の yt-dlp まで届く
+- `batch-fill` は Holodex・コメント・（必要なら）章節の各キャッシュを読み、miss なら上表と同じ段階を通る
+
 **この表は網羅を意図している。** 課金・外部プロセス・外部書き込みを起こすルートを足したら、
 ここにも足すこと。
 
@@ -214,11 +232,12 @@ DB セッション + `roles.permissions` に置き換わりました。判定は
 | `POST /api/sync/holodex/to-holodex/{id}` | **あなたの Holodex アカウント名義**で書き込み | `sync:run` |
 | `POST /api/sync/holodex`、`.../video/{id}` | Holodex / YouTube のクォータを消費 | `sync:run` |
 | `POST /api/ai/normalize` | AI プロバイダーの課金 | `content:edit` |
-| `POST /api/streams/{id}/comments/analyze` | AI プロバイダーの課金 | `content:edit` |
-| `POST /api/streams/{id}/chapters/analyze` | AI プロバイダーの課金（`ExtractSongs` を共有） | `content:edit` |
-| `POST /api/streams/{id}/holodex-songs/analyze` | AI プロバイダーの課金（正規化＋照合判定） | `content:edit` |
-| `POST /api/streams/batch-analyze` | **抽出**の AI。対象に選ばれ、かつ再解析が必要な配信ぶん（範囲は `AI_PIPELINE.md`） | `content:edit` |
-| `POST /api/streams/batch-fill` | 抽出の AI に加えて、**未決着の表記に対する照合 AI**。抽出がキャッシュ命中でも照合 AI は走る（肯定は保存されないため）。実行履歴に配信名が載る | `content:edit` |
+| `POST /api/streams/{id}/comments/analyze` | 下表 | `content:edit` |
+| `POST /api/streams/{id}/chapters/analyze` | 下表 | `content:edit` |
+| `POST /api/streams/{id}/holodex-songs/analyze` | 下表 | `content:edit` |
+| `POST /api/streams/batch-analyze`（実行） | 下表を対象配信ぶん | `content:edit` |
+| `POST /api/streams/batch-fill`（実行） | 下表を対象配信ぶん＋未決着表記の照合 AI | `content:edit` |
+| `GET /api/streams/batch-analyze/status`、`.../batch-fill/*` の状態・履歴 | **外部呼び出し無し**（メモリ／DB を読むだけ） | `content:edit` |
 | `POST /api/availability/backfill` | **yt-dlp を起動**。既定は未調査のみ、`?recheck=1` では調査済みの弱い判定（`public` かつ埋め込み可）も対象。非表示も含む | `content:edit` |
 | `POST /api/streams/{id}/availability` | yt-dlp を 1 回起動 | `content:edit` |
 | `POST /api/ai/backfill-readings` | AI プロバイダーの課金（曲名・アーティスト各 30 件） | `content:edit` |
