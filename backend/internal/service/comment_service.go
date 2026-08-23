@@ -100,7 +100,9 @@ func (s *CommentService) analyzeComments(videoID string, force, dryRun, adjudica
 
 	rawHash := hashStoredComments(stream.CommentRaw)
 
-	// キャッシュ命中：comment_songs は現在の comment_raw から計算済みなので、そのまま返して AI は呼ばない
+	// キャッシュ命中：comment_songs は現在の comment_raw から計算済みなので抽出はやり直さない。
+	// **AI の照合判定はここでも走る**（対話 analyze のとき）── 照合は保存していないので、
+	// キャッシュを返すだけでは未決着の行が決まらないまま残る。
 	if !force {
 		cachedHash, _ := s.streamRepo.GetCommentSongsHash(videoID)
 		if commentCacheHit(rawHash, cachedHash, stream.CommentSongs) {
@@ -140,7 +142,9 @@ func (s *CommentService) analyzeComments(videoID string, force, dryRun, adjudica
 
 	// 規則で決まらなかった行を AI に回し、決まったぶんだけ照合し直す。
 	//
-	// 呼ぶのは新規解析のときだけ ── キャッシュ命中と backfill は AI を呼ばない約束。
+	// backfill と一括プレ分析からは呼ばない（誰も見ていない配信のために AI を焚かない）。
+	// **キャッシュ命中でも呼ぶ** ── 利用者が読み込みを押した瞬間で、
+	// 照合は保存していないため未決着の行はキャッシュを返すだけでは決まらない。
 	// dry-run では行わない。判定は checks テーブルへの書き込みを伴うため。
 	//
 	// 抽出がどの経路（統合 / 2 段階 / 正規表現）を通ったかに関わらず呼ぶ。以前は

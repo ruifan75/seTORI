@@ -104,8 +104,10 @@ const aiMatchBatchSize = 8
 // AdjudicateMatches は未照合の行を AI に判定させる。
 // 戻り値は (実際に AI へ送った行数, 照合できた行数)。
 //
-// 呼ぶのは「入力元を編集フォームへ読み込む」ときだけ。配信を開いただけの読み取りや
-// 一括プレ分析からは呼ばない（誰も見ていない配信のために AI を焚かない）。
+// 呼ぶのは**入力元を取り込むとき**。対話の「読み込む」に加えて、一括セットリスト作成
+// （batch_fill_service）からも直接呼ぶ ── あちらは歌唱を作るので、審査へ回す前に
+// 決められるものは決める。配信を開いただけの読み取りと一括プレ分析からは呼ばない
+// （誰も見ていない配信のために AI を焚かない）。
 func (s *NormalizationService) AdjudicateMatches(rows []*aiMatchRow) (asked, resolved int) {
 	if s.matchService == nil || s.aiClient == nil || len(rows) == 0 {
 		return 0, 0

@@ -108,6 +108,7 @@
      ── 詳細と実例は `docs/AI_PIPELINE.md`。
      トリガー：`POST /api/streams/{id}/comments/analyze`、
      `POST /api/streams/{id}/chapters/analyze`（`ChapterService` は `ExtractSongs` を共有する）、
+     `POST /api/streams/{id}/holodex-songs/analyze`（`BatchAINormalization` と未決着の AI 照合）、
      および一括（`batch-analyze` / `batch-fill`）。
      **AI 経路には除外キーワードの辞書を渡さない**（`filterScopeForPath`。
      AI が既に `is_song` を判断しているため。regex 経路だけ辞書を使う）。
@@ -202,12 +203,20 @@ Holodex の `topic_id = "membersonly"` は候補の絞り込みに使えるが�
 DB セッション + `roles.permissions` に置き換わりました。判定は
 `internal/handler/router.go` の `requiredPermission` 一箇所にあります。
 
+**この表は網羅を意図している。** 課金・外部プロセス・外部書き込みを起こすルートを足したら、
+ここにも足すこと。
+
 | ルート | 何が起きるか | 必要な権限 |
 |---|---|---|
 | `POST /api/sync/holodex/to-holodex/{id}` | **あなたの Holodex アカウント名義**で書き込み | `sync:run` |
 | `POST /api/sync/holodex`、`.../video/{id}` | Holodex / YouTube のクォータを消費 | `sync:run` |
 | `POST /api/ai/normalize` | AI プロバイダーの課金 | `content:edit` |
 | `POST /api/streams/{id}/comments/analyze` | AI プロバイダーの課金 | `content:edit` |
+| `POST /api/streams/{id}/chapters/analyze` | AI プロバイダーの課金（`ExtractSongs` を共有） | `content:edit` |
+| `POST /api/streams/{id}/holodex-songs/analyze` | AI プロバイダーの課金（正規化＋照合判定） | `content:edit` |
+| `POST /api/streams/batch-analyze`、`/api/streams/batch-fill` | 全配信ぶんの AI。実行履歴に配信名が載る | `content:edit` |
+| `POST /api/availability/backfill` | **全対象へ yt-dlp を起動**（未調査のみ。非表示も含む） | `content:edit` |
+| `POST /api/streams/{id}/availability` | yt-dlp を 1 回起動 | `content:edit` |
 | `/api/ai-providers/*` | API キーの登録・変更 | `ai:manage` |
 | `/api/backups/*` | ダウンロード（GET）含む全操作 | `backup:manage` |
 | `GET /api/streams/{id}/comments` | Holodex / YouTube のクォータを消費（キャッシュが無いとき） | `content:edit` |
