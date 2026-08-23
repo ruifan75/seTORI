@@ -71,7 +71,9 @@ func (s *CommentService) AnalyzeComments(videoID string, force bool) (*dto.Analy
 // AnalyzeCommentsForBatch は一括プレ分析用。**AI 判定は行わない。**
 //
 // 一括分析がやるのは「comment_raw → comment_songs」（抽出＋正規化＋拍手 end）まで。
-// 照合とその判定は、人がその配信を開いて読み込むときの仕事なので分ける。
+// **規則による照合は ExtractSongs の中で走る**（応答に載せるため。保存はしない）。
+// 分けているのは**未決着行の AI 判定**だけで、それは人がその配信を開いて
+// 読み込むとき、または一括セットリスト作成（歌唱を作る側）の仕事。
 //
 // 混ぜると、724 本を回すだけで 1 本あたり最大 3 回の AI 呼び出しになり、
 // 誰も見ていない配信のために別名義の学習（システム全体の照合に効く）が進んでしまう。
@@ -110,13 +112,10 @@ func (s *CommentService) analyzeComments(videoID string, force, dryRun, adjudica
 		if commentCacheHit(rawHash, cachedHash, stream.CommentSongs) {
 			var cached []dto.CommentSong
 			if err := json.Unmarshal(stream.CommentSongs, &cached); err == nil && len(cached) > 0 {
-				// DB 照合だけ現在の状態へ再解決する（AI は打たない）。matched_song_id は
-				// 分析時点の DB に依存するため、キャッシュに凍結された古いマッチ／未マッチを補正する。
-				// 照合が変わったら保存する。応答にだけ乗せて DB を古いまま残すと、
-				// 一覧や集計は誤ったまま、開いた画面だけ正しいという食い違いが残る。
-				// hash は据え置く ── 変わったのは照合結果だけで、抽出元のコメントは同じ。
-				// 照合は保存された値ではなく、今の DB で計算して返す。
-				// 保存しないので書き戻しも要らない（曲が増えれば次に開いたとき自然に直る）。
+				// 照合は**保存された値ではなく、今の DB で計算して返す**。
+				// キャッシュに照合結果は入っていない（保存前に stripMatchForStorage が落とす）ので、
+				// ここで当て直さないと未照合のまま返ることになる。
+				// 書き戻しはしない ── 曲が増えれば次に取り込んだとき自然に直る。
 				s.normalizationService.ResolveForDisplay(cached)
 				// 抽出のやり直しは不要でも、照合が決着しない行は残りうる。
 				// 利用者が読み込みを押した瞬間なので、ここで判定してよい。

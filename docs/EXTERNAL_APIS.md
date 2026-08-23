@@ -217,16 +217,17 @@ DB セッション + `roles.permissions` に置き換わりました。判定は
 | `POST /api/streams/{id}/comments/analyze` | AI プロバイダーの課金 | `content:edit` |
 | `POST /api/streams/{id}/chapters/analyze` | AI プロバイダーの課金（`ExtractSongs` を共有） | `content:edit` |
 | `POST /api/streams/{id}/holodex-songs/analyze` | AI プロバイダーの課金（正規化＋照合判定） | `content:edit` |
-| `POST /api/streams/batch-analyze`、`/api/streams/batch-fill` | 全配信ぶんの AI。実行履歴に配信名が載る | `content:edit` |
+| `POST /api/streams/batch-analyze`、`/api/streams/batch-fill` | **対象に選ばれ、再解析が必要な配信ぶん**の AI（全配信ではない。範囲は `AI_PIPELINE.md`）。実行履歴に配信名が載る | `content:edit` |
 | `POST /api/availability/backfill` | **全対象へ yt-dlp を起動**（未調査のみ。非表示も含む） | `content:edit` |
 | `POST /api/streams/{id}/availability` | yt-dlp を 1 回起動 | `content:edit` |
 | `POST /api/ai/backfill-readings` | AI プロバイダーの課金（曲名・アーティスト各 30 件） | `content:edit` |
 | `POST /api/songs/merge-candidates/scan` | AI プロバイダーの課金（登録曲を丸ごと見せる） | `content:edit` |
 | `POST /api/songs/merge-candidates/adjudicate` | AI プロバイダーの課金 | `content:edit` |
 | `POST /api/streams/{id}/analyze-chat-ends`、`.../chat-end-estimate` | **yt-dlp を起動**（live chat。キャッシュが無いとき） | `content:edit` |
-| `POST /api/chat-ends/backfill` | **全配信へ yt-dlp** | `content:edit` |
+| `POST /api/chat-ends/backfill` | yt-dlp（**非空の `comment_songs` を持つ配信だけ**。全配信ではない） | `content:edit` |
 | `POST /api/streams/{id}/chapters/sync`、`POST /api/chapters/backfill` | **yt-dlp を起動** | `content:edit` |
 | `POST /api/streams/{id}/comments/sync-youtube` | YouTube Data API のクォータを消費 | `content:edit` |
+| `POST /api/singers` | Holodex を叩き、必要なら YouTube Data API へ fallback | `content:edit` |
 | `/api/ai-providers/*` | API キーの登録・変更 | `ai:manage` |
 | `/api/backups/*` | ダウンロード（GET）含む全操作 | `backup:manage` |
 | `GET /api/streams/{id}/comments` | Holodex / YouTube のクォータを消費（キャッシュが無いとき） | `content:edit` |
