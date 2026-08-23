@@ -106,7 +106,9 @@
      （AI が行と秒数、正規表現が曲名／アーティスト）は**その退避先**で、
      さらに失敗すると純粋正規表現へ落ちる。経路は 3 段階で退避する
      ── 詳細と実例は `docs/AI_PIPELINE.md`。
-     トリガー：`POST /api/streams/{id}/comments/analyze` と一括（`batch-analyze` / `batch-fill`）。
+     トリガー：`POST /api/streams/{id}/comments/analyze`、
+     `POST /api/streams/{id}/chapters/analyze`（`ChapterService` は `ExtractSongs` を共有する）、
+     および一括（`batch-analyze` / `batch-fill`）。
      **AI 経路には除外キーワードの辞書を渡さない**（`filterScopeForPath`。
      AI が既に `is_song` を判断しているため。regex 経路だけ辞書を使う）。
 - **⚠️ リスク**：トークン課金。公開環境であなたの key を使うと、1 ユーザーで請求を爆発させたりクォータを消費し尽くす可能性があります。key 未設定時は AI ステップがフォールトトレラント（生データ / 純粋正規表現結果を返却）。
@@ -135,10 +137,14 @@
 公開: {"embeddable":true, ..., "privacyStatus":"public", ...}
 ```
 
-`embeddable: true` と言っているが、実際には IFrame API が `onError: 150`
-（所有者が埋め込みを許可していない）で弾く。**この用途に Data API は使えない。**
+`embeddable: true` と言っているが、実際には IFrame API が `onError: 150` で弾く。
+**この用途に Data API は使えない。**
 
-判別できるのは **yt-dlp の `availability`**。
+> 150（および 101）は「埋め込み再生を拒否された」であって、
+> **会限か、所有者が埋め込みを切っているかは区別できない**。
+> 画面の文言も両方の可能性を書く（`STREAM_VISIBILITY.md`）。
+
+判別の材料は **yt-dlp の `availability`**。
 `yt-dlp --skip-download --print "%(availability)s" <URL>`（cookie は `--cookies`）で：
 
 | 動画 | cookie なし | cookie あり | 状態 |
@@ -147,17 +153,26 @@
 | 公開 | `public` | `public` | 正常 |
 | 削除・非公開 | `Video unavailable` | `Video unavailable` | 取得不可 |
 
-既に yt-dlp を実行する配信では、**同じ実行に出力を足せば追加プロセスは要らない**。
-ただし「全配信でいつか自動的に埋まる」わけではない ── main には `availability` の
-取得・保存がまだ無く、実行の契機も限られている：
+**実装済み**（PR #18）。`streams.availability` / `playable_in_embed` /
+`availability_checked_at` に保存し、導出した `playability` を配信詳細で返す。埋める経路は 3 つ：
 
-- live chat はファイルキャッシュがあると `chatend_service.go` が yt-dlp の前に return する
-- 章節 backfill は `FindIDsWithoutChapterRaw` が **`is_hidden = FALSE`** に限定しており、
-  **判定したい非表示配信をそもそも対象にしない**
-- 新規同期しただけでコメント解析も章節取得もしていない配信には、呼ぶ契機が無い
+| 経路 | 追加プロセス |
+|---|---|
+| live chat の取得に相乗り | なし（`--no-simulate` が要る。`DATA_COMPLETION.md`） |
+| チャプター取得に相乗り | なし |
+| `POST /api/availability/backfill` | あり（未調査のみ。**非表示を除かない**） |
 
-なので「既存の実行に相乗りする」ことと「未実行・キャッシュ済みの配信をどう埋めるか」は
-別に決める必要がある（issue #3）。取得不可は「不確実」なので、公開しない側へ倒すこと。
+**相乗りだけでは埋まらない**ので専用の backfill がある ── live chat はファイルキャッシュが
+あると yt-dlp の前に return し、章節 backfill は `is_hidden = FALSE` に限定されていて
+判定したい非表示配信を対象にしないため。
+
+> ⚠️ **`availability` 単独では判定できない。** 本番の相乗り 2 経路は
+> `--ignore-no-formats-error` を付けており、そのとき**視聴できない動画でも
+> `availability = public` が返る**。`playable_in_embed` の有無と併せて見ること。
+> また会限は `subscriber_only` かつ `playable_in_embed = true` を返すので、
+> **会限の判定を先に置く**。`public` は「反証が無かった」という弱い結論なので、
+> 誤りうる前提で `?recheck=1` と IFrame の `onError` を残してある。
+> 判定表と実測値は `docs/STREAM_VISIBILITY.md`。
 
 Holodex の `topic_id = "membersonly"` は候補の絞り込みに使えるが、**単値**なので
 `singing` などと排他になる（2026-08-21 に本番の複製 1302 本を集計したときの分布は
@@ -166,7 +181,8 @@ Holodex の `topic_id = "membersonly"` は候補の絞り込みに使えるが�
 その修正は「topic を正しく見る」ではなく **「実際に再生できるかを見る」** だった
 （`Holodex/src/components/watch/WatchLiveChat.vue` の `currentTime > 0`、および CHANGELOG）。
 
-→ **Holodex は候補抽出に、`availability` は判定に**、と役割を分ける。設計は issue #3。
+→ **Holodex は候補抽出に、`availability` は判定に**、と役割を分ける（issue #3、実装済み）。
+秘匿そのものの軸は `streams.is_restricted`（issue #4 / `STREAM_VISIBILITY.md`）。
 
 ## 5. iTunes Search / Lookup API（key 不要）
 
