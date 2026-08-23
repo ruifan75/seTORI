@@ -823,7 +823,9 @@ type holodexDataSong struct {
 }
 
 // AnalyzeHolodexSongs は保存済み holodex_data から楽曲を解析し、正規化・DB 照合・拍手 end 補完を行って永続化する。
-// 既存の holodex_hash をキャッシュキーとし、Holodex のデータが変わっていなければ AI を再実行しない。
+// 既存の holodex_hash をキャッシュキーとし、Holodex のデータが変わっていなければ
+// **正規化の AI は**再実行しない。ただし未決着の照合 AI（adjudicateSuggestions）は
+// キャッシュ命中でも走る ── 照合は保存していないため。
 // Holodex が明示的に end を持つ曲はそれを優先（人力キュレーションのため最も正確）。
 func (s *HolodexService) AnalyzeHolodexSongs(videoID string, force bool) ([]dto.SongSuggestion, error) {
 	return s.analyzeHolodexSongs(videoID, force, true)
@@ -850,7 +852,8 @@ func (s *HolodexService) analyzeHolodexSongs(videoID string, force, adjudicate b
 		holodexHash = stream.HolodexHash.String
 	}
 
-	// キャッシュ命中：holodex_data が変わっていない → chat 比較だけ付け直して返す（AI なし）
+	// キャッシュ命中：holodex_data が変わっていない → 正規化はやり直さず chat 比較を付け直す。
+	// **照合の AI 判定はこのあと走る**（未決着の行は保存されていないため）。
 	if !force && holodexHash != "" {
 		cached, cachedHash, _ := s.streamRepo.GetHolodexSongsCache(videoID)
 		if cachedHash.Valid && cachedHash.String == holodexHash && len(cached) > 0 {
@@ -967,9 +970,9 @@ func (s *HolodexService) analyzeHolodexSongs(videoID string, force, adjudicate b
 //
 // 呼ぶのは利用者が「Holodex から読み込む」を押したときだけ。
 // 配信詳細を開いただけの GET からは呼ばない（見ているだけで AI を呼ぶことになる）。
-// **保存されるのは否定だけ**（song_identity_checks）。肯定はその応答に載るだけで、
-// stripMatchForStorage がキャッシュへ書く前に落とす。したがって「一度読み込めば以後無料」
-// ではなく、同じ配信をもう一度 analyze すれば未決着の行は再び AI に当たる。
+// **保存されるのは否定だけ**（song_identity_checks / artist_alias_checks）。肯定はその応答に
+// 載るだけで、stripMatchFromSuggestions がキャッシュへ書く前に落とす。したがって
+// 「一度読み込めば以後無料」ではなく、同じ配信をもう一度 analyze すれば再び AI に当たる。
 func (s *HolodexService) adjudicateSuggestions(songs []dto.SongSuggestion) {
 	if s.normalizationService == nil {
 		return
