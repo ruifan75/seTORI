@@ -26,6 +26,47 @@ import (
 type AvailabilityService struct {
 	*ytdlpRunner // ChatEndService と**同じ実体**を共有する（cookie を 2 か所に持たない）
 	streamRepo   *repository.StreamRepository
+
+	// 実行中の状態。**止められることが要件**（1300 件を数十分かけて回すので、
+	// cookie の不備に気付いたときに再起動でしか止められないのは困る）。
+	mu        sync.Mutex
+	running   bool
+	cancelled bool
+	progress  AvailabilityProgress
+}
+
+// AvailabilityProgress は backfill の進み具合。log は直近 1000 件しか残らず、
+// 20 件ごとの進捗行が失敗行を押し流すので、成功・失敗の数はここで持つ。
+type AvailabilityProgress struct {
+	Running   bool   `json:"running"`
+	Total     int    `json:"total"`
+	Done      int    `json:"done"`
+	Succeeded int    `json:"succeeded"`
+	Failed    int    `json:"failed"`
+	Cancelled bool   `json:"cancelled"`
+	LastError string `json:"last_error,omitempty"`
+}
+
+// Cancel は実行中の backfill に停止を要求する（処理中の 1 件が終わり次第止まる）。
+func (s *AvailabilityService) Cancel() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.running {
+		s.cancelled = true
+	}
+}
+
+func (s *AvailabilityService) isCancelled() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cancelled
+}
+
+// Progress は現在の進捗を返す（走っていなければ最後の実行の結果）。
+func (s *AvailabilityService) Progress() AvailabilityProgress {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.progress
 }
 
 func NewAvailabilityService(streamRepo *repository.StreamRepository, chatEnd *ChatEndService) *AvailabilityService {
@@ -157,27 +198,69 @@ func (s *AvailabilityService) Backfill(concurrency int, recheckWeak bool) (targe
 		return 0, concurrency, nil
 	}
 
+	// 二重起動を防ぐ。同じ対象へ 2 つ走らせても yt-dlp が倍になるだけで得が無い。
+	s.mu.Lock()
+	if s.running {
+		s.mu.Unlock()
+		return 0, concurrency, fmt.Errorf("すでに実行中です（停止するには cancel）")
+	}
+	s.running = true
+	s.cancelled = false
+	s.progress = AvailabilityProgress{Running: true, Total: len(ids)}
+	s.mu.Unlock()
+
 	go func() {
 		logger.Infof("[availability] backfill を開始: %d 件 (並列 %d)", len(ids), concurrency)
 		sem := make(chan struct{}, concurrency)
 		var wg sync.WaitGroup
-		var done int64
+		var done, ok, ng int64
 		for _, id := range ids {
+			// **1 件ごとに見る。** 処理中の 1 件は終わらせる（途中で殺すと
+			// yt-dlp の一時ファイルが残る）が、次は始めない。
+			if s.isCancelled() {
+				logger.Infof("[availability] backfill をキャンセルしました: %d/%d", atomic.LoadInt64(&done), len(ids))
+				break
+			}
 			sem <- struct{}{}
 			wg.Add(1)
 			go func(id string) {
 				defer wg.Done()
 				defer func() { <-sem }()
+				var errText string
 				if _, err := s.Fetch(id); err != nil {
+					atomic.AddInt64(&ng, 1)
+					errText = err.Error()
 					logger.Warnf("[availability] backfill %s: %v", id, err)
+				} else {
+					atomic.AddInt64(&ok, 1)
 				}
-				if n := atomic.AddInt64(&done, 1); n%20 == 0 || int(n) == len(ids) {
-					logger.Infof("[availability] backfill の進捗: %d/%d", n, len(ids))
+				n := atomic.AddInt64(&done, 1)
+				s.mu.Lock()
+				s.progress.Done = int(n)
+				s.progress.Succeeded = int(atomic.LoadInt64(&ok))
+				s.progress.Failed = int(atomic.LoadInt64(&ng))
+				if errText != "" {
+					s.progress.LastError = errText
+				}
+				s.mu.Unlock()
+				if n%20 == 0 || int(n) == len(ids) {
+					logger.Infof("[availability] backfill の進捗: %d/%d（成功 %d / 失敗 %d）",
+						n, len(ids), atomic.LoadInt64(&ok), atomic.LoadInt64(&ng))
 				}
 			}(id)
 		}
 		wg.Wait()
-		logger.Infof("[availability] backfill が完了: %d 件", len(ids))
+
+		s.mu.Lock()
+		s.running = false
+		s.progress.Running = false
+		s.progress.Cancelled = s.cancelled
+		s.mu.Unlock()
+
+		// **試行数ではなく成功・失敗を出す。** 以前は「完了: N 件」と対象数を出していたので、
+		// 全部失敗していても成功したように読めた。
+		logger.Infof("[availability] backfill が終了: 成功 %d / 失敗 %d / 対象 %d",
+			atomic.LoadInt64(&ok), atomic.LoadInt64(&ng), len(ids))
 	}()
 
 	return len(ids), concurrency, nil

@@ -95,6 +95,14 @@ Go は `effectiveRestricted`。**片方だけ変えないこと**）。
 **自動では外れない。** `availability = public` は「反証が無かった」という弱い結論なので
 （issue #3）、それで秘匿を解くと誤って公開する。`SaveAvailability` は立てる方向にしか動かない。
 
+> ⚠️ **`COALESCE` を外さないこと。** 判定は
+> `is_restricted = is_restricted OR COALESCE($2 = 'subscriber_only', FALSE)`。
+> `availability` が NULL のとき比較結果も NULL になり、SQL の三値論理では
+> **`false OR NULL` = NULL**（`true OR NULL` は true）。`is_restricted` は NOT NULL なので、
+> **秘匿でない行に「取得できなかった」を保存すると制約違反で落ちる**。
+> 本番の backfill でこれを踏み、該当しうる行が 1217 あった。
+> 既に秘匿の行だけは通ってしまうので、会限の配信で試すと再現しない。
+
 ### 候補は 3 つの材料から、全部の時点で倒す
 
 | いつ | 材料 |
@@ -450,6 +458,11 @@ cookie の判定は `HasCookies()` ではなく**実際に渡せたか**で見�
 | live chat の取得に相乗り | なし | ファイルキャッシュがあると yt-dlp 自体を呼ばない |
 | チャプター取得に相乗り | なし | backfill が `is_hidden = FALSE` 限定 |
 | `POST /api/availability/backfill` | あり（既定は未調査のみ／`?recheck=1` で弱い判定も） | ─ |
+
+進捗と停止：`GET /api/availability/backfill/status`（成功・失敗の数）と
+`POST /api/availability/backfill/cancel`（処理中の 1 件が終わり次第停止）。
+**log では足りない** ── 直近 1000 件しか残らず、20 件ごとの進捗行が失敗行を押し流す。
+二重起動は弾く（同じ対象へ 2 つ走らせても yt-dlp が倍になるだけ）。
 
 **backfill は非表示を除かない。** 会限の歌枠はどれも非表示側にあるので、
 除くと判定したい配信がまるごと落ちる（チャプター側は「表示中の配信の

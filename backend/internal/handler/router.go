@@ -430,6 +430,8 @@ func (r *Router) setupRoutes() {
 	// 再生可否（会限・削除済みの判定材料。issue #3）
 	r.mux.HandleFunc("POST /api/streams/{id}/availability", r.handleFetchAvailability)
 	r.mux.HandleFunc("POST /api/availability/backfill", r.handleBackfillAvailability)
+	r.mux.HandleFunc("POST /api/availability/backfill/cancel", r.handleCancelAvailabilityBackfill)
+	r.mux.HandleFunc("GET /api/availability/backfill/status", r.handleAvailabilityBackfillStatus)
 
 	// Filter keywords management
 	r.mux.HandleFunc("GET /api/filter-keywords", r.handleListFilterKeywords)
@@ -2623,6 +2625,22 @@ func (r *Router) handleFetchAvailability(w http.ResponseWriter, req *http.Reques
 		resp["error"] = err.Error()
 	}
 	respondJSON(w, http.StatusOK, resp)
+}
+
+// handleCancelAvailabilityBackfill は実行中の backfill を止める。
+// **処理中の 1 件は終わらせて**次を始めない（途中で殺すと yt-dlp の一時ファイルが残る）。
+func (r *Router) handleCancelAvailabilityBackfill(w http.ResponseWriter, req *http.Request) {
+	r.availabilityService.Cancel()
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"message":  "停止を要求しました（処理中の 1 件が終わり次第止まります）",
+		"progress": r.availabilityService.Progress(),
+	})
+}
+
+// handleAvailabilityBackfillStatus は進捗を返す。
+// **log では足りない** ── 直近 1000 件しか残らず、20 件ごとの進捗行が失敗行を押し流す。
+func (r *Router) handleAvailabilityBackfillStatus(w http.ResponseWriter, req *http.Request) {
+	respondJSON(w, http.StatusOK, r.availabilityService.Progress())
 }
 
 func (r *Router) handleBackfillAvailability(w http.ResponseWriter, req *http.Request) {
