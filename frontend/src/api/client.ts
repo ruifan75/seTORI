@@ -99,6 +99,7 @@ import type {
   ActivityListResponse,
   ActivityStatsResponse,
   UserActivitySummaryResponse,
+  AvailabilityBackfillStatus,
 } from './types';
 
 const DEFAULT_API_BASE_URL =
@@ -477,6 +478,30 @@ export const chapterApi = {
 // ========== 一括プレ分析 API ==========
 
 // 一括セットリスト作成。歌唱（performances）を直接作るので、実行記録と撤回がある。
+// 再生可否（会限・削除済みの判定材料）の一括取得。
+// **log では足りない** ── 直近 1000 件しか残らず、20 件ごとの進捗行が失敗行を押し流すので、
+// 進捗と最後のエラーは status から読む。
+export const availabilityApi = {
+  // recheck を立てると、`public` で確定済みの弱い判定も対象に戻す。
+  backfill: async (
+    concurrency: number,
+    recheck = false
+  ): Promise<{ targets: number; concurrency: number; recheck: boolean; message: string }> => {
+    const params = new URLSearchParams({ concurrency: String(concurrency) });
+    if (recheck) params.set('recheck', '1');
+    const { data } = await api.post(`/api/availability/backfill?${params}`);
+    return data;
+  },
+  status: async (): Promise<AvailabilityBackfillStatus> => {
+    const { data } = await api.get('/api/availability/backfill/status');
+    return data;
+  },
+  cancel: async (): Promise<{ message: string; progress: AvailabilityBackfillStatus }> => {
+    const { data } = await api.post('/api/availability/backfill/cancel');
+    return data;
+  },
+};
+
 export const batchFillApi = {
   // singerIds は対象チャンネル（空なら全部）。既定はそのチャンネルが**所有する**配信で、
   // includeCollabs を立てるとゲスト参加した配信も含む。

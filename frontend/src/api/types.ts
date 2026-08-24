@@ -270,6 +270,19 @@ export interface StreamListResponse {
   pagination: PaginationResponse;
 }
 
+// 再生可否の一括取得の進捗。**saved と failed の意味を取り違えないこと** ──
+// saved は「DB に記録できた」（「動画が無い」も含む。再試行不要）、
+// failed は「記録できなかった」＝再試行が要るもの。error の有無ではない。
+export interface AvailabilityBackfillStatus {
+  running: boolean;
+  total: number;
+  done: number;
+  saved: number;
+  failed: number;
+  cancelled: boolean;
+  last_error?: string;
+}
+
 export interface UpdateStreamRequest {
   title?: string;
   stream_date?: string;
