@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/ruifan75/setori/internal/logger"
@@ -38,10 +37,12 @@ type AvailabilityService struct {
 // AvailabilityProgress は backfill の進み具合。log は直近 1000 件しか残らず、
 // 20 件ごとの進捗行が失敗行を押し流すので、成功・失敗の数はここで持つ。
 type AvailabilityProgress struct {
-	Running   bool   `json:"running"`
-	Total     int    `json:"total"`
-	Done      int    `json:"done"`
-	Succeeded int    `json:"succeeded"`
+	Running bool `json:"running"`
+	Total   int  `json:"total"`
+	Done    int  `json:"done"`
+	// Saved は **DB に記録できた** 件数（「動画が無い」もここ。再試行は要らない）。
+	// Failed は **記録できなかった** 件数＝再試行が要るもの。error の有無ではない。
+	Saved     int    `json:"saved"`
 	Failed    int    `json:"failed"`
 	Cancelled bool   `json:"cancelled"`
 	LastError string `json:"last_error,omitempty"`
@@ -80,7 +81,11 @@ func NewAvailabilityService(streamRepo *repository.StreamRepository, chatEnd *Ch
 // availability = public で返ってくる。ここは再生可否そのものを知りたいので、
 // 動画情報を取れないことを**エラーとして受け取る**（保存はする ── 「調べた結果、
 // 取れなかった」も事実なので、未調査のまま毎回調べ直すのは避ける）。
-func (s *AvailabilityService) Fetch(videoID string) (ytdlpAvailability, error) {
+// 戻り値の saved は**DB に記録できたか**。error とは独立している ──
+// 「動画が無い」は error を返すが記録は成功しており、再試行の必要は無い。
+// backfill の失敗数をこれで数えないと、まさに今回直した入力（秘匿でない取得不能動画）が
+// 「保存できた」のに「失敗」と報告される。
+func (s *AvailabilityService) Fetch(videoID string) (a ytdlpAvailability, saved bool, err error) {
 	args := []string{
 		"--skip-download",
 		"--no-warnings",
@@ -105,18 +110,18 @@ func (s *AvailabilityService) Fetch(videoID string) (ytdlpAvailability, error) {
 	cmd.Stderr = &stderr
 	runErr := cmd.Run()
 
-	a := parseYtdlpAvailability(lastNonEmptyLine(stdout.String()))
+	a = parseYtdlpAvailability(lastNonEmptyLine(stdout.String()))
 
 	if runErr != nil {
 		switch {
 		case notInstalled(runErr):
-			return a, fmt.Errorf("yt-dlp が実行できません (%s): 未インストールの可能性があります", s.path)
+			return a, false, fmt.Errorf("yt-dlp が実行できません (%s): 未インストールの可能性があります", s.path)
 		case ctx.Err() != nil:
-			return a, fmt.Errorf("yt-dlp がタイムアウトしました（2分）")
+			return a, false, fmt.Errorf("yt-dlp がタイムアウトしました（2分）")
 		case isBotCheck(stderr.String()):
 			// BOT 判定は全配信で一様に起きる。値を保存すると「調べ済み」になって
 			// cookie を入れ直したあとの調べ直しから漏れるので、保存せずに返す。
-			return a, botCheckError(s.ytdlpRunner)
+			return a, false, botCheckError(s.ytdlpRunner)
 		}
 		// ここから先は「動画が無い」と「今回の実行が失敗した」の区別が要る。
 		//
@@ -135,32 +140,34 @@ func (s *AvailabilityService) Fetch(videoID string) (ytdlpAvailability, error) {
 		if !cookiesSent {
 			// cookie 無しでは「削除された」と「会限で見えない」が同じ失敗になる。
 			// 会限の歌枠に「削除された可能性があります」と出さないよう、記録しない。
-			return a, fmt.Errorf("動画情報を取得できません（cookie 無しのため会限と区別できず、判定は保存しません）: %s",
+			return a, false, fmt.Errorf("動画情報を取得できません（cookie 無しのため会限と区別できず、判定は保存しません）: %s",
 				ytdlpErrorLine(stderr.String()))
 		}
 		switch classifyFetchFailure(stderr.String()) {
 		case failureTransient:
-			return a, fmt.Errorf("一時的な失敗のため保存しません（時間をおいて再実行してください）: %s",
+			return a, false, fmt.Errorf("一時的な失敗のため保存しません（時間をおいて再実行してください）: %s",
 				ytdlpErrorLine(stderr.String()))
 		case failureUnknown:
-			return a, fmt.Errorf("動画情報を取得できません（原因を判別できないため保存しません。再実行してください）: %s",
+			return a, false, fmt.Errorf("動画情報を取得できません（原因を判別できないため保存しません。再実行してください）: %s",
 				ytdlpErrorLine(stderr.String()))
 		}
 		// failureVideoGone。availability は空、playable_in_embed は NULL。
 		if err := s.save(videoID, a); err != nil {
-			return a, err
+			return a, false, err
 		}
-		return a, fmt.Errorf("動画情報を取得できません: %s", ytdlpErrorLine(stderr.String()))
+		// **保存はできている。** error は「取得できなかった」という事実を伝えるためで、
+		// 再試行は要らない（次回の backfill 対象からも外れる）。
+		return a, true, fmt.Errorf("動画情報を取得できません: %s", ytdlpErrorLine(stderr.String()))
 	}
 
 	// 終了コード 0 でも中身が空なら保存しない（NULL/NULL を書くと unavailable になる）。
 	if !a.Resolved() && a.Availability == "" {
-		return a, fmt.Errorf("yt-dlp が再生可否を返しませんでした（保存しません）")
+		return a, false, fmt.Errorf("yt-dlp が再生可否を返しませんでした（保存しません）")
 	}
 	if err := s.save(videoID, a); err != nil {
-		return a, err
+		return a, false, err
 	}
-	return a, nil
+	return a, true, nil
 }
 
 func (s *AvailabilityService) save(videoID string, a ytdlpAvailability) error {
@@ -213,39 +220,43 @@ func (s *AvailabilityService) Backfill(concurrency int, recheckWeak bool) (targe
 		logger.Infof("[availability] backfill を開始: %d 件 (並列 %d)", len(ids), concurrency)
 		sem := make(chan struct{}, concurrency)
 		var wg sync.WaitGroup
-		var done, ok, ng int64
 		for _, id := range ids {
-			// **1 件ごとに見る。** 処理中の 1 件は終わらせる（途中で殺すと
-			// yt-dlp の一時ファイルが残る）が、次は始めない。
+			// 速い経路。ここで落とせれば semaphore を待たずに済む。
 			if s.isCancelled() {
-				logger.Infof("[availability] backfill をキャンセルしました: %d/%d", atomic.LoadInt64(&done), len(ids))
 				break
 			}
 			sem <- struct{}{}
+			// **取得後にもう一度見る。** semaphore を待っている間に cancel が来ることがあり、
+			// 前段の判定だけだと「待たされていた 1 件」が cancel 後に開始してしまう。
+			if s.isCancelled() {
+				<-sem
+				break
+			}
 			wg.Add(1)
 			go func(id string) {
 				defer wg.Done()
 				defer func() { <-sem }()
-				var errText string
-				if _, err := s.Fetch(id); err != nil {
-					atomic.AddInt64(&ng, 1)
-					errText = err.Error()
+				_, saved, err := s.Fetch(id)
+				if err != nil {
 					logger.Warnf("[availability] backfill %s: %v", id, err)
-				} else {
-					atomic.AddInt64(&ok, 1)
 				}
-				n := atomic.AddInt64(&done, 1)
+				// **数えるのは「記録できたか」であって error の有無ではない。**
+				// 「動画が無い」は error を返すが記録は成功しており、再試行は要らない。
+				// ここを取り違えると、operator が「再試行が必要な件数」を過大に読む。
 				s.mu.Lock()
-				s.progress.Done = int(n)
-				s.progress.Succeeded = int(atomic.LoadInt64(&ok))
-				s.progress.Failed = int(atomic.LoadInt64(&ng))
-				if errText != "" {
-					s.progress.LastError = errText
+				s.progress.Done++
+				if saved {
+					s.progress.Saved++
+				} else {
+					s.progress.Failed++
+					if err != nil {
+						s.progress.LastError = err.Error()
+					}
 				}
+				n, sv, fl := s.progress.Done, s.progress.Saved, s.progress.Failed
 				s.mu.Unlock()
-				if n%20 == 0 || int(n) == len(ids) {
-					logger.Infof("[availability] backfill の進捗: %d/%d（成功 %d / 失敗 %d）",
-						n, len(ids), atomic.LoadInt64(&ok), atomic.LoadInt64(&ng))
+				if n%20 == 0 || n == len(ids) {
+					logger.Infof("[availability] backfill の進捗: %d/%d（記録 %d / 未記録 %d）", n, len(ids), sv, fl)
 				}
 			}(id)
 		}
@@ -255,12 +266,14 @@ func (s *AvailabilityService) Backfill(concurrency int, recheckWeak bool) (targe
 		s.running = false
 		s.progress.Running = false
 		s.progress.Cancelled = s.cancelled
+		fin := s.progress
 		s.mu.Unlock()
 
-		// **試行数ではなく成功・失敗を出す。** 以前は「完了: N 件」と対象数を出していたので、
+		// **試行数ではなく記録・未記録を出す。** 以前は「完了: N 件」と対象数を出していたので、
 		// 全部失敗していても成功したように読めた。
-		logger.Infof("[availability] backfill が終了: 成功 %d / 失敗 %d / 対象 %d",
-			atomic.LoadInt64(&ok), atomic.LoadInt64(&ng), len(ids))
+		logger.Infof("[availability] backfill が終了: 記録 %d / 未記録 %d / 処理 %d / 対象 %d%s",
+			fin.Saved, fin.Failed, fin.Done, fin.Total,
+			map[bool]string{true: "（キャンセル）", false: ""}[fin.Cancelled])
 	}()
 
 	return len(ids), concurrency, nil

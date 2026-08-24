@@ -459,10 +459,23 @@ cookie の判定は `HasCookies()` ではなく**実際に渡せたか**で見�
 | チャプター取得に相乗り | なし | backfill が `is_hidden = FALSE` 限定 |
 | `POST /api/availability/backfill` | あり（既定は未調査のみ／`?recheck=1` で弱い判定も） | ─ |
 
-進捗と停止：`GET /api/availability/backfill/status`（成功・失敗の数）と
-`POST /api/availability/backfill/cancel`（処理中の 1 件が終わり次第停止）。
+進捗と停止：`GET /api/availability/backfill/status` と
+`POST /api/availability/backfill/cancel`。
 **log では足りない** ── 直近 1000 件しか残らず、20 件ごとの進捗行が失敗行を押し流す。
 二重起動は弾く（同じ対象へ 2 つ走らせても yt-dlp が倍になるだけ）。
+
+> **数えるのは「記録できたか」であって error の有無ではない。**
+>
+> | 項目 | 意味 |
+> |---|---|
+> | `saved` | DB に記録できた。**「動画が無い」もここ**（error は返すが記録済み。再試行不要） |
+> | `failed` | 記録できなかった＝**再試行が要る**（一時障害・cookie 無し・原因不明） |
+>
+> 取り違えると、operator が「再試行が必要な件数」を過大に読む。
+>
+> **cancel は「実行中のものが終わり次第」で、最大で並列数ぶん残る。**
+> semaphore を待っている 1 件も開始しないよう、取得の前後で 2 回見ている
+> ── 前だけだと、待たされていた 1 件が cancel 後に始まってしまう。
 
 **backfill は非表示を除かない。** 会限の歌枠はどれも非表示側にあるので、
 除くと判定したい配信がまるごと落ちる（チャプター側は「表示中の配信の

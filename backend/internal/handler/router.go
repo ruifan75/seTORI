@@ -2612,7 +2612,7 @@ func (r *Router) handleFetchAvailability(w http.ResponseWriter, req *http.Reques
 		respondError(w, http.StatusBadRequest, "配信IDは必須です")
 		return
 	}
-	a, err := r.availabilityService.Fetch(id)
+	a, saved, err := r.availabilityService.Fetch(id)
 	// 取得できなかったこと自体が結果なので、エラーでも保存済みの値を返す。
 	resp := map[string]interface{}{
 		"availability":      a.Availability,
@@ -2621,6 +2621,9 @@ func (r *Router) handleFetchAvailability(w http.ResponseWriter, req *http.Reques
 	if a.PlayableInEmbed.Valid {
 		resp["playable_in_embed"] = a.PlayableInEmbed.Bool
 	}
+	// saved は「DB に記録できたか」。error があっても記録済みのことがある
+	// （動画が無いと確かめられた場合）。再実行が要るかはこちらで判断する。
+	resp["saved"] = saved
 	if err != nil {
 		resp["error"] = err.Error()
 	}
@@ -2632,7 +2635,7 @@ func (r *Router) handleFetchAvailability(w http.ResponseWriter, req *http.Reques
 func (r *Router) handleCancelAvailabilityBackfill(w http.ResponseWriter, req *http.Request) {
 	r.availabilityService.Cancel()
 	respondJSON(w, http.StatusOK, map[string]interface{}{
-		"message":  "停止を要求しました（処理中の 1 件が終わり次第止まります）",
+		"message":  "停止を要求しました（実行中のものが終わり次第止まります。最大で並列数ぶん残ります）",
 		"progress": r.availabilityService.Progress(),
 	})
 }
