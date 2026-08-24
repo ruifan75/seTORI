@@ -477,7 +477,6 @@ export const chapterApi = {
 
 // ========== 一括プレ分析 API ==========
 
-// 一括セットリスト作成。歌唱（performances）を直接作るので、実行記録と撤回がある。
 // 再生可否（会限・削除済みの判定材料）の一括取得。
 // **log では足りない** ── 直近 1000 件しか残らず、20 件ごとの進捗行が失敗行を押し流すので、
 // 進捗と最後のエラーは status から読む。
@@ -502,6 +501,7 @@ export const availabilityApi = {
   },
 };
 
+// 一括セットリスト作成。歌唱（performances）を直接作るので、実行記録と撤回がある。
 // singerIds は対象チャンネル（空なら全部）。既定はそのチャンネルが**所有する**配信で、
 // includeCollabs を立てるとゲスト参加した配信も含む。
 export const batchFillApi = {
