@@ -48,7 +48,11 @@ type AvailabilityProgress struct {
 	LastError string `json:"last_error,omitempty"`
 }
 
-// Cancel は実行中の backfill に停止を要求する（処理中の 1 件が終わり次第止まる）。
+// Cancel は実行中の backfill に停止を要求する。
+//
+// **保証は「この呼び出しが返ったあと、新しい 1 件は始まらない」。** 既に始まっている
+// ものは最後まで走る（最大で並列数ぶん）。途中で殺さないのは、yt-dlp の一時ファイルが
+// 残るため。起動の予約は Cancel と同じ mutex の下で行うので、この線引きが成り立つ。
 func (s *AvailabilityService) Cancel() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -226,9 +230,15 @@ func (s *AvailabilityService) Backfill(concurrency int, recheckWeak bool) (targe
 				break
 			}
 			sem <- struct{}{}
-			// **取得後にもう一度見る。** semaphore を待っている間に cancel が来ることがあり、
-			// 前段の判定だけだと「待たされていた 1 件」が cancel 後に開始してしまう。
-			if s.isCancelled() {
+
+			// **確認と起動を同じ mutex の下で行う。** 確認だけを別に取ると、
+			// 解錠してから go するまでの間に cancel が入り、その 1 件が
+			// cancel の応答を返したあとに開始してしまう。
+			// Cancel が同じ mutex を取るので、cancelled=true が見えた時点で
+			// 以後の go は発行されない ── 既に発行済みのものだけが走る。
+			s.mu.Lock()
+			if s.cancelled {
+				s.mu.Unlock()
 				<-sem
 				break
 			}
@@ -259,6 +269,7 @@ func (s *AvailabilityService) Backfill(concurrency int, recheckWeak bool) (targe
 					logger.Infof("[availability] backfill の進捗: %d/%d（記録 %d / 未記録 %d）", n, len(ids), sv, fl)
 				}
 			}(id)
+			s.mu.Unlock()
 		}
 		wg.Wait()
 
