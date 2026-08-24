@@ -862,7 +862,11 @@ func (r *StreamRepository) SaveAvailability(id string, availability sql.NullStri
 		    -- 触らない ── 触ると「公開してよい」と決めた配信が、次の取得で伏せ直される。
 		    -- 外しもしない（public は「反証が無かった」という弱い結論なので、
 		    -- それで秘匿を解くと誤って公開する）。
-		    is_restricted = is_restricted OR $2 = 'subscriber_only'
+		    -- **COALESCE を外さないこと。** availability が NULL のとき比較結果も NULL になり、
+		    -- SQL の三値論理では false OR NULL = NULL（true OR NULL = true）。
+		    -- is_restricted は NOT NULL なので、秘匿でない行に対する
+		    -- 「取得できなかった」の保存が制約違反で落ちる。本番で踏んだ。
+		    is_restricted = is_restricted OR COALESCE($2 = 'subscriber_only', FALSE)
 		WHERE id = $1`, id, availability, playableInEmbed)
 	if err != nil {
 		return fmt.Errorf("save availability: %w", err)
