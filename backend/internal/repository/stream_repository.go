@@ -2,6 +2,7 @@ package repository
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -424,6 +425,10 @@ func (r *StreamRepository) SetInitialVisibility(streamID string, hidden bool) er
 	}
 	return nil
 }
+
+// ErrStreamNotFound は対象の配信が存在しないこと。UPDATE は存在しない ID でも
+// error にならないので、行数を見て返す側でこれを使う。
+var ErrStreamNotFound = errors.New("stream not found")
 
 // MarkHolodexUploadAttempt は Holodex への**送信を試みた**時刻を記録する
 // （外部コピーの台帳。migration 054）。
@@ -855,7 +860,7 @@ func (r *StreamRepository) FindIDsWithoutChapterRaw() ([]string, error) {
 // **checked_at は必ず一緒に書く。** これが NULL のままだと未調査と区別できず、
 // 「調べたが値が取れなかった」配信を毎回調べ直すことになる。
 func (r *StreamRepository) SaveAvailability(id string, availability sql.NullString, playableInEmbed sql.NullBool) error {
-	_, err := r.db.Exec(`
+	res, err := r.db.Exec(`
 		UPDATE streams
 		SET availability = $2, playable_in_embed = $3, availability_checked_at = NOW(),
 		    -- 会限と分かったら**自動判定の側だけ**立てる。restriction_override（人の裁定）は
@@ -870,6 +875,11 @@ func (r *StreamRepository) SaveAvailability(id string, availability sql.NullStri
 		WHERE id = $1`, id, availability, playableInEmbed)
 	if err != nil {
 		return fmt.Errorf("save availability: %w", err)
+	}
+	// **行数を見る。** 存在しない ID でも UPDATE は error にならないので、
+	// 確認しないと「記録できた」と答えてしまう（saved の契約は「DB に記録できたか」）。
+	if n, err := res.RowsAffected(); err == nil && n == 0 {
+		return ErrStreamNotFound
 	}
 	return nil
 }

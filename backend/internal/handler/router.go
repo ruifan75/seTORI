@@ -2631,11 +2631,12 @@ func (r *Router) handleFetchAvailability(w http.ResponseWriter, req *http.Reques
 }
 
 // handleCancelAvailabilityBackfill は実行中の backfill を止める。
-// **処理中の 1 件は終わらせて**次を始めない（途中で殺すと yt-dlp の一時ファイルが残る）。
+// **保証は「この応答のあと新しい 1 件は始まらない」**。既に始まっているものは
+// 最後まで走る（最大で並列数ぶん）。途中で殺すと yt-dlp の一時ファイルが残るため。
 func (r *Router) handleCancelAvailabilityBackfill(w http.ResponseWriter, req *http.Request) {
 	r.availabilityService.Cancel()
 	respondJSON(w, http.StatusOK, map[string]interface{}{
-		"message":  "停止を要求しました（実行中のものが終わり次第止まります。最大で並列数ぶん残ります）",
+		"message":  "停止を要求しました（これ以降は新しく始めません。実行中のものは終わるまで走ります）",
 		"progress": r.availabilityService.Progress(),
 	})
 }
