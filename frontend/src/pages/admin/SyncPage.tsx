@@ -72,11 +72,12 @@ export default function SyncPage() {
   });
   const availStart = useMutation({
     mutationFn: () => availabilityApi.backfill(availConcurrency, availRecheck),
-    onSuccess: (r) => {
-      showToast(`再生可否の取得を開始しました（対象 ${r.targets} 件）`, 'success');
-      queryClient.invalidateQueries({ queryKey: ['availability-backfill-status'] });
-    },
+    onSuccess: (r) => showToast(`再生可否の取得を開始しました（対象 ${r.targets} 件）`, 'success'),
     onError: (e: Error) => showToast(e.message, 'error'),
+    // **失敗しても取り直す。** 二重起動で弾かれたときは、手元の status が古い
+    // （running=false）まま polling も止まっているので、toast で「実行中」と言われても
+    // 進捗も停止ボタンも出ない。取り直せば running=true を拾って停止できる。
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['availability-backfill-status'] }),
   });
   const availCancel = useMutation({
     mutationFn: availabilityApi.cancel,
@@ -438,11 +439,30 @@ export default function SyncPage() {
         <p className="text-gray-500 mb-4">
           yt-dlp で <code className="text-xs bg-gray-100 px-1 rounded">availability</code> を調べ、
           会限（メンバー限定）や削除済みの配信を判別します。判別できると、プレイヤーを描く前に
-          理由を出せるようになります。未調査の配信だけが対象で、途中で止めても
-          記録済みのぶんは残るので、そのまま再開できます。
+          理由を出せるようになります。
+        </p>
+        <p className="text-gray-500 mb-4 text-sm">
+          既定は<strong>未記録の配信だけ</strong>が対象なので、途中で止めても記録済みのぶんは残り、
+          そのまま続きから再開できます。
+          <br />
+          {/* recheck には checkpoint が無い。WHERE が
+              「未記録 OR (public かつ埋め込み可)」なので、記録済みでも毎回対象に戻る。
+              止めて再開すると先頭から掛け直すことになる。 */}
+          <span className="text-amber-800">
+            再調査（下のチェック）を使うときは続きから再開できません
+          </span>
+          ── 記録済みの弱い判定も毎回対象に戻るので、止めて再開すると先頭からやり直しになります。
         </p>
 
+        {/* **実行中は触らせない。** backend が使う値は開始時に固定される一方、
+            status はそれを返さないので、ここの表示は「走っている条件」ではない
+            （再読み込みすると既定値に戻る）。編集できると現在の条件と読めてしまう。 */}
         <div className="flex flex-wrap items-center gap-3 mb-4">
+          {availStatus?.running && (
+            <span className="w-full text-xs text-gray-500">
+              実行中は変更できません（下の値は次回の設定で、いま走っている条件とは限りません）
+            </span>
+          )}
           <label className="flex items-center gap-2 text-sm">
             並列
             <input
@@ -450,14 +470,16 @@ export default function SyncPage() {
               min={1}
               max={8}
               value={availConcurrency}
+              disabled={availStatus?.running}
               onChange={(e) => setAvailConcurrency(Math.max(1, Math.min(8, Number(e.target.value) || 1)))}
-              className="w-16 px-2 py-1 border rounded"
+              className="w-16 px-2 py-1 border rounded disabled:bg-gray-100 disabled:text-gray-400"
             />
           </label>
           <label className="flex items-center gap-2 text-sm cursor-pointer">
             <input
               type="checkbox"
               checked={availRecheck}
+              disabled={availStatus?.running}
               onChange={(e) => setAvailRecheck(e.target.checked)}
               className="w-4 h-4"
             />

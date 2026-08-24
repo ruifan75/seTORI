@@ -502,9 +502,9 @@ export const availabilityApi = {
   },
 };
 
+// singerIds は対象チャンネル（空なら全部）。既定はそのチャンネルが**所有する**配信で、
+// includeCollabs を立てるとゲスト参加した配信も含む。
 export const batchFillApi = {
-  // singerIds は対象チャンネル（空なら全部）。既定はそのチャンネルが**所有する**配信で、
-  // includeCollabs を立てるとゲスト参加した配信も含む。
   start: async (
     mode: string,
     singerIds: string[] = [],
