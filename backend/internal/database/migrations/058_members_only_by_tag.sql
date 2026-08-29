@@ -20,9 +20,23 @@
 -- 1. 既存の判定をタグへ写す
 -- ==========================================
 -- ここを飛ばすと、列を落とした瞬間に本番の会限 86 本が公開側へ倒れる。
-INSERT INTO stream_stream_tags (stream_id, tag_id)
-SELECT id, 'members_only' FROM streams WHERE is_restricted
-ON CONFLICT (stream_id, tag_id) DO NOTHING;
+--
+-- **列の存在を確かめてから読む。** migration の本体と schema_migrations への記録は
+-- 別のトランザクションなので、DROP が通ったあと記録の前にプロセスが落ちると、
+-- 次の起動でこの 058 が未実行として再実行される。そのとき裸の
+-- `WHERE is_restricted` は "column does not exist" で落ち、**起動するたびに
+-- 同じ場所で止まる**（前へ進めなくなる）。
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'streams' AND column_name = 'is_restricted'
+    ) THEN
+        INSERT INTO stream_stream_tags (stream_id, tag_id)
+        SELECT id, 'members_only' FROM streams WHERE is_restricted
+        ON CONFLICT (stream_id, tag_id) DO NOTHING;
+    END IF;
+END $$;
 
 -- ==========================================
 -- 2. 列を落とす

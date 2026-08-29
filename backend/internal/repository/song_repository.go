@@ -29,8 +29,8 @@ func NewSongRepository(db *sql.DB) *SongRepository {
 // **相関サブクエリで数えない。** 以前は曲ごとに `(SELECT COUNT(*) ...)` を回しており、
 // 秘匿判定が曲 × 配信の組ごとに評価されていた。手元 922 曲で推定 cost 224,711 ＝
 // 既定の jit_above_cost=100000 を越え、ページ要求のたびに JIT のコンパイル費を
-// 払っていた（issue #30）。配信ごとに 1 回だけ数えて JOIN すると 14,084 まで下がり、
-// JIT は発火しない（実測 44.6ms → 8.4ms）。
+// 払っていた（issue #30）。配信ごとに 1 回だけ数えて JOIN すると 16,410 まで下がり、
+// JIT は発火しない（実測 44.6ms → 9.0ms）。
 func songListBody(sort, dir, where string) string {
 	from := "FROM songs"
 	var order string

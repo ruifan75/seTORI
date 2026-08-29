@@ -186,7 +186,7 @@ Holodex の `topic_id = "membersonly"` は候補の絞り込みに使えるが�
 （`Holodex/src/components/watch/WatchLiveChat.vue` の `currentTime > 0`、および CHANGELOG）。
 
 → **Holodex は候補抽出に、`availability` は判定に**、と役割を分ける（issue #3、実装済み）。
-秘匿そのものの軸は `streams.is_restricted`（issue #4 / `STREAM_VISIBILITY.md`）。
+秘匿そのものの軸は `members_only` タグ（issue #4 / #32、`STREAM_VISIBILITY.md`）。
 
 ## 5. iTunes Search / Lookup API（key 不要）
 

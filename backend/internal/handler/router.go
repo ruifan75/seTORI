@@ -2837,6 +2837,11 @@ func (r *Router) handleDeleteStreamTag(w http.ResponseWriter, req *http.Request)
 		return
 	}
 	if err := r.tagRepo.DeleteStreamTag(id); err != nil {
+		// 予約タグは 409。500 だと「一時的な失敗だからやり直せばいい」と読まれる。
+		if errors.Is(err, repository.ErrReservedStreamTag) {
+			respondError(w, http.StatusConflict, err.Error())
+			return
+		}
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
