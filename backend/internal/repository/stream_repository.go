@@ -78,7 +78,9 @@ func (r *StreamRepository) FindAll(limit, offset int, includeHidden bool, sort, 
 // FindByID は動画 ID で歌枠を取得する。
 func (r *StreamRepository) FindByID(id string) (*models.Stream, error) {
 	query := `
-		SELECT id, title, stream_date, duration_seconds, thumbnail_url, holodex_data, holodex_hash, comment_raw, comment_songs, comment_songs_analyzed_at, chapter_raw, chapter_songs, is_processed, is_hidden, is_restricted, restriction_override, holodex_uploaded_at, holodex_upload_unknown, availability, playable_in_embed, availability_checked_at, created_at, updated_at
+		SELECT id, title, stream_date, duration_seconds, thumbnail_url, holodex_data, holodex_hash, comment_raw, comment_songs, comment_songs_analyzed_at, chapter_raw, chapter_songs, is_processed, is_hidden, is_restricted, restriction_override, holodex_uploaded_at, holodex_upload_unknown, availability, playable_in_embed, availability_checked_at, created_at, updated_at,
+		       (SELECT sg.members_only_policy FROM stream_singers ss JOIN singers sg ON sg.id = ss.singer_id
+		         WHERE ss.stream_id = streams.id AND ss.is_owner LIMIT 1) AS owner_members_only_policy
 		FROM streams WHERE id = $1`
 
 	var s models.Stream
@@ -86,7 +88,7 @@ func (r *StreamRepository) FindByID(id string) (*models.Stream, error) {
 		&s.ID, &s.Title, &s.StreamDate, &s.DurationSeconds,
 		&s.ThumbnailURL, &s.HolodexData, &s.HolodexHash, &s.CommentRaw, &s.CommentSongs, &s.CommentSongsAnalyzedAt,
 		&s.ChapterRaw, &s.ChapterSongs, &s.IsProcessed, &s.IsHidden, &s.IsRestricted, &s.RestrictionOverride, &s.HolodexUploadedAt, &s.HolodexUploadUnknown,
-		&s.Availability, &s.PlayableInEmbed, &s.AvailabilityCheckedAt, &s.CreatedAt, &s.UpdatedAt)
+		&s.Availability, &s.PlayableInEmbed, &s.AvailabilityCheckedAt, &s.CreatedAt, &s.UpdatedAt, &s.OwnerMembersOnlyPolicy)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}

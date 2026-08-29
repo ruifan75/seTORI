@@ -273,7 +273,7 @@ func (s *StreamService) toStreamResponse(stream models.Stream, tags []models.Str
 		StreamDate:   stream.StreamDate.Format(time.RFC3339),
 		IsProcessed:  stream.IsProcessed,
 		IsHidden:     stream.IsHidden,
-		IsRestricted: effectiveRestricted(stream),
+		IsRestricted: effectiveRestricted(stream, stream.OwnerMembersOnlyPolicy.String),
 		CreatedAt:    stream.CreatedAt,
 		UpdatedAt:    stream.UpdatedAt,
 	}
@@ -661,11 +661,28 @@ func playabilityOf(stream models.Stream) string {
 	return dto.PlayabilityPlayable
 }
 
-// effectiveRestricted は実効的な秘匿状態（人の裁定が自動判定に勝つ）。
-// SQL 側の repository.NotRestricted と同じ規則。**片方だけ変えないこと。**
-func effectiveRestricted(stream models.Stream) bool {
+// effectiveRestricted は実効的な秘匿状態。SQL 側の repository.NotRestricted と
+// **同じ規則でなければならない**（片方だけ変えると、一覧には出ないのに詳細では
+// 出る、のような食い違いになる）。
+//
+//  1. 配信が会限か（IsRestricted）
+//  2. そのチャンネルの方針（ownerPolicy が "allow" なら公開してよい）
+//  3. その配信だけの例外（RestrictionOverride。最も強い）
+//
+// ownerPolicy は所有者チャンネルの members_only_policy。空文字は「所有者が居ない」
+// または「未確認」で、どちらも 1 の判定に委ねる。
+func effectiveRestricted(stream models.Stream, ownerPolicy string) bool {
 	if stream.RestrictionOverride.Valid {
 		return stream.RestrictionOverride.Bool
 	}
+	if ownerPolicy == MembersOnlyAllow {
+		return false
+	}
 	return stream.IsRestricted
 }
+
+// 会限セットリストの公開可否（チャンネル単位）。migration 056。
+const (
+	MembersOnlyAllow = "allow"
+	MembersOnlyDeny  = "deny"
+)

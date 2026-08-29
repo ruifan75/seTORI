@@ -119,6 +119,11 @@ type Stream struct {
 	// 次の availability 取得で戻ってしまう。
 	IsRestricted        bool         `json:"is_restricted"`
 	RestrictionOverride sql.NullBool `json:"restriction_override"`
+	// OwnerMembersOnlyPolicy は所有者チャンネルの会限方針（migration 056）。
+	// **SELECT で引いてくる派生値**で、streams の列ではない。
+	// 実効判定は SQL の repository.NotRestricted と Go の effectiveRestricted の
+	// 両方にあるので、材料も両方へ同じように渡す必要がある。
+	OwnerMembersOnlyPolicy sql.NullString `json:"-"`
 	// HolodexUploadedAt は seTORI → Holodex への**送信を試みた**時刻（外部コピーの台帳）。
 	// 記録は PUT の前に書くので「送信済み」ではない。秘匿へ変えても**向こうのコピーは残りうる**
 	// ので、編集画面で気付けるように出す。

@@ -884,7 +884,22 @@ const (
 // st / s / 別名なしと揃っていないため** ── 揃えるより、渡し忘れをコンパイルで
 // 止めるほうが確実。
 func NotRestricted(alias string) string {
-	return "NOT COALESCE(" + alias + ".restriction_override, " + alias + ".is_restricted)"
+	// 判定は 3 段。**下ほど強い**：
+	//
+	//	1. 配信が会限か（is_restricted。自動判定の候補）
+	//	2. そのチャンネルの方針（singers.members_only_policy。配信主に訊いた結果）
+	//	3. その配信だけの例外（restriction_override。人が個別に決めたもの）
+	//
+	// 2 を挟むのは、**公開可否がチャンネル単位の判断だから**。配信主に訊けば
+	// 答えは「全部いい」か「全部だめ」で、配信ごとではない。3 だけだと
+	// 会限が 60 本あるチャンネルで 60 回チェックを外すことになる。
+	//
+	// 所有者は stream_singers.is_owner で引く（コラボの主催＝その配信の持ち主）。
+	// 所有者が居ない配信では 2 は効かず、1 と 3 だけで決まる。
+	policyAllows := "EXISTS (SELECT 1 FROM stream_singers pss JOIN singers psg ON psg.id = pss.singer_id" +
+		" WHERE pss.stream_id = " + alias + ".id AND pss.is_owner AND psg.members_only_policy = 'allow')"
+	return "NOT COALESCE(" + alias + ".restriction_override, " +
+		"CASE WHEN " + policyAllows + " THEN FALSE ELSE " + alias + ".is_restricted END)"
 }
 
 // restrictClause は WHERE / JOIN の条件へ足す文字列を返す。

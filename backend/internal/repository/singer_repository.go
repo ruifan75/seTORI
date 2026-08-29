@@ -152,6 +152,27 @@ func (r *SingerRepository) SetHidden(id string, hidden bool) (bool, error) {
 	return affected > 0, nil
 }
 
+// SetMembersOnlyPolicy は会限セットリストの公開可否を設定する（migration 056）。
+//
+// policy が空文字なら NULL（未確認）へ戻す。**NULL と 'deny' は実効的には同じ**
+// （どちらも伏せる）が、「まだ訊いていない」と「訊いて断られた」を区別するために分ける
+// ── 未確認のチャンネルを一覧したいときに要る。
+func (r *SingerRepository) SetMembersOnlyPolicy(id, policy string) (bool, error) {
+	var val sql.NullString
+	if policy != "" {
+		val = sql.NullString{String: policy, Valid: true}
+	}
+	res, err := r.db.Exec(`UPDATE singers SET members_only_policy = $2, updated_at = NOW() WHERE id = $1`, id, val)
+	if err != nil {
+		return false, fmt.Errorf("set members only policy: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("set members only policy rows: %w", err)
+	}
+	return n > 0, nil
+}
+
 // SetOrganizationOverride は Holodex の分類を手動で上書きする（空文字なら上書きを解除）。
 //
 // Holodex の値（organization）は触らない。同期は今後もそちらを更新し続けるので、

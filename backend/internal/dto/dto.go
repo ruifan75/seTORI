@@ -163,6 +163,12 @@ type SingerGroupListResponse struct {
 // 名前などのメタデータ更新（UpdateSingerRequest）と分けているのは、
 // メタデータは Holodex 管理チャンネルでは編集できない一方、
 // 非表示は seTORI 側の都合なのでどのチャンネルでも切り替えられるため。
+// UpdateSingerMembersPolicyRequest は会限セットリストの公開可否。
+// 空文字で「未確認」へ戻す（NULL）。
+type UpdateSingerMembersPolicyRequest struct {
+	Policy string `json:"members_only_policy"`
+}
+
 type UpdateSingerVisibilityRequest struct {
 	IsHidden bool `json:"is_hidden"`
 }

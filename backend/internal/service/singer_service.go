@@ -119,6 +119,20 @@ func (s *SingerService) SetHidden(id string, hidden bool) (bool, error) {
 	return found, nil
 }
 
+// SetMembersOnlyPolicy は会限セットリストの公開可否を設定する。
+//
+// **チャンネル単位なのは、配信主に訊いたときの答えがそうだから。** 「会限の歌単を
+// 公開してよいか」への答えはほぼ「全部いい」か「全部だめ」で、配信ごとではない。
+// 配信単位の restriction_override は、その方針からの例外を書くために残してある。
+func (s *SingerService) SetMembersOnlyPolicy(id, policy string) (bool, error) {
+	switch policy {
+	case "", MembersOnlyAllow, MembersOnlyDeny:
+	default:
+		return false, fmt.Errorf("不明な方針です: %s", policy)
+	}
+	return s.singerRepo.SetMembersOnlyPolicy(id, policy)
+}
+
 // Search は歌手を検索する。
 func (s *SingerService) Search(query string, limit int) ([]dto.SingerResponse, error) {
 	if limit <= 0 {
@@ -339,7 +353,7 @@ func (s *SingerService) toStreamResponse(stream models.Stream, tags []models.Str
 		StreamDate:   stream.StreamDate.Format(time.RFC3339),
 		IsProcessed:  stream.IsProcessed,
 		IsHidden:     stream.IsHidden,
-		IsRestricted: effectiveRestricted(stream),
+		IsRestricted: effectiveRestricted(stream, stream.OwnerMembersOnlyPolicy.String),
 		CreatedAt:    stream.CreatedAt,
 		UpdatedAt:    stream.UpdatedAt,
 	}
