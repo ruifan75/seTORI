@@ -1927,8 +1927,6 @@ func (r *Router) handleListSingers(w http.ResponseWriter, req *http.Request) {
 	respondJSON(w, http.StatusOK, result)
 }
 
-// handleUpdateSingerVisibility はチャンネルの非表示を切り替える（content:edit）。
-// 非表示にしてもチャンネルページ自体は誰でも開ける。隠すのは一覧に載る場所だけ。
 // handleUpdateSingerMembersPolicy は会限セットリストの公開可否をチャンネル単位で設定する。
 //
 // **配信単位ではないのが要点。** 配信主に訊けば答えは「全部いい」か「全部だめ」なので、
@@ -1970,6 +1968,8 @@ func (r *Router) handleUpdateSingerMembersPolicy(w http.ResponseWriter, req *htt
 	respondJSON(w, http.StatusOK, map[string]any{"id": id, "members_only_policy": *body.Policy})
 }
 
+// handleUpdateSingerVisibility はチャンネルの非表示を切り替える（content:edit）。
+// 非表示にしてもチャンネルページ自体は誰でも開ける。隠すのは一覧に載る場所だけ。
 func (r *Router) handleUpdateSingerVisibility(w http.ResponseWriter, req *http.Request) {
 	id := req.PathValue("id")
 	if id == "" {
@@ -2055,7 +2055,8 @@ func (r *Router) handleGetSinger(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	result, err := r.singerService.GetByID(id)
+	// 会限の方針など運用の内部情報は content:edit のときだけ載せる。
+	result, err := r.singerService.GetByID(id, userHasPermission(req, auth.PermContentEdit))
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return

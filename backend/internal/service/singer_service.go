@@ -155,7 +155,8 @@ func (s *SingerService) Search(query string, limit int) ([]dto.SingerResponse, e
 }
 
 // GetByID は歌手の詳細を取得する。
-func (s *SingerService) GetByID(id string) (*dto.SingerDetailResponse, error) {
+// includeOperational を立てると、会限の方針など運用の内部情報も載せる（content:edit 用）。
+func (s *SingerService) GetByID(id string, includeOperational bool) (*dto.SingerDetailResponse, error) {
 	singer, err := s.singerRepo.FindByID(id)
 	if err != nil {
 		return nil, fmt.Errorf("get singer: %w", err)
@@ -169,6 +170,9 @@ func (s *SingerService) GetByID(id string) (*dto.SingerDetailResponse, error) {
 	performanceCount, _ := s.singerRepo.GetPerformanceCount(id)
 
 	singerResp := s.toSingerResponse(*singer)
+	if includeOperational {
+		singerResp = s.toSingerResponseForEditor(*singer)
+	}
 
 	return &dto.SingerDetailResponse{
 		SingerResponse:   singerResp,
@@ -331,6 +335,16 @@ func (s *SingerService) toSingerResponse(singer models.Singer) dto.SingerRespons
 		}
 	}
 
+	// **方針は載せない。** 「配信主に訊いたか」「断られたか」は運用の内部情報で、
+	// Singer の GET は未認証で通る。載せると第三者が一覧をページングして
+	// 「どのチャンネルに訊いて断られたか」を集められる。
+	// 編集画面へ返すのは toSingerResponseForEditor。
+	return resp
+}
+
+// toSingerResponseForEditor は content:edit 向け。運用の内部情報を足す。
+func (s *SingerService) toSingerResponseForEditor(singer models.Singer) dto.SingerResponse {
+	resp := s.toSingerResponse(singer)
 	if singer.MembersOnlyPolicy.Valid {
 		p := singer.MembersOnlyPolicy.String
 		resp.MembersOnlyPolicy = &p

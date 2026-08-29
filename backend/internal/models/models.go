@@ -119,7 +119,9 @@ type Stream struct {
 	// 秘匿（中身を公開してよいか）。**is_hidden とは別の軸**で、しかも 2 列に分ける：
 	//   IsRestricted        … 自動判定の候補（Holodex topic / members_only タグ / availability）
 	//   RestrictionOverride … 人の裁定。NULL＝未裁定 / true＝伏せる / false＝公開してよい
-	// 実効値は COALESCE(override, is_restricted)。1 列だと、人が解除しても
+	// 実効値は 3 段（自動判定 → チャンネルの方針 → この列）。計算は
+	// repository.EffectiveRestrictedExpr の 1 か所だけで、結果は IsRestrictedEffective。
+	// 2 列に分けるのは、1 列だと人が解除しても
 	// 次の availability 取得で戻ってしまう。
 	IsRestricted        bool         `json:"is_restricted"`
 	RestrictionOverride sql.NullBool `json:"restriction_override"`
