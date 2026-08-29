@@ -856,7 +856,7 @@ func (r *PerformanceRepository) FindBySingerID(singerID string, limit, offset in
 // ========== ホーム：ランダム再生 ==========
 
 // perfDetailSelect は配信・楽曲情報付きで歌唱を引く共通 SELECT（FindByTagID と同形）。
-// ViewerAccess は歌唱を読む側の立場。**秘匿された配信（streams.is_restricted）の中身を
+// ViewerAccess は歌唱を読む側の立場。**秘匿された配信（members_only タグ）の中身を
 // 返してよいか**を決める。
 //
 // 引数として必須にしてあるのは、**新しい読み取りを足した人が決めずには
@@ -876,7 +876,7 @@ const (
 // NotRestricted は「実効的に秘匿されていない」を表す SQL 式を返す。
 //
 // **人の裁定が自動判定に勝つ。** restriction_override は NULL＝未裁定 /
-// TRUE＝伏せる / FALSE＝公開してよい で、is_restricted（自動判定の候補）より優先する。
+// TRUE＝伏せる / FALSE＝公開してよい で、検出（members_only タグ）より優先する。
 // 1 列で兼ねていた頃は、人が解除しても次の availability 取得で戻っていた
 // （会限は chapters / live chat / backfill から繰り返し取り直される）。
 //
@@ -894,19 +894,50 @@ const (
 // 同意は fail-closed で扱う ── 「誰か 1 人が allow なら公開」は、
 // データ異常や共同配信で意図せず公開する方向へ倒れる。
 func EffectiveRestrictedExpr(alias string) string {
-	// 所有者が居ない配信では方針が無いので、自動判定と例外だけで決まる。
-	allOwnersAllow := "(EXISTS (SELECT 1 FROM stream_singers eo WHERE eo.stream_id = " + alias + ".id AND eo.is_owner)" +
-		" AND NOT EXISTS (SELECT 1 FROM stream_singers eo JOIN singers eg ON eg.id = eo.singer_id" +
-		" WHERE eo.stream_id = " + alias + ".id AND eo.is_owner" +
-		" AND (eg.members_only_policy IS DISTINCT FROM 'allow')))"
 	return "COALESCE(" + alias + ".restriction_override, " +
-		"CASE WHEN " + allOwnersAllow + " THEN FALSE ELSE " + alias + ".is_restricted END)"
+		MembersOnlyDetectedExpr(alias) + " AND NOT " + allOwnersAllowExpr(alias) + ")"
+}
+
+// MembersOnlyDetectedExpr は「その配信が会限か」の**検出**。
+//
+// **タグを読む。** 以前は streams.is_restricted という専用列だったが、
+// 会限を確実に判定する方法が無い（yt-dlp の availability は本番の会限 86 本のうち
+// 6 本を public と返し、Holodex の topic_id は単値なので singing と排他になる）ため
+// **人が補強するしかない**。そして人が「これは会限だ」と言う場所はタグで、
+// 初回同期の自動判定も元からタグを読んでいた。にもかかわらず後から付けたタグは
+// 何の効果も無く、歌単は公開されたままだった（issue #32）。
+//
+// 自動で付ける経路は add-only なので「**自動では外れない**」という性質は保たれる。
+// 外せるのは人だけで、それがまさに意図（「これは会限ではない」という事実の訂正）。
+// 「会限だが公開してよい」は別の陳述なので restriction_override で表す。
+func MembersOnlyDetectedExpr(alias string) string {
+	return "EXISTS (SELECT 1 FROM stream_stream_tags mt" +
+		" WHERE mt.stream_id = " + alias + ".id AND mt.tag_id = '" + MembersOnlyTagID + "')"
+}
+
+// MembersOnlyTagID は会限を表す配信タグ。**stream_tags.id と一致していること**
+// （migration 001 が投入する）。ずれると検出が黙って効かなくなる。
+const MembersOnlyTagID = "members_only"
+
+// allOwnersAllowExpr は「所有者が 1 人以上居て、全員が公開を許可している」。
+//
+// 所有者が複数なら **1 人でも allow でなければ伏せる**（fail-closed）。
+// 「誰か 1 人が allow なら公開」は、データ異常や共同配信で意図せず公開する方向へ倒れる。
+//
+// **bool_and に生の比較を渡さないこと。** bool_and は NULL 入力を無視するので、
+// 未確認（NULL）の所有者と allow の所有者が並ぶと「全員 allow」に化ける。
+// COALESCE で NULL を空文字へ潰してから比べる。所有者が 1 人も居なければ
+// 集約は NULL を返すので、外側の COALESCE が FALSE（＝許可されていない）にする。
+func allOwnersAllowExpr(alias string) string {
+	return "COALESCE((SELECT bool_and(COALESCE(eg.members_only_policy, '') = 'allow')" +
+		" FROM stream_singers eo JOIN singers eg ON eg.id = eo.singer_id" +
+		" WHERE eo.stream_id = " + alias + ".id AND eo.is_owner), FALSE)"
 }
 
 func NotRestricted(alias string) string {
 	// 判定は 3 段。**下ほど強い**：
 	//
-	//	1. 配信が会限か（is_restricted。自動判定の候補）
+	//	1. 配信が会限か（members_only タグ。自動でも人でも付く）
 	//	2. そのチャンネルの方針（singers.members_only_policy。配信主に訊いた結果）
 	//	3. その配信だけの例外（restriction_override。人が個別に決めたもの）
 	//

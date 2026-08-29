@@ -175,18 +175,6 @@ func (r *SingerRepository) SetMembersOnlyPolicy(id, policy string) (bool, error)
 	return n > 0, nil
 }
 
-// MembersOnlyDetectedExpr は「その配信が会限らしいか」の**検出**を表す式。
-//
-// **実効判定（EffectiveRestrictedExpr）とは別物。** あちらは「歌単を伏せるか」で、
-// チャンネル方針が allow なら false になる。こちらは「会限かどうか」という事実なので、
-// 公開してよいと決めた後も真のまま ── 方針を設定する画面は、方針が allow でも
-// 「このチャンネルは会限を 85 本持っている」と出す必要がある。
-//
-// 検出の材料を変えるときはここ 1 か所（issue #32 で members_only タグへ移す予定）。
-func MembersOnlyDetectedExpr(alias string) string {
-	return alias + ".is_restricted"
-}
-
 // CountMembersOnlyByOwner は所有者ごとの会限配信の本数を返す（0 本のチャンネルは含まない）。
 // onlyIDs を渡すとそのチャンネルだけを数える（詳細ページ用。1 件のために全件を
 // 集計しないため）。空なら全チャンネル。
