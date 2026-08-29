@@ -129,10 +129,14 @@ Holodex の分類もタイトルキーワード規則も自動判定であり、
 | 列 | 誰が書くか | 意味 |
 |---|---|---|
 | `is_restricted` | 自動（同期の候補判定・`SaveAvailability`） | 会限らしいという**検出** |
+| `singers.members_only_policy` | 人だけ（`PUT /api/singers/{id}/members-policy`） | チャンネル単位の方針。NULL＝未確認 / `allow` / `deny` |
 | `restriction_override` | 人だけ（`PUT /api/streams/{id}`） | NULL＝未裁定 / TRUE＝伏せる / FALSE＝公開してよい |
 
-読むときは `COALESCE(restriction_override, is_restricted)`（SQL は `repository.NotRestricted`、
-Go は `effectiveRestricted`。**片方だけ変えないこと**）。
+読むときは 3 段（下ほど強い）：`is_restricted` → チャンネルの方針 → `restriction_override`。
+**式は `repository.EffectiveRestrictedExpr` の 1 か所だけ**（否定は `NotRestricted`）。
+Go に双子は置かない ── 材料（所有者の方針）を SELECT していない経路では空のまま
+評価され、「詳細は公開・一覧は秘匿」と食い違う。所有者が複数なら**1 人でも allow で
+なければ伏せる**（fail-closed）。
 
 **自動判定の側は凍結しない。** `singers.is_hidden` のように固めると、後から会限化した
 配信を検出できなくなる。人の裁定が勝つので、検出が立ち続けていても表示は変わらない。

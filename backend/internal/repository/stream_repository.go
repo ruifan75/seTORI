@@ -41,18 +41,14 @@ func (r *StreamRepository) FindAll(limit, offset int, includeHidden bool, sort, 
 
 	var query string
 	if includeHidden {
-		query = `
-			SELECT ` + streamListColumns("streams") + `
-			FROM streams
-			ORDER BY ` + order + `
-			LIMIT $1 OFFSET $2`
+		query = streamListQuery("streams", `
+			ORDER BY `+order+`
+			LIMIT $1 OFFSET $2`)
 	} else {
-		query = `
-			SELECT ` + streamListColumns("streams") + `
-			FROM streams
+		query = streamListQuery("streams", `
 			WHERE is_hidden = FALSE
-			ORDER BY ` + order + `
-			LIMIT $1 OFFSET $2`
+			ORDER BY `+order+`
+			LIMIT $1 OFFSET $2`)
 	}
 
 	rows, err := r.db.Query(query, limit, offset)
@@ -86,6 +82,23 @@ func streamListColumns(alias string) string {
 		p + "holodex_data, " + p + "holodex_hash, " + p + "comment_raw, " + p + "comment_songs, " +
 		p + "is_processed, " + p + "is_hidden, " + p + "is_restricted, " + p + "restriction_override, " +
 		p + "created_at, " + p + "updated_at, " + EffectiveRestrictedExpr(alias)
+}
+
+// streamListQuery は一覧系の SELECT を丸ごと組み立てる。呼び出し側が書くのは
+// FROM 以降（JOIN / WHERE / ORDER BY / LIMIT）だけ。
+//
+// **列を継ぎ足す口を呼び出し側に残さない**のが目的。列名を並べる方式をやめて
+// streamListColumns に集約したあとも、FindByTagID と SearchStreams が
+// `streamListColumns(...) + ", " + EffectiveRestrictedExpr(...)` と書いて
+// 17 列 vs 16 引数になり、タグ別一覧と配信検索が常に 500 を返していた
+// ── 列の「書き忘れ」は塞いだが「継ぎ足し」は塞げていなかった。
+// SELECT ごと持てば、列をいじるには必ずこの対を通る。
+func streamListQuery(alias, rest string) string {
+	from := "FROM streams"
+	if alias != "streams" {
+		from += " " + alias
+	}
+	return "SELECT " + streamListColumns(alias) + "\n" + from + "\n" + rest
 }
 
 // scanStreamRow は streamListColumns で引いた 1 行を読む。
@@ -200,10 +213,8 @@ func (r *StreamRepository) Delete(id string) error {
 
 // FindWithoutCommentSongs は comment_raw を持つすべての配信を取得する（backfill／再生成用）。
 func (r *StreamRepository) FindWithoutCommentSongs() ([]models.Stream, error) {
-	query := `
-		SELECT ` + streamListColumns("streams") + `
-		FROM streams
-		WHERE comment_raw IS NOT NULL AND comment_raw != 'null'`
+	query := streamListQuery("streams", `
+		WHERE comment_raw IS NOT NULL AND comment_raw != 'null'`)
 
 	rows, err := r.db.Query(query)
 	if err != nil {
@@ -295,11 +306,9 @@ func (r *StreamRepository) UpdateCommentSongsHash(id, hash string) error {
 
 // FindByDateRange は日付範囲で歌枠を取得する。
 func (r *StreamRepository) FindByDateRange(start, end time.Time) ([]models.Stream, error) {
-	query := `
-		SELECT ` + streamListColumns("streams") + `
-		FROM streams
+	query := streamListQuery("streams", `
 		WHERE stream_date >= $1 AND stream_date <= $2
-		ORDER BY stream_date DESC`
+		ORDER BY stream_date DESC`)
 
 	rows, err := r.db.Query(query, start, end)
 	if err != nil {
@@ -501,13 +510,11 @@ func (r *StreamRepository) FindByTagID(tagID string, limit, offset int) ([]model
 		return nil, 0, fmt.Errorf("count streams by tag: %w", err)
 	}
 
-	rows, err := r.db.Query(`
-		SELECT `+streamListColumns("s")+`, `+EffectiveRestrictedExpr("s")+`
-		FROM streams s
+	rows, err := r.db.Query(streamListQuery("s", `
 		JOIN stream_stream_tags sst ON sst.stream_id = s.id
 		WHERE sst.tag_id = $1 AND s.is_hidden = FALSE
 		ORDER BY s.stream_date DESC
-		LIMIT $2 OFFSET $3`, tagID, limit, offset)
+		LIMIT $2 OFFSET $3`), tagID, limit, offset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("query streams by tag: %w", err)
 	}
@@ -646,12 +653,10 @@ func (r *StreamRepository) SearchStreams(filters models.StreamSearchFilters, lim
 		return nil, 0, fmt.Errorf("count searched streams: %w", err)
 	}
 
-	query := fmt.Sprintf(`
-		SELECT `+streamListColumns("s")+`, `+EffectiveRestrictedExpr("s")+`
-		FROM streams s
+	query := fmt.Sprintf(streamListQuery("s", `
 		%s
 		ORDER BY s.stream_date DESC
-		LIMIT $%d OFFSET $%d`, where, i, i+1)
+		LIMIT $%d OFFSET $%d`), where, i, i+1)
 	args = append(args, limit, offset)
 
 	rows, err := r.db.Query(query, args...)
