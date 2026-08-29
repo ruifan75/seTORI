@@ -350,7 +350,7 @@ func (s *SingerService) toSingerResponse(singer models.Singer) dto.SingerRespons
 	// **方針は載せない。** 「配信主に訊いたか」「断られたか」は運用の内部情報で、
 	// Singer の GET は未認証で通る。載せると第三者が一覧をページングして
 	// 「どのチャンネルに訊いて断られたか」を集められる。
-	// 編集画面へ返すのは toSingerResponseForEditor。
+	// 編集画面へ返すのは toSingerResponseFor（includeOperational=true）。
 	return resp
 }
 
