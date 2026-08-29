@@ -337,9 +337,34 @@ PR #6 が解析結果でやったのと同じ考え方だが、通す場所は�
 閲覧者へは導出した `playability` だけを返す（`unknown` / `playable` /
 `members_only` / `embed_disabled` / `unavailable`）。生の 3 列は `content:edit` のみ。
 
-**`availability` 単独では判定できない。** 本番の live chat / チャプター取得は
-どちらも `--ignore-no-formats-error` を付けて yt-dlp を呼んでおり
-（そうしないとフォーマット一覧が空のときに落ちる）、**このフラグが付いていると
+### 本番では `--ignore-no-formats-error` が必須（2026-08-25 に踏んだ）
+
+YouTube はデータセンター IP（Vultr）からの要求に `The page needs to be reloaded.` を返す。
+これは yt-dlp の `raise_no_formats(expected=True)` を通り、その分岐は
+
+```python
+if expected and ignore_no_formats_error: report_warning(...)  # 継続
+else:                                    raise ExtractorError  # 中止
+```
+
+なので、**このフラグの有無で生死が分かれる**。live chat と chapters は最初から
+付けていたので動いており、**付けていなかった availability だけが本番で全滅した**
+（1306 件すべて失敗）。付けるだけで client を変えなくても値が取れる（本番で実測）。
+
+そこで `AvailabilityService.Fetch` は **2 段構え**：
+
+| | |
+|---|---|
+| ① フラグ付きで 1 回 | 本番でも値が取れる。会限は `subscriber_only` を返す |
+| ② `Resolved()` が false なら、フラグ無しでもう 1 回 | 「動画が無い」はここで初めてエラーとして返る |
+
+**②へ来たら①の値は捨てること。** ①の `public` は反証を取りに行けていないだけの嘘で、
+持ち越すと「動画が無い」の保存にその嘘が混ざる（最初の実装がそうなっていて、
+`hVfDBfreYNI` が `availability=public` のまま保存された）。
+②が走るのは①で決まらなかったときだけなので、追加のコストは削除済みの少数だけ。
+
+**`availability` 単独では判定できない。** 上のとおり相乗り 2 経路も
+`--ignore-no-formats-error` を付けており、**このフラグが付いていると
 視聴できない動画でも `availability` が `public` で返る**。実測：
 
 | 動画 | フラグあり | フラグなし |
