@@ -26,7 +26,7 @@ const effectiveOrg = `COALESCE(s.organization_override, s.organization)`
 const singerColumns = `s.id, s.name, s.english_name, s.photo_url,
 	s.organization, s.organization_override, o.display_name,
 	COALESCE(o.is_unaffiliated, FALSE),
-	s.metadata_source, s.is_hidden, s.created_at, s.updated_at`
+	s.metadata_source, s.is_hidden, s.members_only_policy, s.created_at, s.updated_at`
 
 // singerFrom は singers と organizations を結んだ FROM 句。
 // 事務所は任意なので LEFT JOIN（所属なしのチャンネルを落とさない）。
@@ -37,7 +37,7 @@ func scanSinger(row interface{ Scan(...any) error }) (models.Singer, error) {
 	var s models.Singer
 	err := row.Scan(&s.ID, &s.Name, &s.EnglishName, &s.PhotoURL,
 		&s.Organization, &s.OrganizationOverride, &s.OrganizationName, &s.OrganizationUnaffil,
-		&s.MetadataSource, &s.IsHidden, &s.CreatedAt, &s.UpdatedAt)
+		&s.MetadataSource, &s.IsHidden, &s.MembersOnlyPolicy, &s.CreatedAt, &s.UpdatedAt)
 	return s, err
 }
 

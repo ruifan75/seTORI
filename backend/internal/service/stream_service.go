@@ -273,7 +273,7 @@ func (s *StreamService) toStreamResponse(stream models.Stream, tags []models.Str
 		StreamDate:   stream.StreamDate.Format(time.RFC3339),
 		IsProcessed:  stream.IsProcessed,
 		IsHidden:     stream.IsHidden,
-		IsRestricted: effectiveRestricted(stream, stream.OwnerMembersOnlyPolicy.String),
+		IsRestricted: stream.IsRestrictedEffective,
 		CreatedAt:    stream.CreatedAt,
 		UpdatedAt:    stream.UpdatedAt,
 	}
@@ -661,25 +661,12 @@ func playabilityOf(stream models.Stream) string {
 	return dto.PlayabilityPlayable
 }
 
-// effectiveRestricted は実効的な秘匿状態。SQL 側の repository.NotRestricted と
-// **同じ規則でなければならない**（片方だけ変えると、一覧には出ないのに詳細では
-// 出る、のような食い違いになる）。
+// 会限セットリストの公開可否（チャンネル単位）。migration 056。
 //
-//  1. 配信が会限か（IsRestricted）
-//  2. そのチャンネルの方針（ownerPolicy が "allow" なら公開してよい）
-//  3. その配信だけの例外（RestrictionOverride。最も強い）
-//
-// ownerPolicy は所有者チャンネルの members_only_policy。空文字は「所有者が居ない」
-// または「未確認」で、どちらも 1 の判定に委ねる。
-func effectiveRestricted(stream models.Stream, ownerPolicy string) bool {
-	if stream.RestrictionOverride.Valid {
-		return stream.RestrictionOverride.Bool
-	}
-	if ownerPolicy == MembersOnlyAllow {
-		return false
-	}
-	return stream.IsRestricted
-}
+// **実効的な秘匿判定は Go 側に持たない。** 以前は effectiveRestricted という双子が
+// あったが、材料を SELECT していない経路では空のまま評価され、
+// 「詳細は公開・一覧は秘匿」と食い違った。計算は SQL の
+// repository.EffectiveRestrictedExpr だけが行い、Go はその結果を読む。
 
 // 会限セットリストの公開可否（チャンネル単位）。migration 056。
 const (

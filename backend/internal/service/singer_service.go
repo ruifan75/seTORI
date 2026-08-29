@@ -15,6 +15,8 @@ import (
 var (
 	ErrSingerMetadataManagedByHolodex = errors.New("Holodex 登録済みチャンネルは手動編集できません")
 	ErrSingerNameRequired             = errors.New("チャンネル名は必須です")
+	// ErrInvalidMembersOnlyPolicy は方針の値が不正。DB エラーと区別して 400 を返すために要る。
+	ErrInvalidMembersOnlyPolicy = errors.New("不明な方針です")
 )
 
 type SingerService struct {
@@ -128,7 +130,7 @@ func (s *SingerService) SetMembersOnlyPolicy(id, policy string) (bool, error) {
 	switch policy {
 	case "", MembersOnlyAllow, MembersOnlyDeny:
 	default:
-		return false, fmt.Errorf("不明な方針です: %s", policy)
+		return false, fmt.Errorf("%w: %s", ErrInvalidMembersOnlyPolicy, policy)
 	}
 	return s.singerRepo.SetMembersOnlyPolicy(id, policy)
 }
@@ -329,6 +331,10 @@ func (s *SingerService) toSingerResponse(singer models.Singer) dto.SingerRespons
 		}
 	}
 
+	if singer.MembersOnlyPolicy.Valid {
+		p := singer.MembersOnlyPolicy.String
+		resp.MembersOnlyPolicy = &p
+	}
 	return resp
 }
 
@@ -353,7 +359,7 @@ func (s *SingerService) toStreamResponse(stream models.Stream, tags []models.Str
 		StreamDate:   stream.StreamDate.Format(time.RFC3339),
 		IsProcessed:  stream.IsProcessed,
 		IsHidden:     stream.IsHidden,
-		IsRestricted: effectiveRestricted(stream, stream.OwnerMembersOnlyPolicy.String),
+		IsRestricted: stream.IsRestrictedEffective,
 		CreatedAt:    stream.CreatedAt,
 		UpdatedAt:    stream.UpdatedAt,
 	}

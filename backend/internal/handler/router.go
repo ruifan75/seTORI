@@ -1944,17 +1944,30 @@ func (r *Router) handleUpdateSingerMembersPolicy(w http.ResponseWriter, req *htt
 		respondError(w, http.StatusBadRequest, "無効なリクエスト形式")
 		return
 	}
-	found, err := r.singerService.SetMembersOnlyPolicy(id, body.Policy)
+	// **項目が無いのを「未確認へ戻す」と読まない。** `{}` や項目名の typo が
+	// decode に成功してしまい、既存の allow / deny を黙って消すため
+	// （deny では「訊いて断られた」という記録が失われる）。
+	if body.Policy == nil {
+		respondError(w, http.StatusBadRequest, "members_only_policy は必須です（未確認へ戻すなら空文字）")
+		return
+	}
+	found, err := r.singerService.SetMembersOnlyPolicy(id, *body.Policy)
 	if err != nil {
-		respondError(w, http.StatusBadRequest, err.Error())
+		// 検証エラーと DB エラーを分ける。一律 400 だと、DB が落ちているときに
+		// operator が入力不正だと誤解する。
+		if errors.Is(err, service.ErrInvalidMembersOnlyPolicy) {
+			respondError(w, http.StatusBadRequest, err.Error())
+		} else {
+			respondError(w, http.StatusInternalServerError, err.Error())
+		}
 		return
 	}
 	if !found {
 		respondError(w, http.StatusNotFound, "チャンネルが見つかりません")
 		return
 	}
-	logger.Infof("singer %s members_only_policy updated (%q)", id, body.Policy)
-	respondJSON(w, http.StatusOK, map[string]any{"id": id, "members_only_policy": body.Policy})
+	logger.Infof("singer %s members_only_policy updated (%q)", id, *body.Policy)
+	respondJSON(w, http.StatusOK, map[string]any{"id": id, "members_only_policy": *body.Policy})
 }
 
 func (r *Router) handleUpdateSingerVisibility(w http.ResponseWriter, req *http.Request) {

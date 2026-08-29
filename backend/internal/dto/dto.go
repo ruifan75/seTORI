@@ -88,13 +88,16 @@ type SingerResponse struct {
 	Organization     *string `json:"organization,omitempty"`
 	OrganizationName *string `json:"organization_name,omitempty"`
 	// 以下は編集画面用。手動指定の有無と、Holodex が何と言っているかを見せるため。
-	OrganizationOverride *string   `json:"organization_override,omitempty"`
-	OrganizationHolodex  *string   `json:"organization_holodex,omitempty"`
-	MetadataSource       string    `json:"metadata_source"`
-	CanEditMetadata      bool      `json:"can_edit_metadata"`
-	IsHidden             bool      `json:"is_hidden"`
-	CreatedAt            time.Time `json:"created_at"`
-	UpdatedAt            time.Time `json:"updated_at"`
+	OrganizationOverride *string `json:"organization_override,omitempty"`
+	OrganizationHolodex  *string `json:"organization_holodex,omitempty"`
+	MetadataSource       string  `json:"metadata_source"`
+	CanEditMetadata      bool    `json:"can_edit_metadata"`
+	IsHidden             bool    `json:"is_hidden"`
+	// MembersOnlyPolicy は会限セットリストの公開可否（未設定なら省略＝未確認）。
+	// 「訊いていない」「断られた」は運用の情報なので、**編集画面のためのもの**。
+	MembersOnlyPolicy *string   `json:"members_only_policy,omitempty"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 type SingerListResponse struct {
@@ -164,9 +167,12 @@ type SingerGroupListResponse struct {
 // メタデータは Holodex 管理チャンネルでは編集できない一方、
 // 非表示は seTORI 側の都合なのでどのチャンネルでも切り替えられるため。
 // UpdateSingerMembersPolicyRequest は会限セットリストの公開可否。
-// 空文字で「未確認」へ戻す（NULL）。
+//
+// **ポインタにするのは「フィールドが無い」と「明示的な空文字」を分けるため。**
+// 値型だと `{}` や項目名の typo が decode に成功し、既存の allow / deny を
+// 黙って未確認へ戻してしまう（deny では「訊いて断られた」という記録が消える）。
 type UpdateSingerMembersPolicyRequest struct {
-	Policy string `json:"members_only_policy"`
+	Policy *string `json:"members_only_policy"`
 }
 
 type UpdateSingerVisibilityRequest struct {
