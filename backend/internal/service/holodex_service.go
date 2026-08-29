@@ -131,6 +131,14 @@ type SyncResult struct {
 // Holodex の topic_id と seTORI の stream_tags.id は同じ語でも表記が一致しない。
 // 特に Original_Song / Music_Cover はそのまま FK へ入れるとタグが付かないため、
 // seTORI 側の安定した ID へ明示的に寄せる。
+// キーは **小文字**（引く前に ToLower している）。Holodex は `Music_Cover` のように
+// 大文字混じりで返すので、そのまま tag_id にすると FK に当たらない。
+//
+// **seTORI にある 17 タグのうち、Holodex が topic で表せるものは全部ここに書く。**
+// 書き漏らすと「タグが付かない」としか現れない ── 実際 `membersonly` が
+// 抜けていて、Holodex が会限と言っている 86 本の**すべて**で members_only タグが
+// 付いていなかった（タイトルに「メン限」と書いてある 84 本だけがキーワード規則で
+// 救われていた。2026-08-29 に実測）。
 var holodexTopicTagAliases = map[string]string{
 	"concert":       "concert",
 	"karaoke":       "karaoke",
@@ -140,20 +148,28 @@ var holodexTopicTagAliases = map[string]string{
 	"mv":            "mv",
 	"original_song": "original_song",
 	"singing":       "singing",
+	"shorts":        "shorts",
+	// 以下は 2026-08-29 に追加。それまでは「表に無いので topic をそのまま試す」経路へ
+	// 落ちて FK に当たらず、静かに捨てられていた。
+	"membersonly": "members_only",
+	"3d_stream":   "3d",
+	"birthday":    "birthday",
+	"anniversary": "anniversary",
 }
 
-func streamTagIDForHolodexTopic(topicID string) (string, bool) {
+// 対応する seTORI の配信タグ ID を返す。**表に無い topic は空を返す。**
+//
+// 以前は「同じ ID かもしれない」と原文のまま AddTag へ渡し、FK エラーを
+// 握りつぶしていた。Holodex の topic はゲーム名がそのまま来る
+// （Persona / genshin / Splatoon …）ので失敗が常態で、**その握りつぶしが
+// `membersonly` の取りこぼしを隠していた**。対応させたいものは
+// 同名でも上の表に明記する（`shorts`）。
+func streamTagIDForHolodexTopic(topicID string) string {
 	topicID = strings.TrimSpace(topicID)
 	if topicID == "" {
-		return "", false
+		return ""
 	}
-	tagID, mapped := holodexTopicTagAliases[strings.ToLower(topicID)]
-	if mapped {
-		return tagID, true
-	}
-	// shorts など、Holodex と seTORI で同じ ID を使っている既存 topic は
-	// 従来どおりそのまま試す。対応する tag が無い topic の FK エラーは無視する。
-	return topicID, false
+	return holodexTopicTagAliases[strings.ToLower(topicID)]
 }
 
 // SyncChannelInfo はチャンネル情報だけを同期し、配信は同期しない。
@@ -465,10 +481,14 @@ func (s *HolodexService) syncVideo(video holodex.Video, channelID string, forceU
 	logger.Infof("[holodex] upserted stream %s (existing=%v, force=%v)", video.ID, existing != nil, forceUpdate)
 
 	// Holodex topic_id -> seTORI stream tag。両者の ID は必ずしも同じではない。
-	if tagID, mapped := streamTagIDForHolodexTopic(video.TopicID); tagID != "" {
-		if err := s.streamRepo.AddTag(video.ID, tagID); err != nil && mapped {
-			return "", fmt.Errorf("add mapped Holodex topic tag (topic=%s, tag=%s): %w",
-				video.TopicID, tagID, err)
+	// 表に載っているものだけが来るので、ここでの失敗は異常（タグを画面から
+	// 消した等）。**ただし同期は止めない** ── syncVideo の失敗は呼び出し元で
+	// 「この動画は skip」になり、stream 行を作った直後なので中途半端に残る。
+	// 見た目のタグ 1 つのために配信の取り込みを落とさない。名指しで警告する。
+	if tagID := streamTagIDForHolodexTopic(video.TopicID); tagID != "" {
+		if err := s.streamRepo.AddTag(video.ID, tagID); err != nil {
+			logger.Warnf("[holodex] topic タグの付与に失敗 (video=%s, topic=%s, tag=%s): %v",
+				video.ID, video.TopicID, tagID, err)
 		}
 	}
 
