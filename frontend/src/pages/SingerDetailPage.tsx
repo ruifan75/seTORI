@@ -26,6 +26,7 @@ export default function SingerDetailPage() {
   const { showToast } = useToast();
   const authUser = useAuthStore((s) => s.user);
   const canEdit = hasPermission(authUser, PERM.CONTENT_EDIT);
+  const authStatus = useAuthStore((s) => s.status);
   const canSync = hasPermission(authUser, PERM.SYNC_RUN);
   // タブ・ページ・フィルタは URL クエリに保持する。
   // 詳細ページへ遷移して「戻る」した際に state だとリセットされるため（URL なら復元される）。
@@ -78,10 +79,19 @@ export default function SingerDetailPage() {
     hiddenParam === 'all' || hiddenParam === 'true' ? hiddenParam : 'false';
 
   // Singer detail
+  //
+  // **権限を query key に入れる。** 応答の中身が権限で変わる（会限の方針と本数は
+  // content:edit のときだけ載る）ので、同じ鍵で共有すると片方が古いまま残る。
+  // 実際、保存済みトークンでハードリロードすると、復元より先に匿名の GET が走って
+  // 方針の無い応答が入り、あとから canEdit=true になっても staleTime 5 分のあいだ
+  // 引き直さないため、設定の導線が出なかった。
+  //
+  // enabled で loading 中を待つのは、その無駄な匿名リクエスト自体を省くため。
+  // トークンが無ければ init() は即 anonymous を返すので、未ログインの表示は遅れない。
   const { data: singer, isLoading: singerLoading } = useQuery({
-    queryKey: ['singer', id],
+    queryKey: ['singer', id, canEdit],
     queryFn: () => singerApi.get(id!),
-    enabled: !!id,
+    enabled: !!id && authStatus !== 'loading',
   });
 
   // 編集フォームの所属プルダウン用。編集できる人だけ引く。
@@ -240,6 +250,11 @@ export default function SingerDetailPage() {
                 </span>
               )}
               {canEdit && <OrganizationPicker singer={singer} organizations={organizations} />}
+              {/* 会限を持たないチャンネルには出さない。148 件すべてに「未確認」を出すと、
+                  本当に訊くべき数件が埋もれる */}
+              {canEdit && (singer.members_only_stream_count ?? 0) > 0 && (
+                <MembersPolicyPicker singer={singer} />
+              )}
               {/* 非表示でもこのページは誰でも開けるので、閲覧者にも状態を見せる */}
               {singer.is_hidden && (
                 <span
@@ -730,6 +745,86 @@ export default function SingerDetailPage() {
         </div>
       )}
     </div>
+  );
+}
+
+// MembersPolicyPicker は会限セットリストの公開可否（チャンネル単位）。
+//
+// **配信単位ではないのが要点。** 配信主に訊けば答えは「全部いい」か「全部だめ」なので、
+// 会限が 85 本あるチャンネルで 85 回操作させないため。個別の例外は配信側の
+// 「セットリストを伏せる」で扱う。
+//
+// 3 態なのは、**「まだ訊いていない」と「訊いて断られた」を分けるため**。
+// 伏せる動きは同じだが、分けておかないと「どのチャンネルにまだ訊いていないか」を
+// 一覧できない（それが分からないと、この作業は永久に終わらない）。
+function MembersPolicyPicker({
+  singer,
+}: {
+  singer: { id: string; members_only_policy?: 'allow' | 'deny'; members_only_stream_count?: number };
+}) {
+  const queryClient = useQueryClient();
+  const { showToast } = useToast();
+  const [open, setOpen] = useState(false);
+
+  const mutation = useMutation({
+    mutationFn: (policy: 'allow' | 'deny' | '') => singerApi.setMembersPolicy(singer.id, policy),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['singer', singer.id] });
+      queryClient.invalidateQueries({ queryKey: ['singers'] });
+      setOpen(false);
+      showToast('会限セットリストの方針を更新しました', 'success');
+    },
+    onError: (err: Error) => showToast(err.message, 'error'),
+  });
+
+  const count = singer.members_only_stream_count ?? 0;
+  const policy = singer.members_only_policy;
+
+  if (!open) {
+    // 未確認は「まだ作業が残っている」ことなので目立たせる（amber）。
+    // allow / deny は決着済みなので落ち着いた色にする。
+    const label = policy === 'allow' ? '会限：公開可' : policy === 'deny' ? '会限：非公開' : '会限：未確認';
+    const tone = policy === 'allow'
+      ? 'text-emerald-700 border-emerald-300 hover:border-emerald-400'
+      : policy === 'deny'
+        ? 'text-gray-600 border-gray-300 hover:border-gray-400'
+        : 'text-amber-700 border-amber-400 bg-amber-50 hover:border-amber-500';
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        title={`このチャンネルの会限配信 ${count} 本のセットリストを公開してよいか（配信主に確認した結果を記録する）`}
+        className={`inline-flex items-center gap-1 px-2 py-1 text-xs border border-dashed rounded-full ${tone}`}
+      >
+        {label}
+        <span className="opacity-70">（{count}）</span>
+      </button>
+    );
+  }
+
+  return (
+    <span className="inline-flex items-center gap-2">
+      <select
+        autoFocus
+        defaultValue={policy ?? ''}
+        onChange={(e) => mutation.mutate(e.target.value as 'allow' | 'deny' | '')}
+        disabled={mutation.isPending}
+        className="px-2 py-1 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+      >
+        <option value="">未確認（伏せる）</option>
+        <option value="allow">公開してよい</option>
+        <option value="deny">公開しない（訊いて断られた）</option>
+      </select>
+      <button
+        onClick={() => setOpen(false)}
+        title="キャンセル"
+        aria-label="キャンセル"
+        className="p-1 text-gray-400 hover:text-gray-700"
+      >
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      </button>
+    </span>
   );
 }
 

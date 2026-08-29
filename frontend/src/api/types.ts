@@ -115,6 +115,16 @@ export interface Singer {
   metadata_source: string;
   can_edit_metadata: boolean;
   is_hidden: boolean; // チャンネル一覧から外す（詳細ページは非表示でも閲覧可）
+  /**
+   * 会限セットリストの公開可否（チャンネル単位）。**content:edit のときだけ返る。**
+   * 省略＝未確認（まだ配信主に訊いていない）。'allow' 以外はすべて伏せる側。
+   */
+  members_only_policy?: 'allow' | 'deny';
+  /**
+   * 所有する会限配信の本数。**content:edit のときだけ返る**（0 なら省略）。
+   * 0 本のチャンネルに公開可否を訊いても意味が無いので、方針の導線はこれで出し分ける。
+   */
+  members_only_stream_count?: number;
   created_at: string;
   updated_at: string;
 }

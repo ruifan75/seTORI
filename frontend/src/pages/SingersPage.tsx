@@ -335,6 +335,18 @@ function SingerCard({
                 非表示
               </span>
             )}
+            {/* 会限を持っていて、まだ配信主に訊いていないチャンネル。
+                **これは作業一覧**なので、決着済み（公開可／非公開）は出さない ──
+                出すと「残っているのはどれか」が読み取れなくなる。
+                本数と方針は content:edit のときだけ返るので、権限判定は要らない */}
+            {(singer.members_only_stream_count ?? 0) > 0 && !singer.members_only_policy && (
+              <span
+                className="inline-block px-2 py-0.5 bg-amber-50 text-amber-700 border border-amber-300 text-xs rounded-full"
+                title={`会限配信 ${singer.members_only_stream_count} 本。セットリストを公開してよいか配信主に未確認（伏せたまま）`}
+              >
+                会限 未確認（{singer.members_only_stream_count}）
+              </span>
+            )}
           </div>
         </div>
         <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">

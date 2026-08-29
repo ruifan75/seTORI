@@ -95,9 +95,14 @@ type SingerResponse struct {
 	IsHidden             bool    `json:"is_hidden"`
 	// MembersOnlyPolicy は会限セットリストの公開可否（未設定なら省略＝未確認）。
 	// 「訊いていない」「断られた」は運用の情報なので、**編集画面のためのもの**。
-	MembersOnlyPolicy *string   `json:"members_only_policy,omitempty"`
-	CreatedAt         time.Time `json:"created_at"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	MembersOnlyPolicy *string `json:"members_only_policy,omitempty"`
+	// MembersOnlyStreamCount は所有する会限配信の本数（0 なら省略）。
+	// **方針を出す画面には要る。** 0 本のチャンネルに「会限の公開可否」を訊いても
+	// 意味が無く、148 件すべてに「未確認」を出すと本当に訊くべき 2 件が埋もれる。
+	// 方針が allow でも本数は数える（「会限かどうか」は事実で、公開可否とは別）。
+	MembersOnlyStreamCount int       `json:"members_only_stream_count,omitempty"`
+	CreatedAt              time.Time `json:"created_at"`
+	UpdatedAt              time.Time `json:"updated_at"`
 }
 
 type SingerListResponse struct {

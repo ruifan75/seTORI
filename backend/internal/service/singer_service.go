@@ -38,7 +38,7 @@ func NewSingerService(
 }
 
 // GetAll はすべての歌手を取得する。includeHidden は content:edit を持つ場合のみ true を渡す。
-func (s *SingerService) GetAll(page, limit int, sort, dir string, includeHidden bool) (*dto.SingerListResponse, error) {
+func (s *SingerService) GetAll(page, limit int, sort, dir string, includeHidden, includeOperational bool) (*dto.SingerListResponse, error) {
 	offset := (page - 1) * limit
 
 	singers, total, err := s.singerRepo.FindAll(limit, offset, sort, dir, includeHidden)
@@ -47,9 +47,13 @@ func (s *SingerService) GetAll(page, limit int, sort, dir string, includeHidden 
 	}
 
 	// DTO に変換する
+	counts, err := s.membersOnlyCounts(includeOperational)
+	if err != nil {
+		return nil, err
+	}
 	singerResponses := make([]dto.SingerResponse, len(singers))
 	for i, singer := range singers {
-		singerResponses[i] = s.toSingerResponse(singer)
+		singerResponses[i] = s.toSingerResponseFor(singer, includeOperational, counts)
 	}
 
 	totalPages := (total + limit - 1) / limit
@@ -67,10 +71,15 @@ func (s *SingerService) GetAll(page, limit int, sort, dir string, includeHidden 
 
 // GetGrouped は事務所別のチャンネル一覧を返す（ページングなし）。
 // 所属なしのチャンネルは最後の「所属なし」グループにまとめる。
-func (s *SingerService) GetGrouped(includeHidden bool) (*dto.SingerGroupListResponse, error) {
+func (s *SingerService) GetGrouped(includeHidden, includeOperational bool) (*dto.SingerGroupListResponse, error) {
 	singers, err := s.singerRepo.FindAllGrouped(includeHidden)
 	if err != nil {
 		return nil, fmt.Errorf("get singers grouped: %w", err)
+	}
+
+	counts, err := s.membersOnlyCounts(includeOperational)
+	if err != nil {
+		return nil, err
 	}
 
 	// SQL 側で「事務所 → 名前」順に並んでいるので、隣接する同じ事務所をまとめるだけでよい。
@@ -94,7 +103,7 @@ func (s *SingerService) GetGrouped(includeHidden bool) (*dto.SingerGroupListResp
 			groups = append(groups, dto.SingerGroupResponse{Organization: org, DisplayName: display})
 		}
 		last := &groups[len(groups)-1]
-		last.Singers = append(last.Singers, s.toSingerResponse(singer))
+		last.Singers = append(last.Singers, s.toSingerResponseFor(singer, includeOperational, counts))
 	}
 
 	return &dto.SingerGroupListResponse{Groups: groups, Total: len(singers)}, nil
@@ -169,10 +178,13 @@ func (s *SingerService) GetByID(id string, includeOperational bool) (*dto.Singer
 	streamCount, _ := s.singerRepo.GetStreamCount(id)
 	performanceCount, _ := s.singerRepo.GetPerformanceCount(id)
 
-	singerResp := s.toSingerResponse(*singer)
-	if includeOperational {
-		singerResp = s.toSingerResponseForEditor(*singer)
+	// **本数もここで引く。** 詳細だけ counts を渡さずにいたため、方針を設定する
+	// Picker の表示条件（会限を 1 本以上持つ）が常に偽になり、画面から設定できなかった。
+	counts, err := s.membersOnlyCounts(includeOperational, id)
+	if err != nil {
+		return nil, err
 	}
+	singerResp := s.toSingerResponseFor(*singer, includeOperational, counts)
 
 	return &dto.SingerDetailResponse{
 		SingerResponse:   singerResp,
@@ -338,18 +350,40 @@ func (s *SingerService) toSingerResponse(singer models.Singer) dto.SingerRespons
 	// **方針は載せない。** 「配信主に訊いたか」「断られたか」は運用の内部情報で、
 	// Singer の GET は未認証で通る。載せると第三者が一覧をページングして
 	// 「どのチャンネルに訊いて断られたか」を集められる。
-	// 編集画面へ返すのは toSingerResponseForEditor。
+	// 編集画面へ返すのは toSingerResponseFor（includeOperational=true）。
 	return resp
 }
 
-// toSingerResponseForEditor は content:edit 向け。運用の内部情報を足す。
-func (s *SingerService) toSingerResponseForEditor(singer models.Singer) dto.SingerResponse {
+// toSingerResponseFor は権限に応じて運用の内部情報を足す。
+//
+// **counts を省略しないこと。** nil map の読み取りは 0 を返し、0 は omitempty で
+// 応答から消えるので、「会限を持たないチャンネル」と区別が付かない。実際それで
+// 詳細の Picker が出なくなっていた。
+func (s *SingerService) toSingerResponseFor(singer models.Singer, includeOperational bool, counts map[string]int) dto.SingerResponse {
 	resp := s.toSingerResponse(singer)
+	if !includeOperational {
+		return resp
+	}
 	if singer.MembersOnlyPolicy.Valid {
 		p := singer.MembersOnlyPolicy.String
 		resp.MembersOnlyPolicy = &p
 	}
+	resp.MembersOnlyStreamCount = counts[singer.ID]
 	return resp
+}
+
+// membersOnlyCounts は所有者ごとの会限本数を引く（権限が無ければ引かない）。
+// **権限が無いときにクエリごと省く**のは、応答に載らない値のために
+// 未認証のリクエストで毎回 1 クエリ走らせないため。
+func (s *SingerService) membersOnlyCounts(includeOperational bool, onlyIDs ...string) (map[string]int, error) {
+	if !includeOperational {
+		return nil, nil
+	}
+	counts, err := s.singerRepo.CountMembersOnlyByOwner(onlyIDs...)
+	if err != nil {
+		return nil, fmt.Errorf("count members only streams: %w", err)
+	}
+	return counts, nil
 }
 
 func nullableTrimmedString(value *string) sql.NullString {

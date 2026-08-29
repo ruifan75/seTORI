@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/lib/pq"
+
 	"github.com/ruifan75/setori/internal/models"
 )
 
@@ -171,6 +173,55 @@ func (r *SingerRepository) SetMembersOnlyPolicy(id, policy string) (bool, error)
 		return false, fmt.Errorf("set members only policy rows: %w", err)
 	}
 	return n > 0, nil
+}
+
+// MembersOnlyDetectedExpr は「その配信が会限らしいか」の**検出**を表す式。
+//
+// **実効判定（EffectiveRestrictedExpr）とは別物。** あちらは「歌単を伏せるか」で、
+// チャンネル方針が allow なら false になる。こちらは「会限かどうか」という事実なので、
+// 公開してよいと決めた後も真のまま ── 方針を設定する画面は、方針が allow でも
+// 「このチャンネルは会限を 85 本持っている」と出す必要がある。
+//
+// 検出の材料を変えるときはここ 1 か所（issue #32 で members_only タグへ移す予定）。
+func MembersOnlyDetectedExpr(alias string) string {
+	return alias + ".is_restricted"
+}
+
+// CountMembersOnlyByOwner は所有者ごとの会限配信の本数を返す（0 本のチャンネルは含まない）。
+// onlyIDs を渡すとそのチャンネルだけを数える（詳細ページ用。1 件のために全件を
+// 集計しないため）。空なら全チャンネル。
+//
+// **一覧の SQL に相関サブクエリを足さない。** 1 回のクエリで全チャンネル分をまとめて引き、
+// 呼び出し側で突き合わせる ── 148 チャンネルに対して N+1 を作らないため。
+func (r *SingerRepository) CountMembersOnlyByOwner(onlyIDs ...string) (map[string]int, error) {
+	where := "ss.is_owner AND " + MembersOnlyDetectedExpr("s")
+	args := []any{}
+	if len(onlyIDs) > 0 {
+		where += " AND ss.singer_id = ANY($1)"
+		args = append(args, pq.Array(onlyIDs))
+	}
+
+	rows, err := r.db.Query(`
+		SELECT ss.singer_id, COUNT(*)
+		FROM stream_singers ss
+		JOIN streams s ON s.id = ss.stream_id
+		WHERE `+where+`
+		GROUP BY ss.singer_id`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("count members only by owner: %w", err)
+	}
+	defer rows.Close()
+
+	counts := make(map[string]int)
+	for rows.Next() {
+		var id string
+		var n int
+		if err := rows.Scan(&id, &n); err != nil {
+			return nil, fmt.Errorf("scan members only count: %w", err)
+		}
+		counts[id] = n
+	}
+	return counts, rows.Err()
 }
 
 // SetOrganizationOverride は Holodex の分類を手動で上書きする（空文字なら上書きを解除）。
