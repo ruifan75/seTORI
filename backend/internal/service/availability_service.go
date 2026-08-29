@@ -80,11 +80,10 @@ func NewAvailabilityService(streamRepo *repository.StreamRepository, chatEnd *Ch
 
 // Fetch は 1 配信の再生可否を調べて保存する。
 //
-// **`--ignore-no-formats-error` は付けない。** 他の経路はフォーマット一覧が空でも
-// 続行したいので付けているが、その副作用で視聴できない動画まで
-// availability = public で返ってくる。ここは再生可否そのものを知りたいので、
-// 動画情報を取れないことを**エラーとして受け取る**（保存はする ── 「調べた結果、
-// 取れなかった」も事実なので、未調査のまま毎回調べ直すのは避ける）。
+// **2 段構え**（詳細は docs/STREAM_VISIBILITY.md）：①フラグ付きで 1 回、
+// 値が揃わなければ②フラグ無しでもう 1 回。本番ではフラグが無いと
+// `The page needs to be reloaded.` で実行ごと止まるので①が要り、
+// 「動画が無い」をエラーとして受け取るには②が要る。
 // 戻り値の saved は**DB に記録できたか**。error とは独立している ──
 // 「動画が無い」は error を返すが記録は成功しており、再試行の必要は無い。
 // backfill の失敗数をこれで数えないと、まさに今回直した入力（秘匿でない取得不能動画）が
@@ -97,7 +96,21 @@ func NewAvailabilityService(streamRepo *repository.StreamRepository, chatEnd *Ch
 // 実行ごと止まる。実測：付ければ同じ動画から public / subscriber_only を取得できる）。
 // 付けた場合の代償は、**動画が取れなくても availability が public で返ること**
 // ── そちらは Resolved() が弾く。
-func (s *AvailabilityService) run(videoID string, ignoreNoFormats bool) (a ytdlpAvailability, cookiesSent bool, stderrText string, runErr error, timedOut bool) {
+// ytdlpRun は 1 回の実行の結果。**平行な戻り値にしない** ── 2 回走らせて片方を
+// 採るコードでは、どれか 1 つだけ差し替え忘れる事故が起きる（実際、cookiesSent だけ
+// 1 回目のものを見ていて、会限を「動画消失」と確定させうる状態だった）。
+type ytdlpRun struct {
+	a           ytdlpAvailability
+	cookiesSent bool
+	stderr      string
+	runErr      error
+	timedOut    bool
+}
+
+func (r ytdlpRun) ok() bool { return r.runErr == nil }
+
+func (s *AvailabilityService) run(videoID string, ignoreNoFormats bool) ytdlpRun {
+	var cookiesSent bool
 	args := []string{
 		"--skip-download",
 		"--no-warnings",
@@ -122,8 +135,14 @@ func (s *AvailabilityService) run(videoID string, ignoreNoFormats bool) (a ytdlp
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	runErr = cmd.Run()
-	return parseYtdlpAvailability(lastNonEmptyLine(stdout.String())), cookiesSent, stderr.String(), runErr, ctx.Err() != nil
+	runErr := cmd.Run()
+	return ytdlpRun{
+		a:           parseYtdlpAvailability(lastNonEmptyLine(stdout.String())),
+		cookiesSent: cookiesSent,
+		stderr:      stderr.String(),
+		runErr:      runErr,
+		timedOut:    ctx.Err() != nil,
+	}
 }
 
 // Fetch は再生可否を調べて保存する。**2 段構え**：
@@ -134,42 +153,54 @@ func (s *AvailabilityService) run(videoID string, ignoreNoFormats bool) (a ytdlp
 //
 // ②が走るのは①で決まらなかったときだけ（実測で言えば削除済みの少数）。
 func (s *AvailabilityService) Fetch(videoID string) (a ytdlpAvailability, saved bool, err error) {
-	a, cookiesSent, stderrText, runErr, timedOut := s.run(videoID, true)
+	r := s.run(videoID, true)
 
 	// ①で両方揃ったなら、それが答え。フラグ付きでも会限は subscriber_only を返す
 	// （実測：本番の 1GlkSFdnCcc）。
-	if runErr == nil && a.Resolved() {
-		if err := s.save(videoID, a); err != nil {
-			return a, false, err
+	if r.ok() && r.a.Resolved() {
+		if err := s.save(videoID, r.a); err != nil {
+			return r.a, false, err
 		}
-		return a, true, nil
+		return r.a, true, nil
 	}
 
-	// ②フラグ無しで確かめ直す。ここで初めて「動画が無い」がエラーとして返る。
-	a2, _, stderr2, runErr2, timedOut2 := s.run(videoID, false)
-	if runErr2 == nil && a2.Resolved() {
-		// ①で欠けていた値が②で揃うこともある（一時的な欠落）。揃ったほうを採る。
-		if err := s.save(videoID, a2); err != nil {
-			return a2, false, err
+	// **②へ進むのは①が終了コード 0 だったときだけ。**
+	//
+	// ①が非ゼロなら、その失敗はフラグの有無では解けない（BOT 判定・レート制限・
+	// タイムアウト・yt-dlp 未インストール）。もう一度走らせても同じ理由で落ちるだけで、
+	// 障害時に外部呼び出しが倍になり、タイムアウトなら 1 件 4 分になる。
+	//
+	// しかも危険がある：①が「レート制限（Video unavailable ... try again later）」と
+	// **確定できていた**のに、その証拠を捨てて②の短い応答だけを見ると、
+	// 同じ動画を failureVideoGone として unavailable に確定させうる。
+	// classifyFetchFailure が「transient を先に見る」ようにしてある意味が、
+	// run をまたぐと失われる。
+	if r.ok() {
+		r2 := s.run(videoID, false)
+		if r2.ok() && r2.a.Resolved() {
+			// ①で欠けていた値が②で揃うこともある。揃ったほうを採る。
+			if err := s.save(videoID, r2.a); err != nil {
+				return r2.a, false, err
+			}
+			return r2.a, true, nil
 		}
-		return a2, true, nil
+		// **①の結果は丸ごと捨てる。** ①の availability は `public`
+		// （＝反証を取りに行けていないだけの嘘）なので「動画が無い」の保存に混ぜない。
+		// struct ごと差し替えるのは、cookie の有無だけ①のものを見て
+		// 会限を「動画消失」と確定させる事故を防ぐため。
+		r = r2
 	}
-	// **①の値は捨てる。** ここへ来たのは①が Resolved() でなかったからで、
-	// そのとき availability に入っているのは `public`（＝反証を取りに行けていないだけの嘘）。
-	// 持ち越すと「動画が無い」を保存する経路でその嘘ごと書き込むことになる。
-	a = a2
-	stderrText, runErr, timedOut = stderr2, runErr2, timedOut2
 
-	if runErr != nil {
+	if r.runErr != nil {
 		switch {
-		case notInstalled(runErr):
-			return a, false, fmt.Errorf("yt-dlp が実行できません (%s): 未インストールの可能性があります", s.path)
-		case timedOut:
-			return a, false, fmt.Errorf("yt-dlp がタイムアウトしました（2分）")
-		case isBotCheck(stderrText):
+		case notInstalled(r.runErr):
+			return r.a, false, fmt.Errorf("yt-dlp が実行できません (%s): 未インストールの可能性があります", s.path)
+		case r.timedOut:
+			return r.a, false, fmt.Errorf("yt-dlp がタイムアウトしました（2分）")
+		case isBotCheck(r.stderr):
 			// BOT 判定は全配信で一様に起きる。値を保存すると「調べ済み」になって
 			// cookie を入れ直したあとの調べ直しから漏れるので、保存せずに返す。
-			return a, false, botCheckError(s.ytdlpRunner)
+			return r.a, false, botCheckError(s.ytdlpRunner)
 		}
 		// ここから先は「動画が無い」と「今回の実行が失敗した」の区別が要る。
 		//
@@ -185,27 +216,27 @@ func (s *AvailabilityService) Fetch(videoID string) (a ytdlpAvailability, saved 
 		// ── 一致しなければ未調査のまま残り、次の backfill が拾い直す。
 		// （会限を文字列で見分けるのは逆に危険なので、そちらは cookie を入れて
 		// subscriber_only という構造化された値で受け取る。）
-		if !cookiesSent {
+		if !r.cookiesSent {
 			// cookie 無しでは「削除された」と「会限で見えない」が同じ失敗になる。
 			// 会限の歌枠に「削除された可能性があります」と出さないよう、記録しない。
-			return a, false, fmt.Errorf("動画情報を取得できません（cookie 無しのため会限と区別できず、判定は保存しません）: %s",
-				ytdlpErrorLine(stderrText))
+			return r.a, false, fmt.Errorf("動画情報を取得できません（cookie 無しのため会限と区別できず、判定は保存しません）: %s",
+				ytdlpErrorLine(r.stderr))
 		}
-		switch classifyFetchFailure(stderrText) {
+		switch classifyFetchFailure(r.stderr) {
 		case failureTransient:
-			return a, false, fmt.Errorf("一時的な失敗のため保存しません（時間をおいて再実行してください）: %s",
-				ytdlpErrorLine(stderrText))
+			return r.a, false, fmt.Errorf("一時的な失敗のため保存しません（時間をおいて再実行してください）: %s",
+				ytdlpErrorLine(r.stderr))
 		case failureUnknown:
-			return a, false, fmt.Errorf("動画情報を取得できません（原因を判別できないため保存しません。再実行してください）: %s",
-				ytdlpErrorLine(stderrText))
+			return r.a, false, fmt.Errorf("動画情報を取得できません（原因を判別できないため保存しません。再実行してください）: %s",
+				ytdlpErrorLine(r.stderr))
 		}
 		// failureVideoGone。availability は空、playable_in_embed は NULL。
-		if err := s.save(videoID, a); err != nil {
-			return a, false, err
+		if err := s.save(videoID, r.a); err != nil {
+			return r.a, false, err
 		}
 		// **保存はできている。** error は「取得できなかった」という事実を伝えるためで、
 		// 再試行は要らない（次回の backfill 対象からも外れる）。
-		return a, true, fmt.Errorf("動画情報を取得できません: %s", ytdlpErrorLine(stderrText))
+		return r.a, true, fmt.Errorf("動画情報を取得できません: %s", ytdlpErrorLine(r.stderr))
 	}
 
 	// ここは「②が終了コード 0 で返ったが、値が揃っていない」場合。
@@ -215,7 +246,7 @@ func (s *AvailabilityService) Fetch(videoID string) (a ytdlpAvailability, saved 
 	// これを保存すると playabilityOf が playable と読み、しかも調査済みになるので
 	// 二度と直らない。
 	if !a.Resolved() {
-		return a, false, fmt.Errorf("再生可否を確定できませんでした（保存しません。再実行してください）")
+		return r.a, false, fmt.Errorf("再生可否を確定できませんでした（保存しません。再実行してください）")
 	}
 	if err := s.save(videoID, a); err != nil {
 		return a, false, err
