@@ -22,8 +22,12 @@ type Singer struct {
 	OrganizationUnaffil  bool           `json:"organization_unaffiliated"` // 実効値が「所属なし」を意味する分類か
 	MetadataSource       string         `json:"metadata_source"`           // holodex / youtube
 	IsHidden             bool           `json:"is_hidden"`                 // チャンネル一覧から外す（詳細ページは閲覧可）
-	CreatedAt            time.Time      `json:"created_at"`
-	UpdatedAt            time.Time      `json:"updated_at"`
+	// MembersOnlyPolicy は会限セットリストの公開可否（migration 056）。
+	// NULL＝未確認（伏せる）/ allow / deny。**NULL と deny は実効同じ**だが、
+	// 「まだ訊いていないチャンネル」を一覧するために分けてある。
+	MembersOnlyPolicy sql.NullString `json:"members_only_policy"`
+	CreatedAt         time.Time      `json:"created_at"`
+	UpdatedAt         time.Time      `json:"updated_at"`
 }
 
 // Organization 事務所。
@@ -115,10 +119,20 @@ type Stream struct {
 	// 秘匿（中身を公開してよいか）。**is_hidden とは別の軸**で、しかも 2 列に分ける：
 	//   IsRestricted        … 自動判定の候補（Holodex topic / members_only タグ / availability）
 	//   RestrictionOverride … 人の裁定。NULL＝未裁定 / true＝伏せる / false＝公開してよい
-	// 実効値は COALESCE(override, is_restricted)。1 列だと、人が解除しても
+	// 実効値は 3 段（自動判定 → チャンネルの方針 → この列）。計算は
+	// repository.EffectiveRestrictedExpr の 1 か所だけで、結果は IsRestrictedEffective。
+	// 2 列に分けるのは、1 列だと人が解除しても
 	// 次の availability 取得で戻ってしまう。
 	IsRestricted        bool         `json:"is_restricted"`
 	RestrictionOverride sql.NullBool `json:"restriction_override"`
+	// IsRestrictedEffective は**実効的な秘匿状態**（自動判定 → チャンネルの方針 →
+	// その配信だけの例外、の 3 段を畳んだ結果）。
+	//
+	// **SELECT で計算してくる派生値**で、streams の列ではない。判定を Go 側にも
+	// 書くと、材料を SELECT していない取得経路で食い違う（実際、方針を読むのは
+	// FindByID だけだったので一覧系は常に「方針なし」として振る舞っていた）。
+	// 計算式は repository.EffectiveRestrictedExpr の 1 か所だけ。
+	IsRestrictedEffective bool `json:"-"`
 	// HolodexUploadedAt は seTORI → Holodex への**送信を試みた**時刻（外部コピーの台帳）。
 	// 記録は PUT の前に書くので「送信済み」ではない。秘匿へ変えても**向こうのコピーは残りうる**
 	// ので、編集画面で気付けるように出す。

@@ -15,6 +15,8 @@ import (
 var (
 	ErrSingerMetadataManagedByHolodex = errors.New("Holodex 登録済みチャンネルは手動編集できません")
 	ErrSingerNameRequired             = errors.New("チャンネル名は必須です")
+	// ErrInvalidMembersOnlyPolicy は方針の値が不正。DB エラーと区別して 400 を返すために要る。
+	ErrInvalidMembersOnlyPolicy = errors.New("不明な方針です")
 )
 
 type SingerService struct {
@@ -119,6 +121,20 @@ func (s *SingerService) SetHidden(id string, hidden bool) (bool, error) {
 	return found, nil
 }
 
+// SetMembersOnlyPolicy は会限セットリストの公開可否を設定する。
+//
+// **チャンネル単位なのは、配信主に訊いたときの答えがそうだから。** 「会限の歌単を
+// 公開してよいか」への答えはほぼ「全部いい」か「全部だめ」で、配信ごとではない。
+// 配信単位の restriction_override は、その方針からの例外を書くために残してある。
+func (s *SingerService) SetMembersOnlyPolicy(id, policy string) (bool, error) {
+	switch policy {
+	case "", MembersOnlyAllow, MembersOnlyDeny:
+	default:
+		return false, fmt.Errorf("%w: %s", ErrInvalidMembersOnlyPolicy, policy)
+	}
+	return s.singerRepo.SetMembersOnlyPolicy(id, policy)
+}
+
 // Search は歌手を検索する。
 func (s *SingerService) Search(query string, limit int) ([]dto.SingerResponse, error) {
 	if limit <= 0 {
@@ -139,7 +155,8 @@ func (s *SingerService) Search(query string, limit int) ([]dto.SingerResponse, e
 }
 
 // GetByID は歌手の詳細を取得する。
-func (s *SingerService) GetByID(id string) (*dto.SingerDetailResponse, error) {
+// includeOperational を立てると、会限の方針など運用の内部情報も載せる（content:edit 用）。
+func (s *SingerService) GetByID(id string, includeOperational bool) (*dto.SingerDetailResponse, error) {
 	singer, err := s.singerRepo.FindByID(id)
 	if err != nil {
 		return nil, fmt.Errorf("get singer: %w", err)
@@ -153,6 +170,9 @@ func (s *SingerService) GetByID(id string) (*dto.SingerDetailResponse, error) {
 	performanceCount, _ := s.singerRepo.GetPerformanceCount(id)
 
 	singerResp := s.toSingerResponse(*singer)
+	if includeOperational {
+		singerResp = s.toSingerResponseForEditor(*singer)
+	}
 
 	return &dto.SingerDetailResponse{
 		SingerResponse:   singerResp,
@@ -315,6 +335,20 @@ func (s *SingerService) toSingerResponse(singer models.Singer) dto.SingerRespons
 		}
 	}
 
+	// **方針は載せない。** 「配信主に訊いたか」「断られたか」は運用の内部情報で、
+	// Singer の GET は未認証で通る。載せると第三者が一覧をページングして
+	// 「どのチャンネルに訊いて断られたか」を集められる。
+	// 編集画面へ返すのは toSingerResponseForEditor。
+	return resp
+}
+
+// toSingerResponseForEditor は content:edit 向け。運用の内部情報を足す。
+func (s *SingerService) toSingerResponseForEditor(singer models.Singer) dto.SingerResponse {
+	resp := s.toSingerResponse(singer)
+	if singer.MembersOnlyPolicy.Valid {
+		p := singer.MembersOnlyPolicy.String
+		resp.MembersOnlyPolicy = &p
+	}
 	return resp
 }
 
@@ -339,7 +373,7 @@ func (s *SingerService) toStreamResponse(stream models.Stream, tags []models.Str
 		StreamDate:   stream.StreamDate.Format(time.RFC3339),
 		IsProcessed:  stream.IsProcessed,
 		IsHidden:     stream.IsHidden,
-		IsRestricted: effectiveRestricted(stream),
+		IsRestricted: stream.IsRestrictedEffective,
 		CreatedAt:    stream.CreatedAt,
 		UpdatedAt:    stream.UpdatedAt,
 	}

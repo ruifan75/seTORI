@@ -883,8 +883,37 @@ const (
 // alias は streams のテーブル別名。**別名を引数にしているのは、歌唱を数える SQL が
 // st / s / 別名なしと揃っていないため** ── 揃えるより、渡し忘れをコンパイルで
 // 止めるほうが確実。
+// EffectiveRestrictedExpr は「実効的に秘匿されているか」を返す SQL 式。
+//
+// **判定はここ 1 か所だけ。** 以前は Go 側にも同じ規則を書いていたが、
+// 材料（所有者の方針）を SELECT していない取得経路が 4 つあり、
+// そこでは空文字が渡って「詳細は公開・一覧は秘匿」と食い違っていた。
+// DTO へは**この式の結果**を読ませる（models.Stream.IsRestrictedEffective）。
+//
+// 所有者が複数居るときは **1 人でも allow でなければ伏せる**。
+// 同意は fail-closed で扱う ── 「誰か 1 人が allow なら公開」は、
+// データ異常や共同配信で意図せず公開する方向へ倒れる。
+func EffectiveRestrictedExpr(alias string) string {
+	// 所有者が居ない配信では方針が無いので、自動判定と例外だけで決まる。
+	allOwnersAllow := "(EXISTS (SELECT 1 FROM stream_singers eo WHERE eo.stream_id = " + alias + ".id AND eo.is_owner)" +
+		" AND NOT EXISTS (SELECT 1 FROM stream_singers eo JOIN singers eg ON eg.id = eo.singer_id" +
+		" WHERE eo.stream_id = " + alias + ".id AND eo.is_owner" +
+		" AND (eg.members_only_policy IS DISTINCT FROM 'allow')))"
+	return "COALESCE(" + alias + ".restriction_override, " +
+		"CASE WHEN " + allOwnersAllow + " THEN FALSE ELSE " + alias + ".is_restricted END)"
+}
+
 func NotRestricted(alias string) string {
-	return "NOT COALESCE(" + alias + ".restriction_override, " + alias + ".is_restricted)"
+	// 判定は 3 段。**下ほど強い**：
+	//
+	//	1. 配信が会限か（is_restricted。自動判定の候補）
+	//	2. そのチャンネルの方針（singers.members_only_policy。配信主に訊いた結果）
+	//	3. その配信だけの例外（restriction_override。人が個別に決めたもの）
+	//
+	// 2 を挟むのは、**公開可否がチャンネル単位の判断だから**。配信主に訊けば
+	// 答えは「全部いい」か「全部だめ」で、配信ごとではない。3 だけだと
+	// 会限が 60 本あるチャンネルで 60 回チェックを外すことになる。
+	return "NOT " + EffectiveRestrictedExpr(alias)
 }
 
 // restrictClause は WHERE / JOIN の条件へ足す文字列を返す。

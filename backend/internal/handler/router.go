@@ -382,6 +382,7 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("POST /api/singers", r.handleCreateSinger)
 	r.mux.HandleFunc("PUT /api/singers/{id}", r.handleUpdateSinger)
 	r.mux.HandleFunc("PUT /api/singers/{id}/visibility", r.handleUpdateSingerVisibility)
+	r.mux.HandleFunc("PUT /api/singers/{id}/members-policy", r.handleUpdateSingerMembersPolicy)
 	r.mux.HandleFunc("PUT /api/singers/{id}/organization", r.handleUpdateSingerOrganization)
 
 	// 事務所（取り込み時の key と表示名を分けて持つ）
@@ -1926,6 +1927,47 @@ func (r *Router) handleListSingers(w http.ResponseWriter, req *http.Request) {
 	respondJSON(w, http.StatusOK, result)
 }
 
+// handleUpdateSingerMembersPolicy は会限セットリストの公開可否をチャンネル単位で設定する。
+//
+// **配信単位ではないのが要点。** 配信主に訊けば答えは「全部いい」か「全部だめ」なので、
+// 会限が 60 本あるチャンネルで 60 回操作させないため（migration 056）。
+func (r *Router) handleUpdateSingerMembersPolicy(w http.ResponseWriter, req *http.Request) {
+	id := req.PathValue("id")
+	if id == "" {
+		respondError(w, http.StatusBadRequest, "チャンネルIDは必須です")
+		return
+	}
+	var body dto.UpdateSingerMembersPolicyRequest
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		respondError(w, http.StatusBadRequest, "無効なリクエスト形式")
+		return
+	}
+	// **項目が無いのを「未確認へ戻す」と読まない。** `{}` や項目名の typo が
+	// decode に成功してしまい、既存の allow / deny を黙って消すため
+	// （deny では「訊いて断られた」という記録が失われる）。
+	if body.Policy == nil {
+		respondError(w, http.StatusBadRequest, "members_only_policy は必須です（未確認へ戻すなら空文字）")
+		return
+	}
+	found, err := r.singerService.SetMembersOnlyPolicy(id, *body.Policy)
+	if err != nil {
+		// 検証エラーと DB エラーを分ける。一律 400 だと、DB が落ちているときに
+		// operator が入力不正だと誤解する。
+		if errors.Is(err, service.ErrInvalidMembersOnlyPolicy) {
+			respondError(w, http.StatusBadRequest, err.Error())
+		} else {
+			respondError(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+	if !found {
+		respondError(w, http.StatusNotFound, "チャンネルが見つかりません")
+		return
+	}
+	logger.Infof("singer %s members_only_policy updated (%q)", id, *body.Policy)
+	respondJSON(w, http.StatusOK, map[string]any{"id": id, "members_only_policy": *body.Policy})
+}
+
 // handleUpdateSingerVisibility はチャンネルの非表示を切り替える（content:edit）。
 // 非表示にしてもチャンネルページ自体は誰でも開ける。隠すのは一覧に載る場所だけ。
 func (r *Router) handleUpdateSingerVisibility(w http.ResponseWriter, req *http.Request) {
@@ -2013,7 +2055,8 @@ func (r *Router) handleGetSinger(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	result, err := r.singerService.GetByID(id)
+	// 会限の方針など運用の内部情報は content:edit のときだけ載せる。
+	result, err := r.singerService.GetByID(id, userHasPermission(req, auth.PermContentEdit))
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return

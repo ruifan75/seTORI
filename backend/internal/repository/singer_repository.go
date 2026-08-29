@@ -26,7 +26,7 @@ const effectiveOrg = `COALESCE(s.organization_override, s.organization)`
 const singerColumns = `s.id, s.name, s.english_name, s.photo_url,
 	s.organization, s.organization_override, o.display_name,
 	COALESCE(o.is_unaffiliated, FALSE),
-	s.metadata_source, s.is_hidden, s.created_at, s.updated_at`
+	s.metadata_source, s.is_hidden, s.members_only_policy, s.created_at, s.updated_at`
 
 // singerFrom は singers と organizations を結んだ FROM 句。
 // 事務所は任意なので LEFT JOIN（所属なしのチャンネルを落とさない）。
@@ -37,7 +37,7 @@ func scanSinger(row interface{ Scan(...any) error }) (models.Singer, error) {
 	var s models.Singer
 	err := row.Scan(&s.ID, &s.Name, &s.EnglishName, &s.PhotoURL,
 		&s.Organization, &s.OrganizationOverride, &s.OrganizationName, &s.OrganizationUnaffil,
-		&s.MetadataSource, &s.IsHidden, &s.CreatedAt, &s.UpdatedAt)
+		&s.MetadataSource, &s.IsHidden, &s.MembersOnlyPolicy, &s.CreatedAt, &s.UpdatedAt)
 	return s, err
 }
 
@@ -150,6 +150,27 @@ func (r *SingerRepository) SetHidden(id string, hidden bool) (bool, error) {
 		return false, fmt.Errorf("set singer hidden: %w", err)
 	}
 	return affected > 0, nil
+}
+
+// SetMembersOnlyPolicy は会限セットリストの公開可否を設定する（migration 056）。
+//
+// policy が空文字なら NULL（未確認）へ戻す。**NULL と 'deny' は実効的には同じ**
+// （どちらも伏せる）が、「まだ訊いていない」と「訊いて断られた」を区別するために分ける
+// ── 未確認のチャンネルを一覧したいときに要る。
+func (r *SingerRepository) SetMembersOnlyPolicy(id, policy string) (bool, error) {
+	var val sql.NullString
+	if policy != "" {
+		val = sql.NullString{String: policy, Valid: true}
+	}
+	res, err := r.db.Exec(`UPDATE singers SET members_only_policy = $2, updated_at = NOW() WHERE id = $1`, id, val)
+	if err != nil {
+		return false, fmt.Errorf("set members only policy: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("set members only policy rows: %w", err)
+	}
+	return n > 0, nil
 }
 
 // SetOrganizationOverride は Holodex の分類を手動で上書きする（空文字なら上書きを解除）。

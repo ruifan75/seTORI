@@ -69,6 +69,51 @@ Holodex の分類もタイトルキーワード規則も自動判定であり、
 画面では「登録されていない」と「見せていない」を**別の文言にする**
 ── 同じにすると「まだ誰も作っていない」に見え、二重に作業させることになる。
 
+### 公開可否は**チャンネル単位**の判断（`singers.members_only_policy`）
+
+配信主に「会限の歌単を公開してよいか」と訊くと、答えはほぼ
+**「全部いい」か「全部だめ」**のどちらかになる。配信ごとではない。
+
+ところが配信単位の `restriction_override` だけだと、会限が 60 本あるチャンネルで
+**60 回チェックを外す**ことになる。運用が成り立たない。
+
+そこで判定を 3 段にする。**下ほど強い**：
+
+| | 列 | 意味 |
+|---|---|---|
+| 1 | `streams.is_restricted` | 会限らしいという**自動判定** |
+| 2 | `singers.members_only_policy` | そのチャンネルの**方針**（配信主に訊いた結果） |
+| 3 | `streams.restriction_override` | その配信だけの**例外** |
+
+`members_only_policy` は `NULL`（未確認）／`allow`／`deny`。
+**`NULL` と `deny` は実効的に同じ**（どちらも伏せる）が分けてある ──
+「まだ訊いていない」と「訊いて断られた」を区別したいため
+（`organizations.is_unaffiliated` が「情報が無い」と「無所属と明示」を分けたのと同じ）。
+
+所有者は `stream_singers.is_owner` で引く。所有者が居ない配信では 2 は効かず、1 と 3 だけで決まる。
+
+> ⚠️ **実効判定は SQL に 1 か所だけ持つ**（`repository.EffectiveRestrictedExpr`）。
+> Go 側に双子を置かない ── 最初はそうしていたが、材料（所有者の方針）を SELECT して
+> いない取得経路が 4 つあり、そこでは空のまま評価されて
+> **「詳細は公開・一覧は秘匿」**と食い違った。DTO は式の結果（`IsRestrictedEffective`）を読む。
+>
+> **所有者が複数居るときは、1 人でも allow でなければ伏せる**（fail-closed）。
+> 「誰か 1 人が allow なら公開」だと、共同配信やデータ異常で意図せず公開する方へ倒れる。
+>
+> 実測（2026-08-29）：`allow` にすると詳細・検索・一覧すべてで歌唱が出る。
+> そこへ `deny` の所有者を足すと、詳細も検索も伏せる側へ戻る。
+>
+> **式を各 SELECT に載せる責務はまだ分散している。** `streamListColumns` と
+> `scanStreamRow` を対にして書き忘れを減らしたが、列の組み合わせが違うクエリは
+> 個別に書く。載せ忘れると **Scan の引数が合わずに 500** になる
+> （実際 `FindBySingerID` がそうなっていた）。`IsRestrictedEffective` のゼロ値は
+> 公開側なので、SELECT ごと省いた経路が DTO に届くと fail-open することに注意。
+>
+> **方針そのものは公開しない。** 「訊いたか」「断られたか」は運用の内部情報で、
+> Singer の GET は未認証で通る。載せると第三者が一覧をページングして
+> 「どのチャンネルが断ったか」を集められる。`content:edit` のときだけ載せる
+> （`toSingerResponseForEditor`）。
+
 ### 自動判定と人の裁定は別の列に持つ
 
 **1 列だと人の判断が消える。** 会限は chapters / live chat / availability backfill から
@@ -84,10 +129,14 @@ Holodex の分類もタイトルキーワード規則も自動判定であり、
 | 列 | 誰が書くか | 意味 |
 |---|---|---|
 | `is_restricted` | 自動（同期の候補判定・`SaveAvailability`） | 会限らしいという**検出** |
+| `singers.members_only_policy` | 人だけ（`PUT /api/singers/{id}/members-policy`） | チャンネル単位の方針。NULL＝未確認 / `allow` / `deny` |
 | `restriction_override` | 人だけ（`PUT /api/streams/{id}`） | NULL＝未裁定 / TRUE＝伏せる / FALSE＝公開してよい |
 
-読むときは `COALESCE(restriction_override, is_restricted)`（SQL は `repository.NotRestricted`、
-Go は `effectiveRestricted`。**片方だけ変えないこと**）。
+読むときは 3 段（下ほど強い）：`is_restricted` → チャンネルの方針 → `restriction_override`。
+**式は `repository.EffectiveRestrictedExpr` の 1 か所だけ**（否定は `NotRestricted`）。
+Go に双子は置かない ── 材料（所有者の方針）を SELECT していない経路では空のまま
+評価され、「詳細は公開・一覧は秘匿」と食い違う。所有者が複数なら**1 人でも allow で
+なければ伏せる**（fail-closed）。
 
 **自動判定の側は凍結しない。** `singers.is_hidden` のように固めると、後から会限化した
 配信を検出できなくなる。人の裁定が勝つので、検出が立ち続けていても表示は変わらない。
