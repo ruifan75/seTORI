@@ -180,7 +180,7 @@ func (r *SingerRepository) SetMembersOnlyPolicy(id, policy string) (bool, error)
 // 公開してよいと決めた後も真のまま ── 方針を設定する画面は、方針が allow でも
 // 「このチャンネルは会限を 85 本持っている」と出す必要がある。
 //
-// 検出の材料を変えるときはここ 1 か所（issue #31 でタグへ移す予定）。
+// 検出の材料を変えるときはここ 1 か所（issue #32 で members_only タグへ移す予定）。
 func MembersOnlyDetectedExpr(alias string) string {
 	return alias + ".is_restricted"
 }
