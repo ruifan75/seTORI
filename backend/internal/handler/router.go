@@ -1904,12 +1904,13 @@ func (r *Router) handleListSingers(w http.ResponseWriter, req *http.Request) {
 
 	// 非表示チャンネルは既定で一覧から外す。include_hidden=true を出せるのは
 	// content:edit を持つレビュー担当だけ（無い場合は黙って無視する）。
-	includeHidden := req.URL.Query().Get("include_hidden") == "true" &&
-		userHasPermission(req, auth.PermContentEdit)
+	// 方針と会限本数も content:edit のときだけ載せる（運用の内部情報なので）。
+	canEditContent := userHasPermission(req, auth.PermContentEdit)
+	includeHidden := req.URL.Query().Get("include_hidden") == "true" && canEditContent
 
 	// group=organization は事務所別（ページングなし）。
 	if req.URL.Query().Get("group") == "organization" {
-		grouped, err := r.singerService.GetGrouped(includeHidden)
+		grouped, err := r.singerService.GetGrouped(includeHidden, canEditContent)
 		if err != nil {
 			respondError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -1918,7 +1919,7 @@ func (r *Router) handleListSingers(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	result, err := r.singerService.GetAll(page, limit, sort, dir, includeHidden)
+	result, err := r.singerService.GetAll(page, limit, sort, dir, includeHidden, canEditContent)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return

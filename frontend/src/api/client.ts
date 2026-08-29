@@ -361,6 +361,23 @@ export const singerApi = {
     const { data } = await api.put(`/api/singers/${id}/visibility`, { is_hidden: isHidden });
     return data;
   },
+
+  // 会限セットリストの公開可否（チャンネル単位）。空文字で「未確認」へ戻す。
+  //
+  // **配信単位ではない。** 配信主に訊けば答えは「全部いい」か「全部だめ」なので、
+  // 会限が 85 本あるチャンネルで 85 回操作させないため。個別の例外は配信側の
+  // 「セットリストを伏せる」で扱う。
+  setMembersPolicy: async (
+    id: string,
+    policy: 'allow' | 'deny' | '',
+  ): Promise<{ id: string; members_only_policy: string }> => {
+    // 項目名は members_only_policy。バックエンドは項目が無いと 400 を返す
+    // （`{}` を「未確認へ戻す」と読まないため）ので、必ず値を入れて送る。
+    const { data } = await api.put(`/api/singers/${id}/members-policy`, {
+      members_only_policy: policy,
+    });
+    return data;
+  },
 };
 
 // ========== 事務所 API ==========

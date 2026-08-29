@@ -38,7 +38,7 @@ func NewSingerService(
 }
 
 // GetAll はすべての歌手を取得する。includeHidden は content:edit を持つ場合のみ true を渡す。
-func (s *SingerService) GetAll(page, limit int, sort, dir string, includeHidden bool) (*dto.SingerListResponse, error) {
+func (s *SingerService) GetAll(page, limit int, sort, dir string, includeHidden, includeOperational bool) (*dto.SingerListResponse, error) {
 	offset := (page - 1) * limit
 
 	singers, total, err := s.singerRepo.FindAll(limit, offset, sort, dir, includeHidden)
@@ -47,9 +47,13 @@ func (s *SingerService) GetAll(page, limit int, sort, dir string, includeHidden 
 	}
 
 	// DTO に変換する
+	counts, err := s.membersOnlyCounts(includeOperational)
+	if err != nil {
+		return nil, err
+	}
 	singerResponses := make([]dto.SingerResponse, len(singers))
 	for i, singer := range singers {
-		singerResponses[i] = s.toSingerResponse(singer)
+		singerResponses[i] = s.toSingerResponseFor(singer, includeOperational, counts)
 	}
 
 	totalPages := (total + limit - 1) / limit
@@ -67,10 +71,15 @@ func (s *SingerService) GetAll(page, limit int, sort, dir string, includeHidden 
 
 // GetGrouped は事務所別のチャンネル一覧を返す（ページングなし）。
 // 所属なしのチャンネルは最後の「所属なし」グループにまとめる。
-func (s *SingerService) GetGrouped(includeHidden bool) (*dto.SingerGroupListResponse, error) {
+func (s *SingerService) GetGrouped(includeHidden, includeOperational bool) (*dto.SingerGroupListResponse, error) {
 	singers, err := s.singerRepo.FindAllGrouped(includeHidden)
 	if err != nil {
 		return nil, fmt.Errorf("get singers grouped: %w", err)
+	}
+
+	counts, err := s.membersOnlyCounts(includeOperational)
+	if err != nil {
+		return nil, err
 	}
 
 	// SQL 側で「事務所 → 名前」順に並んでいるので、隣接する同じ事務所をまとめるだけでよい。
@@ -94,7 +103,7 @@ func (s *SingerService) GetGrouped(includeHidden bool) (*dto.SingerGroupListResp
 			groups = append(groups, dto.SingerGroupResponse{Organization: org, DisplayName: display})
 		}
 		last := &groups[len(groups)-1]
-		last.Singers = append(last.Singers, s.toSingerResponse(singer))
+		last.Singers = append(last.Singers, s.toSingerResponseFor(singer, includeOperational, counts))
 	}
 
 	return &dto.SingerGroupListResponse{Groups: groups, Total: len(singers)}, nil
@@ -344,12 +353,36 @@ func (s *SingerService) toSingerResponse(singer models.Singer) dto.SingerRespons
 
 // toSingerResponseForEditor は content:edit 向け。運用の内部情報を足す。
 func (s *SingerService) toSingerResponseForEditor(singer models.Singer) dto.SingerResponse {
+	return s.toSingerResponseFor(singer, true, nil)
+}
+
+// toSingerResponseFor は権限に応じて運用の内部情報を足す。
+// counts が nil でも方針は載る（詳細のように 1 件だけ返す経路で使う）。
+func (s *SingerService) toSingerResponseFor(singer models.Singer, includeOperational bool, counts map[string]int) dto.SingerResponse {
 	resp := s.toSingerResponse(singer)
+	if !includeOperational {
+		return resp
+	}
 	if singer.MembersOnlyPolicy.Valid {
 		p := singer.MembersOnlyPolicy.String
 		resp.MembersOnlyPolicy = &p
 	}
+	resp.MembersOnlyStreamCount = counts[singer.ID]
 	return resp
+}
+
+// membersOnlyCounts は所有者ごとの会限本数を引く（権限が無ければ引かない）。
+// **権限が無いときにクエリごと省く**のは、応答に載らない値のために
+// 未認証のリクエストで毎回 1 クエリ走らせないため。
+func (s *SingerService) membersOnlyCounts(includeOperational bool) (map[string]int, error) {
+	if !includeOperational {
+		return nil, nil
+	}
+	counts, err := s.singerRepo.CountMembersOnlyByOwner()
+	if err != nil {
+		return nil, fmt.Errorf("count members only streams: %w", err)
+	}
+	return counts, nil
 }
 
 func nullableTrimmedString(value *string) sql.NullString {
