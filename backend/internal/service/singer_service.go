@@ -178,10 +178,13 @@ func (s *SingerService) GetByID(id string, includeOperational bool) (*dto.Singer
 	streamCount, _ := s.singerRepo.GetStreamCount(id)
 	performanceCount, _ := s.singerRepo.GetPerformanceCount(id)
 
-	singerResp := s.toSingerResponse(*singer)
-	if includeOperational {
-		singerResp = s.toSingerResponseForEditor(*singer)
+	// **本数もここで引く。** 詳細だけ counts を渡さずにいたため、方針を設定する
+	// Picker の表示条件（会限を 1 本以上持つ）が常に偽になり、画面から設定できなかった。
+	counts, err := s.membersOnlyCounts(includeOperational, id)
+	if err != nil {
+		return nil, err
 	}
+	singerResp := s.toSingerResponseFor(*singer, includeOperational, counts)
 
 	return &dto.SingerDetailResponse{
 		SingerResponse:   singerResp,
@@ -351,13 +354,11 @@ func (s *SingerService) toSingerResponse(singer models.Singer) dto.SingerRespons
 	return resp
 }
 
-// toSingerResponseForEditor は content:edit 向け。運用の内部情報を足す。
-func (s *SingerService) toSingerResponseForEditor(singer models.Singer) dto.SingerResponse {
-	return s.toSingerResponseFor(singer, true, nil)
-}
-
 // toSingerResponseFor は権限に応じて運用の内部情報を足す。
-// counts が nil でも方針は載る（詳細のように 1 件だけ返す経路で使う）。
+//
+// **counts を省略しないこと。** nil map の読み取りは 0 を返し、0 は omitempty で
+// 応答から消えるので、「会限を持たないチャンネル」と区別が付かない。実際それで
+// 詳細の Picker が出なくなっていた。
 func (s *SingerService) toSingerResponseFor(singer models.Singer, includeOperational bool, counts map[string]int) dto.SingerResponse {
 	resp := s.toSingerResponse(singer)
 	if !includeOperational {
@@ -374,11 +375,11 @@ func (s *SingerService) toSingerResponseFor(singer models.Singer, includeOperati
 // membersOnlyCounts は所有者ごとの会限本数を引く（権限が無ければ引かない）。
 // **権限が無いときにクエリごと省く**のは、応答に載らない値のために
 // 未認証のリクエストで毎回 1 クエリ走らせないため。
-func (s *SingerService) membersOnlyCounts(includeOperational bool) (map[string]int, error) {
+func (s *SingerService) membersOnlyCounts(includeOperational bool, onlyIDs ...string) (map[string]int, error) {
 	if !includeOperational {
 		return nil, nil
 	}
-	counts, err := s.singerRepo.CountMembersOnlyByOwner()
+	counts, err := s.singerRepo.CountMembersOnlyByOwner(onlyIDs...)
 	if err != nil {
 		return nil, fmt.Errorf("count members only streams: %w", err)
 	}

@@ -26,6 +26,7 @@ export default function SingerDetailPage() {
   const { showToast } = useToast();
   const authUser = useAuthStore((s) => s.user);
   const canEdit = hasPermission(authUser, PERM.CONTENT_EDIT);
+  const authStatus = useAuthStore((s) => s.status);
   const canSync = hasPermission(authUser, PERM.SYNC_RUN);
   // タブ・ページ・フィルタは URL クエリに保持する。
   // 詳細ページへ遷移して「戻る」した際に state だとリセットされるため（URL なら復元される）。
@@ -78,10 +79,19 @@ export default function SingerDetailPage() {
     hiddenParam === 'all' || hiddenParam === 'true' ? hiddenParam : 'false';
 
   // Singer detail
+  //
+  // **権限を query key に入れる。** 応答の中身が権限で変わる（会限の方針と本数は
+  // content:edit のときだけ載る）ので、同じ鍵で共有すると片方が古いまま残る。
+  // 実際、保存済みトークンでハードリロードすると、復元より先に匿名の GET が走って
+  // 方針の無い応答が入り、あとから canEdit=true になっても staleTime 5 分のあいだ
+  // 引き直さないため、設定の導線が出なかった。
+  //
+  // enabled で loading 中を待つのは、その無駄な匿名リクエスト自体を省くため。
+  // トークンが無ければ init() は即 anonymous を返すので、未ログインの表示は遅れない。
   const { data: singer, isLoading: singerLoading } = useQuery({
-    queryKey: ['singer', id],
+    queryKey: ['singer', id, canEdit],
     queryFn: () => singerApi.get(id!),
-    enabled: !!id,
+    enabled: !!id && authStatus !== 'loading',
   });
 
   // 編集フォームの所属プルダウン用。編集できる人だけ引く。

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/lib/pq"
+
 	"github.com/ruifan75/setori/internal/models"
 )
 
@@ -186,16 +188,25 @@ func MembersOnlyDetectedExpr(alias string) string {
 }
 
 // CountMembersOnlyByOwner は所有者ごとの会限配信の本数を返す（0 本のチャンネルは含まない）。
+// onlyIDs を渡すとそのチャンネルだけを数える（詳細ページ用。1 件のために全件を
+// 集計しないため）。空なら全チャンネル。
 //
 // **一覧の SQL に相関サブクエリを足さない。** 1 回のクエリで全チャンネル分をまとめて引き、
 // 呼び出し側で突き合わせる ── 148 チャンネルに対して N+1 を作らないため。
-func (r *SingerRepository) CountMembersOnlyByOwner() (map[string]int, error) {
+func (r *SingerRepository) CountMembersOnlyByOwner(onlyIDs ...string) (map[string]int, error) {
+	where := "ss.is_owner AND " + MembersOnlyDetectedExpr("s")
+	args := []any{}
+	if len(onlyIDs) > 0 {
+		where += " AND ss.singer_id = ANY($1)"
+		args = append(args, pq.Array(onlyIDs))
+	}
+
 	rows, err := r.db.Query(`
 		SELECT ss.singer_id, COUNT(*)
 		FROM stream_singers ss
 		JOIN streams s ON s.id = ss.stream_id
-		WHERE ss.is_owner AND ` + MembersOnlyDetectedExpr("s") + `
-		GROUP BY ss.singer_id`)
+		WHERE `+where+`
+		GROUP BY ss.singer_id`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("count members only by owner: %w", err)
 	}
