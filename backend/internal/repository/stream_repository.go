@@ -80,7 +80,7 @@ func streamListColumns(alias string) string {
 	p := alias + "."
 	return p + "id, " + p + "title, " + p + "stream_date, " + p + "duration_seconds, " + p + "thumbnail_url, " +
 		p + "holodex_data, " + p + "holodex_hash, " + p + "comment_raw, " + p + "comment_songs, " +
-		p + "is_processed, " + p + "is_hidden, " + p + "is_restricted, " + p + "restriction_override, " +
+		p + "is_processed, " + p + "is_hidden, " + p + "restriction_override, " +
 		p + "created_at, " + p + "updated_at, " + EffectiveRestrictedExpr(alias)
 }
 
@@ -106,7 +106,7 @@ func scanStreamRow(row interface{ Scan(...any) error }) (models.Stream, error) {
 	var s models.Stream
 	err := row.Scan(&s.ID, &s.Title, &s.StreamDate, &s.DurationSeconds,
 		&s.ThumbnailURL, &s.HolodexData, &s.HolodexHash, &s.CommentRaw, &s.CommentSongs,
-		&s.IsProcessed, &s.IsHidden, &s.IsRestricted, &s.RestrictionOverride,
+		&s.IsProcessed, &s.IsHidden, &s.RestrictionOverride,
 		&s.CreatedAt, &s.UpdatedAt, &s.IsRestrictedEffective)
 	return s, err
 }
@@ -114,7 +114,7 @@ func scanStreamRow(row interface{ Scan(...any) error }) (models.Stream, error) {
 // FindByID は動画 ID で歌枠を取得する。
 func (r *StreamRepository) FindByID(id string) (*models.Stream, error) {
 	query := `
-		SELECT id, title, stream_date, duration_seconds, thumbnail_url, holodex_data, holodex_hash, comment_raw, comment_songs, comment_songs_analyzed_at, chapter_raw, chapter_songs, is_processed, is_hidden, is_restricted, restriction_override, holodex_uploaded_at, holodex_upload_unknown, availability, playable_in_embed, availability_checked_at, created_at, updated_at,
+		SELECT id, title, stream_date, duration_seconds, thumbnail_url, holodex_data, holodex_hash, comment_raw, comment_songs, comment_songs_analyzed_at, chapter_raw, chapter_songs, is_processed, is_hidden, restriction_override, holodex_uploaded_at, holodex_upload_unknown, availability, playable_in_embed, availability_checked_at, created_at, updated_at,
 		       ` + EffectiveRestrictedExpr("streams") + ` AS is_restricted_effective
 		FROM streams WHERE id = $1`
 
@@ -122,7 +122,7 @@ func (r *StreamRepository) FindByID(id string) (*models.Stream, error) {
 	err := r.db.QueryRow(query, id).Scan(
 		&s.ID, &s.Title, &s.StreamDate, &s.DurationSeconds,
 		&s.ThumbnailURL, &s.HolodexData, &s.HolodexHash, &s.CommentRaw, &s.CommentSongs, &s.CommentSongsAnalyzedAt,
-		&s.ChapterRaw, &s.ChapterSongs, &s.IsProcessed, &s.IsHidden, &s.IsRestricted, &s.RestrictionOverride, &s.HolodexUploadedAt, &s.HolodexUploadUnknown,
+		&s.ChapterRaw, &s.ChapterSongs, &s.IsProcessed, &s.IsHidden, &s.RestrictionOverride, &s.HolodexUploadedAt, &s.HolodexUploadUnknown,
 		&s.Availability, &s.PlayableInEmbed, &s.AvailabilityCheckedAt, &s.CreatedAt, &s.UpdatedAt, &s.IsRestrictedEffective)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -151,7 +151,7 @@ func (r *StreamRepository) Create(s *models.Stream) error {
 
 // UpdateMetadata は利用者が編集できる metadata フィールドだけを更新し、大きな JSONB（holodex_data / comment_*）には触れない。
 // 通常の情報更新で問題を含む可能性のある JSONB データを書き戻さないため。
-// restrictionOverride は人の裁定（NULL＝未裁定）。**自動判定の is_restricted は書かない** ──
+// restrictionOverride は人の裁定（NULL＝未裁定）。**検出の members_only タグは書かない** ──
 // 人が触った事実と、検出が言っていることは別の列に残す。
 func (r *StreamRepository) UpdateMetadata(id string, title string, streamDate time.Time, isProcessed, isHidden bool, restrictionOverride sql.NullBool) error {
 	query := `
@@ -480,20 +480,20 @@ func (r *StreamRepository) MarkHolodexUploadAttempt(streamID string) error {
 	return nil
 }
 
-// SetRestrictionCandidate は自動判定の側（is_restricted）を立てる。
+// MarkMembersOnly は会限の検出を記録する（members_only タグを付ける）。
 //
-// **新規同期にも効かせるために要る。** Upsert は is_restricted を INSERT 列に持たないので
-// 既定の false で入り、yt-dlp が availability を取りに行くまで公開側に置かれてしまう。
-// 会限と分かる材料（Holodex の topic / members_only タグ）は同期の時点で揃っているので、
-// そこで倒しておく。
+// **新規同期にも効かせるために要る。** yt-dlp が availability を取りに行くのは
+// 限られた経路だけなので、それを待つ間このデータは公開側に置かれてしまう。
+// 会限と分かる材料（Holodex の topic / タイトル規則）は同期の時点で揃っている。
 //
-// **立てるだけで外さない。** 人の裁定は restriction_override に載るので、ここは触らない。
-func (r *StreamRepository) SetRestrictionCandidate(streamID string) error {
+// **付けるだけで外さない。** 外せるのは人だけ（「これは会限ではない」という
+// 事実の訂正）。「会限だが公開してよい」は restriction_override で表す。
+func (r *StreamRepository) MarkMembersOnly(streamID string) error {
 	_, err := r.db.Exec(`
-		UPDATE streams SET is_restricted = TRUE, updated_at = NOW()
-		WHERE id = $1 AND NOT is_restricted`, streamID)
+		INSERT INTO stream_stream_tags (stream_id, tag_id) VALUES ($1, $2)
+		ON CONFLICT (stream_id, tag_id) DO NOTHING`, streamID, MembersOnlyTagID)
 	if err != nil {
-		return fmt.Errorf("set restriction candidate: %w", err)
+		return fmt.Errorf("mark members only: %w", err)
 	}
 	return nil
 }
@@ -885,25 +885,38 @@ func (r *StreamRepository) FindIDsWithoutChapterRaw() ([]string, error) {
 // **checked_at は必ず一緒に書く。** これが NULL のままだと未調査と区別できず、
 // 「調べたが値が取れなかった」配信を毎回調べ直すことになる。
 func (r *StreamRepository) SaveAvailability(id string, availability sql.NullString, playableInEmbed sql.NullBool) error {
-	res, err := r.db.Exec(`
-		UPDATE streams
-		SET availability = $2, playable_in_embed = $3, availability_checked_at = NOW(),
-		    -- 会限と分かったら**自動判定の側だけ**立てる。restriction_override（人の裁定）は
-		    -- 触らない ── 触ると「公開してよい」と決めた配信が、次の取得で伏せ直される。
-		    -- 外しもしない（public は「反証が無かった」という弱い結論なので、
-		    -- それで秘匿を解くと誤って公開する）。
-		    -- **COALESCE を外さないこと。** availability が NULL のとき比較結果も NULL になり、
-		    -- SQL の三値論理では false OR NULL = NULL（true OR NULL = true）。
-		    -- is_restricted は NOT NULL なので、秘匿でない行に対する
-		    -- 「取得できなかった」の保存が制約違反で落ちる。本番で踏んだ。
-		    is_restricted = is_restricted OR COALESCE($2 = 'subscriber_only', FALSE)
-		WHERE id = $1`, id, availability, playableInEmbed)
+	// **1 文にまとめる。** 更新とタグ付けが別々の Exec だと、間で失敗したときに
+	// 「availability は subscriber_only なのに会限の印が無い」＝公開側に置かれた行が残る。
+	// data-modifying CTE なら同じ文なので、片方だけ成立することがない。
+	//
+	// 会限と分かったら**検出の側だけ**記録する。restriction_override（人の裁定）は
+	// 触らない ── 触ると「公開してよい」と決めた配信が、次の取得で伏せ直される。
+	// 外しもしない（public は「反証が無かった」という弱い結論なので、
+	// それで秘匿を解くと誤って公開する）。
+	//
+	// **COALESCE を外さないこと。** availability が NULL のとき比較結果も NULL になり、
+	// SQL の三値論理では WHERE NULL は偽でも真でもなく行が消える。以前この列が
+	// NOT NULL だった頃は制約違反で本番が落ちた。
+	var updated int
+	err := r.db.QueryRow(`
+		WITH upd AS (
+		    UPDATE streams
+		    SET availability = $2, playable_in_embed = $3, availability_checked_at = NOW()
+		    WHERE id = $1
+		    RETURNING id
+		), tagged AS (
+		    INSERT INTO stream_stream_tags (stream_id, tag_id)
+		    SELECT upd.id, $4 FROM upd
+		    WHERE COALESCE($2 = 'subscriber_only', FALSE)
+		    ON CONFLICT (stream_id, tag_id) DO NOTHING
+		)
+		SELECT COUNT(*) FROM upd`, id, availability, playableInEmbed, MembersOnlyTagID).Scan(&updated)
 	if err != nil {
 		return fmt.Errorf("save availability: %w", err)
 	}
 	// **行数を見る。** 存在しない ID でも UPDATE は error にならないので、
 	// 確認しないと「記録できた」と答えてしまう（saved の契約は「DB に記録できたか」）。
-	if n, err := res.RowsAffected(); err == nil && n == 0 {
+	if updated == 0 {
 		return ErrStreamNotFound
 	}
 	return nil
@@ -1181,7 +1194,7 @@ func (r *StreamRepository) FindBySingerID(singerID string, limit, offset int, fi
 	}
 
 	query := fmt.Sprintf(`
-		SELECT s.id, s.title, s.stream_date, s.duration_seconds, s.thumbnail_url, s.holodex_data, s.holodex_hash, s.is_processed, s.is_hidden, s.is_restricted, s.restriction_override, s.created_at, s.updated_at, `+EffectiveRestrictedExpr("s")+`
+		SELECT s.id, s.title, s.stream_date, s.duration_seconds, s.thumbnail_url, s.holodex_data, s.holodex_hash, s.is_processed, s.is_hidden, s.restriction_override, s.created_at, s.updated_at, `+EffectiveRestrictedExpr("s")+`
 		FROM streams s
 		JOIN stream_singers ss ON s.id = ss.stream_id
 		WHERE %s
@@ -1199,7 +1212,7 @@ func (r *StreamRepository) FindBySingerID(singerID string, limit, offset int, fi
 	for rows.Next() {
 		var s models.Stream
 		err := rows.Scan(&s.ID, &s.Title, &s.StreamDate, &s.DurationSeconds,
-			&s.ThumbnailURL, &s.HolodexData, &s.HolodexHash, &s.IsProcessed, &s.IsHidden, &s.IsRestricted, &s.RestrictionOverride, &s.CreatedAt, &s.UpdatedAt, &s.IsRestrictedEffective)
+			&s.ThumbnailURL, &s.HolodexData, &s.HolodexHash, &s.IsProcessed, &s.IsHidden, &s.RestrictionOverride, &s.CreatedAt, &s.UpdatedAt, &s.IsRestrictedEffective)
 		if err != nil {
 			return nil, 0, fmt.Errorf("scan stream: %w", err)
 		}

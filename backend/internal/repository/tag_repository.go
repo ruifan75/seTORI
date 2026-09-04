@@ -2,6 +2,7 @@ package repository
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -53,8 +54,23 @@ func (r *TagRepository) CreateStreamTag(id, displayName, color string) (*models.
 	return &t, nil
 }
 
-// DeleteStreamTag は stream tag を削除する。
+// ErrReservedStreamTag は削除できない予約タグを消そうとしたとき。
+var ErrReservedStreamTag = errors.New("このタグは削除できません")
+
+// reservedStreamTags は**削除を禁じるタグ**。
+//
+// `members_only` は秘匿の検出そのもの（EffectiveRestrictedExpr が読む）。
+// stream_stream_tags は ON DELETE CASCADE なので、タグ定義を 1 回消すと
+// **全会限配信の関連行が消え、歌単が一斉に公開される**。しかも定義を作り直しても
+// 関連行は戻らないので、どの配信が会限だったかという情報ごと失われる。
+// 画面から × を隠すだけでは足りない（API を直接叩けば同じことが起きる）。
+var reservedStreamTags = map[string]bool{"members_only": true}
+
+// DeleteStreamTag は stream tag を削除する。予約タグは拒否する。
 func (r *TagRepository) DeleteStreamTag(id string) error {
+	if reservedStreamTags[id] {
+		return fmt.Errorf("%w: %s", ErrReservedStreamTag, id)
+	}
 	result, err := r.db.Exec(`DELETE FROM stream_tags WHERE id = $1`, id)
 	if err != nil {
 		return fmt.Errorf("delete stream tag: %w", err)

@@ -116,14 +116,16 @@ type Stream struct {
 	ChapterSongs []byte `json:"chapter_songs"` // JSONB - 章節から抽出した楽曲
 	IsProcessed  bool   `json:"is_processed"`  // 処理済み
 	IsHidden     bool   `json:"is_hidden"`     // 初回登録時に判定し、その後は手動編集のみ
-	// 秘匿（中身を公開してよいか）。**is_hidden とは別の軸**で、しかも 2 列に分ける：
-	//   IsRestricted        … 自動判定の候補（Holodex topic / members_only タグ / availability）
-	//   RestrictionOverride … 人の裁定。NULL＝未裁定 / true＝伏せる / false＝公開してよい
-	// 実効値は 3 段（自動判定 → チャンネルの方針 → この列）。計算は
-	// repository.EffectiveRestrictedExpr の 1 か所だけで、結果は IsRestrictedEffective。
-	// 2 列に分けるのは、1 列だと人が解除しても
-	// 次の availability 取得で戻ってしまう。
-	IsRestricted        bool         `json:"is_restricted"`
+	// 秘匿（中身を公開してよいか）。**is_hidden とは別の軸**。
+	//
+	// 検出（会限かどうか）は **members_only タグ**が持つ。専用列を置いていた頃は、
+	// 人がタグを付けても歌単は公開されたままだった ── 会限を確実に判定する方法は
+	// 無く人が補強するしかないのに、人が触る場所と判定が読む場所が違っていた（issue #32）。
+	//
+	// RestrictionOverride は**人の裁定**。NULL＝未裁定 / true＝伏せる / false＝公開してよい。
+	// タグを外すこと（＝「会限ではない」という事実の訂正）とは別の陳述なので分ける。
+	// 実効値は 3 段（タグ → チャンネルの方針 → この列）で、計算は
+	// repository.EffectiveRestrictedExpr の 1 か所だけ。結果は IsRestrictedEffective。
 	RestrictionOverride sql.NullBool `json:"restriction_override"`
 	// IsRestrictedEffective は**実効的な秘匿状態**（自動判定 → チャンネルの方針 →
 	// その配信だけの例外、の 3 段を畳んだ結果）。

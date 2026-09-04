@@ -18,20 +18,47 @@ func NewSongRepository(db *sql.DB) *SongRepository {
 	return &SongRepository{db: db}
 }
 
-// songListOrder は楽曲一覧の ORDER BY 句を組み立てる。
+// songListBody は楽曲一覧の FROM 〜 ORDER BY を組み立てる。
 // sort: "name"(既定) / "artist" / "performances"、dir: asc|desc。
-func songListOrder(sort, dir string) string {
+// where は "" か "WHERE ..."（プレースホルダの番号は呼び出し側の責任）。
+//
+// **FROM と ORDER BY を対で持つ。** 歌唱数順のときだけ集計を JOIN し、ORDER BY が
+// その別名を参照するので、片方だけ変えると SQL エラーになる（一覧の SELECT で
+// 同じ形の取り違えを 2 度やっている。streamListQuery の注記を参照）。
+//
+// **相関サブクエリで数えない。** 以前は曲ごとに `(SELECT COUNT(*) ...)` を回しており、
+// 秘匿判定が曲 × 配信の組ごとに評価されていた。手元 922 曲で推定 cost 224,711 ＝
+// 既定の jit_above_cost=100000 を越え、ページ要求のたびに JIT のコンパイル費を
+// 払っていた（issue #30）。配信ごとに 1 回だけ数えて JOIN すると 16,410 まで下がり、
+// JIT は発火しない（実測 44.6ms → 9.0ms）。
+func songListBody(sort, dir, where string) string {
+	from := "FROM songs"
+	var order string
+
 	switch sort {
 	case "artist":
-		return nameSortOrderDir("original_artist", "original_artist_reading", dir)
+		order = nameSortOrderDir("original_artist", "original_artist_reading", dir)
 	case "performances":
-		return fmt.Sprintf(
-			`(SELECT COUNT(*) FROM performances p JOIN streams st ON st.id = p.stream_id `+
-				`WHERE p.song_id = songs.id AND st.is_hidden = FALSE AND `+NotRestricted("st")+`) %s, `, dirOr(dir, "desc")) +
+		from += `
+			LEFT JOIN (
+			    SELECT p.song_id, COUNT(*) AS n
+			    FROM performances p
+			    JOIN streams st ON st.id = p.stream_id
+			    WHERE st.is_hidden = FALSE AND ` + NotRestricted("st") + `
+			    GROUP BY p.song_id
+			) visible ON visible.song_id = songs.id`
+		// 歌唱が 1 件も無い曲は JOIN で NULL になる。COALESCE を外すと
+		// NULLS FIRST/LAST の既定に左右されて 0 件の曲が先頭に来る。
+		order = fmt.Sprintf("COALESCE(visible.n, 0) %s, ", dirOr(dir, "desc")) +
 			nameSortOrder("name", "name_reading")
 	default:
-		return nameSortOrderDir("name", "name_reading", dir)
+		order = nameSortOrderDir("name", "name_reading", dir)
 	}
+
+	if where != "" {
+		from += "\n\t\t\t" + where
+	}
+	return from + "\n\t\t\tORDER BY " + order
 }
 
 // FindAll はすべての楽曲を取得する（ページング、検索、並び替え対応）。
@@ -52,10 +79,10 @@ func (r *SongRepository) FindAll(limit, offset int, search, sort, dir string) ([
 		}
 
 		query := `
-			SELECT id, name, name_reading, original_artist, original_artist_reading, arts, created_at, updated_at
-			FROM songs
-			WHERE name ILIKE $1 OR original_artist ILIKE $1 OR name_reading ILIKE $1
-			ORDER BY ` + songListOrder(sort, dir) + `
+			SELECT songs.id, songs.name, songs.name_reading, songs.original_artist,
+			       songs.original_artist_reading, songs.arts, songs.created_at, songs.updated_at
+			` + songListBody(sort, dir,
+			"WHERE songs.name ILIKE $1 OR songs.original_artist ILIKE $1 OR songs.name_reading ILIKE $1") + `
 			LIMIT $2 OFFSET $3`
 		rows, err = r.db.Query(query, searchPattern, limit, offset)
 	} else {
@@ -65,9 +92,9 @@ func (r *SongRepository) FindAll(limit, offset int, search, sort, dir string) ([
 		}
 
 		query := `
-			SELECT id, name, name_reading, original_artist, original_artist_reading, arts, created_at, updated_at
-			FROM songs
-			ORDER BY ` + songListOrder(sort, dir) + `
+			SELECT songs.id, songs.name, songs.name_reading, songs.original_artist,
+			       songs.original_artist_reading, songs.arts, songs.created_at, songs.updated_at
+			` + songListBody(sort, dir, "") + `
 			LIMIT $1 OFFSET $2`
 		rows, err = r.db.Query(query, limit, offset)
 	}

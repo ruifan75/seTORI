@@ -548,7 +548,7 @@ func (s *StreamService) Update(id string, req *dto.UpdateStreamRequest) (*dto.St
 		stream.IsHidden = *req.IsHidden
 	}
 
-	// 秘匿の切り替えは**人の裁定として override 列へ書く**。自動判定（is_restricted）は
+	// 秘匿の切り替えは**人の裁定として override 列へ書く**。検出（members_only タグ）は
 	// 触らない ── 同じ列へ書くと、次の availability 取得で人の判断が消える。
 	if req.IsRestricted != nil {
 		stream.RestrictionOverride = sql.NullBool{Bool: *req.IsRestricted, Valid: true}

@@ -45,16 +45,25 @@ Holodex の分類もタイトルキーワード規則も自動判定であり、
 > 会限のように内容の公開可否が決まっていないものを、この列を頼りに保存しないこと。
 >
 > **これは `is_hidden` についての話で、今も変わらない。** 伏せたいものには
-> 次節の `is_restricted` を使う（issue #4 / PR #19 で入った別の列）。
+> 次節の秘匿の軸を使う（issue #4 / PR #19）。
 
-## 秘匿の軸（`streams.is_restricted`）
+## 秘匿の軸（`members_only` タグ）
 
-**中身を公開してよいか未確認の配信に立てる旗**（issue #4）。`is_hidden` とは別の列にする。
+**中身を公開してよいか未確認の配信に付ける印**（issue #4）。`is_hidden` とは別の軸。
 
 | | 何を止めるか | 誰に効くか |
 |---|---|---|
 | `is_hidden` | 一覧・発見面から外す | 誰にも中身は読める（認可境界ではない） |
-| `is_restricted` | **歌唱と解析結果そのもの** | 未ログイン・一般利用者。`content:edit` は読める |
+| `members_only` タグ | **歌唱と解析結果そのもの** | 未ログイン・一般利用者。`content:edit` は読める |
+
+> **検出はタグが持つ**（PR #33 / issue #32）。専用列 `streams.is_restricted` だった頃は、
+> 人がタグを付けても歌単は公開されたままだった ── 会限を確実に判定する方法は無く
+> 人が補強するしかないのに、**人が触る場所と判定が読む場所が違っていた**。
+> 実測：タグを付けても未ログインから歌唱 25 件が見えた。
+>
+> `members_only` は**削除できない予約タグ**（`reservedStreamTags`）。
+> `stream_stream_tags` は ON DELETE CASCADE なので、タグ定義を 1 回消すと
+> 全会限配信の関連行が消えて歌単が一斉に公開され、定義を作り直しても戻らない。
 
 **軸を分ける理由は実測できる。** 本番相当のデータに Holodex の `topic_id = membersonly` は
 86 本あり、**そのうち 1 本は `is_hidden = FALSE`**（`SEHFB5EiKZo`「メンバーシップ限定歌枠」）。
@@ -79,9 +88,9 @@ Holodex の分類もタイトルキーワード規則も自動判定であり、
 
 そこで判定を 3 段にする。**下ほど強い**：
 
-| | 列 | 意味 |
+| | どこ | 意味 |
 |---|---|---|
-| 1 | `streams.is_restricted` | 会限らしいという**自動判定** |
+| 1 | `members_only` タグ | 会限だという**検出**（自動でも人でも付く） |
 | 2 | `singers.members_only_policy` | そのチャンネルの**方針**（配信主に訊いた結果） |
 | 3 | `streams.restriction_override` | その配信だけの**例外** |
 
@@ -116,23 +125,25 @@ Holodex の分類もタイトルキーワード規則も自動判定であり、
 
 ### 自動判定と人の裁定は別の列に持つ
 
-**1 列だと人の判断が消える。** 会限は chapters / live chat / availability backfill から
-繰り返し取り直されるので、次の順で必ず戻っていた：
+**検出と裁定を 1 つにすると人の判断が消える。** 会限は chapters / live chat /
+availability backfill から繰り返し取り直されるので、次の順で必ず戻ってしまう：
 
-1. `availability` が `subscriber_only` → 秘匿が立つ
+1. `availability` が `subscriber_only` → 検出が立つ
 2. 編集者が「公開してよい」と判断して外す
 3. 何かの取得で同じ動画をもう一度読む
-4. `is_restricted OR subscriber_only` で **また立つ**
+4. 自動の検出が **また立つ**
+
+だから「公開してよい」は検出を外すのではなく `restriction_override = FALSE` で表す。
 
 そこで `organization` / `organization_override` と同じ形にする（CLAUDE.md §3.5）。
 
 | 列 | 誰が書くか | 意味 |
 |---|---|---|
-| `is_restricted` | 自動（同期の候補判定・`SaveAvailability`） | 会限らしいという**検出** |
+| `members_only` タグ | 自動（同期の候補判定・`SaveAvailability`）＋**人** | 会限だという**検出** |
 | `singers.members_only_policy` | 人だけ（`PUT /api/singers/{id}/members-policy`） | チャンネル単位の方針。NULL＝未確認 / `allow` / `deny` |
 | `restriction_override` | 人だけ（`PUT /api/streams/{id}`） | NULL＝未裁定 / TRUE＝伏せる / FALSE＝公開してよい |
 
-読むときは 3 段（下ほど強い）：`is_restricted` → チャンネルの方針 → `restriction_override`。
+読むときは 3 段（下ほど強い）：`members_only` タグ → チャンネルの方針 → `restriction_override`。
 **式は `repository.EffectiveRestrictedExpr` の 1 か所だけ**（否定は `NotRestricted`）。
 Go に双子は置かない ── 材料（所有者の方針）を SELECT していない経路では空のまま
 評価され、「詳細は公開・一覧は秘匿」と食い違う。所有者が複数なら**1 人でも allow で
@@ -144,25 +155,34 @@ Go に双子は置かない ── 材料（所有者の方針）を SELECT し�
 **自動では外れない。** `availability = public` は「反証が無かった」という弱い結論なので
 （issue #3）、それで秘匿を解くと誤って公開する。`SaveAvailability` は立てる方向にしか動かない。
 
-> ⚠️ **`COALESCE` を外さないこと。** 判定は
-> `is_restricted = is_restricted OR COALESCE($2 = 'subscriber_only', FALSE)`。
+> ⚠️ **`COALESCE` を外さないこと。** `SaveAvailability` は
+> `WHERE COALESCE($2 = 'subscriber_only', FALSE)` でタグ付けを決める。
 > `availability` が NULL のとき比較結果も NULL になり、SQL の三値論理では
-> **`false OR NULL` = NULL**（`true OR NULL` は true）。`is_restricted` は NOT NULL なので、
-> **秘匿でない行に「取得できなかった」を保存すると制約違反で落ちる**。
-> 本番の backfill でこれを踏み、該当しうる行が 1217 あった。
-> 既に秘匿の行だけは通ってしまうので、会限の配信で試すと再現しない。
+> `WHERE NULL` は真でも偽でもなく**行が消える**。列だった頃は NOT NULL 制約に当たり、
+> 秘匿でない行への「取得できなかった」の保存が本番で落ちた（該当しうる行が 1217）。
+> 既に秘匿の行だけは通るので、会限の配信で試すと再現しない。
+>
+> **更新とタグ付けは 1 文（data-modifying CTE）にする。** 別々の Exec だと、間で
+> 失敗したときに「`availability` は `subscriber_only` なのに会限の印が無い」＝
+> 公開側に置かれた行が残る。
 
 ### 候補は 3 つの材料から、全部の時点で倒す
 
 | いつ | 材料 |
 |---|---|
 | migration 052 / 053（既存行） | `availability = subscriber_only` / Holodex `topic_id = membersonly` / `members_only` タグ |
-| 初回同期（新しい行） | Holodex `topic_id` / `members_only` タグ（`initialRestrictionCandidate`） |
-| yt-dlp を呼んだとき | `availability = subscriber_only` |
+| migration 057 / 058 | Holodex topic の対応漏れを補い、旧 `is_restricted` をタグへ写す |
+| 初回同期（新しい行） | Holodex `topic_id` / `members_only` タグ（`initialMembersOnlyCandidate` → `MarkMembersOnly`） |
+| yt-dlp を呼んだとき | `availability = subscriber_only`（`SaveAvailability` が同じ文でタグを付ける） |
+| **人** | 編集画面でタグを付ける／外す |
 
-**初回同期の判定が要る理由**：`StreamRepository.Upsert` は `is_restricted` を INSERT 列に
-持たないので既定の `false` で入る。`availability` は yt-dlp を呼ぶまで埋まらないので、
+**初回同期の判定が要る理由**：`availability` は yt-dlp を呼ぶまで埋まらないので、
 それを待つ間、新しく同期された会限配信は公開側に置かれてしまう。
+
+**人が要る理由**：会限を確実に判定する方法が無い。yt-dlp の `availability` は本番の
+会限 86 本のうち 6 本を `public` と返し、Holodex の `topic_id` は単値なので `singing` と
+排他になり、タイトルに「メン限」と書かない会限もある。だから**タグが検出の器**で、
+自動の 2 経路は add-only（外すのは人だけ）。
 
 Holodex の `topic_id` は単値で `singing` と排他になるため取りこぼすが、
 **倒す方向にしか使わない**ので害はない（取りこぼしは `members_only` タグと
