@@ -226,7 +226,12 @@ export interface Stream {
   tags: StreamTag[];
   participants: Singer[];  // 参加者
   channel_owner?: Singer;  // チャンネルオーナー
-  is_processed: boolean;   // 処理済み
+  /**
+   * 処理済み（セットリストを作り終えたか）。**content:edit のときだけ返る**。
+   * 閲覧者には意味が無く、編集者が「まだ手を付けていない配信」を見分けるための印。
+   * 未処理の配信そのものは誰でも見られる（隠すのは印だけ）。
+   */
+  is_processed?: boolean;
   is_hidden: boolean;      // 非表示（初回登録後は手動編集のみ）
   // 中身（セットリスト・解析結果）を公開してよいか未確認。**is_hidden とは別の軸**。
   // 立っている間、歌唱は編集者にしか返らない（曲/歌手/ランダム/プレイリストからも消える）
@@ -877,7 +882,7 @@ export interface SearchStreamItem {
   title: string;
   stream_date: string;
   thumbnail_url?: string;
-  is_processed: boolean;
+  is_processed?: boolean;
   is_hidden: boolean;
 }
 
