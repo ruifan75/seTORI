@@ -169,6 +169,7 @@ export default function StreamDetailPage() {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const canEdit = hasPermission(useAuthStore((s) => s.user), PERM.CONTENT_EDIT);
+  const authStatus = useAuthStore((s) => s.status);
 
   const [isEditing, setIsEditing] = useState(false);
   // 再生時に実際に失敗したエラーコード。保存済みの判定より新しい事実なので優先する。
@@ -260,10 +261,16 @@ export default function StreamDetailPage() {
   };
   const [vocalistPopupSingers, setVocalistPopupSingers] = useState<Singer[] | null>(null);
 
+  // **権限を query key に入れる。** 応答の中身が権限で変わる（解析結果と処理状態は
+  // content:edit のときだけ載る）ので、同じ鍵で共有すると片方が古いまま残る。
+  // staleTime: 0 でも足りない ── 鍵も enabled も同じまま認証状態だけ変わっても
+  // 即座には引き直さないので、保存済みトークンでハードリロードすると
+  // 「処理済みなのにチェックが外れて見える」（is_processed が応答に無いため）。
+  // auth が loading のあいだ待つのは、その無駄な匿名リクエストを省くため。
   const { data: stream, isLoading } = useQuery({
-    queryKey: ['stream', id],
+    queryKey: ['stream', id, canEdit],
     queryFn: () => streamApi.get(id!),
-    enabled: !!id,
+    enabled: !!id && authStatus !== 'loading',
     staleTime: 0, // ページに入るたびに再読み込みを保証
   });
 

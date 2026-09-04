@@ -105,9 +105,13 @@ export default function SingerDetailPage() {
 
   // Streams
   const { data: streams, isLoading: streamsLoading } = useQuery({
-    queryKey: ['singerStreams', id, streamPage, processedFilter, hiddenFilter],
+    // 権限を鍵に入れる（処理状態は content:edit のときだけ載り、`processed=` の
+    // 絞り込みも権限が無ければバックエンドが無視する）。入れないと、保存済み
+    // トークンでのハードリロードで匿名の応答が 5 分残り、「未処理」で絞ったつもりが
+    // 全件並ぶ・バッジも出ない、という状態になる。
+    queryKey: ['singerStreams', id, streamPage, processedFilter, hiddenFilter, canEdit],
     queryFn: () => singerApi.getStreams(id!, streamPage, 20, processedFilter, hiddenFilter),
-    enabled: !!id && activeTab === 'streams',
+    enabled: !!id && activeTab === 'streams' && authStatus !== 'loading',
   });
 
   // Performances

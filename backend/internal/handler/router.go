@@ -2096,10 +2096,24 @@ func (r *Router) handleGetSingerStreams(w http.ResponseWriter, req *http.Request
 	// 「まだ手を付けていない配信」の一覧は外から作れてしまう。
 	canEditContent := userHasPermission(req, auth.PermContentEdit)
 
-	// processed: "all" (nil), "true", "false"
-	if processedStr := req.URL.Query().Get("processed"); canEditContent && processedStr != "" && processedStr != "all" {
-		processed := processedStr == "true"
-		processedFilter = &processed
+	// processed: ""/"all"（すべて）, "true"（処理済みのみ）, "false"（未処理のみ）。
+	//
+	// **未知の値は 400。** `processedStr == "true"` で判定していた頃は、
+	// `?processed=TRUE` や打ち間違いが黙って「未処理のみ」に化けていた
+	// （＝惜しい間違いが既定へ倒れる。batch の入力検証と同じ理由）。
+	// 検証は権限に関係なく行い、**適用だけ content:edit に限る** ── 権限が
+	// 無い利用者には黙って無視する（結果集合を常に同じにして、未処理の件数を
+	// 推測させないため。`include_hidden` と同じ）。
+	switch processedStr := req.URL.Query().Get("processed"); processedStr {
+	case "", "all":
+	case "true", "false":
+		if canEditContent {
+			processed := processedStr == "true"
+			processedFilter = &processed
+		}
+	default:
+		respondError(w, http.StatusBadRequest, "processed は all / true / false のいずれかです")
+		return
 	}
 
 	// hidden: "all", "true"（非表示のみ）, "false"（非表示を除外、既定）
