@@ -605,7 +605,7 @@ func (r *Router) handleGlobalSearch(w http.ResponseWriter, req *http.Request) {
 		resp.Songs = songs.Songs
 	}
 
-	if streams, err := r.streamService.SearchByTitle(query, limit); err != nil {
+	if streams, err := r.streamService.SearchByTitle(query, limit, userHasPermission(req, auth.PermContentEdit)); err != nil {
 		logger.Warnf("global search streams failed: %v", err)
 	} else {
 		resp.Streams = streams
@@ -660,7 +660,7 @@ func (r *Router) handleSearchStreams(w http.ResponseWriter, req *http.Request) {
 	page, _ := strconv.Atoi(req.URL.Query().Get("page"))
 	limit, _ := strconv.Atoi(req.URL.Query().Get("limit"))
 
-	result, err := r.streamService.SearchStreams(filters, page, limit)
+	result, err := r.streamService.SearchStreams(filters, page, limit, userHasPermission(req, auth.PermContentEdit))
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1542,7 +1542,7 @@ func (r *Router) handleGetStreamsByTag(w http.ResponseWriter, req *http.Request)
 	page, _ := strconv.Atoi(req.URL.Query().Get("page"))
 	limit, _ := strconv.Atoi(req.URL.Query().Get("limit"))
 
-	result, err := r.streamService.GetByTag(tagID, page, limit)
+	result, err := r.streamService.GetByTag(tagID, page, limit, userHasPermission(req, auth.PermContentEdit))
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1823,7 +1823,7 @@ func (r *Router) handleListStreams(w http.ResponseWriter, req *http.Request) {
 		limit = 20
 	}
 
-	result, err := r.streamService.GetAll(page, limit, sort, dir)
+	result, err := r.streamService.GetAll(page, limit, sort, dir, userHasPermission(req, auth.PermContentEdit))
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -2090,8 +2090,14 @@ func (r *Router) handleGetSingerStreams(w http.ResponseWriter, req *http.Request
 	// 絞り込みパラメータを解析する
 	var processedFilter, hiddenFilter *bool
 
+	// 処理状態は運用の内部情報なので `content:edit` のときだけ扱う。
+	// **権限が無ければ絞り込みも黙って無視する**（include_hidden と同じ）──
+	// 応答から is_processed を消しても、`?processed=false` で絞り込めるなら
+	// 「まだ手を付けていない配信」の一覧は外から作れてしまう。
+	canEditContent := userHasPermission(req, auth.PermContentEdit)
+
 	// processed: "all" (nil), "true", "false"
-	if processedStr := req.URL.Query().Get("processed"); processedStr != "" && processedStr != "all" {
+	if processedStr := req.URL.Query().Get("processed"); canEditContent && processedStr != "" && processedStr != "all" {
 		processed := processedStr == "true"
 		processedFilter = &processed
 	}
@@ -2111,7 +2117,7 @@ func (r *Router) handleGetSingerStreams(w http.ResponseWriter, req *http.Request
 	}
 	// hiddenStr == "all" の場合、hiddenFilter は nil のままにする
 
-	result, err := r.singerService.GetStreams(id, page, limit, processedFilter, hiddenFilter)
+	result, err := r.singerService.GetStreams(id, page, limit, processedFilter, hiddenFilter, canEditContent)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return

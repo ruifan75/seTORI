@@ -228,7 +228,7 @@ func (s *SingerService) UpdateManualMetadata(id string, req *dto.UpdateSingerReq
 }
 
 // GetStreams は歌手が参加した歌枠を取得する（絞り込み対応）。
-func (s *SingerService) GetStreams(singerID string, page, limit int, processedFilter, hiddenFilter *bool) (*dto.StreamListResponse, error) {
+func (s *SingerService) GetStreams(singerID string, page, limit int, processedFilter, hiddenFilter *bool, isEditor bool) (*dto.StreamListResponse, error) {
 	offset := (page - 1) * limit
 
 	// 絞り込み条件を組み立てる
@@ -247,7 +247,7 @@ func (s *SingerService) GetStreams(singerID string, page, limit int, processedFi
 	for i, stream := range streams {
 		tags, _ := s.streamRepo.GetTags(stream.ID)
 		participants, _ := s.streamRepo.GetSingers(stream.ID)
-		streamResponses[i] = s.toStreamResponse(stream, tags, participants)
+		streamResponses[i] = s.toStreamResponse(stream, tags, participants, isEditor)
 	}
 
 	totalPages := (total + limit - 1) / limit
@@ -400,12 +400,21 @@ func nullableTrimmedString(value *string) sql.NullString {
 }
 
 // toStreamResponse は Model を DTO に変換する。
-func (s *SingerService) toStreamResponse(stream models.Stream, tags []models.StreamTag, participants []models.Singer) dto.StreamResponse {
+// toStreamResponse は歌手ページ用の変換。**StreamService にも同名の関数がある** ──
+// あちらは解析結果とチャンネル所有者まで組み立てるが、両方が同じ DTO を返すので
+// 載せる／載せないの判断は 2 か所に要る。片方だけ直すと権限の穴になる。
+//
+// isEditor は処理済みフラグを載せるか（content:edit のときだけ）。
+func (s *SingerService) toStreamResponse(stream models.Stream, tags []models.StreamTag, participants []models.Singer, isEditor bool) dto.StreamResponse {
+	var processed *bool
+	if isEditor {
+		processed = &stream.IsProcessed
+	}
 	resp := dto.StreamResponse{
 		ID:           stream.ID,
 		Title:        stream.Title,
 		StreamDate:   stream.StreamDate.Format(time.RFC3339),
-		IsProcessed:  stream.IsProcessed,
+		IsProcessed:  processed,
 		IsHidden:     stream.IsHidden,
 		IsRestricted: stream.IsRestrictedEffective,
 		CreatedAt:    stream.CreatedAt,

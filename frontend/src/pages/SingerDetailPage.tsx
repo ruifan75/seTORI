@@ -445,7 +445,8 @@ export default function SingerDetailPage() {
           {/* Filter Controls */}
           <div className="bg-white rounded-lg shadow-sm border p-4">
             <div className="flex flex-wrap gap-4 items-center">
-              {/* Processed Filter */}
+              {/* Processed Filter（編集者だけ。バックエンドも権限が無ければ黙って無視する） */}
+              {canEdit && (
               <div className="flex items-center gap-2">
                 <span className="text-sm font-medium text-gray-700">処理状態:</span>
                 <select
@@ -462,6 +463,7 @@ export default function SingerDetailPage() {
                   <option value="true">処理済み</option>
                 </select>
               </div>
+              )}
               {/* Hidden Filter */}
               <div className="flex items-center gap-2">
                 <span className="text-sm font-medium text-gray-700">表示:</span>
@@ -516,7 +518,10 @@ export default function SingerDetailPage() {
                       )}
                       {/* Status badges */}
                       <div className="absolute top-2 left-2 flex flex-col gap-1">
-                        {!stream.is_processed && (
+                        {/* 未処理は**編集者の作業印**。閲覧者には意味が無いので出さない。
+                            未処理の配信そのものは誰でも見られる（隠すのは印だけ）。
+                            権限が無ければ is_processed 自体が応答に無い */}
+                        {canEdit && stream.is_processed === false && (
                           <span className="px-2 py-0.5 bg-amber-500 text-white text-xs font-medium rounded">
                             未処理
                           </span>

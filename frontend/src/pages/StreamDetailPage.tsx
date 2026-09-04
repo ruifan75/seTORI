@@ -1950,7 +1950,7 @@ export default function StreamDetailPage() {
                 <label className="flex items-center gap-1.5 cursor-pointer text-sm font-medium text-gray-700 whitespace-nowrap">
                   <input
                     type="checkbox"
-                    checked={stream.is_processed}
+                    checked={stream.is_processed ?? false}
                     onChange={(e) => quickSaveStream({ is_processed: e.target.checked })}
                     className="w-4 h-4 text-green-600 border-gray-300 rounded focus:ring-green-500"
                   />

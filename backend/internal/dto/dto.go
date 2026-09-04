@@ -235,8 +235,12 @@ type StreamResponse struct {
 	Tags            []StreamTagResponse `json:"tags"`
 	Participants    []SingerResponse    `json:"participants"`
 	ChannelOwner    *SingerResponse     `json:"channel_owner,omitempty"` // チャンネル所有者
-	IsProcessed     bool                `json:"is_processed"`
-	IsHidden        bool                `json:"is_hidden"`
+	// IsProcessed は**運用の状態**（セットリストを作り終えたか）。
+	// `content:edit` のときだけ載せる ── 閲覧者には意味が無く、
+	// 「まだ手を付けていない配信」の一覧を外から作れてしまう。
+	// nil＝載せない（omitempty で応答から消える）。
+	IsProcessed *bool `json:"is_processed,omitempty"`
+	IsHidden    bool  `json:"is_hidden"`
 	// IsRestricted は中身を公開してよいか未確認の配信。**閲覧者にも返す**
 	// （画面で「セットリストは未公開」と言うために要る）。旗そのものは秘密ではない。
 	IsRestricted         bool             `json:"is_restricted"`
@@ -1103,8 +1107,9 @@ type SearchStreamItem struct {
 	Title        string    `json:"title"`
 	StreamDate   time.Time `json:"stream_date"`
 	ThumbnailURL *string   `json:"thumbnail_url,omitempty"`
-	IsProcessed  bool      `json:"is_processed"`
-	IsHidden     bool      `json:"is_hidden"`
+	// IsProcessed は content:edit のときだけ（StreamResponse と同じ理由）。
+	IsProcessed *bool `json:"is_processed,omitempty"`
+	IsHidden    bool  `json:"is_hidden"`
 }
 
 // SearchTagItem 検索結果のタグ（使用件数付き）

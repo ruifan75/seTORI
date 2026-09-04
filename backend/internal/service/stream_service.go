@@ -29,7 +29,7 @@ func (s *StreamService) ApplyTagRulesToAll() (int64, error) {
 }
 
 // SearchByTitle はタイトル部分一致で配信を検索する（グローバル検索用）。
-func (s *StreamService) SearchByTitle(query string, limit int) ([]dto.SearchStreamItem, error) {
+func (s *StreamService) SearchByTitle(query string, limit int, isEditor bool) ([]dto.SearchStreamItem, error) {
 	streams, err := s.streamRepo.SearchByTitle(query, limit)
 	if err != nil {
 		return nil, err
@@ -40,7 +40,7 @@ func (s *StreamService) SearchByTitle(query string, limit int) ([]dto.SearchStre
 			ID:          st.ID,
 			Title:       st.Title,
 			StreamDate:  st.StreamDate,
-			IsProcessed: st.IsProcessed,
+			IsProcessed: listView(isEditor).processedOrNil(st.IsProcessed),
 			IsHidden:    st.IsHidden,
 		}
 		if st.ThumbnailURL.Valid {
@@ -61,7 +61,7 @@ func (s *StreamService) Exists(id string) (bool, error) {
 }
 
 // GetAll は歌枠一覧を取得する（既定では非表示を除外）。
-func (s *StreamService) GetAll(page, limit int, sort, dir string) (*dto.StreamListResponse, error) {
+func (s *StreamService) GetAll(page, limit int, sort, dir string, isEditor bool) (*dto.StreamListResponse, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -94,7 +94,7 @@ func (s *StreamService) GetAll(page, limit int, sort, dir string) (*dto.StreamLi
 	streamResponses := make([]dto.StreamResponse, len(streams))
 	for i, stream := range streams {
 		// 一覧は解析結果を載せない（編集画面だけが読むもの）
-		streamResponses[i] = s.toStreamResponse(stream, tagsMap[stream.ID], participantsMap[stream.ID], ownersMap[stream.ID], false)
+		streamResponses[i] = s.toStreamResponse(stream, tagsMap[stream.ID], participantsMap[stream.ID], ownersMap[stream.ID], listView(isEditor))
 	}
 
 	totalPages := (total + limit - 1) / limit
@@ -111,7 +111,7 @@ func (s *StreamService) GetAll(page, limit int, sort, dir string) (*dto.StreamLi
 }
 
 // composeStreamList は stream 群にタグ・参加者をバッチで補完し、ページング付きレスポンスを組み立てる。
-func (s *StreamService) composeStreamList(streams []models.Stream, total, page, limit int) (*dto.StreamListResponse, error) {
+func (s *StreamService) composeStreamList(streams []models.Stream, total, page, limit int, isEditor bool) (*dto.StreamListResponse, error) {
 	streamIDs := make([]string, len(streams))
 	for i, stream := range streams {
 		streamIDs[i] = stream.ID
@@ -128,7 +128,7 @@ func (s *StreamService) composeStreamList(streams []models.Stream, total, page, 
 	streamResponses := make([]dto.StreamResponse, len(streams))
 	for i, stream := range streams {
 		// 一覧は解析結果を載せない（編集画面だけが読むもの）
-		streamResponses[i] = s.toStreamResponse(stream, tagsMap[stream.ID], participantsMap[stream.ID], ownersMap[stream.ID], false)
+		streamResponses[i] = s.toStreamResponse(stream, tagsMap[stream.ID], participantsMap[stream.ID], ownersMap[stream.ID], listView(isEditor))
 	}
 
 	return &dto.StreamListResponse{
@@ -143,7 +143,7 @@ func (s *StreamService) composeStreamList(streams []models.Stream, total, page, 
 }
 
 // GetByTag は指定タグが付いた配信一覧を返す（タグ検索ページ用）。
-func (s *StreamService) GetByTag(tagID string, page, limit int) (*dto.StreamListResponse, error) {
+func (s *StreamService) GetByTag(tagID string, page, limit int, isEditor bool) (*dto.StreamListResponse, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -154,11 +154,11 @@ func (s *StreamService) GetByTag(tagID string, page, limit int) (*dto.StreamList
 	if err != nil {
 		return nil, fmt.Errorf("get streams by tag: %w", err)
 	}
-	return s.composeStreamList(streams, total, page, limit)
+	return s.composeStreamList(streams, total, page, limit, isEditor)
 }
 
 // SearchStreams は非表示を含め、配信元・参加者・ボーカル・タグを組み合わせて配信を検索する。
-func (s *StreamService) SearchStreams(filters models.StreamSearchFilters, page, limit int) (*dto.StreamListResponse, error) {
+func (s *StreamService) SearchStreams(filters models.StreamSearchFilters, page, limit int, isEditor bool) (*dto.StreamListResponse, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -169,7 +169,7 @@ func (s *StreamService) SearchStreams(filters models.StreamSearchFilters, page, 
 	if err != nil {
 		return nil, fmt.Errorf("search streams: %w", err)
 	}
-	return s.composeStreamList(streams, total, page, limit)
+	return s.composeStreamList(streams, total, page, limit, isEditor)
 }
 
 // GetPerformancesByTag は指定の演出タグが付いた演出一覧を返す（タグ検索ページ用）。
@@ -215,7 +215,7 @@ func (s *StreamService) GetPerformancesByTag(tagID string, page, limit int) (*dt
 // GetByID は配信の詳細を返す。includeAnalysis は解析結果を載せるか
 // （toStreamResponse のコメント参照。呼び出し側が権限を見て決める）。
 func (s *StreamService) GetByID(id string, access repository.ViewerAccess) (*dto.StreamDetailResponse, error) {
-	includeAnalysis := access == repository.EditorAccess
+	view := editorView(access == repository.EditorAccess)
 	stream, err := s.streamRepo.FindByID(id)
 	if err != nil {
 		return nil, fmt.Errorf("get stream: %w", err)
@@ -227,7 +227,7 @@ func (s *StreamService) GetByID(id string, access repository.ViewerAccess) (*dto
 	tags, _ := s.streamRepo.GetTags(stream.ID)
 	participants, _ := s.streamRepo.GetSingers(stream.ID)
 	channelOwner, _ := s.streamRepo.GetChannelOwner(stream.ID)
-	streamResp := s.toStreamResponse(*stream, tags, participants, channelOwner, includeAnalysis)
+	streamResp := s.toStreamResponse(*stream, tags, participants, channelOwner, view)
 	// 再生可否は**詳細でだけ**返す。閲覧者にも要る（プレイヤーを描くかの判断）が、
 	// 一覧・検索の SELECT はこの 3 列を読んでいないので、そこで値を組み立てると
 	// 全部 unknown という**別の事実の主張**になる（chapter_count を省略するのと同じ理由）。
@@ -256,6 +256,37 @@ func (s *StreamService) GetByID(id string, access repository.ViewerAccess) (*dto
 // toStreamResponse は Model を DTO に変換する。**照合はしない**（理由は下の comment_songs の節）。
 // toStreamResponse は配信を応答へ写す。
 //
+// streamView は応答に「何を載せるか」の判断。**bool を 2 つ並べない** ──
+// 呼び出し側が `(..., false, true)` と書く形にすると、どちらがどちらか読めない。
+//
+// 2 つが別の旗なのは効き方が違うから：
+//
+//	Analysis    … 解析結果。**詳細かつ content:edit のときだけ**（一覧には常に載せない）
+//	Operational … 処理済みフラグ。**content:edit なら一覧でも載せる**
+//	              （未処理の絞り込みと未処理バッジは編集の作業そのもの）
+type streamView struct {
+	Analysis    bool
+	Operational bool
+}
+
+// processedOrNil は運用の状態を載せてよいときだけ値を返す。
+func (v streamView) processedOrNil(processed bool) *bool {
+	if !v.Operational {
+		return nil
+	}
+	return &processed
+}
+
+// editorView は content:edit を持つ利用者の詳細向け。
+func editorView(isEditor bool) streamView {
+	return streamView{Analysis: isEditor, Operational: isEditor}
+}
+
+// listView は一覧・検索向け。解析結果は権限があっても載せない。
+func listView(isEditor bool) streamView {
+	return streamView{Analysis: false, Operational: isEditor}
+}
+
 // includeAnalysis は解析結果（Holodex / コメント / チャプターのタイムライン）を載せるか。
 // **これらは編集画面だけが読む中間生成物** ── フロントエンドでの参照はすべて
 // StreamDetailPage の isEditing の内側にあり、閲覧者向けの画面はどれも使っていない。
@@ -266,12 +297,12 @@ func (s *StreamService) GetByID(id string, access repository.ViewerAccess) (*dto
 //
 // 引数にして呼び出し側に選ばせているのは、あとから応答を返す経路が増えたときに
 // 黙って載せてしまわないため（コンパイルが通らないので判断を迫られる）。
-func (s *StreamService) toStreamResponse(stream models.Stream, tags []models.StreamTag, participants []models.Singer, channelOwner *models.Singer, includeAnalysis bool) dto.StreamResponse {
+func (s *StreamService) toStreamResponse(stream models.Stream, tags []models.StreamTag, participants []models.Singer, channelOwner *models.Singer, view streamView) dto.StreamResponse {
 	resp := dto.StreamResponse{
 		ID:           stream.ID,
 		Title:        stream.Title,
 		StreamDate:   stream.StreamDate.Format(time.RFC3339),
-		IsProcessed:  stream.IsProcessed,
+		IsProcessed:  view.processedOrNil(stream.IsProcessed),
 		IsHidden:     stream.IsHidden,
 		IsRestricted: stream.IsRestrictedEffective,
 		CreatedAt:    stream.CreatedAt,
@@ -339,7 +370,7 @@ func (s *StreamService) toStreamResponse(stream models.Stream, tags []models.Str
 	// 閲覧向けの応答には載せない ── 一覧と検索は非表示の配信も含むので、
 	// 載せると「一覧に出していない配信の抽出結果」が未ログインから列挙できてしまう
 	// （コメントのタイムラインは元コメントの原文を含む）。
-	if !includeAnalysis {
+	if !view.Analysis {
 		return resp
 	}
 
