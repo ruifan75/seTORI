@@ -64,7 +64,9 @@ func (s *ChatEndService) AnalyzeStream(videoID string) (AnalyzeResult, error) {
 		duration = int(stream.DurationSeconds.Int32)
 	}
 
-	songs, filled, changed := s.DetectEndsForSongs(videoID, duration, songs)
+	// この経路は拍手 end の付与そのものが目的で、到達できなければ 0 件になるだけ。
+	// 抽出結果のキャッシュは触らないので、到達可否で分岐する必要は無い。
+	songs, filled, changed, _ := s.DetectEndsForSongs(videoID, duration, songs)
 	res = AnalyzeResult{Total: len(songs), Filled: filled, Changed: changed}
 	// 既に end があった曲でも ChatEnd / EndDiff は保存する。値そのものは変えないが、
 	// コメントの end と拍手の end がずれている曲を UI で拾えるようにするため
@@ -88,19 +90,25 @@ func (s *ChatEndService) AnalyzeStream(videoID string) (AnalyzeResult, error) {
 
 // DetectEnds は指定された start 秒数に対して live chat の拍手から曲末 end を検出し、start→end の対応を返す。
 // DB には書かず、comment / holodex の両分析フローで共用する。live chat を使えなければ空の map を返す。
-func (s *ChatEndService) DetectEnds(videoID string, durationSeconds int, starts []int) map[int]int {
+// DetectEnds は拍手 end を返す。**2 つ目の戻り値は「live chat に到達できたか」。**
+//
+// 到達できなかったことと「到達したが拍手が無かった」ことは、どちらも空の結果に
+// なるので**呼び出し側では区別できない**。配信直後は YouTube の変換が終わって
+// おらず replay をしばらく取得できないため、この 2 つを混同すると
+// 「まだ取れないだけ」の配信を「拍手が無い配信」として確定させてしまう。
+func (s *ChatEndService) DetectEnds(videoID string, durationSeconds int, starts []int) (map[int]int, bool) {
 	if len(starts) == 0 {
-		return nil
+		return nil, true
 	}
 	chatPath, err := s.fetchLiveChat(videoID)
 	if err != nil {
 		logger.Warnf("[chatend] %s: live chat を利用できないため、end の推定をスキップ: %v", videoID, err)
-		return nil
+		return nil, false
 	}
 	events, err := chatend.ParseLiveChatFile(chatPath)
 	if err != nil {
 		logger.Warnf("[chatend] %s: live chat の解析に失敗: %v", videoID, err)
-		return nil
+		return nil, false
 	}
 
 	fstarts := make([]float64, len(starts))
@@ -114,7 +122,7 @@ func (s *ChatEndService) DetectEnds(videoID string, durationSeconds int, starts 
 			endByStart[int(e.Start)] = int(*e.End)
 		}
 	}
-	return endByStart
+	return endByStart, true
 }
 
 // DetectEndsForSongs は comment songs に拍手による end 検出を適用する。
@@ -126,15 +134,17 @@ func (s *ChatEndService) DetectEnds(videoID string, durationSeconds int, starts 
 // 戻り値は (songs, filled, changed)。filled は end を埋めた曲数、
 // changed は ChatEnd/EndDiff だけの記録も含めた「実際に書き換わった」曲数で、
 // 呼び出し側が保存の要否を判断するのに使う。
-func (s *ChatEndService) DetectEndsForSongs(videoID string, durationSeconds int, songs []dto.CommentSong) ([]dto.CommentSong, int, int) {
+// DetectEndsForSongs は comment songs に拍手 end を適用する。
+// 4 つ目の戻り値は「live chat に到達できたか」（DetectEnds の注記を参照）。
+func (s *ChatEndService) DetectEndsForSongs(videoID string, durationSeconds int, songs []dto.CommentSong) ([]dto.CommentSong, int, int, bool) {
 	if len(songs) == 0 {
-		return songs, 0, 0
+		return songs, 0, 0, true
 	}
 	starts := make([]int, len(songs))
 	for i, sg := range songs {
 		starts[i] = sg.Start
 	}
-	endByStart := s.DetectEnds(videoID, durationSeconds, starts)
+	endByStart, chatReachable := s.DetectEnds(videoID, durationSeconds, starts)
 	filled, changed := 0, 0
 
 	for i := range songs {
@@ -163,7 +173,7 @@ func (s *ChatEndService) DetectEndsForSongs(videoID string, durationSeconds int,
 			changed++
 		}
 	}
-	return songs, filled, changed
+	return songs, filled, changed, chatReachable
 }
 
 func abs(x int) int {
@@ -286,7 +296,8 @@ func (s *ChatEndService) EstimateEnds(videoID string, starts []int) (map[int]int
 	if stream.DurationSeconds.Valid {
 		duration = int(stream.DurationSeconds.Int32)
 	}
-	return s.DetectEnds(videoID, duration, starts), nil
+	ends, _ := s.DetectEnds(videoID, duration, starts)
+	return ends, nil
 }
 
 // saveAvailability は yt-dlp の --print 出力から再生可否を拾って保存する。

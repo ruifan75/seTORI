@@ -950,7 +950,9 @@ func (s *HolodexService) analyzeHolodexSongs(videoID string, force, adjudicate b
 		for i := range songs {
 			starts[i] = songs[i].StartSeconds
 		}
-		if endByStart := s.chatEndService.DetectEnds(videoID, duration, starts); len(endByStart) > 0 {
+		// 到達できなければ空が返るだけ。ここは Holodex の曲に end を足す経路で、
+		// 抽出結果のキャッシュを書かないので分岐は要らない。
+		if endByStart, _ := s.chatEndService.DetectEnds(videoID, duration, starts); len(endByStart) > 0 {
 			for i := range songs {
 				chatEnd, ok := endByStart[songs[i].StartSeconds]
 				if !ok {
@@ -1303,7 +1305,7 @@ func (s *HolodexService) attachChatComparison(stream *models.Stream, songs []dto
 	for i := range songs {
 		starts[i] = songs[i].StartSeconds
 	}
-	endByStart := s.chatEndService.DetectEnds(stream.ID, duration, starts)
+	endByStart, _ := s.chatEndService.DetectEnds(stream.ID, duration, starts)
 	for i := range songs {
 		if chatEnd, ok := endByStart[songs[i].StartSeconds]; ok {
 			songs[i].ChatEnd = chatEnd
