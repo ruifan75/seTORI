@@ -181,6 +181,8 @@ export default function SyncPage() {
     <div className="space-y-6">
       <h1 className="text-3xl font-bold text-gray-900">Holodex 同期</h1>
 
+      <AutoFillTargets />
+
       {/* Sync by Channel */}
       <div className="bg-white rounded-lg shadow-sm border p-6">
         <h2 className="text-xl font-bold text-gray-900 mb-4">チャンネルから同期</h2>
@@ -779,6 +781,73 @@ function GapList({ runId }: { runId: string }) {
           </ul>
         </div>
       ))}
+    </div>
+  );
+}
+
+
+// AutoFillTargets は自動処理が有効なチャンネルの一覧。
+//
+// **1 か所で見えて、ここから止められること**が目的。有効化はチャンネルページから
+// 個別にやるが、「今どれが自動で動いているか」を知るのに 148 件を見て回るのでは
+// 運用にならない。0 件のときも節ごと消さずに「無効」と出す ── 消すと
+// 「そんな仕組みは無い」と読めてしまう。
+function AutoFillTargets() {
+  const queryClient = useQueryClient();
+  const { showToast } = useToast();
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['autoFillTargets'],
+    queryFn: singerApi.listAutoFill,
+  });
+
+  const stop = useMutation({
+    mutationFn: (id: string) => singerApi.setAutoFill(id, false),
+    onSuccess: (_d, id) => {
+      queryClient.invalidateQueries({ queryKey: ['autoFillTargets'] });
+      queryClient.invalidateQueries({ queryKey: ['singer', id] });
+      showToast('自動処理を止めました', 'success');
+    },
+    onError: (err: Error) => showToast(err.message, 'error'),
+  });
+
+  const targets = data?.singers ?? [];
+
+  return (
+    <div className="bg-white rounded-lg shadow-sm border p-6">
+      <h2 className="text-xl font-bold text-gray-900 mb-2">自動処理の対象</h2>
+      <p className="text-gray-500 mb-4 text-sm">
+        新しい配信を定期的に取り込み、まだ歌単の無いものはコメントから自動で作ります。
+        確信の無いものと未登録の曲は<strong>審査へ回ります</strong>。
+        <strong>処理完了のチェックは自動では付きません</strong>（最後の確認は人がやります）。
+        有効化は各チャンネルのページから。
+      </p>
+
+      {isLoading ? (
+        <p className="text-gray-400 text-sm">読み込み中...</p>
+      ) : targets.length === 0 ? (
+        <p className="text-gray-400 text-sm">
+          対象はありません（自動処理は無効）。チャンネルページの「自動処理」から有効にできます。
+        </p>
+      ) : (
+        <ul className="divide-y border rounded-lg">
+          {targets.map((sg) => (
+            <li key={sg.id} className="flex items-center justify-between gap-3 px-4 py-2">
+              <Link to={`/singers/${sg.id}`} className="text-indigo-600 hover:underline truncate">
+                {sg.name}
+              </Link>
+              <button
+                onClick={() => stop.mutate(sg.id)}
+                disabled={stop.isPending}
+                title="このチャンネルの自動処理を止める"
+                className="shrink-0 px-2 py-1 text-xs text-gray-600 border border-gray-300 rounded-full hover:text-red-600 hover:border-red-300 disabled:opacity-50"
+              >
+                止める
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

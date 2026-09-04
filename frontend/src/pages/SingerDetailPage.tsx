@@ -259,6 +259,7 @@ export default function SingerDetailPage() {
               {canEdit && (singer.members_only_stream_count ?? 0) > 0 && (
                 <MembersPolicyPicker singer={singer} />
               )}
+              {canEdit && <AutoFillToggle singer={singer} />}
               {/* 非表示でもこのページは誰でも開けるので、閲覧者にも状態を見せる */}
               {singer.is_hidden && (
                 <span
@@ -754,6 +755,48 @@ export default function SingerDetailPage() {
         </div>
       )}
     </div>
+  );
+}
+
+// AutoFillToggle は自動処理（定期同期 → コメント解析 → 歌単作成）の切り替え。
+//
+// **既定は無効のオプトイン。** 立てると外部 API と AI を定期的に呼ぶので、
+// 黙って有効になっていてよいものではない。
+//
+// 立てても**最後の確認（処理完了）は自動では付かない** ── 確信の無いものは
+// 審査へ回り、人が確かめてから処理完了にする。ボタンの説明でそう言う。
+function AutoFillToggle({ singer }: { singer: { id: string; auto_fill_enabled?: boolean } }) {
+  const queryClient = useQueryClient();
+  const { showToast } = useToast();
+  const enabled = singer.auto_fill_enabled ?? false;
+
+  const mutation = useMutation({
+    mutationFn: (next: boolean) => singerApi.setAutoFill(singer.id, next),
+    onSuccess: (_data, next) => {
+      queryClient.invalidateQueries({ queryKey: ['singer', singer.id] });
+      queryClient.invalidateQueries({ queryKey: ['autoFillTargets'] });
+      showToast(next ? '自動処理を有効にしました' : '自動処理を止めました', 'success');
+    },
+    onError: (err: Error) => showToast(err.message, 'error'),
+  });
+
+  return (
+    <button
+      onClick={() => mutation.mutate(!enabled)}
+      disabled={mutation.isPending}
+      title={
+        enabled
+          ? '新しい配信を定期的に取り込み、まだ歌単の無いものはコメントから自動で作ります（確信の無いものは審査へ）。処理完了のチェックは自動では付きません'
+          : '有効にすると、新しい配信を定期的に取り込み、まだ歌単の無いものをコメントから自動で作ります'
+      }
+      className={`inline-flex items-center gap-1 px-2 py-1 text-xs border border-dashed rounded-full disabled:opacity-50 ${
+        enabled
+          ? 'text-sky-700 border-sky-400 bg-sky-50 hover:border-sky-500'
+          : 'text-gray-500 border-gray-300 hover:text-sky-600 hover:border-sky-300'
+      }`}
+    >
+      {enabled ? '自動処理：オン' : '自動処理：オフ'}
+    </button>
   );
 }
 

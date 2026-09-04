@@ -121,6 +121,12 @@ export interface Singer {
    */
   members_only_policy?: 'allow' | 'deny';
   /**
+   * 自動処理の対象か（定期同期＋コメント解析＋歌単作成）。
+   * **content:edit のときだけ返る**。既定は false のオプトイン。
+   * 立てても最後の確認（is_processed）は自動では付かない。
+   */
+  auto_fill_enabled?: boolean;
+  /**
    * 所有する会限配信の本数。**content:edit のときだけ返る**（0 なら省略）。
    * 0 本のチャンネルに公開可否を訊いても意味が無いので、方針の導線はこれで出し分ける。
    */

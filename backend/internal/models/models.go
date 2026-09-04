@@ -26,8 +26,12 @@ type Singer struct {
 	// NULL＝未確認（伏せる）/ allow / deny。**NULL と deny は実効同じ**だが、
 	// 「まだ訊いていないチャンネル」を一覧するために分けてある。
 	MembersOnlyPolicy sql.NullString `json:"members_only_policy"`
-	CreatedAt         time.Time      `json:"created_at"`
-	UpdatedAt         time.Time      `json:"updated_at"`
+	// AutoFillEnabled は自動処理の対象か（定期同期＋コメント解析＋歌単作成）。
+	// **既定は FALSE のオプトイン** ── 自動で外部 API と AI を呼ぶ旗なので、
+	// 黙って有効にしない。最後の確認（is_processed）は自動では付かない。
+	AutoFillEnabled bool      `json:"auto_fill_enabled"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 // Organization 事務所。

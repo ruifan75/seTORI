@@ -55,6 +55,16 @@ func TestStreamAnalysisEndpointsRequireContentEdit(t *testing.T) {
 		// 資源名が ID の位置に来た形は配信詳細であって解析素材ではない
 		{"ID の位置に資源名", http.MethodGet, "/api/streams/comments", "", false},
 
+		// 自動処理の対象一覧：**GET は既定で公開に落ちる**ので明示が要る。
+		// 「どのチャンネルを自動で回しているか」は運用の内部情報
+		{"自動処理の対象一覧", http.MethodGet, "/api/singers/auto-fill", auth.PermContentEdit, true},
+		{"自動処理の切り替え", http.MethodPut, "/api/singers/UC123/auto-fill", auth.PermContentEdit, true},
+		// 巻き込んでいないこと：チャンネルの閲覧は公開のまま
+		{"チャンネル詳細", http.MethodGet, "/api/singers/UC123", "", false},
+		{"チャンネル一覧", http.MethodGet, "/api/singers", "", false},
+		// 近い名前の別ルートを巻き込まない
+		{"近い名前の別ルート", http.MethodGet, "/api/singers/auto-fill-report", "", false},
+
 		// 語尾だけで見ると逆に漏れる形（サブリソースを足したとき）
 		{"サブリソース", http.MethodGet, "/api/streams/abc123/comments/raw", auth.PermContentEdit, true},
 		{"末尾スラッシュ", http.MethodGet, "/api/streams/abc123/comments/", auth.PermContentEdit, true},
