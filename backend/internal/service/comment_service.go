@@ -103,6 +103,13 @@ type analyzeOptions struct {
 	DryRun bool
 	// Adjudicate は照合の AI 判定まで行う（対話の読み込みだけ）。
 	Adjudicate bool
+	// NoRemoteFetch は「保存済みのコメントが空でも遠隔から取りに行かない」。
+	//
+	// **一括は保存済みの入力を処理する仕組み**で、コメントを取ってくるのは同期と
+	// `RefreshCommentRaw` の役目。ここで取りに行くと、別の入力源（Holodex の曲・
+	// 章節）で対象に残った配信でも毎回外部呼び出しが起きる ── 会限なら必ず 403 で、
+	// 何も得られないまま繰り返す。
+	NoRemoteFetch bool
 	// ProbeChatFirst は **AI 抽出より先に live chat を探る**。
 	//
 	// 抽出は AI を使う高い処理なのに、その後で「live chat がまだ無いので
@@ -123,7 +130,7 @@ type analyzeOptions struct {
 
 // batchAnalyzeOptions は一括・自動処理から。**chat を先に探る**のはここだけ。
 func batchAnalyzeOptions(force bool) analyzeOptions {
-	return analyzeOptions{Force: force, ProbeChatFirst: true}
+	return analyzeOptions{Force: force, ProbeChatFirst: true, NoRemoteFetch: true}
 }
 
 // interactiveAnalyzeOptions は編集画面の読み込みから。
@@ -176,7 +183,7 @@ func (s *CommentService) analyzeComments(videoID string, opts analyzeOptions) (*
 
 	// 1. 元コメントを取得する（DB を優先し、なければ YouTube/Holodex から取得）
 	logger.Infof("starting comment analysis for %s (force=%v, raw len=%d)", videoID, force, len(stream.CommentRaw))
-	comments, err := s.getComments(videoID, stream, dryRun)
+	comments, err := s.getComments(videoID, stream, dryRun, opts.NoRemoteFetch)
 	if err != nil {
 		return nil, err
 	}
@@ -836,12 +843,17 @@ func (s *CommentService) parseComments(comments []string) (songs []comment.Parse
 
 // getComments は DB から空でない元コメントを読み込み、なければ YouTube/Holodex から取得して保存する。
 // saveRaw=false のとき、遠隔から取り直したコメントを DB に書かない（dry-run 用）。
-func (s *CommentService) getComments(videoID string, stream *models.Stream, dryRun bool) ([]string, error) {
+func (s *CommentService) getComments(videoID string, stream *models.Stream, dryRun, noRemote bool) ([]string, error) {
 	if stream != nil && len(stream.CommentRaw) > 0 {
 		var comments []string
 		if err := json.Unmarshal(stream.CommentRaw, &comments); err == nil && len(comments) > 0 {
 			return comments, nil
 		}
+	}
+	// **保存済みが空なら、ここで取りに行かない経路がある**（一括）。
+	// 取りに行くと、別の入力源で対象に残った配信でも毎回外部呼び出しが起きる。
+	if noRemote {
+		return nil, nil
 	}
 
 	comments, err := s.holodexService.GetVideoComments(videoID)

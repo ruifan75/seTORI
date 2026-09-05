@@ -575,8 +575,10 @@ export default function SyncPage() {
               disabled={fillStatus?.running}
               className="border border-gray-300 rounded-lg px-3 py-2"
             >
-              <option value="unprocessed">歌唱がまだ無い配信だけ</option>
-              <option value="force">入力元を持つ配信すべて（既存と違う分は審査へ）</option>
+              {/* 「処理済みを除く」を書かないと、force との違いが
+                  「歌唱の有無だけ」に見えて、なぜ対象に出てこないのか分からなくなる */}
+              <option value="unprocessed">歌唱が無く、まだ処理済みでない配信</option>
+              <option value="force">入力元を持つ配信すべて（処理済みも含む・違う分は審査へ）</option>
             </select>
           </label>
           <label className="text-sm">

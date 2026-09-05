@@ -1232,6 +1232,7 @@ func (r *StreamRepository) FindBySingerID(singerID string, limit, offset int, fi
 // 「取り直しても結果が変わりうるもの」だけに絞る：
 //
 //	歌単が空          … 既にある歌単には触らない約束なので、それ以外は取り直しても何も起きない
+//	未処理            … 人が「処理した」と言ったものは触らない
 //	非表示でない      … 雑談・ゲームまで対象にしない（本番では 731 → 14 まで減る）
 //	終了から days 日以内 … 古い配信に今さら歌単が貼られることは稀
 //	未来日でない        … 予約配信を配信前から取りに行かない
@@ -1255,6 +1256,10 @@ func (r *StreamRepository) FindStreamsNeedingCommentRefresh(singerIDs []string, 
 		SELECT s.id
 		FROM streams s
 		WHERE s.is_hidden = FALSE
+		  -- **人が「処理した」と言った配信は取り直さない。** ここを見ないと、
+		  -- 一括作成の対象から外れていても**その前段で毎回外部取得が起きる**
+		  -- （会限なら 403）。人の結論を自動処理へ伝えるなら両方に要る。
+		  AND NOT s.is_processed
 		  -- **上限も要る。** 予約配信（未来日）は「終了から N 日以内」に入って
 		  -- しまい、配信が始まる前から定期的にコメントを取りに行くことになる。
 		  -- SyncChannel は past しか取らないが、SyncVideo 等で先に登録されうる。
@@ -1304,6 +1309,50 @@ func (r *StreamRepository) FindStreamsNeedingCommentRefresh(singerIDs []string, 
 	return ids, rows.Err()
 }
 
+// fillTargetWhere は一括セットリスト作成の対象条件を組み立てる。
+//
+// **純粋関数にしてあるのはテストのため。** 条件は SQL 文字列なので、壊れても
+// コンパイルは通る。実 DB を使うテスト基盤が無いので、せめてモードごとの
+// 生成結果を固定できる形にしてある。
+func fillTargetWhere(mode string) string {
+	// jsonb_typeof で配列だけを見る。comment_songs には JSON のスカラー 'null' が入っている
+	// 行があり、jsonb_array_length に直接渡すと「cannot get array length of a scalar」で落ちる。
+	//
+	// comment_raw しか無い（まだ抽出していない）配信も対象に入れる。読み込みの側が
+	// 未解析なら抽出から走らせるので、「コメントはあるがまだ解析していない」を
+	// 一括の対象外にしておく理由が無い。
+	//
+	// **ただし「非空の配列」で絞ること。** `IS NOT NULL AND != 'null'` では `[]` が通り、
+	// 「保存済みの入力を処理し直す」つもりの実行が遠隔からの再取得に化ける
+	// （CLAUDE.md §6.1。FindStreamsForBatch は直っていたが、こちらは残っていた）。
+	// 実測（2026-09-05、本番）：これで通っていた 9 本はすべて会限で `comment_raw = []`。
+	// コメントは API key では読めない（403 forbidden。**配額ではなく権限**）ので、
+	// 毎時間 403 を叩いては何も得られずに終わっていた。
+	//
+	// チャプターは**取得済みで章節がある**配信だけを対象にする。yt-dlp は一括の中で
+	// 呼ばない約束（1 本あたり数秒かかる）なので、まだ調べていない配信を入れても
+	// 読み込みの側が空を返すだけになる。先に POST /api/chapters/backfill を回すこと。
+	where := `s.is_hidden = FALSE AND (
+		(jsonb_typeof(s.holodex_data->'songs') = 'array' AND jsonb_array_length(s.holodex_data->'songs') > 0)
+		OR (jsonb_typeof(s.comment_songs) = 'array' AND jsonb_array_length(s.comment_songs) > 0)
+		OR (jsonb_typeof(s.comment_raw) = 'array' AND jsonb_array_length(s.comment_raw) > 0)
+		OR (jsonb_typeof(s.chapter_raw) = 'array' AND jsonb_array_length(s.chapter_raw) > 0))`
+	if mode == "unprocessed" {
+		where += " AND NOT EXISTS (SELECT 1 FROM performances p WHERE p.stream_id = s.id)"
+		// **人が「処理した」と言った配信は触らない。**
+		//
+		// ここでの unprocessed は「歌唱記録が無い」という意味で、`is_processed` 列とは
+		// 別物（名前だけ衝突している）。見ていなかったので、**人の結論が仕組みに
+		// 伝わっていなかった** ── 確認して「この配信に歌は無い」と判断しても、
+		// 歌唱が 0 件なら毎回やり直していた。
+		//
+		// force モードには付けない。あちらは「全部もう一度考え直す」ための明示的な口で、
+		// 人が意図して回すもの。
+		where += " AND NOT s.is_processed"
+	}
+	return where
+}
+
 // FindStreamsForFill は一括セットリスト作成の対象を返す。
 //
 // 一括プレ分析（FindStreamsForBatch）とは対象が違う。あちらは comment_raw を持つ配信だが、
@@ -1333,28 +1382,7 @@ func (r *StreamRepository) FindStreamsForFill(mode string, singerIDs []string, i
 	// チャプターは**取得済みで章節がある**配信だけを対象にする。yt-dlp は一括の中で
 	// 呼ばない約束（1 本あたり数秒かかる）なので、まだ調べていない配信を入れても
 	// 読み込みの側が空を返すだけになる。先に POST /api/chapters/backfill を回すこと。
-	where := `s.is_hidden = FALSE AND (
-		(jsonb_typeof(s.holodex_data->'songs') = 'array' AND jsonb_array_length(s.holodex_data->'songs') > 0)
-		OR (jsonb_typeof(s.comment_songs) = 'array' AND jsonb_array_length(s.comment_songs) > 0)
-		OR (jsonb_typeof(s.comment_raw) = 'array' AND jsonb_array_length(s.comment_raw) > 0)
-		OR (jsonb_typeof(s.chapter_raw) = 'array' AND jsonb_array_length(s.chapter_raw) > 0))`
-	if mode == "unprocessed" {
-		where += " AND NOT EXISTS (SELECT 1 FROM performances p WHERE p.stream_id = s.id)"
-		// **人が「処理した」と言った配信は触らない。**
-		//
-		// ここでの unprocessed は「歌唱記録が無い」という意味で、`is_processed` 列とは
-		// 別物（名前だけ衝突している）。見ていなかったので、**人の結論が仕組みに
-		// 伝わっていなかった** ── 確認して「この配信に歌は無い」と判断しても、
-		// 歌唱が 0 件なら毎回やり直していた。
-		//
-		// 実測（2026-09-05、本番）：対象 14 本のうち 10 本が会限で、コメントは
-		// API key では読めない（403 forbidden。配額ではなく権限）。入力源が全部空なので
-		// 歌唱は永久に 0 件のまま、毎時間 403 を叩き続けていた（issue #41）。
-		//
-		// force モードには付けない。あちらは「全部もう一度考え直す」ための明示的な口で、
-		// 人が意図して回すもの。
-		where += " AND NOT s.is_processed"
-	}
+	where := fillTargetWhere(mode)
 
 	args := []any{}
 	if len(singerIDs) > 0 {

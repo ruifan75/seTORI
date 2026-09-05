@@ -43,9 +43,13 @@ type BatchFillService struct {
 }
 
 const (
-	// BatchFillModeUnprocessed は歌唱がまだ 1 つも無い配信だけを埋める。
+	// BatchFillModeUnprocessed は歌唱がまだ 1 つも無く、**かつ処理済みでない**配信を埋める。
+	// 人が「処理した」と言ったものは、歌唱が 0 件でも触らない
+	// （確認して「この配信に歌は無い」と判断した結果を毎回やり直さないため）。
 	BatchFillModeUnprocessed = "unprocessed"
-	// BatchFillModeForce は入力元を持つ配信すべてを見る。既存と食い違う分は審査へ回す。
+	// BatchFillModeForce は入力元を持つ配信すべてを見る（処理済みも含む）。
+	// 既存と食い違う分は審査へ回す。**明示的に「全部もう一度考え直す」ための口**なので、
+	// 人の裁定では絞らない。
 	BatchFillModeForce = "force"
 
 	// 自動で歌唱を作ってよい AI の確信度。これ未満は人の審査へ回す。
