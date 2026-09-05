@@ -508,6 +508,12 @@ type AnalyzeCommentsResponse struct {
 	// AI 正規化が失敗（全プロバイダー冷却等）し、抽出のみで返した場合に設定される。
 	// バッチ分析はこれを見て冷却待ち後に force 再試行する。
 	Warning string `json:"warning,omitempty"`
+	// Deferred は「今回は結論を出さずに見送った」。live chat が取得できず、
+	// **変換待ちか一時的な障害**と判断した回に立つ（chat_readiness.go）。
+	// エラーではないので err は nil だが、**完了として数えてはいけない**
+	// ── 数えると再試行されず、その配信の end は付かないまま残る。
+	// Warning と違って**同じ実行での再試行は無意味**（変換は数時間かかる）。
+	Deferred bool `json:"deferred,omitempty"`
 	// 何が起きたかの内訳。応答だけで挙動を確かめられるようにするためのもので、
 	// これが無いとサーバーのログを読まないと「どの経路を通ったか」が分からない。
 	Stats *AnalyzeStats `json:"stats,omitempty"`
@@ -535,13 +541,16 @@ type AnalyzeStats struct {
 
 // BatchAnalyzeStatus 未処理配信の一括分析ジョブの進捗
 type BatchAnalyzeStatus struct {
-	Running   bool     `json:"running"`
-	Mode      string   `json:"mode,omitempty"`
-	SingerID  string   `json:"singer_id,omitempty"` // 対象を絞ったチャンネル（空なら全チャンネル）
-	Hidden    string   `json:"hidden,omitempty"`    // 非表示配信の扱い（false/true/all）。画面に何が走っているか出すため
-	Total     int      `json:"total"`
-	Done      int      `json:"done"`
-	Failed    int      `json:"failed"`
+	Running  bool   `json:"running"`
+	Mode     string `json:"mode,omitempty"`
+	SingerID string `json:"singer_id,omitempty"` // 対象を絞ったチャンネル（空なら全チャンネル）
+	Hidden   string `json:"hidden,omitempty"`    // 非表示配信の扱い（false/true/all）。画面に何が走っているか出すため
+	Total    int    `json:"total"`
+	Done     int    `json:"done"`
+	Failed   int    `json:"failed"`
+	// Deferred は live chat の取得待ちで見送った件数（失敗ではない）。
+	// 次の実行で拾われるので、完了とも失敗とも分けて出す。
+	Deferred  int      `json:"deferred"`
 	Current   string   `json:"current,omitempty"`    // 処理中の配信タイトル
 	FailedIDs []string `json:"failed_ids,omitempty"` // AI 失敗が解消しなかった配信
 	Message   string   `json:"message,omitempty"`

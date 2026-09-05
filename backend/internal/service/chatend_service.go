@@ -96,19 +96,20 @@ func (s *ChatEndService) AnalyzeStream(videoID string) (AnalyzeResult, error) {
 // なるので**呼び出し側では区別できない**。配信直後は YouTube の変換が終わって
 // おらず replay をしばらく取得できないため、この 2 つを混同すると
 // 「まだ取れないだけ」の配信を「拍手が無い配信」として確定させてしまう。
-func (s *ChatEndService) DetectEnds(videoID string, durationSeconds int, starts []int) (map[int]int, bool) {
+func (s *ChatEndService) DetectEnds(videoID string, durationSeconds int, starts []int) (map[int]int, chatOutcome) {
 	if len(starts) == 0 {
-		return nil, true
+		return nil, chatOK
 	}
-	chatPath, err := s.fetchLiveChat(videoID)
+	chatPath, outcome, err := s.fetchLiveChat(videoID)
 	if err != nil {
 		logger.Warnf("[chatend] %s: live chat を利用できないため、end の推定をスキップ: %v", videoID, err)
-		return nil, false
+		return nil, outcome
 	}
 	events, err := chatend.ParseLiveChatFile(chatPath)
 	if err != nil {
+		// ファイルは取れたが読めない（途中で切れた等）。**結論にはしない。**
 		logger.Warnf("[chatend] %s: live chat の解析に失敗: %v", videoID, err)
-		return nil, false
+		return nil, chatTransientError
 	}
 
 	fstarts := make([]float64, len(starts))
@@ -122,7 +123,7 @@ func (s *ChatEndService) DetectEnds(videoID string, durationSeconds int, starts 
 			endByStart[int(e.Start)] = int(*e.End)
 		}
 	}
-	return endByStart, true
+	return endByStart, chatOK
 }
 
 // DetectEndsForSongs は comment songs に拍手による end 検出を適用する。
@@ -136,15 +137,15 @@ func (s *ChatEndService) DetectEnds(videoID string, durationSeconds int, starts 
 // 呼び出し側が保存の要否を判断するのに使う。
 // DetectEndsForSongs は comment songs に拍手 end を適用する。
 // 4 つ目の戻り値は「live chat に到達できたか」（DetectEnds の注記を参照）。
-func (s *ChatEndService) DetectEndsForSongs(videoID string, durationSeconds int, songs []dto.CommentSong) ([]dto.CommentSong, int, int, bool) {
+func (s *ChatEndService) DetectEndsForSongs(videoID string, durationSeconds int, songs []dto.CommentSong) ([]dto.CommentSong, int, int, chatOutcome) {
 	if len(songs) == 0 {
-		return songs, 0, 0, true
+		return songs, 0, 0, chatOK
 	}
 	starts := make([]int, len(songs))
 	for i, sg := range songs {
 		starts[i] = sg.Start
 	}
-	endByStart, chatReachable := s.DetectEnds(videoID, durationSeconds, starts)
+	endByStart, outcome := s.DetectEnds(videoID, durationSeconds, starts)
 	filled, changed := 0, 0
 
 	for i := range songs {
@@ -173,7 +174,7 @@ func (s *ChatEndService) DetectEndsForSongs(videoID string, durationSeconds int,
 			changed++
 		}
 	}
-	return songs, filled, changed, chatReachable
+	return songs, filled, changed, outcome
 }
 
 func abs(x int) int {
@@ -218,14 +219,14 @@ func (s *ChatEndService) Backfill(concurrency int) {
 }
 
 // fetchLiveChat は yt-dlp で live chat replay をダウンロードする（取得済みならキャッシュを使う）。
-func (s *ChatEndService) fetchLiveChat(videoID string) (string, error) {
+func (s *ChatEndService) fetchLiveChat(videoID string) (string, chatOutcome, error) {
 	if err := os.MkdirAll(s.cacheDir, 0o755); err != nil {
-		return "", fmt.Errorf("create cache dir: %w", err)
+		return "", chatTransientError, fmt.Errorf("create cache dir: %w", err)
 	}
 	base := filepath.Join(s.cacheDir, videoID)
 	chat := base + ".live_chat.json"
 	if _, err := os.Stat(chat); err == nil {
-		return chat, nil
+		return chat, chatOK, nil
 	}
 
 	args := []string{
@@ -263,23 +264,30 @@ func (s *ChatEndService) fetchLiveChat(videoID string) (string, error) {
 
 	// 警告だけで終了コードが非 0 になることがあるので、まずファイルの有無で判断する。
 	if _, err := os.Stat(chat); err == nil {
-		return chat, nil
+		return chat, chatOK, nil
 	}
 
 	// ここから先は失敗の理由を残す。yt-dlp 未インストール・BOT 判定・単に
 	// チャットが無い配信は対処が全く違うのに、以前はどれも同じ文言になっていた。
+	//
+	// **「replay が無い」と「一時的に取れなかった」を戻り値でも分ける。**
+	// 呼び出し側は前者を結論として扱ってよいが、後者から結論すると
+	// 障害の最中に解析した配信が「チャットの無い配信」として固定される。
 	switch {
 	case notInstalled(runErr):
-		return "", fmt.Errorf("yt-dlp が実行できません (%s): 未インストールの可能性があります", s.path)
+		return "", chatTransientError, fmt.Errorf("yt-dlp が実行できません (%s): 未インストールの可能性があります", s.path)
 	case ctx.Err() != nil:
-		return "", fmt.Errorf("yt-dlp がタイムアウトしました（3分）")
+		return "", chatTransientError, fmt.Errorf("yt-dlp がタイムアウトしました（3分）")
 	case isBotCheck(stderr.String()):
 		// 全配信で一様に起きるので、原因と対処をここで名指ししておく
-		return "", botCheckError(s.ytdlpRunner)
+		return "", chatTransientError, botCheckError(s.ytdlpRunner)
 	case runErr != nil:
-		return "", fmt.Errorf("yt-dlp に失敗 (%v): %s", runErr, ytdlpErrorLine(stderr.String()))
+		return "", chatTransientError, fmt.Errorf("yt-dlp に失敗 (%v): %s", runErr, ytdlpErrorLine(stderr.String()))
 	}
-	return "", fmt.Errorf("この配信に live chat replay がありません")
+	// yt-dlp は正常終了したがファイルが無い。**まだ変換中の可能性がある**ので、
+	// 「この配信にはチャットが無い」と言い切れるのは配信から十分に時間が
+	// 経っているときだけ（chat_readiness.go）。
+	return "", chatNoReplay, fmt.Errorf("live chat replay が見つかりません（変換待ちの可能性があります）")
 }
 
 // EstimateEnds は任意の開始秒数リストに対する拍手 end 推定を返す（編集ページの単曲追加用）。

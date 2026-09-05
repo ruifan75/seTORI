@@ -161,15 +161,15 @@ func (s *CommentService) analyzeComments(videoID string, force, dryRun, adjudica
 
 	// 6. live chat の拍手で end を推定（start 基準でマッチ。利用不可なら据え置き）
 	//
-	// chatReachable は「live chat に到達できたか」。到達できなかった回の結果を
+	// chatState は live chat 取得の結果（到達 / replay 無し / 一時的な障害）。
 	// キャッシュすると、その配信の end はコメントの値のまま固定される（下の 7 を参照）。
-	chatReachable := true
+	chatState := chatOK
 	if s.chatEndService != nil {
 		var duration int
 		if stream.DurationSeconds.Valid {
 			duration = int(stream.DurationSeconds.Int32)
 		}
-		songs, _, _, chatReachable = s.chatEndService.DetectEndsForSongs(videoID, duration, songs)
+		songs, _, _, chatState = s.chatEndService.DetectEndsForSongs(videoID, duration, songs)
 	}
 
 	// 7. 永続化（comment_songs + 由来のハッシュ）→ 次回からはキャッシュを直接読む
@@ -179,6 +179,9 @@ func (s *CommentService) analyzeComments(videoID string, force, dryRun, adjudica
 	// 次回以降はキャッシュ命中で AI を呼ばなくなり劣化が固定される。
 	// 保存しなければ以前の結果と hash がそのまま残り、復旧を待てる。
 	saved := false
+	// deferred … live chat が取れなかったので結論を出さずに見送った。
+	// **呼び出し元は完了として数えてはいけない**（下の Deferred を見る）。
+	deferred := false
 	switch {
 	case dryRun:
 		// 読み取り専用の口。何も書かない
@@ -186,7 +189,8 @@ func (s *CommentService) analyzeComments(videoID string, force, dryRun, adjudica
 		// hash が無い（コメントが空など）ので保存対象外
 	case aiWarning != "":
 		logger.Warnf("[comment] skipping cache write for %s due to AI degradation: %s", videoID, aiWarning)
-	case holdCacheForChat(*stream, chatReachable, time.Now()):
+	case holdCacheForChat(*stream, chatState, time.Now()):
+		deferred = true
 		// **配信直後は live chat replay をまだ取得できない。** ここで保存すると
 		// hash が入り、次の一括プレ分析はキャッシュ命中で拍手検出まで飛ばすので、
 		// この配信の end はコメントに書かれた値のまま固定される。
@@ -225,9 +229,10 @@ func (s *CommentService) analyzeComments(videoID string, force, dryRun, adjudica
 
 	logger.Infof("comment analysis completed for %s: %d songs", videoID, len(songs))
 	return &dto.AnalyzeCommentsResponse{
-		Songs:   songs,
-		Warning: aiWarning,
-		Stats:   buildStats(path, dryRun, saved, songs, aliasAsked, aliasLinked),
+		Songs:    songs,
+		Warning:  aiWarning,
+		Deferred: deferred,
+		Stats:    buildStats(path, dryRun, saved, songs, aliasAsked, aliasLinked),
 	}, nil
 }
 

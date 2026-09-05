@@ -941,6 +941,8 @@ func (s *HolodexService) analyzeHolodexSongs(videoID string, force, adjudicate b
 
 	// 3. 拍手 end：明示 end が無い曲は補完。明示 end がある曲も chat 値を検出し、
 	//    ChatEnd/EndDiff として付与する（Holodex 側の誤りをユーザーが確認できるように）。
+	//    chatState は取得の結果で、5 のキャッシュ書き込みの可否に効く。
+	chatState := chatOK
 	if s.chatEndService != nil {
 		var duration int
 		if stream.DurationSeconds.Valid {
@@ -950,9 +952,9 @@ func (s *HolodexService) analyzeHolodexSongs(videoID string, force, adjudicate b
 		for i := range songs {
 			starts[i] = songs[i].StartSeconds
 		}
-		// 到達できなければ空が返るだけ。ここは Holodex の曲に end を足す経路で、
-		// 抽出結果のキャッシュを書かないので分岐は要らない。
-		if endByStart, _ := s.chatEndService.DetectEnds(videoID, duration, starts); len(endByStart) > 0 {
+		endByStart, outcome := s.chatEndService.DetectEnds(videoID, duration, starts)
+		chatState = outcome
+		if len(endByStart) > 0 {
 			for i := range songs {
 				chatEnd, ok := endByStart[songs[i].StartSeconds]
 				if !ok {
@@ -977,7 +979,17 @@ func (s *HolodexService) analyzeHolodexSongs(videoID string, force, adjudicate b
 
 	// 5. 永続化（holodex_songs_normalized + holodex_hash）→ 次回はキャッシュを直接読む
 	//    照合の結果は保存しない（読み取り時に計算する。コメント経路と同じ約束）
-	if holodexHash != "" {
+	//
+	// **この経路もキャッシュを書く。** live chat に到達できていないと、4 で
+	// 次曲の start がそのまま end として保存され、次回はキャッシュ命中で
+	// 拍手検出まで飛ぶ。attachChatComparison は後から ChatEnd を足すだけで
+	// EndSeconds を直さないので、その end は固定される（chat_readiness.go）。
+	switch {
+	case holodexHash == "":
+	case holdCacheForChat(*stream, chatState, time.Now()):
+		logger.Warnf("[holodex] skipping cache write for %s: live chat に到達できず（%v）、"+
+			"次回やり直します", videoID, chatState)
+	default:
 		if b, mErr := json.Marshal(stripMatchFromSuggestions(songs)); mErr == nil {
 			if err := s.streamRepo.SaveHolodexSongs(videoID, b, holodexHash); err != nil {
 				logger.Warnf("[holodex] save normalized songs failed (%s): %v", videoID, err)

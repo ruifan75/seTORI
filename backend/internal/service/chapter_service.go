@@ -180,14 +180,14 @@ func (s *ChapterService) analyzeChapters(videoID string, force, adjudicate bool)
 	applyChapterEnds(songs, chapters)
 
 	// 拍手 end（live chat）。ここで埋まったものだけが確かな end になる。
-	// chatReachable は「到達できたか」で、保存の可否に効く（下を参照）。
-	chatReachable := true
+	// chatState は取得の結果で、保存の可否に効く（下を参照）。
+	chatState := chatOK
 	if s.chatEnd != nil {
 		var duration int
 		if stream.DurationSeconds.Valid {
 			duration = int(stream.DurationSeconds.Int32)
 		}
-		songs, _, _, chatReachable = s.chatEnd.DetectEndsForSongs(videoID, duration, songs)
+		songs, _, _, chatState = s.chatEnd.DetectEndsForSongs(videoID, duration, songs)
 	}
 
 	// 永続化。AI が失敗した回は保存しない（劣化結果をキャッシュに固定しないため）。
@@ -197,7 +197,7 @@ func (s *ChapterService) analyzeChapters(videoID string, force, adjudicate bool)
 	case rawHash == "":
 	case warning != "":
 		logger.Warnf("[chapter] skipping cache write for %s due to AI degradation: %s", videoID, warning)
-	case holdCacheForChat(*stream, chatReachable, time.Now()):
+	case holdCacheForChat(*stream, chatState, time.Now()):
 		// コメント経路と同じ理由（chat_readiness.go）。配信直後は replay が
 		// 取れず、保存すると hash 命中で拍手検出まで飛ばされ end が固定される。
 		logger.Warnf("[chapter] skipping cache write for %s: live chat に到達できず、"+

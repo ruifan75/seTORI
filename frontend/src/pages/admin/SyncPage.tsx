@@ -398,7 +398,7 @@ export default function SyncPage() {
                 ? ` / ${singers.find((sg) => sg.id === batchStatus.singer_id)?.name ?? batchStatus.singer_id}`
                 : ' / 全チャンネル'}
               ）{' '}
-              {batchStatus.done + batchStatus.failed}/{batchStatus.total}
+              {batchStatus.done + batchStatus.failed + (batchStatus.deferred ?? 0)}/{batchStatus.total}
             </span>
             {batchStatus.current && <span className="text-gray-500 truncate max-w-md">{batchStatus.current}</span>}
             <button
@@ -420,7 +420,12 @@ export default function SyncPage() {
             {batchStatus && batchStatus.total > 0 && (
               <span className="text-sm text-gray-500">
                 前回: {batchStatus.message}（成功 {batchStatus.done} 件
-                {batchStatus.failed > 0 && `・失敗 ${batchStatus.failed} 件`}）
+                {batchStatus.failed > 0 && `・失敗 ${batchStatus.failed} 件`}
+                {/* 見送りは失敗ではない。次の実行で拾われることまで書かないと
+                    「取りこぼした」と読まれる */}
+                {(batchStatus.deferred ?? 0) > 0 &&
+                  `・live chat 待ちで見送り ${batchStatus.deferred} 件（次回やり直します）`}
+                ）
                 {batchStatus.failed > 0 && batchStatus.failed_ids && (
                   <span className="text-xs text-gray-400" title={batchStatus.failed_ids.join(', ')}>
                     {' '}（{batchStatus.failed_ids.slice(0, 3).join(', ')}

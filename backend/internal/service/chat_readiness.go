@@ -7,6 +7,25 @@ import (
 	"github.com/ruifan75/setori/internal/models"
 )
 
+// chatOutcome は live chat 取得の結果。**3 態に分けるのが要点。**
+//
+// 以前は「取れたか」の 2 態だったので、BOT 判定・timeout・yt-dlp 未導入といった
+// **一時的な障害**まで「この配信にはチャットが無い」と同じ扱いになっていた。
+// 障害の最中に解析した配信は、下の年齢判定を通って結論として保存されてしまう。
+type chatOutcome int
+
+const (
+	// chatOK … 到達できた。拍手 0 件でも「拍手が無い」は確かな結論。
+	chatOK chatOutcome = iota
+	// chatNoReplay … yt-dlp は正常終了したが replay が無い。
+	// **まだ変換中かもしれない**ので、結論にしてよいかは経過時間で決める。
+	chatNoReplay
+	// chatTransientError … BOT 判定・timeout・未導入・解析失敗など。
+	// **経過時間に関係なく結論にしない。** 障害はいつか直るが、
+	// 一度キャッシュに固定すると誰かが手で backfill するまで直らない。
+	chatTransientError
+)
+
 // chatRetryWindow は「まだ変換中かもしれない」と見なす期間。
 //
 // 配信が終わった直後は YouTube の変換が終わっておらず、live chat replay を
@@ -21,21 +40,22 @@ const chatRetryWindow = 48 * time.Hour
 //
 // Holodex の end_actual を第一候補にする（本番 1318 本すべてに入っている）。
 // 無ければ配信日で代用する ── 日付だけでも「48 時間以内か」の判定には足りる。
-func streamEndedAt(stream models.Stream) (time.Time, bool) {
+// 3 つ目の戻り値は「実際の終了時刻か」（false なら配信日で代用した概算）。
+func streamEndedAt(stream models.Stream) (time.Time, bool, bool) {
 	if len(stream.HolodexData) > 0 {
 		var hd struct {
 			EndActual string `json:"end_actual"`
 		}
 		if err := json.Unmarshal(stream.HolodexData, &hd); err == nil && hd.EndActual != "" {
 			if t, err := time.Parse(time.RFC3339, hd.EndActual); err == nil {
-				return t, true
+				return t, true, true
 			}
 		}
 	}
 	if !stream.StreamDate.IsZero() {
-		return stream.StreamDate, true
+		return stream.StreamDate, true, false
 	}
-	return time.Time{}, false
+	return time.Time{}, false, false
 }
 
 // holdCacheForChat は「抽出結果をキャッシュせずに次回やり直すべきか」を返す。
@@ -52,13 +72,33 @@ func streamEndedAt(stream models.Stream) (time.Time, bool) {
 //
 // 年齢が分からない配信は保存する側に倒す（分からないものを無限に
 // 再試行するより、一度確定させて手動の backfill に任せるほうが安全）。
-func holdCacheForChat(stream models.Stream, chatReachable bool, now time.Time) bool {
-	if chatReachable {
+// **一時的な障害はこの限りではない** ── そちらは年齢に関係なく保留する。
+func holdCacheForChat(stream models.Stream, outcome chatOutcome, now time.Time) bool {
+	switch outcome {
+	case chatOK:
 		return false
+	case chatTransientError:
+		// 障害から結論しない。3 日前の配信を BOT 判定の最中に解析しても、
+		// 「チャットが無い配信」として固定されてはいけない。
+		return true
 	}
-	endedAt, ok := streamEndedAt(stream)
+
+	// chatNoReplay ── 変換待ちかもしれないので、経過時間で決める。
+	endedAt, ok, exact := streamEndedAt(stream)
 	if !ok {
 		return false
 	}
-	return now.Sub(endedAt) < chatRetryWindow
+	window := chatRetryWindow
+	if !exact {
+		// 配信日しか無い＝**その日の 0 時**を終了時刻として扱っている。
+		// 実際の終了は最大でその翌日にまで及ぶので、そのぶん余裕を足さないと
+		// 「48 時間経った」と言いながら実際は 24 時間しか経っていないことがある。
+		window += streamDateSlack
+	}
+	return now.Sub(endedAt) < window
 }
+
+// streamDateSlack は end_actual が無く配信日で代用するときの上乗せ。
+// 配信日は 0 時なので、当日中に終わる配信なら実際の終了は最大 24 時間後。
+// さらに日跨ぎと時差のぶんを見て 1 日足す。
+const streamDateSlack = 48 * time.Hour
