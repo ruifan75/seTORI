@@ -1197,8 +1197,12 @@ export default function StreamDetailPage() {
       ? 'unavailable'
       : playbackErrorCode === 101 || playbackErrorCode === 150
         ? 'playback_failed'
-        : stream.playability && stream.playability !== 'unknown' && stream.playability !== 'playable'
-          ? stream.playability
+        // **先に案内へ倒してよいのは会限だけ。** 他の判定（`unavailable` /
+        // `embed_disabled`）は東京の VPS から見た結果でしかなく、所在地によっては
+        // 再生できる。先に倒すとプレイヤーを描かないので `onError` も鳴らず、
+        // 取り返せない（`UnplayableNotice` の NoticeKind を参照）。
+        : stream.playability === 'members_only'
+          ? 'members_only'
           : null;
 
   const setoriTimeline = stream.performances.map((perf) => {
@@ -1773,13 +1777,13 @@ export default function StreamDetailPage() {
               この箱は縮められ 16:9 を保てない（実測 1299px で比 1.99）。
               上限そのものは 1bb43a5 で「1300px 未満でページをスクロールできるように」
               入れたものなので、直すなら上限の側の設計を見直す必要がある。issue #16 */}
-          {/* 再生できないと分かっている配信にはプレイヤーを描かない。必ず失敗する
-              iframe を出してから黒い枠だけが残るより、理由を出す。
-              playability が undefined（判定していない応答）や unknown（未調査）の
-              ときは従来どおり描き、**実際に失敗したら onError で切り替える**
-              ── 保存済みの判定は古くなるし（アーカイブが後から会限化する、
-              権利で降ろされる）、`public` はそもそも「反証が無かった」という
-              弱い結論でしかない（docs/STREAM_VISIBILITY.md）。 */}
+          {/* **基本は描いてみて、失敗したら onError で切り替える。**
+              保存済みの判定は古くなるし（アーカイブが後から会限化する、権利で
+              降ろされる）、`public` はそもそも「反証が無かった」という弱い結論
+              でしかない（docs/STREAM_VISIBILITY.md）。さらに yt-dlp は東京の VPS で
+              走るので、その結果は見る人の所在地では正しくないことがある。
+              例外は会限だけ ── 実測で所在地に依らず 150 を返すので、必ず失敗する
+              iframe を描くより理由を出すほうがよい（メンバー資格があっても同じ）。 */}
           {noticeKind ? (
             <UnplayableNotice kind={noticeKind} videoId={stream.id} />
           ) : (
