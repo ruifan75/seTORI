@@ -66,7 +66,7 @@ var (
 // AI 判定（別名義・楽曲の同一性）まで行う ── 押した人はどのみち待っているし、
 // これから編集する配信なので判定する価値がある。
 func (s *CommentService) AnalyzeComments(videoID string, force bool) (*dto.AnalyzeCommentsResponse, error) {
-	return s.analyzeComments(videoID, force, false, true)
+	return s.analyzeComments(videoID, interactiveAnalyzeOptions(force))
 }
 
 // AnalyzeCommentsForBatch は一括プレ分析用。**AI 判定は行わない。**
@@ -79,7 +79,7 @@ func (s *CommentService) AnalyzeComments(videoID string, force bool) (*dto.Analy
 // 混ぜると、724 本を回すだけで 1 本あたり最大 3 回の AI 呼び出しになり、
 // 誰も見ていない配信のために別名義の学習（システム全体の照合に効く）が進んでしまう。
 func (s *CommentService) AnalyzeCommentsForBatch(videoID string, force bool) (*dto.AnalyzeCommentsResponse, error) {
-	return s.analyzeComments(videoID, force, false, false)
+	return s.analyzeComments(videoID, batchAnalyzeOptions(force))
 }
 
 // AnalyzeCommentsDryRun は解析だけ行い、**何も書き込まない**。
@@ -91,10 +91,52 @@ func (s *CommentService) AnalyzeCommentsForBatch(videoID string, force bool) (*d
 // 別名義の AI 判定は**行わない**（判定は artist_alias_checks への書き込みを伴うため）。
 // その分だけ本番の挙動とはズレる。stats.path と alias_pairs_asked=0 で判別できる。
 func (s *CommentService) AnalyzeCommentsDryRun(videoID string) (*dto.AnalyzeCommentsResponse, error) {
-	return s.analyzeComments(videoID, true, true, false)
+	return s.analyzeComments(videoID, dryRunAnalyzeOptions())
 }
 
-func (s *CommentService) analyzeComments(videoID string, force, dryRun, adjudicate bool) (*dto.AnalyzeCommentsResponse, error) {
+// analyzeOptions は解析経路の違い。**bool を並べない** ── 呼び出し側が
+// `(id, force, false, false, true)` と書く形になると、どれがどれか読めない。
+type analyzeOptions struct {
+	// Force はキャッシュを無視して作り直す。
+	Force bool
+	// DryRun は何も書き込まない（測定用）。
+	DryRun bool
+	// Adjudicate は照合の AI 判定まで行う（対話の読み込みだけ）。
+	Adjudicate bool
+	// ProbeChatFirst は **AI 抽出より先に live chat を探る**。
+	//
+	// 抽出は AI を使う高い処理なのに、その後で「live chat がまだ無いので
+	// 結論を出さない」と分かると結果ごと捨てることになる（PR #36 の Deferred）。
+	// しかも見送った回は hash を保存しないので、**次の実行でも必ず再抽出する**
+	// ── キャッシュが効く通常の経路と違い、繰り返すたびに AI を呼ぶ。
+	//
+	// live chat の取得は videoID しか要らない（曲目が要るのは後段の
+	// 突き合わせだけ）ので先に探れる。成功時のコストは増えない
+	// ── どのみち後で取りに行くし、結果はファイルキャッシュに載る。
+	//
+	// **対話の読み込みでは立てない。** 人はボタンを押した以上、拍手 end が
+	// 無くても曲目を今見たい。ここで早退すると編集画面が壊れる。
+	ProbeChatFirst bool
+}
+
+// batchAnalyzeOptions は一括・自動処理から。**chat を先に探る**のはここだけ。
+func batchAnalyzeOptions(force bool) analyzeOptions {
+	return analyzeOptions{Force: force, ProbeChatFirst: true}
+}
+
+// interactiveAnalyzeOptions は編集画面の読み込みから。
+// **早退しない** ── 人はボタンを押した以上、拍手 end が無くても曲目を今見たい。
+func interactiveAnalyzeOptions(force bool) analyzeOptions {
+	return analyzeOptions{Force: force, Adjudicate: true}
+}
+
+// dryRunAnalyzeOptions は測定用（何も書き込まない）。
+func dryRunAnalyzeOptions() analyzeOptions {
+	return analyzeOptions{Force: true, DryRun: true}
+}
+
+func (s *CommentService) analyzeComments(videoID string, opts analyzeOptions) (*dto.AnalyzeCommentsResponse, error) {
+	force, dryRun, adjudicate := opts.Force, opts.DryRun, opts.Adjudicate
 	stream, err := s.streamRepo.FindByID(videoID)
 	if err != nil {
 		return nil, fmt.Errorf("find stream: %w", err)
@@ -127,6 +169,26 @@ func (s *CommentService) analyzeComments(videoID string, force, dryRun, adjudica
 				logger.Infof("/comments/analyze cache hit for %s (%d songs)", videoID, len(cached))
 				return &dto.AnalyzeCommentsResponse{Songs: cached, Stats: buildStats("cache", dryRun, false, cached, ca, cl)}, nil
 			}
+		}
+	}
+
+	// **AI 抽出より先に live chat を探る**（一括だけ。analyzeOptions.ProbeChatFirst）。
+	//
+	// ここで早退しないと、抽出（AI）を使い切ってから「今回は結論を出さない」と
+	// 分かることになり、その結果は捨てられる。しかも見送った回は hash を
+	// 保存しないので、**次の実行でも必ず再抽出する** ── 定期実行では
+	// 見送るたびに AI を呼び直すことになる。
+	//
+	// キャッシュ命中の後に置くのは、命中した回は chat を見る必要が無いため。
+	if opts.ProbeChatFirst && s.chatEndService != nil {
+		if _, outcome, err := s.chatEndService.fetchLiveChat(videoID); err != nil {
+			if holdCacheForChat(*stream, outcome, time.Now()) {
+				logger.Infof("[comment] %s: %s。AI 抽出を行わずに見送ります",
+					videoID, holdReason(*stream, outcome, time.Now()))
+				return &dto.AnalyzeCommentsResponse{Deferred: true}, nil
+			}
+			// 見送らない＝結論にしてよい（十分に古い等）。このまま続ける。
+			logger.Infof("[comment] %s: live chat は使えませんが結論として続行します: %v", videoID, err)
 		}
 	}
 

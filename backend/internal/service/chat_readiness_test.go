@@ -236,3 +236,41 @@ func TestSuspectLiveChatCacheIsRejected(t *testing.T) {
 		t.Error("解析に失敗したキャッシュが残っている（永久に取り直せない）")
 	}
 }
+
+// **早退するのは一括だけ。** 対話の読み込みで早退すると、人がボタンを押したのに
+// 曲目が出ない（拍手 end が無くても表示は要る）。逆に一括で早退しないと、
+// 見送るたびに AI 抽出を丸ごと捨てることになる ── 見送った回は hash を
+// 保存しないので、次の実行でも必ず再抽出する。
+func TestProbeChatFirstOnlyForBatch(t *testing.T) {
+	cases := []struct {
+		name      string
+		opts      analyzeOptions
+		wantProbe bool
+		why       string
+	}{
+		{
+			name: "一括・自動処理", opts: batchAnalyzeOptions(false), wantProbe: true,
+			why: "見送った回は hash を保存しないので、早退しないと次の実行でも必ず再抽出する",
+		},
+		{
+			name: "編集画面の読み込み", opts: interactiveAnalyzeOptions(false), wantProbe: false,
+			why: "人がボタンを押した以上、拍手 end が無くても曲目を今見たい",
+		},
+		{
+			name: "dry run（測定用）", opts: dryRunAnalyzeOptions(), wantProbe: false,
+			why: "本番の挙動を測るので、早退で結果が変わってはいけない",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if c.opts.ProbeChatFirst != c.wantProbe {
+				t.Errorf("ProbeChatFirst = %v, want %v（%s）", c.opts.ProbeChatFirst, c.wantProbe, c.why)
+			}
+		})
+	}
+
+	// dry run は何も書かないことが取り柄なので、そこも固定しておく。
+	if !dryRunAnalyzeOptions().DryRun {
+		t.Error("dry run が書き込む側になっている")
+	}
+}
