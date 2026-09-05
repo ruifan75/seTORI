@@ -1388,7 +1388,19 @@ func (r *StreamRepository) FindStreamsNeedingCommentRefresh(singerIDs []string, 
 		  -- SyncChannel は past しか取らないが、SyncVideo 等で先に登録されうる。
 		  AND s.stream_date <= NOW()
 		  AND s.stream_date > NOW() - ($1 || ' days')::INTERVAL
-		  AND NOT EXISTS (SELECT 1 FROM performances p WHERE p.stream_id = s.id)`
+		  AND NOT EXISTS (SELECT 1 FROM performances p WHERE p.stream_id = s.id)
+		  -- **会限は取り直さない。取りに行けないので。**
+		  -- YouTube Data API は commentThreads/forbidden で 403 を返し（API キー方式
+		  -- なので cookie では変わらない）、Holodex は空配列を**正常応答**で返す。
+		  -- つまり毎回「成功・0 件」になり、失敗として数えられないまま外部呼び出し
+		  -- だけが積み上がる（本番実測：SEHFB5EiKZo へ毎時 1 回）。
+		  --
+		  -- さらに、その 0 件は保存されるので、編集者が手元から持ち込んだコメント
+		  -- （ImportInfoJSON）を定期実行が消すことになる ── 救うはずの入力を
+		  -- 自動処理が奪う。RefreshCommentRaw 側にも「0 件で既存を消さない」歯止めを
+		  -- 置いたが、**取りに行かないのが本筋**（PR #43 が一括の対象から会限を
+		  -- 外したのと同じ）。
+		  AND NOT ` + MembersOnlyDetectedExpr("s")
 	args := []any{days}
 	if len(singerIDs) > 0 {
 		query += `

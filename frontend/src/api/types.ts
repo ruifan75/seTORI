@@ -1463,7 +1463,8 @@ export interface InfoJsonImportResult {
 }
 
 export interface LiveChatImportResult {
-  records: number;
+  // 本文のあるイベントの数。パーサは本文の無い記録をイベントにしないので、
+  // 「replay の記録数」とは別物（そちらは数えていないので欄も無い）。
   messages: number;
   applause: number;
   first_at_sec: number;

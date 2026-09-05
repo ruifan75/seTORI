@@ -73,11 +73,33 @@ func readUploadAll(w http.ResponseWriter, req *http.Request, limit int64) ([]byt
 	return data, nil
 }
 
+// requireStream は取り込み先の配信が実在することを確かめる。
+//
+// **無いまま受け取ると、成功応答と孤立したファイルだけが残る。**
+// `SaveCommentRaw` は更新 0 件でもエラーにならないので info.json は 200 を返すし、
+// live chat は repository を一度も見ないので、有効な形の ID を並べるだけで
+// キャッシュディレクトリを太らせられる。
+//
+// **形の検証（`validVideoID`）とは役割が違う。** あちらはファイル名を組む前の
+// 安全確認で service 側に置いてある（呼び出し口が増えても回り込めないように）。
+// こちらは「404 を返す」という API の意味づけなので、ここで見る。
+func (r *Router) requireStream(w http.ResponseWriter, videoID string) bool {
+	ok, err := r.streamService.Exists(videoID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return false
+	}
+	if !ok {
+		respondError(w, http.StatusNotFound, "配信が登録されていません")
+		return false
+	}
+	return true
+}
+
 // handleImportInfoJSON は yt-dlp の info.json からコメントを取り込む。
 func (r *Router) handleImportInfoJSON(w http.ResponseWriter, req *http.Request) {
 	videoID := req.PathValue("id")
-	if videoID == "" {
-		respondError(w, http.StatusBadRequest, "無効な動画ID")
+	if !r.requireStream(w, videoID) {
 		return
 	}
 	data, err := readUploadAll(w, req, maxInfoJSONUploadBytes)
@@ -105,8 +127,7 @@ func (r *Router) handleImportInfoJSON(w http.ResponseWriter, req *http.Request) 
 // handleImportLiveChat は yt-dlp の live_chat.json を取り込む。
 func (r *Router) handleImportLiveChat(w http.ResponseWriter, req *http.Request) {
 	videoID := req.PathValue("id")
-	if videoID == "" {
-		respondError(w, http.StatusBadRequest, "無効な動画ID")
+	if !r.requireStream(w, videoID) {
 		return
 	}
 	// **読み切らずに渡す。** 実測 12.5MB あるので、本番（1 vCPU / 1GB）で
@@ -133,8 +154,7 @@ func (r *Router) handleImportLiveChat(w http.ResponseWriter, req *http.Request) 
 // handleGetImportedLiveChat は置いてある live chat の要約を返す（無ければ present=false）。
 func (r *Router) handleGetImportedLiveChat(w http.ResponseWriter, req *http.Request) {
 	videoID := req.PathValue("id")
-	if videoID == "" {
-		respondError(w, http.StatusBadRequest, "無効な動画ID")
+	if !r.requireStream(w, videoID) {
 		return
 	}
 	res, ok := r.chatEndService.CachedLiveChat(videoID)
@@ -148,8 +168,7 @@ func (r *Router) handleGetImportedLiveChat(w http.ResponseWriter, req *http.Requ
 // チャットが恒久的に居座る。
 func (r *Router) handleDeleteImportedLiveChat(w http.ResponseWriter, req *http.Request) {
 	videoID := req.PathValue("id")
-	if videoID == "" {
-		respondError(w, http.StatusBadRequest, "無効な動画ID")
+	if !r.requireStream(w, videoID) {
 		return
 	}
 	if err := r.chatEndService.DeleteCachedLiveChat(videoID); err != nil {

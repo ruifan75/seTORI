@@ -608,6 +608,24 @@ func (s *CommentService) RefreshCommentRaw(videoID string) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("fetch comments: %w", err)
 	}
+	// **空の取得結果で既にある入力を消さない。**
+	//
+	// 取得は「無かった」と「取れなかった」を区別できない ── 会限配信では
+	// YouTube が 403 を返し、Holodex は空配列を正常応答として返すので、
+	// **成功したように見えて 0 件**になる。そのまま保存すると、編集者が
+	// 手元から持ち込んだコメント（`ImportInfoJSON`）を定期実行が消す。
+	// この機能が救うはずの入力を、自動処理が奪うことになる。
+	//
+	// 逆側の代償は「元コメントが本当に全部消された配信で、古い控えが残る」
+	// だけで、`comment_raw` はもともと監査用の控えなので害が小さい。
+	if len(comments) == 0 {
+		stored, sErr := s.streamRepo.FindByID(videoID)
+		if sErr == nil && stored != nil && keepStoredComments(len(comments), stored.CommentRaw) {
+			logger.Infof("[comment] %s: 取得 0 件のため取り直しを見送りました（保存済み %d 件を残す）",
+				videoID, storedCommentCount(stored.CommentRaw))
+			return 0, nil
+		}
+	}
 	rawJSON, err := json.Marshal(comments)
 	if err != nil {
 		return 0, fmt.Errorf("marshal comments: %w", err)
@@ -907,4 +925,31 @@ func (s *CommentService) GetRawComments(videoID string) ([]string, error) {
 		}
 	}
 	return comments, nil
+}
+
+// keepStoredComments は「取り直しを見送って保存済みを残すか」を返す。
+//
+// **取得は「無かった」と「取れなかった」を区別できない。** 会限配信では
+// YouTube が 403 を返し、Holodex は空配列を**正常応答**で返すので、
+// 取り直しは「成功・0 件」になる。そのまま保存すると、編集者が手元から
+// 持ち込んだコメント（ImportInfoJSON）を定期実行が消す。
+//
+// 逆側の代償は「元コメントが本当に全部消された配信で、古い控えが残る」だけで、
+// `comment_raw` はもともと監査用の控えなので害が小さい。
+//
+// **判定を関数にしてあるのは、これがテストできる形でないと固定できないから**
+// （呼び出し元は外部取得と DB を挟む）。
+func keepStoredComments(fetched int, storedRaw []byte) bool {
+	return fetched == 0 && storedCommentCount(storedRaw) > 0
+}
+
+func storedCommentCount(raw []byte) int {
+	if len(raw) == 0 {
+		return 0
+	}
+	var comments []string
+	if err := json.Unmarshal(raw, &comments); err != nil {
+		return 0
+	}
+	return len(comments)
 }

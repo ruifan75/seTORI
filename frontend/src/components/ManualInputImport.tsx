@@ -129,7 +129,9 @@ export default function ManualInputImport({
   const present = cached.data?.present ?? false;
   const chat = chatResult ?? (present ? cached.data?.chat : undefined);
   // 記録が 0 件で置いてある＝読めないファイルが居座っている。
-  const cachedUnusable = present && !chatResult && (cached.data?.chat.records ?? 0) === 0;
+  // 本文が 1 件も無いファイルは、拍手も取れないので置いておく意味が無い
+  // （検証を通ったということは replay として読めてはいる）。
+  const cachedUnusable = present && !chatResult && (cached.data?.chat.messages ?? 0) === 0;
 
   return (
     <div className="space-y-4 text-sm">
@@ -208,7 +210,7 @@ export default function ManualInputImport({
         {chat && !cachedUnusable && (
           <div className="text-xs bg-green-50 border border-green-200 rounded px-2 py-1.5 text-green-800">
             <p>
-              記録 {chat.records.toLocaleString()} 件・拍手 {chat.applause.toLocaleString()} 件・
+              本文 {chat.messages.toLocaleString()} 件・拍手 {chat.applause.toLocaleString()} 件・
               {formatSeconds(chat.first_at_sec)} 〜 {formatSeconds(chat.last_at_sec)}
               （{formatBytes(chat.bytes)}）
             </p>
@@ -220,6 +222,9 @@ export default function ManualInputImport({
                 大きく違う場合は別の配信のファイルかもしれません。
               </p>
             ) : null}
+            {/* **消せるのはファイルだけ。** 拍手 end 検出を走らせたあとなら
+                終了時間は既に入っており、しかも「end が無い曲だけ採用」なので
+                入れ直して再検出しても上書きされない。そう書く。 */}
             <button
               onClick={() => deleteMutation.mutate()}
               disabled={deleteMutation.isPending}
@@ -228,6 +233,11 @@ export default function ManualInputImport({
             >
               取り込んだ live chat を消す
             </button>
+            <p className="mt-0.5 text-green-800/70">
+              消せるのはファイルだけです。すでに拍手 end を反映したあとなら、
+              入った終了時間は戻りません（入れ直して再検出しても、
+              終了時間のある曲は上書きされません）。編集画面で直してください。
+            </p>
           </div>
         )}
         {cachedUnusable && (
