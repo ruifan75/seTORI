@@ -1,7 +1,6 @@
 package service
 
 import (
-	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -40,9 +39,16 @@ type AutoFillSettings struct {
 
 // AutoFillLastRun は最後の実行の記録（設定とは別キー。上の注記）。
 type AutoFillLastRun struct {
-	At    *time.Time `json:"last_run_at,omitempty"`
-	Note  string     `json:"last_run_note,omitempty"`
-	Error string     `json:"last_run_error,omitempty"`
+	// At は**実際に処理した**最後の時刻。次回の判定はこれだけを見る。
+	//
+	// **見送りでここを進めない。** 進めると、予定時刻にたまたま手動の一括と
+	// 重なっただけで次回が丸ごと 1 間隔ぶん先送りになる（168 時間設定なら 7 日後）。
+	// 見送りは 10 分ごとの tick で次に拾えばよい。
+	At *time.Time `json:"last_run_at,omitempty"`
+	// SkippedAt は最後に見送った時刻（表示用。次回の判定には使わない）。
+	SkippedAt *time.Time `json:"last_skipped_at,omitempty"`
+	Note      string     `json:"last_run_note,omitempty"`
+	Error     string     `json:"last_run_error,omitempty"`
 }
 
 // AutoFillService は登録チャンネルの取り込みから歌単作成までを定期的に回す。
@@ -216,19 +222,25 @@ func (s *AutoFillService) RunOnce() (AutoFillResult, error) {
 		s.mu.Unlock()
 	}()
 
-	// **一括作成が走っているなら何も触らない。** 排他を `batchFill.Start` まで
-	// 遅らせると、手動の一括が raw=A を読んだあとに、こちらがコメントを raw=B へ
-	// 更新できてしまう ── 一括は古い A から歌唱を作る。
+	// **入力を書き換える前に一括の枠を押さえる。**
 	//
-	// `Start` は goroutine を起動して即座に返るので、こちらの running だけでは
-	// 一括の完了まで守れない（次の実行が同じ競合を起こす）。**開始前に見る**のが
-	// 唯一の防ぎ方。走っていれば次の実行で拾えばよい。
-	if s.batchFill.Status().Running {
+	// 「走っていないか確認 → コメント更新 → 開始」の順では、確認と開始の間に
+	// 手動の一括が始まりうる。その一括は古い raw=A を読み込んだあとで
+	// こちらの更新（raw=B）を受け、**A のまま歌唱を作る**。開始を弾いても
+	// 手遅れなので、確認と予約が原子的でなければならない（Reserve）。
+	if !s.batchFill.Reserve() {
 		res.Note = "一括セットリスト作成が実行中のため見送りました"
 		logger.Infof("[auto-fill] %s", res.Note)
-		s.recordRun(res, nil)
+		s.recordSkip(res)
 		return res, nil
 	}
+	// 予約したまま抜けると以後一括が開始できなくなる。**開始できた場合を除いて必ず解放する。**
+	reserved := true
+	defer func() {
+		if reserved {
+			s.batchFill.Release()
+		}
+	}()
 
 	targets, err := s.singerRepo.FindAutoFillTargets()
 	if err != nil {
@@ -238,7 +250,7 @@ func (s *AutoFillService) RunOnce() (AutoFillResult, error) {
 	if len(targets) == 0 {
 		res.Note = "対象チャンネルがありません"
 		s.recordRun(res, nil)
-		return res, nil
+		return res, nil // defer が予約を解放する
 	}
 
 	singerIDs := make([]string, 0, len(targets))
@@ -267,23 +279,25 @@ func (s *AutoFillService) RunOnce() (AutoFillResult, error) {
 	}
 
 	// 2. コメントの取り直し（歌単が空・非表示でない・N 日以内）
-	refreshed, refreshFailures := s.refreshComments(singerIDs, s.GetSettings().RefreshDays, justSynced)
+	syncedIDs := make([]string, 0, len(justSynced))
+	for id := range justSynced {
+		syncedIDs = append(syncedIDs, id)
+	}
+	refreshed, refreshFailures := s.refreshComments(singerIDs, s.GetSettings().RefreshDays, syncedIDs)
 	res.Refreshed = refreshed
 	res.Failures += refreshFailures
 
 	// 3. 一括セットリスト作成。既に手動で走っていれば譲る（次の実行で拾う）。
-	runID, err := s.batchFill.Start(BatchFillModeUnprocessed, singerIDs, false, nil)
-	switch {
-	case err == nil:
-		res.FillRunID = runID.String()
-	case errors.Is(err, ErrBatchFillAlreadyRunning):
-		// 開始前にも見ているが、その間に手動で始められる可能性は残る。
-		res.Note = "一括セットリスト作成が既に実行中のため見送りました"
-		logger.Infof("[auto-fill] %s", res.Note)
-	default:
+	runID, err := s.batchFill.StartReserved(BatchFillModeUnprocessed, singerIDs, false, nil)
+	if err != nil {
+		// StartReserved は失敗時に自分で予約を解放する。
+		reserved = false
 		s.recordRun(res, err)
 		return res, fmt.Errorf("一括セットリスト作成の開始に失敗: %w", err)
 	}
+	// 開始できた＝予約は実行そのものへ引き継がれた。ここで解放してはいけない。
+	reserved = false
+	res.FillRunID = runID.String()
 
 	logger.Infof("[auto-fill] 完了: チャンネル %d / 同期 %d / コメント取り直し %d",
 		res.Channels, res.Synced, res.Refreshed)
@@ -293,22 +307,18 @@ func (s *AutoFillService) RunOnce() (AutoFillResult, error) {
 
 // refreshComments は歌単がまだ無い配信のコメントを取り直す。
 //
-// **全配信を取り直さない。** 取り直しは 1 本につき外部 API 1 回で、
-// 既に歌単がある配信は取り直しても何も起きない（自動処理は既存の歌単に触らない）。
-// skip は同じ実行の同期で入ってきた配信（既にコメントを取得済み）。
-func (s *AutoFillService) refreshComments(singerIDs []string, days int, skip map[string]bool) (refreshed, failures int) {
-	ids, err := s.streamRepo.FindStreamsNeedingCommentRefresh(singerIDs, days)
+// **全配信を取り直さない。** 既に歌単がある配信は取り直しても何も起きないし
+// （自動処理は既存の歌単に触らない）、取り直しは外部 API を叩く
+// （`GetVideoComments` は YouTube → Holodex の 2 リクエストになりうる）。
+// justSynced はこの実行の同期で入ってきた配信。**除外の判断は SQL 側**で行う
+// （新規というだけでは取得できた証拠にならないため。repository の注記）。
+func (s *AutoFillService) refreshComments(singerIDs []string, days int, justSynced []string) (refreshed, failures int) {
+	ids, err := s.streamRepo.FindStreamsNeedingCommentRefresh(singerIDs, days, justSynced)
 	if err != nil {
 		logger.Warnf("[auto-fill] コメント取り直しの対象取得に失敗: %v", err)
 		return 0, 1
 	}
 	for _, id := range ids {
-		// **同期直後の配信は取り直さない。** 同期は新規のときコメントを取得するので、
-		// ここで再取得すると同じ実行で 2 回外部へ行くことになる
-		// （`GetVideoComments` は YouTube → Holodex の 2 リクエストになりうる）。
-		if skip[id] {
-			continue
-		}
 		if err := s.comments.RefreshCommentRaw(id); err != nil {
 			logger.Warnf("[auto-fill] %s のコメント取り直しに失敗: %v", id, err)
 			failures++
@@ -317,16 +327,29 @@ func (s *AutoFillService) refreshComments(singerIDs []string, days int, skip map
 		refreshed++
 	}
 	if refreshed > 0 || failures > 0 {
-		logger.Infof("[auto-fill] コメントを取り直しました: %d 本（対象 %d・同期直後を除く・失敗 %d）",
+		logger.Infof("[auto-fill] コメントを取り直しました: %d/%d 本（失敗 %d）",
 			refreshed, len(ids), failures)
 	}
 	return refreshed, failures
 }
 
 // recordRun は最後の実行を設定へ書き戻す（画面に出すため）。
+// recordSkip は見送りを記録する。**At は進めない**（上の注記）。
+func (s *AutoFillService) recordSkip(res AutoFillResult) {
+	last := s.GetLastRun()
+	now := time.Now()
+	last.SkippedAt = &now
+	last.Note = res.Note
+	if err := s.settingsRepo.Set(settingsKeyAutoFillRun, last); err != nil {
+		logger.Warnf("[auto-fill] 見送りの記録に失敗: %v", err)
+	}
+}
+
 func (s *AutoFillService) recordRun(res AutoFillResult, runErr error) {
 	now := time.Now()
-	last := AutoFillLastRun{At: &now}
+	last := s.GetLastRun()
+	last.At = &now
+	last.Error = ""
 	last.Note = fmt.Sprintf("チャンネル %d / 同期 %d / コメント取り直し %d",
 		res.Channels, res.Synced, res.Refreshed)
 	if res.FillRunID != "" {

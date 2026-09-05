@@ -1236,9 +1236,17 @@ func (r *StreamRepository) FindBySingerID(singerID string, limit, offset int, fi
 //	終了から days 日以内 … 古い配信に今さら歌単が貼られることは稀
 //	未来日でない        … 予約配信を配信前から取りに行かない
 //
+// なお `GetVideoComments` は YouTube → Holodex の 2 リクエストになりうるので、
+// 「1 本につき外部 API 1 回」ではない。コメントが空の配信はこの実行の中で
+// 複数回取りに行くこともある ── **飛ばして取りこぼすよりは安い**という判断。
+//
 // singerIDs が空なら全チャンネル。**所有者で絞る**（ゲスト参加しただけの
 // 他人の配信まで対象にしない。FindStreamsForFill と同じ）。
-func (r *StreamRepository) FindStreamsNeedingCommentRefresh(singerIDs []string, days int) ([]string, error) {
+// justSynced はこの実行の同期で入ってきた配信。**それだけでは除外しない** ──
+// 同期のコメント取得は失敗してもログだけで、その配信は「新規」として返る。
+// 「新規だから取得済み」と決めつけると、取得に失敗した配信を黙って飛ばすことになる。
+// **実際にコメントが入っているものだけ**を除外する（＝取得できた証拠がある）。
+func (r *StreamRepository) FindStreamsNeedingCommentRefresh(singerIDs []string, days int, justSynced []string) ([]string, error) {
 	if days < 1 {
 		days = 30
 	}
@@ -1258,6 +1266,16 @@ func (r *StreamRepository) FindStreamsNeedingCommentRefresh(singerIDs []string, 
 		  AND EXISTS (SELECT 1 FROM stream_singers ss
 		              WHERE ss.stream_id = s.id AND ss.is_owner AND ss.singer_id = ANY($2))`
 		args = append(args, pq.Array(singerIDs))
+	}
+	if len(justSynced) > 0 {
+		// 同期で入ってきて、**かつ実際にコメントが入った**ものだけ除外する。
+		// 空のまま（取得失敗・コメントがまだ無い）なら取り直す ── そちらは
+		// 再取得で結果が変わりうるし、飛ばすと今回の実行から漏れる。
+		query += fmt.Sprintf(`
+		  AND NOT (s.id = ANY($%d)
+		           AND jsonb_typeof(s.comment_raw) = 'array'
+		           AND jsonb_array_length(s.comment_raw) > 0)`, len(args)+1)
+		args = append(args, pq.Array(justSynced))
 	}
 	query += `
 		ORDER BY s.stream_date DESC`

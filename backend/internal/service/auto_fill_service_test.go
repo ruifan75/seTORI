@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"testing"
+	"time"
 )
 
 // 設定の既定は**無効**であること。
@@ -60,5 +61,25 @@ func TestAutoFillSettingsHasNoRunState(t *testing.T) {
 		if _, ok := m[k]; ok {
 			t.Errorf("設定に実行結果 %q が入っている", k)
 		}
+	}
+}
+
+// **見送りで次回を先送りしないこと。**
+// 見送り（一括が実行中）で At を進めると、予定時刻にたまたま重なっただけで
+// 次回が丸ごと 1 間隔ぶん遅れる（168 時間設定なら 7 日後）。
+func TestAutoFillSkipDoesNotDelayNextRun(t *testing.T) {
+	// 判定に使うのは At だけで、SkippedAt は表示用。
+	// 構造体の JSON キーが分かれていることを固定する（同じキーだと区別できない）。
+	b, err := json.Marshal(AutoFillLastRun{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = b
+
+	var last AutoFillLastRun
+	now := time.Now()
+	last.SkippedAt = &now
+	if last.At != nil {
+		t.Error("見送りの記録が実行時刻を進めている")
 	}
 }

@@ -156,17 +156,58 @@ func (r *fillRow) hasReliableEnd() bool {
 //
 // singerIDs は対象チャンネル（空なら全部）。既定はそのチャンネルが**所有する**配信で、
 // includeCollabs を立てるとゲスト参加した配信も含む。
+// Reserve は「これから開始する」を**原子的に**押さえる。
+//
+// **入力を書き換える前に呼ぶこと。** 「走っていないか確認 → 入力を更新 → 開始」
+// の順では、確認と開始の間に手動の一括が始まりうる。その一括は古い入力
+// （raw=A）を読み込んだあとで更新（raw=B）を受け、**A のまま歌唱を作る**。
+// 開始を弾いても手遅れで、二重起動を防ぐだけでは足りない。
+//
+// 押さえたら必ず StartReserved か Release を呼ぶこと（呼ばないと以後
+// 一括が一切開始できなくなる）。
+func (s *BatchFillService) Reserve() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.running {
+		return false
+	}
+	s.running = true
+	s.status = dto.BatchFillStatus{Running: true, Mode: "reserved"}
+	return true
+}
+
+// Release は Reserve を取り消す（開始しないと決めたとき）。
+func (s *BatchFillService) Release() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.running = false
+	s.status = dto.BatchFillStatus{}
+}
+
+// StartReserved は Reserve 済みの前提で開始する。
+func (s *BatchFillService) StartReserved(mode string, singerIDs []string, includeCollabs bool, startedBy *uuid.UUID) (uuid.UUID, error) {
+	return s.start(mode, singerIDs, includeCollabs, startedBy, true)
+}
+
 func (s *BatchFillService) Start(mode string, singerIDs []string, includeCollabs bool, startedBy *uuid.UUID) (uuid.UUID, error) {
+	return s.start(mode, singerIDs, includeCollabs, startedBy, false)
+}
+
+func (s *BatchFillService) start(mode string, singerIDs []string, includeCollabs bool, startedBy *uuid.UUID, reserved bool) (uuid.UUID, error) {
 	switch mode {
 	case BatchFillModeUnprocessed, BatchFillModeForce:
 	default:
+		if reserved {
+			s.Release()
+		}
 		return uuid.Nil, errors.New("無効なモードです（unprocessed / force）")
 	}
 	singerIDs = trimIDs(singerIDs)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.running {
+	// 予約済みなら running は既に立っている（立てたのは自分）。
+	if s.running && !reserved {
 		return uuid.Nil, ErrBatchFillAlreadyRunning
 	}
 
@@ -177,6 +218,11 @@ func (s *BatchFillService) Start(mode string, singerIDs []string, includeCollabs
 	}
 	runID, err := s.runRepo.CreateRun(mode, sid, startedBy)
 	if err != nil {
+		if reserved {
+			// 予約したまま抜けると、以後一括が一切開始できなくなる。
+			s.running = false
+			s.status = dto.BatchFillStatus{}
+		}
 		return uuid.Nil, err
 	}
 

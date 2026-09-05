@@ -835,9 +835,8 @@ function AutoFillTargets() {
   return (
     <div className="bg-white rounded-lg shadow-sm border p-6">
       <h2 className="text-xl font-bold text-gray-900 mb-2">自動処理の対象</h2>
-      {/* **今は旗を保存するだけ**で、定期実行はまだ入っていない（issue #35 の ③）。
-          「取り込みます」と書くと、有効にしたのに何も起きないのを
-          正常稼働と誤認させる */}
+      {/* 登録したチャンネルは下の定期実行の対象になる。実行するかどうかと
+          間隔はそちらの設定側（既定は無効） */}
       <p className="text-gray-500 mb-4 text-sm">
         ここに登録したチャンネルが、下の定期実行の対象になります（同期 → コメント取り直し →
         歌単作成）。確信の無いものと未登録の曲は<strong>審査へ回り</strong>、
