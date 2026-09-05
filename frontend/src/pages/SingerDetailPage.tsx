@@ -775,7 +775,7 @@ function AutoFillToggle({ singer }: { singer: { id: string; auto_fill_enabled?: 
     onSuccess: (_data, next) => {
       queryClient.invalidateQueries({ queryKey: ['singer', singer.id] });
       queryClient.invalidateQueries({ queryKey: ['autoFillTargets'] });
-      showToast(next ? '自動処理を有効にしました' : '自動処理を止めました', 'success');
+      showToast(next ? '自動処理の対象に登録しました' : '自動処理の対象から外しました', 'success');
     },
     onError: (err: Error) => showToast(err.message, 'error'),
   });
@@ -784,10 +784,12 @@ function AutoFillToggle({ singer }: { singer: { id: string; auto_fill_enabled?: 
     <button
       onClick={() => mutation.mutate(!enabled)}
       disabled={mutation.isPending}
+      // **定期実行はまだ入っていない**（issue #35 の ③）。「取り込みます」と
+      // 現在形で書くと、有効にしたのに何も起きないのを正常稼働と誤認させる。
       title={
         enabled
-          ? '新しい配信を定期的に取り込み、まだ歌単の無いものはコメントから自動で作ります（確信の無いものは審査へ）。処理完了のチェックは自動では付きません'
-          : '有効にすると、新しい配信を定期的に取り込み、まだ歌単の無いものをコメントから自動で作ります'
+          ? '将来の自動処理（定期同期 → コメント解析 → 歌単作成）の対象として登録済み。定期実行はまだ動いていません'
+          : '将来の自動処理の対象として登録します（定期実行はまだ動いていません）'
       }
       className={`inline-flex items-center gap-1 px-2 py-1 text-xs border border-dashed rounded-full disabled:opacity-50 ${
         enabled
@@ -795,7 +797,7 @@ function AutoFillToggle({ singer }: { singer: { id: string; auto_fill_enabled?: 
           : 'text-gray-500 border-gray-300 hover:text-sky-600 hover:border-sky-300'
       }`}
     >
-      {enabled ? '自動処理：オン' : '自動処理：オフ'}
+      {enabled ? '自動処理：登録済み' : '自動処理：未登録'}
     </button>
   );
 }

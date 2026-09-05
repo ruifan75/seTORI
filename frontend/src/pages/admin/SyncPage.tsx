@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { holodexApi, batchAnalyzeApi, batchFillApi, singerApi, availabilityApi } from '../../api/client';
 import { useToast } from '../../components/ui/ToastContext';
+import { useAuthStore, hasPermission, PERM } from '../../store/auth';
 import { formatSeconds } from '../../components/usePerformanceTiming';
 
 // 一括分析のモード定義（バックエンドの BatchMode* と対応）
@@ -795,39 +796,62 @@ function GapList({ runId }: { runId: string }) {
 function AutoFillTargets() {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
+  // **この画面は sync:run で開けるが、この API は content:edit を要求する。**
+  // 権限で中身が変わるどころか、権限が無ければ 403 になる。
+  const canEdit = hasPermission(useAuthStore((st) => st.user), PERM.CONTENT_EDIT);
+  const authStatus = useAuthStore((st) => st.status);
 
-  const { data, isLoading } = useQuery({
-    queryKey: ['autoFillTargets'],
+  const { data, isLoading, isError, error } = useQuery({
+    // **権限を鍵に入れる。** ログアウトしても QueryClient は消えないので、
+    // 固定の鍵だと content:edit の利用者が取った一覧が、5 分以内に
+    // ログインした sync:run だけの利用者に見えてしまう
+    // （応答には会限の方針と本数も入っている）。
+    queryKey: ['autoFillTargets', canEdit],
     queryFn: singerApi.listAutoFill,
+    enabled: canEdit && authStatus !== 'loading',
   });
 
   const stop = useMutation({
     mutationFn: (id: string) => singerApi.setAutoFill(id, false),
     onSuccess: (_d, id) => {
-      queryClient.invalidateQueries({ queryKey: ['autoFillTargets'] });
+      queryClient.invalidateQueries({ queryKey: ['autoFillTargets'] }); // prefix 一致で権限別の鍵も拾う
       queryClient.invalidateQueries({ queryKey: ['singer', id] });
-      showToast('自動処理を止めました', 'success');
+      showToast('自動処理の対象から外しました', 'success');
     },
     onError: (err: Error) => showToast(err.message, 'error'),
   });
 
   const targets = data?.singers ?? [];
 
+  // 権限が無いなら節ごと出さない（取得もしない）。
+  if (!canEdit) return null;
+
   return (
     <div className="bg-white rounded-lg shadow-sm border p-6">
       <h2 className="text-xl font-bold text-gray-900 mb-2">自動処理の対象</h2>
+      {/* **今は旗を保存するだけ**で、定期実行はまだ入っていない（issue #35 の ③）。
+          「取り込みます」と書くと、有効にしたのに何も起きないのを
+          正常稼働と誤認させる */}
       <p className="text-gray-500 mb-4 text-sm">
-        新しい配信を定期的に取り込み、まだ歌単の無いものはコメントから自動で作ります。
-        確信の無いものと未登録の曲は<strong>審査へ回ります</strong>。
-        <strong>処理完了のチェックは自動では付きません</strong>（最後の確認は人がやります）。
+        ここに登録したチャンネルが、将来の自動処理（定期同期 → コメント解析 → 歌単作成）の
+        対象になります。<strong>定期実行はまだ動いていません</strong>（登録だけ先にできます）。
+        動き出したあとも、確信の無いものと未登録の曲は<strong>審査へ回り</strong>、
+        <strong>処理完了のチェックは自動では付きません</strong>。
         有効化は各チャンネルのページから。
       </p>
 
       {isLoading ? (
         <p className="text-gray-400 text-sm">読み込み中...</p>
+      ) : isError ? (
+        // **取得失敗を「対象なし」と言わない。** 運用の設定なので、
+        // 「全部無効」と読めてしまうと止まっているのか壊れているのか分からない
+        <p className="text-red-600 text-sm">
+          対象の取得に失敗しました（{(error as Error)?.message ?? '不明なエラー'}）。
+          一覧が空という意味ではありません。
+        </p>
       ) : targets.length === 0 ? (
         <p className="text-gray-400 text-sm">
-          対象はありません（自動処理は無効）。チャンネルページの「自動処理」から有効にできます。
+          対象はありません。チャンネルページの「自動処理」から登録できます。
         </p>
       ) : (
         <ul className="divide-y border rounded-lg">
@@ -839,7 +863,7 @@ function AutoFillTargets() {
               <button
                 onClick={() => stop.mutate(sg.id)}
                 disabled={stop.isPending}
-                title="このチャンネルの自動処理を止める"
+                title="このチャンネルを自動処理の対象から外す"
                 className="shrink-0 px-2 py-1 text-xs text-gray-600 border border-gray-300 rounded-full hover:text-red-600 hover:border-red-300 disabled:opacity-50"
               >
                 止める
