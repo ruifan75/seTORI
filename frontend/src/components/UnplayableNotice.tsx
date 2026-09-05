@@ -1,15 +1,25 @@
-import type { Playability } from '../api/types';
-
 // 埋め込み再生できない配信のために、プレイヤーの代わりに置く案内。
 //
 // 会限（メンバー限定）の動画は YouTube が埋め込みを塞いでいる。メンバー資格の
 // あるアカウントでログインしていても再生できないので、「入れば見られる」とは書かない。
 // 削除・非公開はそもそも YouTube 側にも無いが、リンクは残す ── 復活したり
 // 別の場所へ移っていたりするので、行き止まりにしないため。
-// NoticeKind は保存済みの判定に加えて、再生時に実際に失敗した場合を持つ。
+// NoticeKind は**実際に案内へ切り替える理由**だけを持つ。`Playability` から
+// 導いた型にはしない ── 保存済みの判定は全部が案内の理由になるわけではない。
+//
+// **再生できるかは見る人の所在地で変わる。** yt-dlp は東京の VPS で走るので、
+// その結果は「東京から見て再生できるか」でしかない。日本で権利上ブロックされて
+// いても他の地域では再生できることがあり、先に案内へ倒すとその人から再生を
+// 奪う ── しかもプレイヤーを描かないので `onError` は永遠に鳴らず、
+// **取り返す機会が無い**（片道の判断）。
+//
+// 逆向き（東京で再生できるが他の地域では不可）は `onError` が拾うので、
+// 誤りは「先に判定する」側にしか出ない。だから**先に判定してよいのは
+// 所在地に依存しないと実測できているものだけ**＝会限。
+//
 // **エラーコードからは会限と埋め込み無効を区別できない**（どちらも 101/150）ので、
 // 推測して片方の文言を出さず、両方の可能性を書く。
-export type NoticeKind = Exclude<Playability, 'unknown' | 'playable'> | 'playback_failed';
+export type NoticeKind = 'members_only' | 'unavailable' | 'playback_failed';
 
 const MESSAGES: Record<NoticeKind, { title: string; detail: string }> = {
   playback_failed: {
@@ -19,10 +29,6 @@ const MESSAGES: Record<NoticeKind, { title: string; detail: string }> = {
   members_only: {
     title: 'メンバー限定の配信です',
     detail: 'YouTube がメンバー限定配信の埋め込み再生を許可していないため、ここでは再生できません。メンバーシップに加入していても同じです。',
-  },
-  embed_disabled: {
-    title: '埋め込み再生が許可されていません',
-    detail: 'この動画は配信者が外部サイトでの再生を無効にしています。',
   },
   unavailable: {
     title: 'この動画は YouTube 上で見られなくなっています',

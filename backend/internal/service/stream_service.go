@@ -682,7 +682,13 @@ func (s *StreamService) GetRandomPerformances(limit int, excludedSongIDs []strin
 	return s.ComposePerformanceList(perfs), nil
 }
 
-// playabilityOf は保存済みの再生可否から、プレイヤーを描くかどうかの判定を導く。
+// playabilityOf は保存済みの再生可否を、画面が読める 1 つの値へまとめる。
+//
+// **これは「プレイヤーを描くかどうか」ではない。** 画面が先に案内へ倒すのは
+// `members_only` だけで、`unavailable` / `embed_disabled` はプレイヤーを描いてから
+// `onError` で切り替える（2026-09-05）。yt-dlp は東京の VPS で走るので、
+// その結論は見る人の所在地では正しくないことがあるため。
+// ここが返す値は編集者向けの情報でもあるので、**会限以外も引き続き導出する**。
 //
 // **availability だけでは決められない。** 本番の 2 経路は
 // `--ignore-no-formats-error` を付けて yt-dlp を呼んでおり、そのとき

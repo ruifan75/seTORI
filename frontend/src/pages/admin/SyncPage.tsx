@@ -452,8 +452,10 @@ export default function SyncPage() {
         <h2 className="text-xl font-bold text-gray-900 mb-2">再生可否の取得</h2>
         <p className="text-gray-500 mb-4">
           yt-dlp で <code className="text-xs bg-gray-100 px-1 rounded">availability</code> を調べ、
-          会限（メンバー限定）や削除済みの配信を判別します。判別できると、プレイヤーを描く前に
-          理由を出せるようになります。
+          会限（メンバー限定）や削除済みの配信を判別します。会限だと分かった配信は、
+          プレイヤーを描く前に理由を出せるようになります。それ以外は判定を持っていても
+          プレイヤーを描き、実際に失敗したときに切り替えます（再生できるかは見る人の
+          所在地で変わるため）。
         </p>
         <p className="text-gray-500 mb-4 text-sm">
           既定は<strong>未記録の配信だけ</strong>が対象なので、途中で止めても記録済みのぶんは残り、
