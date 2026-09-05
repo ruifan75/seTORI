@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/ruifan75/setori/pkg/auth"
@@ -90,6 +91,110 @@ func TestStreamAnalysisEndpointsRequireContentEdit(t *testing.T) {
 			if perm != tc.wantPerm || login != tc.wantLogin {
 				t.Errorf("%s %s = (%q,%v), want (%q,%v)",
 					tc.method, tc.path, perm, login, tc.wantPerm, tc.wantLogin)
+			}
+		})
+	}
+}
+
+// 認可が見るパスは、**ServeMux が実際にどのハンドラへ配るか**と一致していなければ
+// ならない。食い違うと「ルーティングは通るのに認可だけが別のパスを見る」形の
+// バイパスになる。2026-09-06 に本番で成立していた：未ログインの
+// `GET /api/streams/.%2FhVfDBfreYNI/comments` が 401 ではなく 200 を返した。
+//
+// 食い違いは**二方向**ある。片方だけ直すともう片方が開く：
+//
+//	区切り … 復号済みパスを分割すると `%2F` が区切りに化けてセグメントがずれる
+//	内容  … escape されたまま比べると `%63omments` が `comments` に一致しない
+//
+// **攻撃経路が実在することも併せて確かめる。** 認可だけを試すと、ServeMux が
+// そもそも配らないパス（404 や 301 になるもの）を「塞いだ」と誤認しうる。
+func TestEncodedPathDoesNotBypassStreamAuthz(t *testing.T) {
+	// 本物と同じパターンで dispatch を確かめる。
+	mux := http.NewServeMux()
+	reached := ""
+	for _, pat := range []string{
+		"GET /api/streams/{id}/comments",
+		"GET /api/streams/{id}/chapters",
+		"GET /api/streams/{id}/holodex-songs",
+		"GET /api/streams/{id}/availability",
+	} {
+		p := pat
+		mux.HandleFunc(p, func(w http.ResponseWriter, r *http.Request) { reached = p })
+	}
+
+	for _, path := range []string{
+		"/api/streams/.%2FhVfDBfreYNI/comments", // 区切りを増やす
+		"/api/streams/%2E%2E/comments",          // 復号すると ".."
+		"/api/streams/hVfDBfreYNI/%63omments",   // 内容を符号化する
+		"/api/streams/hVfDBfreYNI/co%6Dments",   //
+		"/api/streams/hVfDBfreYNI/%63hapters",   //
+		"/api/streams/.%2FhVfDBfreYNI/%68olodex-songs",
+		"/api/streams/hVfDBfreYNI/%61vailability",
+	} {
+		t.Run(path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+
+			// ① この形は実際にハンドラへ届く（届かないなら塞ぐ意味が無い）
+			reached = ""
+			mux.ServeHTTP(httptest.NewRecorder(), req)
+			if reached == "" {
+				t.Fatalf("ServeMux が配っていない。この経路は実在しないので、固定しても意味が無い")
+			}
+
+			// ② それでも未ログインでは通らない
+			if authorizeRequest(req, nil) {
+				t.Errorf("未ログインで通っている（%s へ配られる経路）", reached)
+			}
+		})
+	}
+}
+
+// **認可は escape されたパスで判定する。** decode 済みだと `%2F` が本物の `/` に
+// なって区切りが 1 つずれ、`isStreamSubresource` が外れて公開既定へ落ちる。
+// ServeMux（Go 1.22+）は wildcard の中の `%2F` を区切りとして扱わないので、
+// **ルーティングは通るのに認可だけが別のパスを見る**ことになる。
+//
+// 2026-09-06 に本番で成立していた：未ログインの
+// `GET /api/streams/.%2FhVfDBfreYNI/comments` が 401 ではなく 200 を返した。
+//
+// **リクエストから通すこと。** requiredPermission へ escape 済みの文字列を直接
+// 渡すテストは、middleware がどちらのパスを見ていても通ってしまう
+// （実際それを書いて、負のコントロールで気付いた）。
+func TestEscapedSlashDoesNotBypassStreamAuthz(t *testing.T) {
+	for _, path := range []string{
+		"/api/streams/.%2FhVfDBfreYNI/comments",
+		"/api/streams/%2E%2FhVfDBfreYNI/chapters",
+		"/api/streams/a%2Fb%2Fc/holodex-songs",
+		"/api/streams/..%2F..%2Fetc%2Fpasswd/availability",
+	} {
+		t.Run(path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			// 前提：この形は escape されたまま届いている（そうでなければ
+			// このテストは別のことを確かめてしまう）。
+			if req.URL.EscapedPath() == req.URL.Path {
+				t.Fatalf("escape が保たれていない: Path=%q Escaped=%q", req.URL.Path, req.URL.EscapedPath())
+			}
+			if authorizeRequest(req, nil) {
+				t.Errorf("未ログインで通っている（decode 済みのパスを見ている）")
+			}
+		})
+	}
+}
+
+// 逆に、巻き込んでいないこと。escape を見るようにしたせいで公開の経路が
+// 塞がると、未ログインの閲覧が壊れる。
+func TestEscapedPathKeepsPublicRoutesPublic(t *testing.T) {
+	for _, path := range []string{
+		"/api/streams",
+		"/api/streams/hVfDBfreYNI",
+		"/api/streams/search",
+		"/api/songs/%E6%98%A5%E3%82%92%E5%91%8A%E3%81%92%E3%82%8B", // 日本語を含む ID
+		"/api/shared/playlists/abc123",
+	} {
+		t.Run(path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			if !authorizeRequest(req, nil) {
+				t.Errorf("未ログインで見られなくなっている")
 			}
 		})
 	}

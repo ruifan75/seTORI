@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -549,7 +550,9 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// 認可：メソッド＋パスから必要権限を求めて判定
-	if !authorize(req.Method, req.URL.Path, user) {
+	// 判定の入口は authorizeRequest に寄せてある（どのパスを見るかがここの要点で、
+	// テストはリクエストから通す必要があるため）。
+	if !authorizeRequest(req, user) {
 		if user == nil {
 			respondError(w, http.StatusUnauthorized, "ログインが必要です")
 		} else {
@@ -3592,6 +3595,72 @@ func (r *Router) resolveUser(req *http.Request) (*models.User, error) {
 		return nil, nil
 	}
 	return r.authService.Authenticate(token)
+}
+
+// authorizeRequest はリクエストから認可を判定する。
+//
+// **`URL.Path`（decode 済み）ではなく `EscapedPath()` を見る。** 認可はパスを
+// `/` で分割して「どのサブリソースか」を判断するが、decode 済みだと `%2F` が
+// 本物の `/` になって**区切りが 1 つずれる**。ServeMux（Go 1.22+）は wildcard の
+// 中の `%2F` を区切りとして扱わないので、**ルーティングは通るのに認可だけが
+// 別のパスを見る**ことになる。
+//
+// 実測（2026-09-06、本番で成立していた）：
+//
+//	GET /api/streams/.%2FhVfDBfreYNI/comments
+//	  → ServeMux: PathValue("id") = "./hVfDBfreYNI" でハンドラへ
+//	  → 認可:     "/api/streams/./hVfDBfreYNI/comments" と見えるので
+//	              parts[1] が "comments" ではなく "hVfDBfreYNI" になり、
+//	              `isStreamSubresource` が外れて**公開 GET に落ちた**（401 ではなく 200）
+//
+// escape されたままなら `.%2FhVfDBfreYNI` は 1 つの区切りに収まる。
+//
+// **ただし escape されたパスをそのまま見るのも誤り。** ServeMux は各セグメントを
+// **復号してから**パターンと突き合わせるので `/api/streams/{id}/%63omments` は
+// comments のハンドラへ届く。認可が `%63omments` のまま比べると、今度は
+// **内容**が一致せず、やはり公開既定へ落ちる ── 区切りの穴を内容の穴に
+// すり替えただけになる（この形をレビューで指摘された）。
+//
+// そこで `authzPath` が ServeMux と同じ規則へ揃える。
+//
+// **これは認可の穴を塞ぐだけで、値が安全になるわけではない。** ID を
+// ファイル名や外部コマンドに使う側は、別途その値を検証すること
+// ── `filepath.Join` は `../` を正規化するので、認可を通ったことは
+// 「パスとして安全」を意味しない。
+func authorizeRequest(req *http.Request, user *models.User) bool {
+	return authorize(req.Method, authzPath(req.URL.EscapedPath()), user)
+}
+
+// authzPath は認可が見るパスを ServeMux の解釈へ揃える。
+//
+//   - 区切り（`/`）は **escape されたパス**で決める。復号済みのパスを分割すると
+//     `%2F` が区切りに化けて、セグメントが 1 つずれる
+//   - 各セグメントは**個別に復号**する。ServeMux は復号後の値でパターンと
+//     突き合わせるので、`%63omments` は `comments` として届く
+//   - 復号で現れた `/` は**区切りに昇格させない**（`%2F` へ戻す）。
+//     ここを素通しにすると 1 つ目の規則が無意味になる
+//
+// 実測（Go 1.25、`net/http.ServeMux`）：
+//
+//	/api/streams/ID/%63omments    → ハンドラ到達（id="ID"）   復号して一致させる必要がある
+//	/api/streams/.%2FID/comments  → ハンドラ到達（id="./ID"） 区切りを増やしてはいけない
+//	/api/streams/%2E%2E/comments  → ハンドラ到達（id=".."）   復号後も区切りは増えない
+//	/api/streams/../comments      → 301（ハンドラへ届かない）
+//	/api/streams/ID%2Fcomments    → 404（ハンドラへ届かない）
+func authzPath(escaped string) string {
+	segs := strings.Split(escaped, "/")
+	for i, seg := range segs {
+		decoded, err := url.PathUnescape(seg)
+		if err != nil {
+			// 復号できない（不正な `%`）。ServeMux もこの形はルーティングしないので
+			// 到達しないが、**こちらでは何も緩めない**ためそのまま残す。
+			continue
+		}
+		// 復号で現れた区切りは区切りにしない。ServeMux も wildcard の中の
+		// `%2F` を区切りとして扱わない。
+		segs[i] = strings.ReplaceAll(decoded, "/", "%2F")
+	}
+	return strings.Join(segs, "/")
 }
 
 // authorize はメソッド＋パスに必要な権限を求め、user がそれを満たすか判定する。
