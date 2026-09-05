@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -319,7 +320,7 @@ func (s *ChatEndService) fetchLiveChat(videoID string) (string, chatOutcome, err
 		return "", chatTransientError, fmt.Errorf("create cache dir: %w", err)
 	}
 	base := filepath.Join(s.cacheDir, videoID)
-	chat := base + ".live_chat.json"
+	chat := s.chatCachePath(videoID)
 	// **存在するだけでは証拠にならない。** 途中で切れた／空のファイルが残っていると、
 	// ParseLiveChatFile は壊れた行を黙って読み飛ばすので「0 件・エラー無し」になり、
 	// 「拍手が無かった」という結論として確定してしまう。しかもキャッシュなので
@@ -439,4 +440,121 @@ func (s *ChatEndService) saveAvailability(videoID, stdout string) {
 	if err := s.streamRepo.SaveAvailability(videoID, avail, a.PlayableInEmbed); err != nil {
 		logger.Warnf("[chatend] %s の再生可否を保存できません: %v", videoID, err)
 	}
+}
+
+// ========== 手動での取り込み（会限配信のため） ==========
+
+// chatCachePath は live chat replay のキャッシュ先。**yt-dlp の -o と同じ形**に
+// しておくこと（`fetchLiveChat` はここへ書かせている）。
+func (s *ChatEndService) chatCachePath(videoID string) string {
+	return filepath.Join(s.cacheDir, videoID+".live_chat.json")
+}
+
+// LiveChatImport は取り込んだ（または既にある）live chat の中身の要約。
+//
+// **人が「取り違えていないか」を判断するための材料。** live chat のファイルには
+// 動画 ID がどこにも入っていないので（実測：本番のキャッシュを grep して 0 件）、
+// 機械では別の配信のものと区別できない。時間の範囲と件数を出して人に見せるしかない。
+type LiveChatImport struct {
+	Records    int     `json:"records"`  // replay として読めた記録の数
+	Messages   int     `json:"messages"` // うち本文のあるもの
+	Applause   int     `json:"applause"` // そのうち「拍手だけ」のコメント
+	FirstAtSec float64 `json:"first_at_sec"`
+	LastAtSec  float64 `json:"last_at_sec"`
+	Bytes      int64   `json:"bytes"`
+}
+
+// ErrLiveChatUnreadable は取り込もうとしたファイルが live chat replay として読めないこと。
+var ErrLiveChatUnreadable = errors.New("live chat replay として読めません")
+
+// ImportLiveChat は編集者が手元の yt-dlp で取った live_chat.json を取り込む。
+//
+// **会限配信は本番から取れない。** cookie はデータセンター IP の BOT 判定を
+// 抜けるためのもので、視聴資格を与えるものではない（実測：cookie 無しでも
+// availability=subscriber_only は取れるが、replay の中身は取れない）。
+// メンバー資格のある編集者が手元で取ったものを持ち込む口がこれ。
+//
+// **検証してから置く。** 素通しでキャッシュへ書くと、壊れたファイルが
+// 「拍手が 0 件だった」という結論として確定し、しかもキャッシュなので
+// force 分析でも回復しない（§6.5 で踏んだのと同じ穴）。`ParseLiveChat` が
+// 「記録を認識でき、かつ壊れた行が無い」と言ったものだけを受け入れる。
+func (s *ChatEndService) ImportLiveChat(videoID string, data []byte) (LiveChatImport, error) {
+	var out LiveChatImport
+
+	events, recognized, err := chatend.ParseLiveChat(bytes.NewReader(data))
+	if err != nil {
+		return out, fmt.Errorf("%w: %v", ErrLiveChatUnreadable, err)
+	}
+	if !recognized {
+		// 記録が 1 つも無い、または壊れた行がある（＝途中で切れている）。
+		// **どちらも「拍手が無かった」とは別の事実**なので受け取らない。
+		return out, ErrLiveChatUnreadable
+	}
+
+	out = summarizeChat(events, int64(len(data)))
+
+	if err := os.MkdirAll(s.cacheDir, 0o755); err != nil {
+		return out, fmt.Errorf("create cache dir: %w", err)
+	}
+	// **書き換えは原子的に。** 途中で失敗して半分だけのファイルが残ると、
+	// それがそのままキャッシュとして読まれる。
+	tmp := s.chatCachePath(videoID) + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return out, fmt.Errorf("write live chat: %w", err)
+	}
+	if err := os.Rename(tmp, s.chatCachePath(videoID)); err != nil {
+		_ = os.Remove(tmp)
+		return out, fmt.Errorf("place live chat: %w", err)
+	}
+
+	logger.Infof("[chatend] %s: live chat を手動で取り込みました（記録 %d・拍手 %d・%.0f〜%.0f 秒）",
+		videoID, out.Records, out.Applause, out.FirstAtSec, out.LastAtSec)
+	return out, nil
+}
+
+// CachedLiveChat は既に置かれている live chat の要約を返す（無ければ ok=false）。
+// 取り違えたときに人が気付けるよう、画面へ出すためのもの。
+func (s *ChatEndService) CachedLiveChat(videoID string) (LiveChatImport, bool) {
+	path := s.chatCachePath(videoID)
+	info, err := os.Stat(path)
+	if err != nil {
+		return LiveChatImport{}, false
+	}
+	events, recognized, err := chatend.ParseLiveChatFile(path)
+	if err != nil || !recognized {
+		// 置いてあるが使えない。**「無い」とは違う**ので、そう言えるように
+		// 件数 0 の要約を返す（画面は取り直しを促せる）。
+		return LiveChatImport{Bytes: info.Size()}, true
+	}
+	return summarizeChat(events, info.Size()), true
+}
+
+// DeleteCachedLiveChat は置いてある live chat を消す。
+//
+// **取り違えを取り消せることが、手動取り込みを許す条件。** ファイルがあると
+// yt-dlp は呼ばれず force 分析でも読み直さないので、消せないと別の配信の
+// チャットが恒久的に居座る。
+func (s *ChatEndService) DeleteCachedLiveChat(videoID string) error {
+	err := os.Remove(s.chatCachePath(videoID))
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove live chat: %w", err)
+	}
+	return nil
+}
+
+// summarizeChat は取り込み前後の確認に出す要約を作る。
+func summarizeChat(events []chatend.Event, size int64) LiveChatImport {
+	out := LiveChatImport{Records: len(events), Messages: len(events), Bytes: size}
+	for i, e := range events {
+		if chatend.IsPureApplause(e.Text) {
+			out.Applause++
+		}
+		if i == 0 || e.T < out.FirstAtSec {
+			out.FirstAtSec = e.T
+		}
+		if e.T > out.LastAtSec {
+			out.LastAtSec = e.T
+		}
+	}
+	return out
 }

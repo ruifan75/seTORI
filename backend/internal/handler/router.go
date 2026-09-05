@@ -441,6 +441,11 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("POST /api/comments/backfill", r.handleBackfillCommentSongs)
 	r.mux.HandleFunc("POST /api/comments/backfill-hashes", r.handleBackfillCommentSongsHashes)
 	r.mux.HandleFunc("POST /api/streams/{id}/analyze-chat-ends", r.handleAnalyzeChatEnds)
+	// 手動での取り込み（会限配信は本番から入力源を取れないため。content:edit）
+	r.mux.HandleFunc("POST /api/streams/{id}/import/info-json", r.handleImportInfoJSON)
+	r.mux.HandleFunc("POST /api/streams/{id}/import/live-chat", r.handleImportLiveChat)
+	r.mux.HandleFunc("GET /api/streams/{id}/import/live-chat", r.handleGetImportedLiveChat)
+	r.mux.HandleFunc("DELETE /api/streams/{id}/import/live-chat", r.handleDeleteImportedLiveChat)
 	r.mux.HandleFunc("POST /api/streams/{id}/chat-end-estimate", r.handleEstimateChatEnds)
 	r.mux.HandleFunc("POST /api/chat-ends/backfill", r.handleBackfillChatEnds)
 
@@ -3742,7 +3747,10 @@ func requiredPermission(method, path string) (perm string, needsAuth bool) {
 	// **語尾ではなくルートの形で判定する。** 語尾だけで見ると
 	// /api/streams/search/chapters のような別の形も拾い、逆に将来
 	// /api/streams/{id}/comments/raw のようなサブリソースを足すと素通りする。
-	if isStreamSubresource(path, "comments", "chapters", "holodex-songs", "availability") {
+	// "import" … 手動での取り込み（会限配信のため）。**書き込みだけでなく GET も
+	// ここで塞ぐ** ── 置いてある live chat の要約には配信の時間構造が出るし、
+	// そもそも会限配信の解析素材の存在自体を未ログインへ知らせる必要が無い。
+	if isStreamSubresource(path, "comments", "chapters", "holodex-songs", "availability", "import") {
 		return auth.PermContentEdit, true
 	}
 

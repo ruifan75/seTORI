@@ -37,6 +37,14 @@ func TestStreamAnalysisEndpointsRequireContentEdit(t *testing.T) {
 		{"配信検索", http.MethodGet, "/api/streams/search", "", false},
 		{"楽曲詳細", http.MethodGet, "/api/songs/abc123", "", false},
 
+		// 手動での取り込み（会限配信のため）。**GET も塞ぐ** ── 置いてある
+		// live chat の要約には配信の時間構造が出るし、会限配信の解析素材の存在
+		// そのものを未ログインへ知らせる必要が無い。
+		{"info.json の取り込み", http.MethodPost, "/api/streams/abc123/import/info-json", auth.PermContentEdit, true},
+		{"live chat の取り込み", http.MethodPost, "/api/streams/abc123/import/live-chat", auth.PermContentEdit, true},
+		{"取り込んだ live chat の要約", http.MethodGet, "/api/streams/abc123/import/live-chat", auth.PermContentEdit, true},
+		{"取り込んだ live chat の削除", http.MethodDelete, "/api/streams/abc123/import/live-chat", auth.PermContentEdit, true},
+
 		// 書き込み側は元から content:edit（既定で拾えていることの確認）
 		{"コメント再取得", http.MethodPost, "/api/streams/abc123/comments/sync-youtube", auth.PermContentEdit, true},
 		{"チャプター再取得", http.MethodPost, "/api/streams/abc123/chapters/sync", auth.PermContentEdit, true},
