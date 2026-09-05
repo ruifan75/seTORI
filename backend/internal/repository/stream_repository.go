@@ -591,7 +591,11 @@ func (r *StreamRepository) FindStreamsForBatch(mode, singerID string, hidden *bo
 		where += fmt.Sprintf(" AND EXISTS (SELECT 1 FROM stream_singers ss WHERE ss.stream_id = s.id AND ss.singer_id = $%d)", len(args))
 	}
 
-	rows, err := r.db.Query(`SELECT s.id, s.title FROM streams s WHERE `+where+` ORDER BY s.stream_date ASC`, args...)
+	// **is_hidden と is_processed も引く。** 部分モデルにしていたので、
+	// 呼び出し側の `stream.IsHidden` が常にゼロ値 false になり、
+	// 「非表示で曲が出なければ処理済みにする」が**一度も発火しなかった**
+	// （コンパイルは通るので気付けない。SELECT と Scan の対の話と同じ形）。
+	rows, err := r.db.Query(`SELECT s.id, s.title, s.is_hidden, s.is_processed FROM streams s WHERE `+where+` ORDER BY s.stream_date ASC`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query batch streams: %w", err)
 	}
@@ -600,7 +604,7 @@ func (r *StreamRepository) FindStreamsForBatch(mode, singerID string, hidden *bo
 	var streams []models.Stream
 	for rows.Next() {
 		var s models.Stream
-		if err := rows.Scan(&s.ID, &s.Title); err != nil {
+		if err := rows.Scan(&s.ID, &s.Title, &s.IsHidden, &s.IsProcessed); err != nil {
 			return nil, fmt.Errorf("scan stream: %w", err)
 		}
 		streams = append(streams, s)
@@ -1242,9 +1246,16 @@ type NonSingingCandidate struct {
 //
 // 「見たが歌回ではない」と記録されたものは外す（`non_singing_checks`）。
 // 残し続けると作業一覧として使えなくなるうえ、別の担当が「漏れ」と読んでしまう。
-func (r *StreamRepository) FindNonSingingCandidates(limit int) ([]NonSingingCandidate, error) {
+// dismissed=true なら「歌回ではないと判断した」ものを返す（取り消すため）。
+// **効き続けるものは見えて取り消せること**（CLAUDE.md §7.7）── 一覧から
+// 消えるだけで戻せないと、誤って却下した配信が二度と出てこない。
+func (r *StreamRepository) FindNonSingingCandidates(limit int, dismissed bool) ([]NonSingingCandidate, error) {
 	if limit < 1 || limit > 500 {
 		limit = 100
+	}
+	exists := "NOT EXISTS"
+	if dismissed {
+		exists = "EXISTS"
 	}
 	rows, err := r.db.Query(`
 		SELECT s.id, s.title, s.stream_date,
@@ -1256,7 +1267,7 @@ func (r *StreamRepository) FindNonSingingCandidates(limit int) ([]NonSingingCand
 		WHERE s.is_hidden
 		  AND jsonb_typeof(s.comment_songs) = 'array'
 		  AND jsonb_array_length(s.comment_songs) > 0
-		  AND NOT EXISTS (SELECT 1 FROM non_singing_checks c WHERE c.stream_id = s.id)
+		  AND `+exists+` (SELECT 1 FROM non_singing_checks c WHERE c.stream_id = s.id)
 		ORDER BY jsonb_array_length(s.comment_songs) DESC, s.stream_date DESC
 		LIMIT $1`, limit)
 	if err != nil {

@@ -2046,7 +2046,9 @@ func (r *Router) handleListNonSingingCandidates(w http.ResponseWriter, req *http
 			limit = n
 		}
 	}
-	result, err := r.streamService.ListNonSingingCandidates(limit)
+	// dismissed=true は「歌回ではないと判断した」一覧（取り消すため）。
+	dismissed := req.URL.Query().Get("dismissed") == "true"
+	result, err := r.streamService.ListNonSingingCandidates(limit, dismissed)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return

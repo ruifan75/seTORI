@@ -400,8 +400,9 @@ export const singerApi = {
 // 非表示だが現行規則で曲が出た配信。**自動で非表示は解除しない**
 // （誤判定は両方向にある）ので、判断は人が行う。
 export const nonSingingApi = {
-  list: async (limit = 100): Promise<{ candidates: NonSingingCandidate[]; total: number }> => {
-    const { data } = await api.get('/api/non-singing-candidates', { params: { limit } });
+  // dismissed=true は「歌回ではないと判断した」一覧（取り消すため）。
+  list: async (limit = 100, dismissed = false): Promise<{ candidates: NonSingingCandidate[]; total: number }> => {
+    const { data } = await api.get('/api/non-singing-candidates', { params: { limit, dismissed } });
     return data;
   },
 

@@ -430,6 +430,10 @@ export default function SyncPage() {
                     「取りこぼした」と読まれる */}
                 {(batchStatus.deferred ?? 0) > 0 &&
                   `・live chat 待ちで見送り ${batchStatus.deferred} 件（次回やり直します）`}
+                {/* **状態を変えたことは必ず出す。** 出さないと、いつの間にか
+                    処理済みが増えていて理由が分からなくなる */}
+                {(batchStatus.marked_processed ?? 0) > 0 &&
+                  `・曲が無いので処理済みにした ${batchStatus.marked_processed} 件`}
                 ）
                 {batchStatus.failed > 0 && batchStatus.failed_ids && (
                   <span className="text-xs text-gray-400" title={batchStatus.failed_ids.join(', ')}>
@@ -1060,9 +1064,13 @@ function NonSingingCandidates() {
   const canEdit = hasPermission(useAuthStore((st) => st.user), PERM.CONTENT_EDIT);
   const authStatus = useAuthStore((st) => st.status);
 
+  // **却下したものも見えること。** 一覧から消えるだけで戻せないと、
+  // 誤って却下した配信が二度と出てこない（CLAUDE.md §7.7）。
+  const [showDismissed, setShowDismissed] = useState(false);
+
   const { data, isLoading, isError } = useQuery({
-    queryKey: ['nonSingingCandidates', canEdit],
-    queryFn: () => nonSingingApi.list(),
+    queryKey: ['nonSingingCandidates', canEdit, showDismissed],
+    queryFn: () => nonSingingApi.list(100, showDismissed),
     enabled: canEdit && authStatus !== 'loading',
   });
 
@@ -1070,7 +1078,16 @@ function NonSingingCandidates() {
     mutationFn: (id: string) => nonSingingApi.dismiss(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['nonSingingCandidates'] });
-      showToast('歌回ではないと記録しました（一覧から外れます）', 'success');
+      showToast('歌回ではないと記録しました（「判断済み」から取り消せます）', 'success');
+    },
+    onError: (err: Error) => showToast(err.message, 'error'),
+  });
+
+  const restore = useMutation({
+    mutationFn: (id: string) => nonSingingApi.restore(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['nonSingingCandidates'] });
+      showToast('判断を取り消しました（候補に戻ります）', 'success');
     },
     onError: (err: Error) => showToast(err.message, 'error'),
   });
@@ -1081,7 +1098,15 @@ function NonSingingCandidates() {
 
   return (
     <div className="bg-white rounded-lg shadow-sm border p-6">
-      <h2 className="text-xl font-bold text-gray-900 mb-2">見直しが要る配信</h2>
+      <div className="flex items-center justify-between mb-2">
+        <h2 className="text-xl font-bold text-gray-900">見直しが要る配信</h2>
+        <button
+          onClick={() => setShowDismissed((v) => !v)}
+          className="text-xs text-gray-500 hover:text-indigo-600 underline"
+        >
+          {showDismissed ? '候補に戻る' : '判断済みを見る'}
+        </button>
+      </div>
       <p className="text-gray-500 mb-4 text-sm">
         <strong>非表示なのに、コメントから曲が抽出できた</strong>配信です。
         本当は歌枠なのに隠れている可能性がありますが、実況メモや雑談のタイムスタンプが
@@ -1096,7 +1121,9 @@ function NonSingingCandidates() {
           取得に失敗しました（候補が無いという意味ではありません）。
         </p>
       ) : candidates.length === 0 ? (
-        <p className="text-gray-400 text-sm">見直しが要る配信はありません。</p>
+        <p className="text-gray-400 text-sm">
+          {showDismissed ? '「歌回ではない」と判断した配信はありません。' : '見直しが要る配信はありません。'}
+        </p>
       ) : (
         <ul className="divide-y border rounded-lg">
           {candidates.map((c) => (
@@ -1116,14 +1143,25 @@ function NonSingingCandidates() {
                   )}
                 </div>
               </div>
-              <button
-                onClick={() => dismiss.mutate(c.id)}
-                disabled={dismiss.isPending}
-                title="見たが歌回ではない、と記録して一覧から外す（取り消せます）"
-                className="shrink-0 px-2 py-1 text-xs text-gray-600 border border-gray-300 rounded-full hover:text-indigo-600 hover:border-indigo-300 disabled:opacity-50"
-              >
-                歌回ではない
-              </button>
+              {showDismissed ? (
+                <button
+                  onClick={() => restore.mutate(c.id)}
+                  disabled={restore.isPending}
+                  title="判断を取り消して候補に戻す"
+                  className="shrink-0 px-2 py-1 text-xs text-gray-600 border border-gray-300 rounded-full hover:text-indigo-600 hover:border-indigo-300 disabled:opacity-50"
+                >
+                  判断を取り消す
+                </button>
+              ) : (
+                <button
+                  onClick={() => dismiss.mutate(c.id)}
+                  disabled={dismiss.isPending}
+                  title="見たが歌回ではない、と記録して一覧から外す（あとで取り消せます）"
+                  className="shrink-0 px-2 py-1 text-xs text-gray-600 border border-gray-300 rounded-full hover:text-indigo-600 hover:border-indigo-300 disabled:opacity-50"
+                >
+                  歌回ではない
+                </button>
+              )}
             </li>
           ))}
         </ul>

@@ -177,7 +177,13 @@ func (s *BatchAnalyzeService) run(mode, singerID string, hidden *bool) {
 		//
 		// **非表示だけ**。表示中の配信は Holodex や章節から歌単ができうるので、
 		// コメントに曲が無いことは「もう手を入れなくてよい」を意味しない。
-		if outcome == batchOutcomeDone && songs == 0 && stream.IsHidden && !stream.IsProcessed {
+		// **emptyByDesign は標記の根拠にならない。** 取得できて 0 件だったことは
+		// 「今コメントが無い」しか証明せず、歌が無いことは証明しない ── 配信直後で
+		// 歌単コメントがまだ投稿されていない非表示の歌回や、Holodex・章節に曲は
+		// あるがコメントは空の配信を処理済みにしてしまう。しかも refresh は
+		// `is_processed = FALSE` で絞るので、**後からコメントが増えても拾えなくなる**。
+		if outcome == batchOutcomeDone && !emptyByDesign && songs == 0 &&
+			stream.IsHidden && !stream.IsProcessed {
 			if err := s.streamRepo.MarkProcessed(stream.ID); err != nil {
 				logger.Warnf("[batch-analyze] %s: 処理済みにできませんでした: %v", stream.ID, err)
 			} else {

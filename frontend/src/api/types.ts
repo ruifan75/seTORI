@@ -561,6 +561,12 @@ export interface BatchAnalyzeStatus {
    * 完了に混ぜると、その配信の end が付かないまま「終わった」ことになる。
    */
   deferred: number;
+  /**
+   * 「曲が無かったので処理済みにした」件数（非表示のみ）。
+   * **黙って状態を変えない**ために出す ── 出さないと、いつの間にか
+   * 処理済みが増えていて理由が分からなくなる。
+   */
+  marked_processed: number;
   current?: string;
   failed_ids?: string[];
   message?: string;

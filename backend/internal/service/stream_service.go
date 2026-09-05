@@ -217,8 +217,8 @@ func (s *StreamService) GetPerformancesByTag(tagID string, page, limit int) (*dt
 //
 // **自動で非表示は解除しない。** 誤判定は両方向にある（雑談が歌枠と判定される／
 // 本物の歌枠が隠れる）ので、判断は人に委ねる。
-func (s *StreamService) ListNonSingingCandidates(limit int) (*dto.NonSingingCandidateList, error) {
-	rows, err := s.streamRepo.FindNonSingingCandidates(limit)
+func (s *StreamService) ListNonSingingCandidates(limit int, dismissed bool) (*dto.NonSingingCandidateList, error) {
+	rows, err := s.streamRepo.FindNonSingingCandidates(limit, dismissed)
 	if err != nil {
 		return nil, fmt.Errorf("list non singing candidates: %w", err)
 	}
