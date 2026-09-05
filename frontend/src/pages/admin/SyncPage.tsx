@@ -1,7 +1,7 @@
 import { Fragment, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { holodexApi, batchAnalyzeApi, batchFillApi, singerApi, availabilityApi, autoFillApi } from '../../api/client';
+import { holodexApi, batchAnalyzeApi, batchFillApi, singerApi, availabilityApi, autoFillApi, nonSingingApi } from '../../api/client';
 import { useToast } from '../../components/ui/ToastContext';
 import { useAuthStore, hasPermission, PERM } from '../../store/auth';
 import { formatSeconds } from '../../components/usePerformanceTiming';
@@ -184,6 +184,7 @@ export default function SyncPage() {
 
       <AutoFillTargets />
       <AutoFillSchedule />
+      <NonSingingCandidates />
 
       {/* Sync by Channel */}
       <div className="bg-white rounded-lg shadow-sm border p-6">
@@ -1039,6 +1040,93 @@ function AutoFillSchedule() {
             </p>
           )}
         </>
+      )}
+    </div>
+  );
+}
+
+
+// NonSingingCandidates は「非表示だが現行規則で曲が出た」配信の一覧。
+//
+// **自動で非表示は解除しない。** 2026-08-29 に手で見直したときの実測では、
+// 誤判定は両方向にあった（雑談が歌枠と判定される／本物の歌枠が隠れる）ので、
+// 自動で解くと雑談が発見面へ出る。ここは候補を並べて人に決めさせる場所。
+//
+// **差分は保存しない**（毎回計算する）。記録するのは否定だけ ──
+// 「見たが歌回ではない」を残さないと同じ配信が毎回出続け、作業一覧として使えなくなる。
+function NonSingingCandidates() {
+  const queryClient = useQueryClient();
+  const { showToast } = useToast();
+  const canEdit = hasPermission(useAuthStore((st) => st.user), PERM.CONTENT_EDIT);
+  const authStatus = useAuthStore((st) => st.status);
+
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['nonSingingCandidates', canEdit],
+    queryFn: () => nonSingingApi.list(),
+    enabled: canEdit && authStatus !== 'loading',
+  });
+
+  const dismiss = useMutation({
+    mutationFn: (id: string) => nonSingingApi.dismiss(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['nonSingingCandidates'] });
+      showToast('歌回ではないと記録しました（一覧から外れます）', 'success');
+    },
+    onError: (err: Error) => showToast(err.message, 'error'),
+  });
+
+  if (!canEdit) return null;
+
+  const candidates = data?.candidates ?? [];
+
+  return (
+    <div className="bg-white rounded-lg shadow-sm border p-6">
+      <h2 className="text-xl font-bold text-gray-900 mb-2">見直しが要る配信</h2>
+      <p className="text-gray-500 mb-4 text-sm">
+        <strong>非表示なのに、コメントから曲が抽出できた</strong>配信です。
+        本当は歌枠なのに隠れている可能性がありますが、実況メモや雑談のタイムスタンプが
+        曲として拾われることも多いので、<strong>自動では解除しません</strong>。
+        中身を見て、歌枠なら配信ページで非表示を解除してください。
+      </p>
+
+      {isLoading ? (
+        <p className="text-gray-400 text-sm">読み込み中...</p>
+      ) : isError ? (
+        <p className="text-red-600 text-sm">
+          取得に失敗しました（候補が無いという意味ではありません）。
+        </p>
+      ) : candidates.length === 0 ? (
+        <p className="text-gray-400 text-sm">見直しが要る配信はありません。</p>
+      ) : (
+        <ul className="divide-y border rounded-lg">
+          {candidates.map((c) => (
+            <li key={c.id} className="flex items-center justify-between gap-3 px-4 py-2">
+              <div className="min-w-0">
+                <Link to={`/streams/${c.id}`} className="text-indigo-600 hover:underline truncate block">
+                  {c.title}
+                </Link>
+                <div className="text-xs text-gray-400 flex flex-wrap items-center gap-2">
+                  <span>{c.song_count} 曲</span>
+                  <span>{new Date(c.stream_date).toLocaleDateString('ja-JP')}</span>
+                  {c.tags.length > 0 && <span>{c.tags.join('・')}</span>}
+                  {/* **旧規則のままかを出す。** 古い抽出を根拠に非表示を解くのは危ない
+                      （2026-08-07 より前の結果は現行規則に通すと落ちるものが多い） */}
+                  {!c.analyzed_at && (
+                    <span className="text-amber-600">旧規則のままの抽出（要再分析）</span>
+                  )}
+                </div>
+              </div>
+              <button
+                onClick={() => dismiss.mutate(c.id)}
+                disabled={dismiss.isPending}
+                title="見たが歌回ではない、と記録して一覧から外す（取り消せます）"
+                className="shrink-0 px-2 py-1 text-xs text-gray-600 border border-gray-300 rounded-full hover:text-indigo-600 hover:border-indigo-300 disabled:opacity-50"
+              >
+                歌回ではない
+              </button>
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );

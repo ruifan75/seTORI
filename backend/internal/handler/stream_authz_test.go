@@ -65,6 +65,13 @@ func TestStreamAnalysisEndpointsRequireContentEdit(t *testing.T) {
 		// 近い名前の別ルートを巻き込まない
 		{"近い名前の別ルート", http.MethodGet, "/api/singers/auto-fill-report", "", false},
 
+		// 見直しが要る配信。**GET は既定で公開に落ちる**ので明示が要る ──
+		// 書かないと「非表示にしている配信の題名」が未ログインから読める
+		{"見直し候補の一覧", http.MethodGet, "/api/non-singing-candidates", auth.PermContentEdit, true},
+		{"見直し候補の却下", http.MethodPost, "/api/non-singing-candidates/abc/dismiss", auth.PermContentEdit, true},
+		{"却下の取り消し", http.MethodDelete, "/api/non-singing-candidates/abc/dismiss", auth.PermContentEdit, true},
+		{"近い名前の別ルート(candidates)", http.MethodGet, "/api/non-singing-candidates-report", "", false},
+
 		// 自動処理（定期実行）。設定の GET も content:edit ── ここに書かないと
 		// 「いつ・どれを自動で回しているか」と最後の実行結果が未ログインから読める
 		{"自動処理の設定", http.MethodGet, "/api/auto-fill/settings", auth.PermContentEdit, true},

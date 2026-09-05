@@ -158,11 +158,32 @@ func (s *BatchAnalyzeService) run(mode, singerID string, hidden *bool) {
 			}
 		}
 
-		outcome := batchOutcomeDone
+		outcome, songs := batchOutcomeDone, 0
 		if emptyByDesign {
 			logger.Infof("[batch-analyze] %s: コメントが 0 件でした（取得は成功。分析は行いません）", stream.ID)
 		} else {
-			outcome = s.processOne(stream.ID, forceStart)
+			outcome, songs = s.processOne(stream.ID, forceStart)
+		}
+
+		// **非表示 × 曲が出ない → 処理済みにする**（issue #42）。
+		//
+		// 「非歌回か確かめる」作業の出口。現行規則で曲が 1 つも出なければ
+		// 歌回ではないと判断してよく、そこで打ち止めにしないと毎回やり直すことになる。
+		//
+		// **成功したときだけ**（outcome == done）。AI 劣化・見送り・取得失敗でも
+		// 標記すると、「今回は走らなかった」を「この配信に歌は無い」として
+		// 固定することになる ── `is_processed` は人と機構が共有する結論なので、
+		// 読めなかっただけの配信をそこへ落とすのが一番まずい。
+		//
+		// **非表示だけ**。表示中の配信は Holodex や章節から歌単ができうるので、
+		// コメントに曲が無いことは「もう手を入れなくてよい」を意味しない。
+		if outcome == batchOutcomeDone && songs == 0 && stream.IsHidden && !stream.IsProcessed {
+			if err := s.streamRepo.MarkProcessed(stream.ID); err != nil {
+				logger.Warnf("[batch-analyze] %s: 処理済みにできませんでした: %v", stream.ID, err)
+			} else {
+				logger.Infof("[batch-analyze] %s: 曲が見つからないので処理済みにしました", stream.ID)
+				s.update(func(st *dto.BatchAnalyzeStatus) { st.MarkedProcessed++ })
+			}
 		}
 
 		switch outcome {
@@ -203,11 +224,13 @@ const (
 
 // processOne は1配信を分析する。AI 劣化（warning あり）は冷却待ち後に force で再試行。
 // forceStart=true のときは初回から force（キャッシュ無視）で分析する（reanalyze 用）。
-func (s *BatchAnalyzeService) processOne(videoID string, forceStart bool) batchOutcome {
+// 2 つ目の戻り値は抽出できた曲数（**成功したときだけ意味がある**）。
+// 「曲が 0 件だった」を「処理できなかった」と混ぜないために、outcome と分けて返す。
+func (s *BatchAnalyzeService) processOne(videoID string, forceStart bool) (batchOutcome, int) {
 	force := forceStart
 	for attempt := 1; attempt <= batchMaxAttempts; attempt++ {
 		if s.isCancelled() {
-			return batchOutcomeFailed
+			return batchOutcomeFailed, 0
 		}
 
 		// 一括プレ分析は抽出までにとどめる。**この経路では**照合の AI 判定を行わない
@@ -218,9 +241,9 @@ func (s *BatchAnalyzeService) processOne(videoID string, forceStart bool) batchO
 			// キャッシュを書いていないので、完了に数えると再試行されないまま
 			// その配信の end が付かずに残る。
 			if resp.Deferred {
-				return batchOutcomeDeferred
+				return batchOutcomeDeferred, 0
 			}
-			return batchOutcomeDone
+			return batchOutcomeDone, len(resp.Songs)
 		}
 		// **保存済みの入力が無いのは「分析して 0 曲」ではない。**
 		// 再試行しても遠隔へは行かない（一括は保存済みを処理する仕組み）ので、
@@ -228,7 +251,7 @@ func (s *BatchAnalyzeService) processOne(videoID string, forceStart bool) batchO
 		// 取り直しに失敗した配信が「処理済み」に見えてしまう。
 		if errors.Is(err, ErrNoStoredComments) {
 			logger.Warnf("[batch-analyze] %s: 保存済みのコメントがありません（取り直しに失敗した可能性）", videoID)
-			return batchOutcomeFailed
+			return batchOutcomeFailed, 0
 		}
 		// 分析中にコメントが差し替わっただけなら、待たずに読み直す。
 		// 90 秒の冷却は AI プロバイダーの劣化明けを待つためのもので、
@@ -237,7 +260,7 @@ func (s *BatchAnalyzeService) processOne(videoID string, forceStart bool) batchO
 			logger.Warnf("[batch-analyze] %s attempt %d: コメントが変わったので読み直します", videoID, attempt)
 			force = true
 			if attempt == batchMaxAttempts {
-				return batchOutcomeFailed
+				return batchOutcomeFailed, 0
 			}
 			continue
 		}
@@ -248,16 +271,16 @@ func (s *BatchAnalyzeService) processOne(videoID string, forceStart bool) batchO
 		}
 
 		if attempt == batchMaxAttempts {
-			return batchOutcomeFailed
+			return batchOutcomeFailed, 0
 		}
 		// 劣化結果がキャッシュに載っているため、次は force で作り直す。
 		// AI プロバイダーの冷却明けを待ってから再試行する。
 		force = true
 		if !s.sleepInterruptible(batchCooldownWait) {
-			return batchOutcomeFailed
+			return batchOutcomeFailed, 0
 		}
 	}
-	return batchOutcomeFailed
+	return batchOutcomeFailed, 0
 }
 
 // sleepInterruptible はキャンセルに反応しつつ待機する。継続可否を返す。

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/google/uuid"
 	"time"
 
 	"github.com/ruifan75/setori/internal/dto"
@@ -212,6 +213,42 @@ func (s *StreamService) GetPerformancesByTag(tagID string, page, limit int) (*dt
 }
 
 // GetByID は歌枠の詳細（セットリストを含む）を取得する。
+// ListNonSingingCandidates は「非表示だが現行規則で曲が出た」配信を返す（issue #42）。
+//
+// **自動で非表示は解除しない。** 誤判定は両方向にある（雑談が歌枠と判定される／
+// 本物の歌枠が隠れる）ので、判断は人に委ねる。
+func (s *StreamService) ListNonSingingCandidates(limit int) (*dto.NonSingingCandidateList, error) {
+	rows, err := s.streamRepo.FindNonSingingCandidates(limit)
+	if err != nil {
+		return nil, fmt.Errorf("list non singing candidates: %w", err)
+	}
+	items := make([]dto.NonSingingCandidate, len(rows))
+	for i, c := range rows {
+		items[i] = dto.NonSingingCandidate{
+			ID:         c.ID,
+			Title:      c.Title,
+			StreamDate: c.StreamDate.Format(time.RFC3339),
+			SongCount:  c.SongCount,
+			Tags:       c.Tags,
+		}
+		if c.AnalyzedAt.Valid {
+			t := c.AnalyzedAt.Time.Format(time.RFC3339)
+			items[i].AnalyzedAt = &t
+		}
+	}
+	return &dto.NonSingingCandidateList{Candidates: items, Total: len(items)}, nil
+}
+
+// MarkNotSinging は「見たが歌回ではない」を記録する（候補から外し続ける）。
+func (s *StreamService) MarkNotSinging(streamID string, by *uuid.UUID, note string) error {
+	return s.streamRepo.SaveNonSingingCheck(streamID, by, note)
+}
+
+// UnmarkNotSinging は判断を取り消す。**効き続けるものは見えて取り消せること。**
+func (s *StreamService) UnmarkNotSinging(streamID string) error {
+	return s.streamRepo.DeleteNonSingingCheck(streamID)
+}
+
 // GetByID は配信の詳細を返す。includeAnalysis は解析結果を載せるか
 // （toStreamResponse のコメント参照。呼び出し側が権限を見て決める）。
 func (s *StreamService) GetByID(id string, access repository.ViewerAccess) (*dto.StreamDetailResponse, error) {

@@ -511,6 +511,17 @@ export interface AnalyzeCommentsResponse {
 
 // 未処理配信の一括プレ分析ジョブの進捗
 /** 自動処理（定期実行）の設定。**content:edit のみ**。 */
+/** 「非表示だが現行規則で曲が出た」配信（issue #42）。**content:edit のみ**。 */
+export interface NonSingingCandidate {
+  id: string;
+  title: string;
+  stream_date: string;
+  song_count: number;
+  /** 無いなら**旧規則のままの抽出**。古い結果を根拠に非表示を解くのは危ない */
+  analyzed_at?: string;
+  tags: string[];
+}
+
 export interface AutoFillSettings {
   enabled: boolean;
   /** 実行間隔。短いほど「まだ変換中」の配信を何度も触ることになる */
