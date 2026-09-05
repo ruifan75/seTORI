@@ -383,6 +383,8 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("PUT /api/singers/{id}", r.handleUpdateSinger)
 	r.mux.HandleFunc("PUT /api/singers/{id}/visibility", r.handleUpdateSingerVisibility)
 	r.mux.HandleFunc("PUT /api/singers/{id}/members-policy", r.handleUpdateSingerMembersPolicy)
+	r.mux.HandleFunc("PUT /api/singers/{id}/auto-fill", r.handleUpdateSingerAutoFill)
+	r.mux.HandleFunc("GET /api/singers/auto-fill", r.handleListAutoFillTargets)
 	r.mux.HandleFunc("PUT /api/singers/{id}/organization", r.handleUpdateSingerOrganization)
 
 	// 事務所（取り込み時の key と表示名を分けて持つ）
@@ -1969,6 +1971,52 @@ func (r *Router) handleUpdateSingerMembersPolicy(w http.ResponseWriter, req *htt
 	respondJSON(w, http.StatusOK, map[string]any{"id": id, "members_only_policy": *body.Policy})
 }
 
+// handleUpdateSingerAutoFill は自動処理の対象かを切り替える（content:edit）。
+//
+// 立てると**将来**の自動処理（定期同期・コメント解析・歌単作成）の対象になる。
+// **定期実行器はまだ無い**（issue #35 の ③）ので、今は登録するだけ。
+// 動き出したあとも最後の確認（is_processed）は自動では付かない。
+func (r *Router) handleUpdateSingerAutoFill(w http.ResponseWriter, req *http.Request) {
+	id := req.PathValue("id")
+	if id == "" {
+		respondError(w, http.StatusBadRequest, "チャンネルIDは必須です")
+		return
+	}
+	var body dto.UpdateSingerAutoFillRequest
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		respondError(w, http.StatusBadRequest, "無効なリクエスト形式")
+		return
+	}
+	// **項目が無いのを false と読まない。** `{}` や項目名の typo が decode に
+	// 成功してしまい、有効にしてあるチャンネルを黙って止める（members-policy と同じ）。
+	if body.Enabled == nil {
+		respondError(w, http.StatusBadRequest, "auto_fill_enabled は必須です")
+		return
+	}
+	found, err := r.singerService.SetAutoFill(id, *body.Enabled)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !found {
+		respondError(w, http.StatusNotFound, "チャンネルが見つかりません")
+		return
+	}
+	logger.Infof("singer %s auto_fill_enabled=%v", id, *body.Enabled)
+	respondJSON(w, http.StatusOK, map[string]any{"id": id, "auto_fill_enabled": *body.Enabled})
+}
+
+// handleListAutoFillTargets は自動処理に登録したチャンネルの一覧（content:edit）。
+// **どのチャンネルが登録されているかを 1 か所で見て、まとめて外せること**が目的。
+func (r *Router) handleListAutoFillTargets(w http.ResponseWriter, req *http.Request) {
+	singers, err := r.singerService.ListAutoFillTargets()
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"singers": singers})
+}
+
 // handleUpdateSingerVisibility はチャンネルの非表示を切り替える（content:edit）。
 // 非表示にしてもチャンネルページ自体は誰でも開ける。隠すのは一覧に載る場所だけ。
 func (r *Router) handleUpdateSingerVisibility(w http.ResponseWriter, req *http.Request) {
@@ -3490,6 +3538,16 @@ func requiredPermission(method, path string) (perm string, needsAuth bool) {
 	// 再生可否の backfill も同じ理由で content:edit。全配信ぶんの yt-dlp を
 	// 運用者の cookie で起動するので、未ログインから叩ける状態にはできない。
 	if isRouteOrSubpath(path, "/api/availability/backfill") {
+		return auth.PermContentEdit, true
+	}
+
+	// 自動処理の対象一覧は運用の設定なので content:edit。
+	//
+	// **GET は既定で公開に落ちる**ので、書かないと「どのチャンネルを自動で
+	// 回しているか」が未ログインから読める。`/api/singers/{id}` より先に
+	// 判定されるが、認可は ServeMux の前に path 文字列だけで決まるため、
+	// ここに書いてあることが唯一の保護になる。
+	if isRouteOrSubpath(path, "/api/singers/auto-fill") {
 		return auth.PermContentEdit, true
 	}
 

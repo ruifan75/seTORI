@@ -259,6 +259,7 @@ export default function SingerDetailPage() {
               {canEdit && (singer.members_only_stream_count ?? 0) > 0 && (
                 <MembersPolicyPicker singer={singer} />
               )}
+              {canEdit && <AutoFillToggle singer={singer} />}
               {/* 非表示でもこのページは誰でも開けるので、閲覧者にも状態を見せる */}
               {singer.is_hidden && (
                 <span
@@ -754,6 +755,50 @@ export default function SingerDetailPage() {
         </div>
       )}
     </div>
+  );
+}
+
+// AutoFillToggle は自動処理（定期同期 → コメント解析 → 歌単作成）の切り替え。
+//
+// **既定は無効のオプトイン。** 立てると外部 API と AI を定期的に呼ぶので、
+// 黙って有効になっていてよいものではない。
+//
+// 立てても**最後の確認（処理完了）は自動では付かない** ── 確信の無いものは
+// 審査へ回り、人が確かめてから処理完了にする。ボタンの説明でそう言う。
+function AutoFillToggle({ singer }: { singer: { id: string; auto_fill_enabled?: boolean } }) {
+  const queryClient = useQueryClient();
+  const { showToast } = useToast();
+  const enabled = singer.auto_fill_enabled ?? false;
+
+  const mutation = useMutation({
+    mutationFn: (next: boolean) => singerApi.setAutoFill(singer.id, next),
+    onSuccess: (_data, next) => {
+      queryClient.invalidateQueries({ queryKey: ['singer', singer.id] });
+      queryClient.invalidateQueries({ queryKey: ['autoFillTargets'] });
+      showToast(next ? '自動処理の対象に登録しました' : '自動処理の対象から外しました', 'success');
+    },
+    onError: (err: Error) => showToast(err.message, 'error'),
+  });
+
+  return (
+    <button
+      onClick={() => mutation.mutate(!enabled)}
+      disabled={mutation.isPending}
+      // **定期実行はまだ入っていない**（issue #35 の ③）。「取り込みます」と
+      // 現在形で書くと、有効にしたのに何も起きないのを正常稼働と誤認させる。
+      title={
+        enabled
+          ? '将来の自動処理（定期同期 → コメント解析 → 歌単作成）の対象として登録済み。定期実行はまだ動いていません'
+          : '将来の自動処理の対象として登録します（定期実行はまだ動いていません）'
+      }
+      className={`inline-flex items-center gap-1 px-2 py-1 text-xs border border-dashed rounded-full disabled:opacity-50 ${
+        enabled
+          ? 'text-sky-700 border-sky-400 bg-sky-50 hover:border-sky-500'
+          : 'text-gray-500 border-gray-300 hover:text-sky-600 hover:border-sky-300'
+      }`}
+    >
+      {enabled ? '自動処理：登録済み' : '自動処理：未登録'}
+    </button>
   );
 }
 

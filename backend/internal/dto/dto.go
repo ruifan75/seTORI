@@ -96,6 +96,9 @@ type SingerResponse struct {
 	// MembersOnlyPolicy は会限セットリストの公開可否（未設定なら省略＝未確認）。
 	// 「訊いていない」「断られた」は運用の情報なので、**編集画面のためのもの**。
 	MembersOnlyPolicy *string `json:"members_only_policy,omitempty"`
+	// AutoFillEnabled は自動処理の対象か。**content:edit のときだけ載せる**
+	// （運用の設定で、閲覧者には意味が無い）。nil＝載せない。
+	AutoFillEnabled *bool `json:"auto_fill_enabled,omitempty"`
 	// MembersOnlyStreamCount は所有する会限配信の本数（0 なら省略）。
 	// **方針を出す画面には要る。** 0 本のチャンネルに「会限の公開可否」を訊いても
 	// 意味が無く、148 件すべてに「未確認」を出すと本当に訊くべき 2 件が埋もれる。
@@ -178,6 +181,13 @@ type SingerGroupListResponse struct {
 // 黙って未確認へ戻してしまう（deny では「訊いて断られた」という記録が消える）。
 type UpdateSingerMembersPolicyRequest struct {
 	Policy *string `json:"members_only_policy"`
+}
+
+// UpdateSingerAutoFillRequest は自動処理の対象かの切り替え。
+// **ポインタにするのは「項目が無い」と「false」を分けるため**
+// （members-policy と同じ理由。`{}` が黙って無効化するのを防ぐ）。
+type UpdateSingerAutoFillRequest struct {
+	Enabled *bool `json:"auto_fill_enabled"`
 }
 
 type UpdateSingerVisibilityRequest struct {

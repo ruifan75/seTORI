@@ -130,6 +130,28 @@ func (s *SingerService) SetHidden(id string, hidden bool) (bool, error) {
 	return found, nil
 }
 
+// SetAutoFill は自動処理の対象かを切り替える。戻り値は対象が存在したか。
+func (s *SingerService) SetAutoFill(id string, enabled bool) (bool, error) {
+	return s.singerRepo.SetAutoFill(id, enabled)
+}
+
+// ListAutoFillTargets は自動処理が有効なチャンネルを返す（運用の一覧用）。
+func (s *SingerService) ListAutoFillTargets() ([]dto.SingerResponse, error) {
+	singers, err := s.singerRepo.FindAutoFillTargets()
+	if err != nil {
+		return nil, fmt.Errorf("list auto fill targets: %w", err)
+	}
+	counts, err := s.membersOnlyCounts(true)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]dto.SingerResponse, len(singers))
+	for i, sg := range singers {
+		out[i] = s.toSingerResponseFor(sg, true, counts)
+	}
+	return out, nil
+}
+
 // SetMembersOnlyPolicy は会限セットリストの公開可否を設定する。
 //
 // **チャンネル単位なのは、配信主に訊いたときの答えがそうだから。** 「会限の歌単を
@@ -369,6 +391,8 @@ func (s *SingerService) toSingerResponseFor(singer models.Singer, includeOperati
 		resp.MembersOnlyPolicy = &p
 	}
 	resp.MembersOnlyStreamCount = counts[singer.ID]
+	enabled := singer.AutoFillEnabled
+	resp.AutoFillEnabled = &enabled
 	return resp
 }
 

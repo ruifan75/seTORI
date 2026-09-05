@@ -28,7 +28,8 @@ const effectiveOrg = `COALESCE(s.organization_override, s.organization)`
 const singerColumns = `s.id, s.name, s.english_name, s.photo_url,
 	s.organization, s.organization_override, o.display_name,
 	COALESCE(o.is_unaffiliated, FALSE),
-	s.metadata_source, s.is_hidden, s.members_only_policy, s.created_at, s.updated_at`
+	s.metadata_source, s.is_hidden, s.members_only_policy, s.auto_fill_enabled,
+	s.created_at, s.updated_at`
 
 // singerFrom は singers と organizations を結んだ FROM 句。
 // 事務所は任意なので LEFT JOIN（所属なしのチャンネルを落とさない）。
@@ -39,7 +40,8 @@ func scanSinger(row interface{ Scan(...any) error }) (models.Singer, error) {
 	var s models.Singer
 	err := row.Scan(&s.ID, &s.Name, &s.EnglishName, &s.PhotoURL,
 		&s.Organization, &s.OrganizationOverride, &s.OrganizationName, &s.OrganizationUnaffil,
-		&s.MetadataSource, &s.IsHidden, &s.MembersOnlyPolicy, &s.CreatedAt, &s.UpdatedAt)
+		&s.MetadataSource, &s.IsHidden, &s.MembersOnlyPolicy, &s.AutoFillEnabled,
+		&s.CreatedAt, &s.UpdatedAt)
 	return s, err
 }
 
@@ -210,6 +212,48 @@ func (r *SingerRepository) CountMembersOnlyByOwner(onlyIDs ...string) (map[strin
 		counts[id] = n
 	}
 	return counts, rows.Err()
+}
+
+// SetAutoFill は自動処理の対象かを切り替える。戻り値は対象が存在したか。
+func (r *SingerRepository) SetAutoFill(id string, enabled bool) (bool, error) {
+	res, err := r.db.Exec(
+		"UPDATE singers SET auto_fill_enabled = $2, updated_at = NOW() WHERE id = $1", id, enabled)
+	if err != nil {
+		return false, fmt.Errorf("set auto fill: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("set auto fill rows: %w", err)
+	}
+	return n > 0, nil
+}
+
+// FindAutoFillTargets は自動処理に登録されたチャンネルを返す。
+// **読むのは今のところ一覧 API だけ**（定期実行器は issue #35 の ③）。
+//
+// **非表示チャンネルも含める。** `is_hidden` は一覧に載せるかどうかの旗で、
+// 処理してよいかとは別の軸（CLAUDE.md §2）。隠してあるチャンネルの歌単を
+// 作りたい、という組み合わせは普通にある。
+func (r *SingerRepository) FindAutoFillTargets() ([]models.Singer, error) {
+	rows, err := r.db.Query(`
+		SELECT ` + singerColumns + `
+		` + singerFrom + `
+		WHERE s.auto_fill_enabled
+		ORDER BY ` + nameSortOrder("s.name", "''"))
+	if err != nil {
+		return nil, fmt.Errorf("query auto fill targets: %w", err)
+	}
+	defer rows.Close()
+
+	var singers []models.Singer
+	for rows.Next() {
+		sg, err := scanSinger(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan auto fill target: %w", err)
+		}
+		singers = append(singers, sg)
+	}
+	return singers, rows.Err()
 }
 
 // SetOrganizationOverride は Holodex の分類を手動で上書きする（空文字なら上書きを解除）。

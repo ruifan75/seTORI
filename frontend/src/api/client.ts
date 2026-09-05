@@ -362,6 +362,19 @@ export const singerApi = {
     return data;
   },
 
+  // 自動処理（定期同期＋コメント解析＋歌単作成）の対象かを切り替える。
+  // 立てても最後の確認（is_processed）は自動では付かない。
+  setAutoFill: async (id: string, enabled: boolean): Promise<{ id: string; auto_fill_enabled: boolean }> => {
+    const { data } = await api.put(`/api/singers/${id}/auto-fill`, { auto_fill_enabled: enabled });
+    return data;
+  },
+
+  // 自動処理が有効なチャンネルの一覧（content:edit）。
+  listAutoFill: async (): Promise<{ singers: Singer[] }> => {
+    const { data } = await api.get('/api/singers/auto-fill');
+    return data;
+  },
+
   // 会限セットリストの公開可否（チャンネル単位）。空文字で「未確認」へ戻す。
   //
   // **配信単位ではない。** 配信主に訊けば答えは「全部いい」か「全部だめ」なので、
