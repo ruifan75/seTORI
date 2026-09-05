@@ -103,6 +103,13 @@ type analyzeOptions struct {
 	DryRun bool
 	// Adjudicate は照合の AI 判定まで行う（対話の読み込みだけ）。
 	Adjudicate bool
+	// NoRemoteFetch は「保存済みのコメントが空でも遠隔から取りに行かない」。
+	//
+	// **一括は保存済みの入力を処理する仕組み**で、コメントを取ってくるのは同期と
+	// `RefreshCommentRaw` の役目。ここで取りに行くと、別の入力源（Holodex の曲・
+	// 章節）で対象に残った配信でも毎回外部呼び出しが起きる ── 会限なら必ず 403 で、
+	// 何も得られないまま繰り返す。
+	NoRemoteFetch bool
 	// ProbeChatFirst は **AI 抽出より先に live chat を探る**。
 	//
 	// 抽出は AI を使う高い処理なのに、その後で「live chat がまだ無いので
@@ -123,7 +130,7 @@ type analyzeOptions struct {
 
 // batchAnalyzeOptions は一括・自動処理から。**chat を先に探る**のはここだけ。
 func batchAnalyzeOptions(force bool) analyzeOptions {
-	return analyzeOptions{Force: force, ProbeChatFirst: true}
+	return analyzeOptions{Force: force, ProbeChatFirst: true, NoRemoteFetch: true}
 }
 
 // interactiveAnalyzeOptions は編集画面の読み込みから。
@@ -176,7 +183,7 @@ func (s *CommentService) analyzeComments(videoID string, opts analyzeOptions) (*
 
 	// 1. 元コメントを取得する（DB を優先し、なければ YouTube/Holodex から取得）
 	logger.Infof("starting comment analysis for %s (force=%v, raw len=%d)", videoID, force, len(stream.CommentRaw))
-	comments, err := s.getComments(videoID, stream, dryRun)
+	comments, err := s.getComments(videoID, stream, dryRun, opts.NoRemoteFetch)
 	if err != nil {
 		return nil, err
 	}
@@ -345,6 +352,11 @@ func filterScopeForPath(path string, filterKW, keepKW []string) (dict, keep []st
 
 // ErrCommentRawChanged は分析中に comment_raw が差し替わったことを示す。
 // 古い入力から作った結果は保存されていないので、呼び出し元は新しい raw で引き直すこと。
+// ErrNoStoredComments は保存済みのコメントが無く、遠隔取得も許可されていない状態。
+// **エラーだが異常ではない** ── 入力が無いだけ。ただし「分析して 0 曲だった」とは
+// 別物なので、呼び出し側が区別できるように返す。
+var ErrNoStoredComments = errors.New("保存済みのコメントがありません")
+
 var ErrCommentRawChanged = errors.New("分析中に comment_raw が変更されました")
 
 // ExtractSongs は「タイムスタンプ付きのテキスト」から歌唱行を抽出し、正規化して DB と照合する。
@@ -588,20 +600,23 @@ func extractionRulesSalt() []byte {
 // RefreshCommentRaw はコメントを取得し直して comment_raw を上書き保存する。
 // 分析キャッシュは comment_raw のハッシュをキーにしているため、
 // 内容が変わっていれば次回の AnalyzeComments で自動的に再分析される。
-func (s *CommentService) RefreshCommentRaw(videoID string) error {
+// 戻り値は取得できた件数。**0 件と失敗を呼び出し側が区別できるようにするため。**
+// コメントが無効・0 件の動画では外部取得が正常に空を返すので、その後の分析が
+// 「保存済みの入力が無い」になっても**失敗ではない**（調べた結果、何も無い）。
+func (s *CommentService) RefreshCommentRaw(videoID string) (int, error) {
 	comments, err := s.holodexService.GetVideoComments(videoID)
 	if err != nil {
-		return fmt.Errorf("fetch comments: %w", err)
+		return 0, fmt.Errorf("fetch comments: %w", err)
 	}
 	rawJSON, err := json.Marshal(comments)
 	if err != nil {
-		return fmt.Errorf("marshal comments: %w", err)
+		return 0, fmt.Errorf("marshal comments: %w", err)
 	}
 	if err := s.streamRepo.SaveCommentRaw(videoID, util.SanitizeJSONB(rawJSON)); err != nil {
-		return fmt.Errorf("save comment raw: %w", err)
+		return 0, fmt.Errorf("save comment raw: %w", err)
 	}
 	logger.Infof("[comment] refreshed %d raw comments for %s", len(comments), videoID)
-	return nil
+	return len(comments), nil
 }
 
 // SyncYouTubeCommentRaw は YouTube Data API から明示的にコメントを取り直す。
@@ -836,12 +851,22 @@ func (s *CommentService) parseComments(comments []string) (songs []comment.Parse
 
 // getComments は DB から空でない元コメントを読み込み、なければ YouTube/Holodex から取得して保存する。
 // saveRaw=false のとき、遠隔から取り直したコメントを DB に書かない（dry-run 用）。
-func (s *CommentService) getComments(videoID string, stream *models.Stream, dryRun bool) ([]string, error) {
+func (s *CommentService) getComments(videoID string, stream *models.Stream, dryRun, noRemote bool) ([]string, error) {
 	if stream != nil && len(stream.CommentRaw) > 0 {
 		var comments []string
 		if err := json.Unmarshal(stream.CommentRaw, &comments); err == nil && len(comments) > 0 {
 			return comments, nil
 		}
+	}
+	// **保存済みが空なら、ここで取りに行かない経路がある**（一括）。
+	// 取りに行くと、別の入力源で対象に残った配信でも毎回外部呼び出しが起きる。
+	//
+	// **「入力が無かった」を「分析して 0 曲だった」と混ぜない。** 空を返すと
+	// warning なしの 0 曲になり、一括プレ分析は done に数え、
+	// 「曲が無ければ処理済みにする」仕組み（issue #42）は
+	// **読めなかった配信を「歌は無い」と確定させる**ことになる。
+	if noRemote {
+		return nil, ErrNoStoredComments
 	}
 
 	comments, err := s.holodexService.GetVideoComments(videoID)

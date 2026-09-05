@@ -140,13 +140,32 @@ func (s *BatchAnalyzeService) run(mode, singerID string, hidden *bool) {
 
 		// refresh モード：先にコメントを再取得（内容が変わればハッシュが変わり、
 		// 後続の分析でキャッシュを外れて自動的に再分析される）
+		// **取得成功で 0 件と、取得失敗を区別する。** コメントが無効・0 件の動画では
+		// 外部取得が正常に空を返す。それは**失敗ではない**（調べた結果、何も無い）──
+		// failed に数えると「取り直せなかった配信」の一覧が使い物にならなくなる。
+		//
+		// **分析そのものを飛ばす。** 失敗を done へ読み替える形にすると、
+		// AI 劣化・取消・別処理が raw を書いた場合の失敗まで done に化ける
+		// （変換対象を絞れない）。分析する材料が無いのだから、呼ばないのが正しい。
+		emptyByDesign := false
 		if mode == BatchModeRefresh {
-			if err := s.commentService.RefreshCommentRaw(stream.ID); err != nil {
+			n, err := s.commentService.RefreshCommentRaw(stream.ID)
+			switch {
+			case err != nil:
 				logger.Warnf("[batch-analyze] refresh comments failed (%s): %v（既存の raw で分析を続行）", stream.ID, err)
+			case n == 0:
+				emptyByDesign = true
 			}
 		}
 
-		switch s.processOne(stream.ID, forceStart) {
+		outcome := batchOutcomeDone
+		if emptyByDesign {
+			logger.Infof("[batch-analyze] %s: コメントが 0 件でした（取得は成功。分析は行いません）", stream.ID)
+		} else {
+			outcome = s.processOne(stream.ID, forceStart)
+		}
+
+		switch outcome {
 		case batchOutcomeDone:
 			s.update(func(st *dto.BatchAnalyzeStatus) { st.Done++ })
 		case batchOutcomeDeferred:
@@ -202,6 +221,14 @@ func (s *BatchAnalyzeService) processOne(videoID string, forceStart bool) batchO
 				return batchOutcomeDeferred
 			}
 			return batchOutcomeDone
+		}
+		// **保存済みの入力が無いのは「分析して 0 曲」ではない。**
+		// 再試行しても遠隔へは行かない（一括は保存済みを処理する仕組み）ので、
+		// 冷却を挟まず即座に失敗として残す ── done に数えると、
+		// 取り直しに失敗した配信が「処理済み」に見えてしまう。
+		if errors.Is(err, ErrNoStoredComments) {
+			logger.Warnf("[batch-analyze] %s: 保存済みのコメントがありません（取り直しに失敗した可能性）", videoID)
+			return batchOutcomeFailed
 		}
 		// 分析中にコメントが差し替わっただけなら、待たずに読み直す。
 		// 90 秒の冷却は AI プロバイダーの劣化明けを待つためのもので、
