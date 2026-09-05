@@ -110,6 +110,65 @@ func usableLiveChatFile(path, videoID, label string) bool {
 	return false
 }
 
+// loadChat は live chat を取得して**中身まで検証**し、イベントと結果を返す。
+//
+// 取得と検証をここ 1 か所にまとめてあるのは、**呼び出し側が「取れたか」だけを見て
+// 先へ進めないようにする**ため。サイズは有効性の根拠にならない ── 十分に長くても
+// 中身が replay でなければ、パーサは全行を読み飛ばして「0 件・エラー無し」を返す。
+func (s *ChatEndService) loadChat(videoID string) ([]chatend.Event, chatOutcome) {
+	chatPath, outcome, err := s.fetchLiveChat(videoID)
+	if err != nil {
+		logger.Warnf("[chatend] %s: live chat を利用できません: %v", videoID, err)
+		return nil, outcome
+	}
+
+	// **使えないファイルは必ず消す。** 消さずに transient を返すと、次回も同じ
+	// キャッシュが採用されて**「取り直す」が永久に起きない**。
+	// 解析エラー（16MiB を超える壊れた 1 行など）と「replay として認識できない」は
+	// 原因が違うだけで、どちらもこのファイルでは進めないという点は同じ。
+	events, recognized, err := chatend.ParseLiveChatFile(chatPath)
+	switch {
+	case err != nil:
+		logger.Warnf("[chatend] %s: live chat の解析に失敗。キャッシュを消して取り直します: %v", videoID, err)
+		_ = os.Remove(chatPath)
+		return nil, chatTransientError
+	case !recognized:
+		logger.Warnf("[chatend] %s: live chat replay として読めませんでした。キャッシュを消して取り直します", videoID)
+		_ = os.Remove(chatPath)
+		return nil, chatTransientError
+	}
+	return events, chatOK
+}
+
+// Probe は live chat が使えるかだけを確かめる（曲目が要らない段階で呼ぶ）。
+//
+// **DetectEnds と同じ検証を通す。** サイズだけ見て「使える」と判断すると、
+// 中身が壊れたキャッシュのときに AI 抽出を使い切ってから transient と分かる
+// ── この先行確認が避けたかった費用をそのまま払うことになる。
+//
+// 成功時はファイルがディスクに載るので、後段の DetectEnds は再取得しない。
+func (s *ChatEndService) Probe(videoID string) ChatLoad {
+	events, outcome := s.loadChat(videoID)
+	return ChatLoad{events: events, outcome: outcome, loaded: true}
+}
+
+// ChatLoad は取得・検証済みの live chat。**先行確認の結果を後段へ渡すためのもの。**
+// 渡さないと、数 MB の JSONL を同じ解析の中で 2 回読み込んで解析することになる
+// （外部取得は重複しないが、読み込みと JSON 解析は重複する）。
+type ChatLoad struct {
+	events  []chatend.Event
+	outcome chatOutcome
+	loaded  bool
+}
+
+// Outcome は取得の結果（未取得なら chatOK 扱い＝呼び出し側が改めて取りに行く）。
+func (c ChatLoad) Outcome() chatOutcome {
+	if !c.loaded {
+		return chatOK
+	}
+	return c.outcome
+}
+
 // DetectEnds は指定された start 秒数に対して live chat の拍手から曲末 end を検出し、
 // start→end の対応を返す。DB には書かず、comment / holodex の両分析フローで共用する。
 // live chat を使えなければ空の map を返す。
@@ -124,30 +183,19 @@ func (s *ChatEndService) DetectEnds(videoID string, durationSeconds int, starts 
 	if len(starts) == 0 {
 		return nil, chatOK
 	}
-	chatPath, outcome, err := s.fetchLiveChat(videoID)
-	if err != nil {
-		logger.Warnf("[chatend] %s: live chat を利用できないため、end の推定をスキップ: %v", videoID, err)
-		return nil, outcome
+	loaded := s.Probe(videoID)
+	return s.detectEndsFrom(loaded, durationSeconds, starts)
+}
+
+// detectEndsFrom は取得済みの live chat から end を求める（再取得も再解析もしない）。
+func (s *ChatEndService) detectEndsFrom(loaded ChatLoad, durationSeconds int, starts []int) (map[int]int, chatOutcome) {
+	if len(starts) == 0 {
+		return nil, loaded.Outcome()
 	}
-	// **使えないファイルは必ず消す。** 消さずに transient を返すと、次回も同じ
-	// キャッシュが採用されて**「取り直す」が永久に起きない**。
-	// 解析エラー（16MiB を超える壊れた 1 行など）と「replay として認識できない」は
-	// 原因が違うだけで、どちらもこのファイルでは進めないという点は同じ。
-	//
-	// サイズは有効性の根拠にならない ── 十分に長くても中身が replay でなければ、
-	// パーサは全行を読み飛ばして「0 件・エラー無し」を返す。それを
-	// 「拍手が無かった」と結論すると、壊れたキャッシュのまま確定してしまう。
-	events, recognized, err := chatend.ParseLiveChatFile(chatPath)
-	switch {
-	case err != nil:
-		logger.Warnf("[chatend] %s: live chat の解析に失敗。キャッシュを消して取り直します: %v", videoID, err)
-		_ = os.Remove(chatPath)
-		return nil, chatTransientError
-	case !recognized:
-		logger.Warnf("[chatend] %s: live chat replay として読めませんでした。キャッシュを消して取り直します", videoID)
-		_ = os.Remove(chatPath)
-		return nil, chatTransientError
+	if loaded.Outcome() != chatOK {
+		return nil, loaded.Outcome()
 	}
+	events := loaded.events
 
 	fstarts := make([]float64, len(starts))
 	for i, st := range starts {
@@ -175,14 +223,24 @@ func (s *ChatEndService) DetectEnds(videoID string, durationSeconds int, starts 
 // DetectEndsForSongs は comment songs に拍手 end を適用する。
 // 4 つ目の戻り値は取得の結果（3 態。DetectEnds の注記を参照）。
 func (s *ChatEndService) DetectEndsForSongs(videoID string, durationSeconds int, songs []dto.CommentSong) ([]dto.CommentSong, int, int, chatOutcome) {
+	return s.DetectEndsForSongsLoaded(ChatLoad{}, videoID, durationSeconds, songs)
+}
+
+// DetectEndsForSongsLoaded は取得済みの live chat があればそれを使う。
+// **先行確認をした呼び出し側は必ずこちらを使うこと** ── 渡さないと同じ
+// JSONL を 2 回読み込んで解析することになる。
+func (s *ChatEndService) DetectEndsForSongsLoaded(loaded ChatLoad, videoID string, durationSeconds int, songs []dto.CommentSong) ([]dto.CommentSong, int, int, chatOutcome) {
 	if len(songs) == 0 {
 		return songs, 0, 0, chatOK
+	}
+	if !loaded.loaded {
+		loaded = s.Probe(videoID)
 	}
 	starts := make([]int, len(songs))
 	for i, sg := range songs {
 		starts[i] = sg.Start
 	}
-	endByStart, outcome := s.DetectEnds(videoID, durationSeconds, starts)
+	endByStart, outcome := s.detectEndsFrom(loaded, durationSeconds, starts)
 	filled, changed := 0, 0
 
 	for i := range songs {

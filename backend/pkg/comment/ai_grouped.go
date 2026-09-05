@@ -41,6 +41,15 @@ type commentLine struct {
 
 // extractTimestampLinesGrouped は extractTimestampLines と同じ抽出をしつつ、
 // どのコメント由来かを保持する。AI に「別コメントの同じ曲」を認識させるために要る。
+// HasTimestampLines は「抽出の候補になる行があるか」を安く（正規表現だけで）返す。
+//
+// **AI を呼ぶ前に対象を絞るためのもの。** 候補が 1 つも無ければ曲は出ないので、
+// 曲があることを前提にした準備（live chat の取得など）も要らない。
+// 判定は抽出そのものと同じ関数を通すので、両者がずれることはない。
+func HasTimestampLines(comments []string) bool {
+	return len(extractTimestampLinesGrouped(comments)) > 0
+}
+
 func extractTimestampLinesGrouped(comments []string) []commentLine {
 	var lines []commentLine
 	for ci, c := range comments {

@@ -1,6 +1,7 @@
 package comment
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -192,5 +193,51 @@ func TestGroupedPromptDoesNotInventArtist(t *testing.T) {
 	// 例が指示と矛盾していないこと（例は指示より強く効く）
 	if strings.Contains(groupedAISystemPrompt, `"a":"YOASOBI"`) {
 		t.Error("例が「歌手を補う」挙動を示している。指示と矛盾する")
+	}
+}
+
+// HasTimestampLines は「AI を呼ぶ前に対象を絞る」ための安い判定。
+//
+// **これは曲数を予言しない。** 候補行があっても AI が雑談として落とせば 0 曲になる
+// （`12:34 雑談` など）。ここで固定するのは「候補が無ければ必ず 0 曲」という
+// 一方向だけ ── そちらが崩れると、曲が出るのに準備（live chat の取得）を飛ばす。
+//
+// 抽出側と突き合わせる形にはしない。内部で同じ関数を呼んでいるので、
+// 突き合わせても「同じ関数を呼んだ」ことしか分からない。
+func TestHasTimestampLines(t *testing.T) {
+	cases := []struct {
+		name     string
+		comments []string
+		want     bool
+	}{
+		{name: "空", comments: nil, want: false},
+		{name: "タイムスタンプなし", comments: []string{"配信お疲れさまでした！", "楽しかった"}, want: false},
+		{name: "MM:SS", comments: []string{"12:34 曲名"}, want: true},
+		{name: "HH:MM:SS", comments: []string{"1:02:03 曲名 / アーティスト"}, want: true},
+		{name: "複数行のうち 1 行だけ", comments: []string{"こんばんは\n5:00 曲名\nまたね"}, want: true},
+		// **候補ではあるが曲にはならない例。** ここが true なのは想定どおりで、
+		// この配信では探りが無駄になる（受け入れた取捨。comment_service の注記）。
+		{name: "候補だが雑談", comments: []string{"12:34 雑談"}, want: true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := HasTimestampLines(c.comments); got != c.want {
+				t.Errorf("HasTimestampLines = %v, want %v", got, c.want)
+			}
+		})
+	}
+
+	// 「候補が無ければ必ず 0 曲」の一方向を固定する。
+	//
+	// **nil の client を渡さないこと。** 抽出は候補行を見る前に nil を弾くので、
+	// 候補なしの処理を丸ごと削ってもテストが通ってしまう（＝何も守れない）。
+	// stub を渡したうえで ErrNoTimestampLines であることまで見る。
+	stub := &stubChatter{response: `{"songs":[]}`}
+	_, err := ParseNormalizeAndDedupWithAI(stub, []string{"タイムスタンプのない感想"})
+	if !errors.Is(err, ErrNoTimestampLines) {
+		t.Errorf("候補が無いときは ErrNoTimestampLines のはず: %v", err)
+	}
+	if stub.gotUser != "" {
+		t.Error("候補が無いのに AI を呼んでいる")
 	}
 }

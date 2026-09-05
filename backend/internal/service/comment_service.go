@@ -66,7 +66,7 @@ var (
 // AI 判定（別名義・楽曲の同一性）まで行う ── 押した人はどのみち待っているし、
 // これから編集する配信なので判定する価値がある。
 func (s *CommentService) AnalyzeComments(videoID string, force bool) (*dto.AnalyzeCommentsResponse, error) {
-	return s.analyzeComments(videoID, force, false, true)
+	return s.analyzeComments(videoID, interactiveAnalyzeOptions(force))
 }
 
 // AnalyzeCommentsForBatch は一括プレ分析用。**AI 判定は行わない。**
@@ -79,7 +79,7 @@ func (s *CommentService) AnalyzeComments(videoID string, force bool) (*dto.Analy
 // 混ぜると、724 本を回すだけで 1 本あたり最大 3 回の AI 呼び出しになり、
 // 誰も見ていない配信のために別名義の学習（システム全体の照合に効く）が進んでしまう。
 func (s *CommentService) AnalyzeCommentsForBatch(videoID string, force bool) (*dto.AnalyzeCommentsResponse, error) {
-	return s.analyzeComments(videoID, force, false, false)
+	return s.analyzeComments(videoID, batchAnalyzeOptions(force))
 }
 
 // AnalyzeCommentsDryRun は解析だけ行い、**何も書き込まない**。
@@ -91,10 +91,54 @@ func (s *CommentService) AnalyzeCommentsForBatch(videoID string, force bool) (*d
 // 別名義の AI 判定は**行わない**（判定は artist_alias_checks への書き込みを伴うため）。
 // その分だけ本番の挙動とはズレる。stats.path と alias_pairs_asked=0 で判別できる。
 func (s *CommentService) AnalyzeCommentsDryRun(videoID string) (*dto.AnalyzeCommentsResponse, error) {
-	return s.analyzeComments(videoID, true, true, false)
+	return s.analyzeComments(videoID, dryRunAnalyzeOptions())
 }
 
-func (s *CommentService) analyzeComments(videoID string, force, dryRun, adjudicate bool) (*dto.AnalyzeCommentsResponse, error) {
+// analyzeOptions は解析経路の違い。**bool を並べない** ── 呼び出し側が
+// `(id, force, false, false, true)` と書く形になると、どれがどれか読めない。
+type analyzeOptions struct {
+	// Force はキャッシュを無視して作り直す。
+	Force bool
+	// DryRun は何も書き込まない（測定用）。
+	DryRun bool
+	// Adjudicate は照合の AI 判定まで行う（対話の読み込みだけ）。
+	Adjudicate bool
+	// ProbeChatFirst は **AI 抽出より先に live chat を探る**。
+	//
+	// 抽出は AI を使う高い処理なのに、その後で「live chat がまだ無いので
+	// 結論を出さない」と分かると結果ごと捨てることになる（PR #36 の Deferred）。
+	// しかも見送った回は hash を保存しないので、**次の実行でも必ず再抽出する**
+	// ── キャッシュが効く通常の経路と違い、繰り返すたびに AI を呼ぶ。
+	//
+	// live chat の取得は videoID しか要らない（曲目が要るのは後段の
+	// 突き合わせだけ）ので先に探れる。曲になる配信ではコストは増えない
+	// ── どのみち後で取りに行くし、取得結果は後段へ渡す。
+	// **候補行はあるが曲にならない配信では探りが 1 回無駄になる**
+	// （受け入れた取捨。下の注記を参照）。
+	//
+	// **対話の読み込みでは立てない。** 人はボタンを押した以上、拍手 end が
+	// 無くても曲目を今見たい。ここで早退すると編集画面が壊れる。
+	ProbeChatFirst bool
+}
+
+// batchAnalyzeOptions は一括・自動処理から。**chat を先に探る**のはここだけ。
+func batchAnalyzeOptions(force bool) analyzeOptions {
+	return analyzeOptions{Force: force, ProbeChatFirst: true}
+}
+
+// interactiveAnalyzeOptions は編集画面の読み込みから。
+// **早退しない** ── 人はボタンを押した以上、拍手 end が無くても曲目を今見たい。
+func interactiveAnalyzeOptions(force bool) analyzeOptions {
+	return analyzeOptions{Force: force, Adjudicate: true}
+}
+
+// dryRunAnalyzeOptions は測定用（何も書き込まない）。
+func dryRunAnalyzeOptions() analyzeOptions {
+	return analyzeOptions{Force: true, DryRun: true}
+}
+
+func (s *CommentService) analyzeComments(videoID string, opts analyzeOptions) (*dto.AnalyzeCommentsResponse, error) {
+	force, dryRun, adjudicate := opts.Force, opts.DryRun, opts.Adjudicate
 	stream, err := s.streamRepo.FindByID(videoID)
 	if err != nil {
 		return nil, fmt.Errorf("find stream: %w", err)
@@ -139,6 +183,44 @@ func (s *CommentService) analyzeComments(videoID string, force, dryRun, adjudica
 	// リモートから再取得した場合も、分析結果は実際に使ったコメント内容の hash に結び付ける。
 	rawHash = hashComments(comments)
 
+	// **AI 抽出より先に live chat を探る**（一括だけ。analyzeOptions.ProbeChatFirst）。
+	//
+	// ここで早退しないと、抽出（AI）を使い切ってから「今回は結論を出さない」と
+	// 分かることになり、その結果は捨てられる。しかも見送った回は hash を
+	// 保存しないので、**次の実行でも必ず再抽出する** ── 定期実行では
+	// 見送るたびに AI を呼び直すことになる。
+	//
+	// **候補行が無い配信では探らない。** タイムスタンプらしき行が 1 つも無ければ
+	// 曲は必ず 0 件なので、end を付ける対象そのものが無い（`DetectEndsForSongs` は
+	// 曲が 0 件なら取得せずに返るので、従来 chat を一切取りに行かなかった配信がある）。
+	//
+	// **候補があっても曲になるとは限らない** ── `12:34 雑談` のような行は候補には
+	// なるが、AI は雑談として落とすので 0 曲になる。その配信では探りが無駄になり、
+	// chat が未生成なら見送りにもなる。**これは受け入れた取捨**で、避けるには
+	// AI を呼んで曲数を知るしかなく、それでは AI を節約するというこの仕組みの
+	// 目的が消える。無駄になるのは yt-dlp の探り 1 回（成功すればキャッシュされる）で、
+	// 代わりに節約できるのは AI 抽出そのもの。
+	//
+	// 取得した結果は**後段へ引き継ぐ** ── 引き継がないと、成功時も同じ JSONL を
+	// 2 回読み込んで解析し、replay が無い配信では yt-dlp を 2 回実行することになる。
+	var probed ChatLoad
+	probeRan := false
+	if opts.ProbeChatFirst && s.chatEndService != nil && comment.HasTimestampLines(comments) {
+		// **Probe は DetectEnds と同じ検証を通す。** サイズだけ見て「使える」と
+		// 判断すると、中身が壊れたキャッシュのときに AI 抽出を使い切ってから
+		// transient と分かる ── この先行確認が避けたかった費用をそのまま払う。
+		probed, probeRan = s.chatEndService.Probe(videoID), true
+		if probed.Outcome() != chatOK {
+			if holdCacheForChat(*stream, probed.Outcome(), time.Now()) {
+				logger.Infof("[comment] %s: %s。AI 抽出を行わずに見送ります",
+					videoID, holdReason(*stream, probed.Outcome(), time.Now()))
+				return &dto.AnalyzeCommentsResponse{Deferred: true}, nil
+			}
+			// 見送らない＝結論にしてよい（十分に古い等）。このまま続ける。
+			logger.Infof("[comment] %s: live chat は使えませんが結論として続行します", videoID)
+		}
+	}
+
 	// 2〜5. 抽出 → 除外・重複排除 → 正規化 → DB 照合（チャプター経路と共通）
 	songs, aiWarning, path := s.ExtractSongs(comments)
 
@@ -164,12 +246,19 @@ func (s *CommentService) analyzeComments(videoID string, force, dryRun, adjudica
 	// chatState は live chat 取得の結果（到達 / replay 無し / 一時的な障害）。
 	// キャッシュすると、その配信の end はコメントの値のまま固定される（下の 7 を参照）。
 	chatState := chatOK
-	if s.chatEndService != nil {
+	switch {
+	case s.chatEndService == nil:
+	case probeRan && probed.Outcome() != chatOK:
+		// 先行確認で「使えない」と分かっている。**もう一度取りに行かない**
+		// ── replay が無い配信では yt-dlp をこの解析の中で 2 回走らせることになる。
+		chatState = probed.Outcome()
+	default:
 		var duration int
 		if stream.DurationSeconds.Valid {
 			duration = int(stream.DurationSeconds.Int32)
 		}
-		songs, _, _, chatState = s.chatEndService.DetectEndsForSongs(videoID, duration, songs)
+		// 先行確認で取得済みなら**その結果を渡す**（同じ JSONL を 2 回解析しない）。
+		songs, _, _, chatState = s.chatEndService.DetectEndsForSongsLoaded(probed, videoID, duration, songs)
 	}
 
 	// 7. 永続化（comment_songs + 由来のハッシュ）→ 次回からはキャッシュを直接読む
