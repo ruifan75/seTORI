@@ -114,6 +114,9 @@ func (r *Router) handleImportInfoJSON(w http.ResponseWriter, req *http.Request) 
 		// 「読めません」だけだと、人はファイルが壊れていると考えて取り直す。
 		respondError(w, http.StatusBadRequest, err.Error())
 		return
+	case errors.Is(err, service.ErrInfoJSONNoComments):
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
 	case errors.Is(err, service.ErrInfoJSONUnreadable):
 		respondError(w, http.StatusBadRequest, err.Error())
 		return
@@ -163,9 +166,11 @@ func (r *Router) handleGetImportedLiveChat(w http.ResponseWriter, req *http.Requ
 
 // handleDeleteImportedLiveChat は置いてある live chat を消す。
 //
-// **取り違えを取り消せることが、手動取り込みを許す条件。** ファイルがあると
-// yt-dlp は呼ばれず force 分析でも読み直さないので、消せないと別の配信の
-// チャットが恒久的に居座る。
+// ファイルがあると yt-dlp は呼ばれず force 分析でも読み直さないので、
+// 消せないと別の配信のチャットが恒久的に居座る。取り違えたときの唯一の出口。
+//
+// **消せるのはファイルだけで、既に反映された結果は戻らない**
+// （`ChatEndService.DeleteCachedLiveChat` の説明を参照）。
 func (r *Router) handleDeleteImportedLiveChat(w http.ResponseWriter, req *http.Request) {
 	videoID := req.PathValue("id")
 	if !r.requireStream(w, videoID) {

@@ -39,12 +39,22 @@ var ErrInfoJSONUnreadable = errors.New("yt-dlp の info.json として読めま�
 // ErrInfoJSONMismatch は別の配信の info.json であること。
 var ErrInfoJSONMismatch = errors.New("別の配信の info.json です")
 
+// ErrInfoJSONNoComments は comments が入っていないこと（欄が無い／null／空）。
+//
+// **「取り込んだが 0 件」として通してはいけない。** `--write-comments` の
+// 付け忘れが最も多い失敗で、黙って 0 件を受理すると、人は取り込めたと思い、
+// 何も起きない理由が分からない。
+var ErrInfoJSONNoComments = errors.New("info.json にコメントが入っていません")
+
 // ytdlpInfoJSON は info.json のうち使う欄だけ。
 type ytdlpInfoJSON struct {
 	ID       string `json:"id"`
 	Title    string `json:"title"`
 	Duration int    `json:"duration"`
-	Comments []struct {
+	// **ポインタにするのは「欄が無い／null」と「明示的な空配列」を区別するため。**
+	// `--write-comments` を付け忘れた info.json は comments を持たないので、
+	// 値型だと空配列と同じ姿になり、「取り込んだが 0 件」として通ってしまう。
+	Comments *[]struct {
 		Text      string `json:"text"`
 		Parent    string `json:"parent"`
 		LikeCount *int   `json:"like_count"`
@@ -72,8 +82,15 @@ func (s *CommentService) ImportInfoJSON(videoID string, data []byte) (InfoJSONIm
 	if err != nil {
 		return out, fmt.Errorf("marshal comments: %w", err)
 	}
-	if err := s.streamRepo.SaveCommentRaw(videoID, util.SanitizeJSONB(raw)); err != nil {
+	// 取り込みは必ず非空（`parseInfoJSON` が 0 件を弾く）なので、
+	// SaveCommentRaw の「空で非空を潰さない」歯止めには当たらない。
+	// それでも書けたかは確かめる ── 当たったなら前提が崩れている。
+	written, err := s.streamRepo.SaveCommentRaw(videoID, util.SanitizeJSONB(raw))
+	if err != nil {
 		return out, fmt.Errorf("save comment raw: %w", err)
+	}
+	if !written {
+		return out, fmt.Errorf("コメントを保存できませんでした（配信が見つからないか、取り込む中身が空です）")
 	}
 
 	logger.Infof("[import] %s: info.json からコメントを取り込みました（%d 件・うち時刻表記 %d 件）",
@@ -101,20 +118,28 @@ func parseInfoJSON(videoID string, data []byte) (InfoJSONImport, []string, error
 		return out, nil, fmt.Errorf("%w（%s のもの）", ErrInfoJSONMismatch, info.ID)
 	}
 
+	switch {
+	case info.Comments == nil:
+		return out, nil, fmt.Errorf("%w（--write-comments を付けて取り直してください）", ErrInfoJSONNoComments)
+	case len(*info.Comments) == 0:
+		return out, nil, fmt.Errorf("%w（この配信のコメントは 0 件でした）", ErrInfoJSONNoComments)
+	}
+	comments := *info.Comments
+
 	out.VideoID = info.ID
 	out.Title = info.Title
 	out.Duration = info.Duration
-	out.Total = len(info.Comments)
+	out.Total = len(comments)
 
 	// **並びは「関連度の高い順」に寄せる。** 既存の取得経路は YouTube API を
 	// `order=relevance` で叩いており、抽出規則はその並びの前提で調整されている。
 	// info.json の並びは取得順なので、固定と いいね数で近づける。
-	idx := make([]int, len(info.Comments))
+	idx := make([]int, len(comments))
 	for i := range idx {
 		idx[i] = i
 	}
 	sort.SliceStable(idx, func(a, b int) bool {
-		x, y := info.Comments[idx[a]], info.Comments[idx[b]]
+		x, y := comments[idx[a]], comments[idx[b]]
 		if x.IsPinned != y.IsPinned {
 			return x.IsPinned
 		}
@@ -131,9 +156,9 @@ func parseInfoJSON(videoID string, data []byte) (InfoJSONImport, []string, error
 	// **返信も入れる。** 既存経路は top-level しか取らないが、こちらは
 	// 「他に取りようが無い」配信のための口なので、落として歌単を取り逃すより
 	// 入れて構造フィルタに任せるほうがよい。件数は分けて返し、画面で見せる。
-	texts := make([]string, 0, len(info.Comments))
+	texts := make([]string, 0, len(comments))
 	for _, i := range idx {
-		c := info.Comments[i]
+		c := comments[i]
 		if c.Parent == "" || c.Parent == "root" {
 			out.TopLevel++
 		}
@@ -149,5 +174,10 @@ func parseInfoJSON(videoID string, data []byte) (InfoJSONImport, []string, error
 		}
 	}
 	out.Saved = len(texts)
+	if out.Saved == 0 {
+		// 本文が全部空。取り込んでも `comment_raw` は空配列になるだけで、
+		// **既存を潰さない歯止めに当たって黙って何も起きない**。そう言う。
+		return out, nil, fmt.Errorf("%w（本文のあるコメントが 1 件もありません）", ErrInfoJSONNoComments)
+	}
 	return out, texts, nil
 }

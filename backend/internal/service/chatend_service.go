@@ -541,6 +541,16 @@ func (s *ChatEndService) ImportLiveChat(videoID string, r io.Reader) (LiveChatIm
 	}
 
 	events, recognized, err := chatend.ParseLiveChatFile(tmp)
+	// **本文が 1 件も無いファイルは受け取らない。**
+	//
+	// パーサは「replay の記録は読めたが本文イベントは 0 件」を正常と認めるが、
+	// そのファイルからは拍手を 1 つも取れないので、置いても何も起きない。
+	// しかも受理すると**取り込み直後は成功と表示し、読み直すと「読めない
+	// ファイル」と表示する**という食い違いが出る（画面は本文 0 件を
+	// 「使えない」と判定するため）。受け取らなければ食い違いようがない。
+	if err == nil && recognized && len(events) == 0 {
+		recognized = false
+	}
 	if err != nil || !recognized {
 		// 記録が 1 つも無い、または壊れた行がある（＝途中で切れている）。
 		// **どちらも「拍手が無かった」とは別の事実**なので受け取らない。

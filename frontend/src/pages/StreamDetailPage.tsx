@@ -1566,6 +1566,11 @@ export default function StreamDetailPage() {
 
                 {editTab === 'import' && (
                   <ManualInputImport
+                    // **配信ごとに作り直す。** 取り込み結果は state に持って
+                    // いるので、同じ画面のまま別の配信へ移ると前の配信の要約が
+                    // 新しい配信の長さと並んで出る ── 取り違えの確認を
+                    // 誤らせるうえ、削除は現在の配信に効く。
+                    key={stream.id}
                     videoId={stream.id}
                     durationSeconds={stream.duration_seconds}
                   />

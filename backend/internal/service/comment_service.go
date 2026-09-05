@@ -608,30 +608,20 @@ func (s *CommentService) RefreshCommentRaw(videoID string) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("fetch comments: %w", err)
 	}
-	// **空の取得結果で既にある入力を消さない。**
-	//
-	// 取得は「無かった」と「取れなかった」を区別できない ── 会限配信では
-	// YouTube が 403 を返し、Holodex は空配列を正常応答として返すので、
-	// **成功したように見えて 0 件**になる。そのまま保存すると、編集者が
-	// 手元から持ち込んだコメント（`ImportInfoJSON`）を定期実行が消す。
-	// この機能が救うはずの入力を、自動処理が奪うことになる。
-	//
-	// 逆側の代償は「元コメントが本当に全部消された配信で、古い控えが残る」
-	// だけで、`comment_raw` はもともと監査用の控えなので害が小さい。
-	if len(comments) == 0 {
-		stored, sErr := s.streamRepo.FindByID(videoID)
-		if sErr == nil && stored != nil && keepStoredComments(len(comments), stored.CommentRaw) {
-			logger.Infof("[comment] %s: 取得 0 件のため取り直しを見送りました（保存済み %d 件を残す）",
-				videoID, storedCommentCount(stored.CommentRaw))
-			return 0, nil
-		}
-	}
 	rawJSON, err := json.Marshal(comments)
 	if err != nil {
 		return 0, fmt.Errorf("marshal comments: %w", err)
 	}
-	if err := s.streamRepo.SaveCommentRaw(videoID, util.SanitizeJSONB(rawJSON)); err != nil {
+	// **空で非空を潰さないのは SaveCommentRaw（SQL）が見る。** ここで
+	// 読んでから決めると、読んだあと保存するまでの間に手動 import が入った場合に
+	// その直後で潰してしまう。書けたかどうかだけ受け取る。
+	written, err := s.streamRepo.SaveCommentRaw(videoID, util.SanitizeJSONB(rawJSON))
+	if err != nil {
 		return 0, fmt.Errorf("save comment raw: %w", err)
+	}
+	if !written {
+		logger.Infof("[comment] %s: 取得 0 件のため保存済みのコメントを残しました", videoID)
+		return 0, nil
 	}
 	logger.Infof("[comment] refreshed %d raw comments for %s", len(comments), videoID)
 	return len(comments), nil
@@ -656,8 +646,13 @@ func (s *CommentService) SyncYouTubeCommentRaw(videoID string) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("marshal YouTube comments: %w", err)
 	}
-	if err := s.streamRepo.SaveCommentRaw(videoID, util.SanitizeJSONB(rawJSON)); err != nil {
+	written, err := s.streamRepo.SaveCommentRaw(videoID, util.SanitizeJSONB(rawJSON))
+	if err != nil {
 		return 0, fmt.Errorf("save YouTube comments: %w", err)
+	}
+	if !written {
+		// 人が押した操作なので黙って 0 件成功にしない（ErrEmptyFetchKept の説明）。
+		return 0, ErrEmptyFetchKept
 	}
 	logger.Infof("[comment] synced %d raw comments from YouTube for %s", len(comments), videoID)
 	return len(comments), nil
@@ -892,7 +887,7 @@ func (s *CommentService) getComments(videoID string, stream *models.Stream, dryR
 		return nil, fmt.Errorf("get comments: %w", err)
 	}
 	if raw, marshalErr := json.Marshal(comments); marshalErr == nil && !dryRun {
-		if saveErr := s.streamRepo.SaveCommentRaw(videoID, util.SanitizeJSONB(raw)); saveErr != nil {
+		if _, saveErr := s.streamRepo.SaveCommentRaw(videoID, util.SanitizeJSONB(raw)); saveErr != nil {
 			logger.Warnf("save comment raw error (video: %s): %v", videoID, saveErr)
 		}
 	}
@@ -920,27 +915,11 @@ func (s *CommentService) GetRawComments(videoID string) ([]string, error) {
 		return nil, err
 	}
 	if raw, err := json.Marshal(comments); err == nil {
-		if saveErr := s.streamRepo.SaveCommentRaw(videoID, util.SanitizeJSONB(raw)); saveErr != nil {
+		if _, saveErr := s.streamRepo.SaveCommentRaw(videoID, util.SanitizeJSONB(raw)); saveErr != nil {
 			logger.Warnf("save comment raw error (video: %s): %v", videoID, saveErr)
 		}
 	}
 	return comments, nil
-}
-
-// keepStoredComments は「取り直しを見送って保存済みを残すか」を返す。
-//
-// **取得は「無かった」と「取れなかった」を区別できない。** 会限配信では
-// YouTube が 403 を返し、Holodex は空配列を**正常応答**で返すので、
-// 取り直しは「成功・0 件」になる。そのまま保存すると、編集者が手元から
-// 持ち込んだコメント（ImportInfoJSON）を定期実行が消す。
-//
-// 逆側の代償は「元コメントが本当に全部消された配信で、古い控えが残る」だけで、
-// `comment_raw` はもともと監査用の控えなので害が小さい。
-//
-// **判定を関数にしてあるのは、これがテストできる形でないと固定できないから**
-// （呼び出し元は外部取得と DB を挟む）。
-func keepStoredComments(fetched int, storedRaw []byte) bool {
-	return fetched == 0 && storedCommentCount(storedRaw) > 0
 }
 
 func storedCommentCount(raw []byte) int {
@@ -953,3 +932,11 @@ func storedCommentCount(raw []byte) int {
 	}
 	return len(comments)
 }
+
+// ErrEmptyFetchKept は「取得できたのが 0 件で、保存済みの非空を残した」こと。
+//
+// **失敗ではないが成功でもない。** 会限配信では YouTube が 403、Holodex が
+// 空配列を正常応答で返すので、取り直しは黙って「成功・0 件」になる。
+// 人が押した操作でそれを success として返すと、消えていないのに
+// 「0 件で更新した」と読めてしまう。
+var ErrEmptyFetchKept = errors.New("取得できたコメントが 0 件だったため、保存済みのコメントを残しました")

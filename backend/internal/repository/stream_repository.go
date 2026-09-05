@@ -740,20 +740,46 @@ func (r *StreamRepository) ApplyTagRulesToAll() (int64, error) {
 
 // ========== 分析キャッシュ（comment / holodex の正規化結果。由来のハッシュをキーにする） ==========
 
-// SaveCommentRaw は comment_raw を更新し、内容が変わった場合は古いコメントから作られた分析キャッシュも消す。
-func (r *StreamRepository) SaveCommentRaw(id string, raw []byte) error {
+// SaveCommentRaw は comment_raw を更新し、内容が変わった場合は古いコメントから作られた
+// 分析キャッシュも消す。戻り値は**実際に書いたか**。
+//
+// **空の値で非空を潰さない。** 取得は「無かった」と「取れなかった」を区別できない ──
+// 会限配信では YouTube が 403 を返し、Holodex は空配列を**正常応答**で返すので、
+// 取り直しは「成功・0 件」になる。そのまま保存すると、編集者が手元から持ち込んだ
+// コメント（`ImportInfoJSON`）が消える。**救うはずの入力を自動処理が奪う。**
+//
+// **判定はここ（SQL）に置く。** 呼び出し側で「読んでから決める」形にすると、
+//
+//   - 読んだあと保存するまでの間に手動 import が入ると、その直後に潰す（競合）
+//   - 呼び出し口ごとに書くので、**1 か所直しても他が残る**。実際
+//     `RefreshCommentRaw` だけ直して `holodex_service` の同期経路を見落とし、
+//     編集画面の「Holodex から同期」を押すだけで手動投入が消える状態だった
+//
+// **COALESCE を外さないこと。** `comment_raw` が NULL のとき
+// `jsonb_typeof(comment_raw) = 'array'` は NULL になり、三値論理では
+// `NOT NULL` も NULL ＝ 行が消える。実測すると「未取得の配信に 0 件を保存する」
+// （＝調べたが無かった、と記録する）ができなくなり、永遠に取り直し続ける。
+func (r *StreamRepository) SaveCommentRaw(id string, raw []byte) (bool, error) {
 	raw = util.SanitizeJSONB(raw)
-	_, err := r.db.Exec(`
+	res, err := r.db.Exec(`
 		UPDATE streams
 		SET comment_songs = CASE WHEN comment_raw IS DISTINCT FROM $2 THEN NULL ELSE comment_songs END,
 		    comment_songs_hash = CASE WHEN comment_raw IS DISTINCT FROM $2 THEN NULL ELSE comment_songs_hash END,
 		    comment_raw = $2,
 		    updated_at = NOW()
-		WHERE id = $1`, id, raw)
+		WHERE id = $1
+		  AND NOT COALESCE(
+		        (jsonb_typeof($2::jsonb) IS DISTINCT FROM 'array' OR jsonb_array_length($2::jsonb) = 0)
+		        AND jsonb_typeof(comment_raw) = 'array' AND jsonb_array_length(comment_raw) > 0
+		      , FALSE)`, id, raw)
 	if err != nil {
-		return fmt.Errorf("save comment raw: %w", err)
+		return false, fmt.Errorf("save comment raw: %w", err)
 	}
-	return nil
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("save comment raw rows: %w", err)
+	}
+	return n > 0, nil
 }
 
 // GetCommentSongsHash は comment_songs の計算元となった comment_raw のハッシュを取得する（キャッシュの有効性判定用）。

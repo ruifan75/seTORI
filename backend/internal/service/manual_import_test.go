@@ -119,8 +119,10 @@ func TestImportLiveChatAcceptsAndSummarizes(t *testing.T) {
 		t.Errorf("CachedLiveChat = %+v, ok=%v", got, ok)
 	}
 
-	// **消せることが手動取り込みを許す条件。** ファイルがあると yt-dlp は
-	// 呼ばれず force 分析でも読み直さない。
+	// 消せないと別の配信のチャットが恒久的に居座る（ファイルがあると yt-dlp は
+	// 呼ばれず force 分析でも読み直さない）。**ただし消せるのはファイルだけで、
+	// 既に反映された終了時間は戻らない** ── 拍手 end は「end が無い曲だけ採用」
+	// なので、入れ直して再検出しても上書きされない。
 	if err := svc.DeleteCachedLiveChat("bbbbbbbbbbb"); err != nil {
 		t.Fatalf("DeleteCachedLiveChat: %v", err)
 	}
@@ -204,13 +206,14 @@ func TestLiveChatPathsRejectNonVideoIDs(t *testing.T) {
 	}
 }
 
-// **空の取得結果で既にある入力を消さない。**
+// 空配列と NULL と「壊れた値」をどれも「入力なし」として同じに扱う。
+// `IS NOT NULL` では `[]` が通ってしまうのと同じ話で、空配列は入力源ではない。
 //
-// 会限配信では YouTube が 403 を返し、Holodex は空配列を**正常応答**で返すので、
-// 取り直しは「成功・0 件」になる。そのまま保存すると、編集者が手元から
-// 持ち込んだコメントを定期実行が消す ── 救うはずの入力を自動処理が奪う。
+// **歯止めそのものは SQL（`SaveCommentRaw`）にある** ── 読んでから決める形だと、
+// 読んだあと保存するまでの間に手動 import が入った場合に潰してしまうため。
+// ここで固定するのは、その判定が使う数え方のほう。
 func TestStoredCommentCountTreatsEmptyAsNoInput(t *testing.T) {
-	cases := []struct {
+	for _, tc := range []struct {
 		name string
 		raw  string
 		want int
@@ -220,21 +223,56 @@ func TestStoredCommentCountTreatsEmptyAsNoInput(t *testing.T) {
 		{"空配列", "[]", 0},
 		{"壊れた値", "{oops", 0},
 		{"中身あり", `["0:00 開始","3:21 曲名"]`, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := storedCommentCount([]byte(tc.raw)); got != tc.want {
+				t.Errorf("storedCommentCount(%q) = %d, want %d", tc.raw, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseInfoJSONRejectsMissingComments(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		hint string // 応答に入っていてほしい手がかり
+	}{
+		{"comments 欄が無い", `{"id":"v1"}`, "--write-comments"},
+		{"comments が null", `{"id":"v1","comments":null}`, "--write-comments"},
+		{"明示的な空配列", `{"id":"v1","comments":[]}`, "0 件"},
+		{"本文が全部空", `{"id":"v1","comments":[{"text":"  "},{"text":""}]}`, "本文"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := storedCommentCount([]byte(tc.raw))
-			if got != tc.want {
-				t.Errorf("storedCommentCount(%q) = %d, want %d", tc.raw, got, tc.want)
+			_, texts, err := parseInfoJSON("v1", []byte(tc.body))
+			if !errors.Is(err, ErrInfoJSONNoComments) {
+				t.Fatalf("err = %v, want ErrInfoJSONNoComments", err)
 			}
-			// 取得 0 件のときだけ見送る。**取れたなら上書きしてよい**
-			// （取り直しの本来の役目）。
-			if got := keepStoredComments(0, []byte(tc.raw)); got != (tc.want > 0) {
-				t.Errorf("keepStoredComments(0, %q) = %v, want %v", tc.raw, got, tc.want > 0)
+			if texts != nil {
+				t.Errorf("取り込む中身を返している: %v", texts)
 			}
-			if keepStoredComments(3, []byte(tc.raw)) {
-				t.Errorf("取得できているのに見送っている (%q)", tc.raw)
+			// **付け忘れと「本当に 0 件」を同じ文言にしない。** 直し方が違う。
+			if !strings.Contains(err.Error(), tc.hint) {
+				t.Errorf("err = %q, %q を含めてほしい", err, tc.hint)
 			}
 		})
+	}
+}
+
+// 本文が 1 件も無い live chat は受け取らない。置いても拍手を取れないうえ、
+// 受理すると**取り込み直後は成功、読み直すと「読めないファイル」**という
+// 食い違いが出る（画面は本文 0 件を使えないと判定するため）。
+func TestImportLiveChatRejectsRecordsWithoutMessages(t *testing.T) {
+	dir := t.TempDir()
+	svc := NewChatEndService(nil, "", dir)
+
+	// replay の記録としては正しいが、本文のあるイベントが 1 つも無い。
+	noText := `{"replayChatItemAction":{"videoOffsetTimeMsec":"1000","actions":[{"addChatItemAction":{"item":{}}}]}}`
+	if _, err := svc.ImportLiveChat("ddddddddddd", strings.NewReader(noText)); !errors.Is(err, ErrLiveChatUnreadable) {
+		t.Fatalf("err = %v, want ErrLiveChatUnreadable", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "ddddddddddd.live_chat.json")); !os.IsNotExist(err) {
+		t.Error("弾いたのにファイルが置かれている")
 	}
 }
