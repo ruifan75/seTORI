@@ -1987,9 +1987,9 @@ func (r *Router) handleUpdateSingerMembersPolicy(w http.ResponseWriter, req *htt
 
 // handleUpdateSingerAutoFill は自動処理の対象かを切り替える（content:edit）。
 //
-// 立てると**将来**の自動処理（定期同期・コメント解析・歌単作成）の対象になる。
-// **定期実行器はまだ無い**（issue #35 の ③）ので、今は登録するだけ。
-// 動き出したあとも最後の確認（is_processed）は自動では付かない。
+// 立てると自動処理（定期同期・コメント取り直し・歌単作成）の対象になる。
+// 実行するかどうかと間隔は `/api/auto-fill/settings` 側（既定は無効）。
+// 最後の確認（is_processed）は自動では付かない。
 func (r *Router) handleUpdateSingerAutoFill(w http.ResponseWriter, req *http.Request) {
 	id := req.PathValue("id")
 	if id == "" {
@@ -2033,7 +2033,18 @@ func (r *Router) handleListAutoFillTargets(w http.ResponseWriter, req *http.Requ
 
 // handleGetAutoFillSettings は自動処理の設定を返す（content:edit）。
 func (r *Router) handleGetAutoFillSettings(w http.ResponseWriter, req *http.Request) {
-	respondJSON(w, http.StatusOK, r.autoFillService.GetSettings())
+	// 設定と実行結果は**別のキー**に保存している（実行結果の保存が設定を
+	// 巻き戻さないため）。画面には 1 つにまとめて返す。
+	settings := r.autoFillService.GetSettings()
+	last := r.autoFillService.GetLastRun()
+	respondJSON(w, http.StatusOK, map[string]any{
+		"enabled":        settings.Enabled,
+		"interval_hours": settings.IntervalHours,
+		"refresh_days":   settings.RefreshDays,
+		"last_run_at":    last.At,
+		"last_run_note":  last.Note,
+		"last_run_error": last.Error,
+	})
 }
 
 // handleUpdateAutoFillSettings は自動処理の設定を保存する（content:edit）。
@@ -2057,7 +2068,15 @@ func (r *Router) handleUpdateAutoFillSettings(w http.ResponseWriter, req *http.R
 	}
 	logger.Infof("auto fill settings updated: enabled=%v interval=%dh refresh=%dd",
 		settings.Enabled, settings.IntervalHours, settings.RefreshDays)
-	respondJSON(w, http.StatusOK, settings)
+	last := r.autoFillService.GetLastRun()
+	respondJSON(w, http.StatusOK, map[string]any{
+		"enabled":        settings.Enabled,
+		"interval_hours": settings.IntervalHours,
+		"refresh_days":   settings.RefreshDays,
+		"last_run_at":    last.At,
+		"last_run_note":  last.Note,
+		"last_run_error": last.Error,
+	})
 }
 
 // handleRunAutoFill は自動処理を今すぐ 1 回走らせる（content:edit）。

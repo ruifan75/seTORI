@@ -839,9 +839,8 @@ function AutoFillTargets() {
           「取り込みます」と書くと、有効にしたのに何も起きないのを
           正常稼働と誤認させる */}
       <p className="text-gray-500 mb-4 text-sm">
-        ここに登録したチャンネルが、将来の自動処理（定期同期 → コメント解析 → 歌単作成）の
-        対象になります。<strong>定期実行はまだ動いていません</strong>（登録だけ先にできます）。
-        動き出したあとも、確信の無いものと未登録の曲は<strong>審査へ回り</strong>、
+        ここに登録したチャンネルが、下の定期実行の対象になります（同期 → コメント取り直し →
+        歌単作成）。確信の無いものと未登録の曲は<strong>審査へ回り</strong>、
         <strong>処理完了のチェックは自動では付きません</strong>。
         登録は各チャンネルのページから。
       </p>
@@ -894,7 +893,7 @@ function AutoFillSchedule() {
   const canEdit = hasPermission(useAuthStore((st) => st.user), PERM.CONTENT_EDIT);
   const authStatus = useAuthStore((st) => st.status);
 
-  const { data: settings, isError } = useQuery({
+  const { data: settings, isError, isLoading } = useQuery({
     queryKey: ['autoFillSettings', canEdit],
     queryFn: autoFillApi.getSettings,
     enabled: canEdit && authStatus !== 'loading',
@@ -908,6 +907,10 @@ function AutoFillSchedule() {
       autoFillApi.updateSettings(next.enabled, next.interval, next.refreshDays),
     onSuccess: (data) => {
       queryClient.setQueryData(['autoFillSettings', canEdit], data);
+      // **サーバーが丸めた値を画面へ戻す。** ローカル state を残すと、
+      // 999 を保存してサーバーが 168 に丸めても画面には 999 が出たままになる。
+      setInterval(null);
+      setRefreshDays(null);
       showToast(data.enabled ? '自動処理を有効にしました' : '自動処理を止めました', 'success');
     },
     onError: (err: Error) => showToast(err.message, 'error'),
@@ -917,7 +920,7 @@ function AutoFillSchedule() {
     mutationFn: autoFillApi.run,
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['autoFillSettings'] });
-      queryClient.invalidateQueries({ queryKey: ['batchFillStatus'] });
+      queryClient.invalidateQueries({ queryKey: ['batch-fill-status'] });
       showToast(
         `同期 ${res.synced} 件 / コメント取り直し ${res.refreshed} 件` +
           (res.note ? `（${res.note}）` : ''),
@@ -946,6 +949,10 @@ function AutoFillSchedule() {
 
       {isError ? (
         <p className="text-red-600 text-sm">設定の取得に失敗しました（無効という意味ではありません）。</p>
+      ) : isLoading || !settings ? (
+        // **読み込み前に触らせない。** 既定値（無効・6・30）が入ったフォームで
+        // 「保存」を押せると、有効にしてある設定を既定値で上書きできてしまう。
+        <p className="text-gray-400 text-sm">読み込み中...</p>
       ) : (
         <>
           <div className="flex flex-wrap items-end gap-4">

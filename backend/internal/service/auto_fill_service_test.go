@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"testing"
 )
 
@@ -33,5 +34,31 @@ func TestAutoFillRefusesConcurrentRun(t *testing.T) {
 	// 弾かれた側が旗を落とさないこと（落とすと本物の実行が野放しになる）
 	if !s.running {
 		t.Error("弾かれた呼び出しが running を落としている")
+	}
+}
+
+// **実行結果の保存が設定を巻き戻さないこと。**
+// 同じ JSON を read-modify-write すると、recordRun が古い enabled を書き戻して
+// 「運用者が止めたのに勝手に再開する」が起きる。キーを分けてあることを固定する。
+func TestAutoFillSettingsAndLastRunUseDifferentKeys(t *testing.T) {
+	if settingsKeyAutoFill == settingsKeyAutoFillRun {
+		t.Fatal("設定と実行結果が同じキー。実行結果の保存が設定を巻き戻す")
+	}
+}
+
+// 設定の構造体に実行結果が混ざっていないこと（混ざると同じ書き込みに乗る）。
+func TestAutoFillSettingsHasNoRunState(t *testing.T) {
+	b, err := json.Marshal(defaultAutoFillSettings())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"last_run_at", "last_run_note", "last_run_error"} {
+		if _, ok := m[k]; ok {
+			t.Errorf("設定に実行結果 %q が入っている", k)
+		}
 	}
 }

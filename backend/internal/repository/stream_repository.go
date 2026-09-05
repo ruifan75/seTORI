@@ -1234,6 +1234,7 @@ func (r *StreamRepository) FindBySingerID(singerID string, limit, offset int, fi
 //	歌単が空          … 既にある歌単には触らない約束なので、それ以外は取り直しても何も起きない
 //	非表示でない      … 雑談・ゲームまで対象にしない（本番では 731 → 14 まで減る）
 //	終了から days 日以内 … 古い配信に今さら歌単が貼られることは稀
+//	未来日でない        … 予約配信を配信前から取りに行かない
 //
 // singerIDs が空なら全チャンネル。**所有者で絞る**（ゲスト参加しただけの
 // 他人の配信まで対象にしない。FindStreamsForFill と同じ）。
@@ -1245,6 +1246,10 @@ func (r *StreamRepository) FindStreamsNeedingCommentRefresh(singerIDs []string, 
 		SELECT s.id
 		FROM streams s
 		WHERE s.is_hidden = FALSE
+		  -- **上限も要る。** 予約配信（未来日）は「終了から N 日以内」に入って
+		  -- しまい、配信が始まる前から定期的にコメントを取りに行くことになる。
+		  -- SyncChannel は past しか取らないが、SyncVideo 等で先に登録されうる。
+		  AND s.stream_date <= NOW()
 		  AND s.stream_date > NOW() - ($1 || ' days')::INTERVAL
 		  AND NOT EXISTS (SELECT 1 FROM performances p WHERE p.stream_id = s.id)`
 	args := []any{days}
