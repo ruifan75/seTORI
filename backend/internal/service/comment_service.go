@@ -600,20 +600,23 @@ func extractionRulesSalt() []byte {
 // RefreshCommentRaw はコメントを取得し直して comment_raw を上書き保存する。
 // 分析キャッシュは comment_raw のハッシュをキーにしているため、
 // 内容が変わっていれば次回の AnalyzeComments で自動的に再分析される。
-func (s *CommentService) RefreshCommentRaw(videoID string) error {
+// 戻り値は取得できた件数。**0 件と失敗を呼び出し側が区別できるようにするため。**
+// コメントが無効・0 件の動画では外部取得が正常に空を返すので、その後の分析が
+// 「保存済みの入力が無い」になっても**失敗ではない**（調べた結果、何も無い）。
+func (s *CommentService) RefreshCommentRaw(videoID string) (int, error) {
 	comments, err := s.holodexService.GetVideoComments(videoID)
 	if err != nil {
-		return fmt.Errorf("fetch comments: %w", err)
+		return 0, fmt.Errorf("fetch comments: %w", err)
 	}
 	rawJSON, err := json.Marshal(comments)
 	if err != nil {
-		return fmt.Errorf("marshal comments: %w", err)
+		return 0, fmt.Errorf("marshal comments: %w", err)
 	}
 	if err := s.streamRepo.SaveCommentRaw(videoID, util.SanitizeJSONB(rawJSON)); err != nil {
-		return fmt.Errorf("save comment raw: %w", err)
+		return 0, fmt.Errorf("save comment raw: %w", err)
 	}
 	logger.Infof("[comment] refreshed %d raw comments for %s", len(comments), videoID)
-	return nil
+	return len(comments), nil
 }
 
 // SyncYouTubeCommentRaw は YouTube Data API から明示的にコメントを取り直す。

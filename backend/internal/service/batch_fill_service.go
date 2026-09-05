@@ -464,7 +464,14 @@ func (s *BatchFillService) loadRows(streamID string) ([]*fillRow, bool) {
 		// 丸ごと落とす。入力元が無いのではなく、新しい raw で引き直すべき状態。
 		logger.Warnf("[batch-fill] 分析中にコメントが変わりました (%s)。読み直します", streamID)
 		retry, rErr := s.commentService.AnalyzeCommentsForBatch(streamID, true)
-		if rErr != nil || retry == nil {
+		switch {
+		case errors.Is(rErr, ErrNoStoredComments):
+			// **これは「読み直しの失敗」ではない。** 分析中にコメントが空へ差し替わった
+			// （取得できなくなった／元から 0 件だった）だけで、他の入力源は生きている。
+			// ここで諦めると、先に取得済みの Holodex や章節まで捨てて skipped になる。
+			logger.Infof("[batch-fill] %s: コメントが空になりました。他の入力源で続行します", streamID)
+			retry = nil
+		case rErr != nil || retry == nil:
 			// **二度目も駄目ならこの配信ごと諦める。** ここで resp=nil にして先へ進むと、
 			// 「コメントを諦めて別ソースで続行」になり、最初に直したかった取りこぼしが戻る。
 			logger.Warnf("[batch-fill] コメントの読み直しに失敗 (%s): %v。この配信は今回は扱いません", streamID, rErr)

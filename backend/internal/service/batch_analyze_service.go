@@ -140,13 +140,29 @@ func (s *BatchAnalyzeService) run(mode, singerID string, hidden *bool) {
 
 		// refresh モード：先にコメントを再取得（内容が変わればハッシュが変わり、
 		// 後続の分析でキャッシュを外れて自動的に再分析される）
+		// **取得成功で 0 件と、取得失敗を区別する。** コメントが無効・0 件の動画では
+		// 外部取得が正常に空を返す。その後の分析は「保存済みの入力が無い」になるが、
+		// それは**失敗ではない**（調べた結果、何も無い）── failed に数えると
+		// 「取り直せなかった配信」の一覧が使い物にならなくなる。
+		emptyByDesign := false
 		if mode == BatchModeRefresh {
-			if err := s.commentService.RefreshCommentRaw(stream.ID); err != nil {
+			n, err := s.commentService.RefreshCommentRaw(stream.ID)
+			switch {
+			case err != nil:
 				logger.Warnf("[batch-analyze] refresh comments failed (%s): %v（既存の raw で分析を続行）", stream.ID, err)
+			case n == 0:
+				emptyByDesign = true
 			}
 		}
 
-		switch s.processOne(stream.ID, forceStart) {
+		outcome := s.processOne(stream.ID, forceStart)
+		if outcome == batchOutcomeFailed && emptyByDesign {
+			// 取得は成功していて、その動画にコメントが無いだけ。
+			logger.Infof("[batch-analyze] %s: コメントが 0 件でした（取得は成功）", stream.ID)
+			outcome = batchOutcomeDone
+		}
+
+		switch outcome {
 		case batchOutcomeDone:
 			s.update(func(st *dto.BatchAnalyzeStatus) { st.Done++ })
 		case batchOutcomeDeferred:

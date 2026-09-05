@@ -347,7 +347,7 @@ func (s *AutoFillService) refreshComments(singerIDs []string, days int, justSync
 		return 0, 1
 	}
 	for _, id := range ids {
-		if err := s.comments.RefreshCommentRaw(id); err != nil {
+		if _, err := s.comments.RefreshCommentRaw(id); err != nil {
 			logger.Warnf("[auto-fill] %s のコメント取り直しに失敗: %v", id, err)
 			failures++
 			continue
