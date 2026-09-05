@@ -1309,20 +1309,32 @@ func (r *StreamRepository) DeleteNonSingingCheck(streamID string) error {
 	return nil
 }
 
-// MarkProcessedIfHidden は「もう手を入れなくてよい」印を立てる。
+// MarkProcessedIfHiddenAndEmpty は「もう手を入れなくてよい」印を立てる。
 // 戻り値は**実際に立てたか**（既に立っていた／条件を満たさなかったなら false）。
 //
-// **非表示の条件を書き込み時にも見る。** 呼び出し側が持っているのは列挙時の
-// スナップショットで、AI の処理中（数百本なら数分）に編集者が表示へ戻しうる。
+// **前提は全部ここで確かめる。** 呼び出し側が持っているのは列挙時と分析時の
+// スナップショットで、AI の処理中（数百本なら数分）に同期や編集者が横から書ける。
 // 読むときだけ確かめても、**書くときには古い前提**になっている。
+//
+//   - `is_hidden` … 編集者が表示へ戻していれば、Holodex や章節から歌単ができうる
+//   - `comment_songs = []` … 分析のあとに同期が新しいコメントを保存すると、
+//     `SaveCommentRaw` が抽出キャッシュを NULL に戻す。そのまま印を立てると
+//     **新しいコメントを一度も分析しないまま**処理済みになり、取り直しの対象
+//     （`is_processed = FALSE`）から永久に外れる
+//
+// 空配列であることを見れば足りるのは、キャッシュと `comment_raw` が常に一緒に
+// 書かれるため（`SaveCommentSongs` の CAS と `SaveCommentRaw` の NULL 化）。
+// 呼び出し時のハッシュと突き合わせるのではなく**今の値が空か**を見るので、
+// 別の入力から作られた空の結論でも、それが現在の入力のものなら正しく立つ。
 //
 // **既に立っている行は触らない**（updated_at を動かさない）。毎日回る同期が
 // 全配信の updated_at を押し上げるのと同じ問題を、こちらでも作らないため。
 //
 // 非表示を解除したり歌唱を消したりはしない。**「確認した」という結論だけ**を残す。
-func (r *StreamRepository) MarkProcessedIfHidden(streamID string) (bool, error) {
+func (r *StreamRepository) MarkProcessedIfHiddenAndEmpty(streamID string) (bool, error) {
 	res, err := r.db.Exec(`UPDATE streams SET is_processed = TRUE, updated_at = NOW()
-		WHERE id = $1 AND is_hidden AND NOT is_processed`, streamID)
+		WHERE id = $1 AND is_hidden AND NOT is_processed
+		  AND jsonb_typeof(comment_songs) = 'array' AND jsonb_array_length(comment_songs) = 0`, streamID)
 	if err != nil {
 		return false, fmt.Errorf("mark processed: %w", err)
 	}

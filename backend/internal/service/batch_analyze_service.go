@@ -185,10 +185,10 @@ func (s *BatchAnalyzeService) run(mode, singerID string, hidden *bool) {
 		// songs < 0 は「保存できなかった」の印（曲数が信用できない）。
 		if outcome == batchOutcomeDone && !emptyByDesign && songs == 0 &&
 			stream.IsHidden && !stream.IsProcessed {
-			// **非表示の判定は書き込み側にもある。** ここで見ているのは列挙時の
-			// スナップショットで、処理中に編集者が表示へ戻しうる。
+			// **条件を確かめ直すのは書き込み側。** ここで見ているのは列挙時と
+			// 分析時のスナップショットで、処理中に同期や編集者が横から書ける。
 			// 実際に立ったときだけ数える（0 件更新を成功として数えない）。
-			marked, err := s.streamRepo.MarkProcessedIfHidden(stream.ID)
+			marked, err := s.streamRepo.MarkProcessedIfHiddenAndEmpty(stream.ID)
 			switch {
 			case err != nil:
 				logger.Warnf("[batch-analyze] %s: 処理済みにできませんでした: %v", stream.ID, err)
@@ -257,13 +257,17 @@ func (s *BatchAnalyzeService) processOne(videoID string, forceStart bool) (batch
 			if resp.Deferred {
 				return batchOutcomeDeferred, 0
 			}
-			// **保存できたことまで確かめる。** SaveCommentSongs の DB エラーは
-			// ログだけで err にならないので、Saved を見ないと「保存に失敗した回」も
-			// done になる ── そのまま処理済みにすると、キャッシュが無いまま
-			// refresh の対象（is_processed = FALSE）から永久に外れる。
-			// 0 曲のキャッシュは cache-hit 経路では返らないので、
-			// Saved=true を成功条件にしてよい。
-			if resp.Stats == nil || !resp.Stats.Saved {
+			// **0 曲のときだけ、保存できたことまで確かめる。** SaveCommentSongs の
+			// DB エラーはログだけで err にならないので、Saved を見ないと
+			// 「保存に失敗した回」も 0 曲として done になる ── そのまま処理済みに
+			// すると、キャッシュが無いまま refresh の対象（is_processed = FALSE）から
+			// 永久に外れる。曲数を -1 にして、標記の条件（songs == 0）に当てない。
+			//
+			// **Saved=false は障害の印ではない。** キャッシュ命中は仕様として
+			// false を返すので、曲数を見る前に評価すると正常な経路を毎回
+			// 警告として報告することになる。命中は必ず非空なので、
+			// 0 曲のときに限れば取り違えない。
+			if len(resp.Songs) == 0 && (resp.Stats == nil || !resp.Stats.Saved) {
 				logger.Warnf("[batch-analyze] %s: 抽出結果を保存できませんでした（処理済みにはしません）", videoID)
 				return batchOutcomeDone, -1
 			}

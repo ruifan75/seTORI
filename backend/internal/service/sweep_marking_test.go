@@ -27,23 +27,33 @@ func TestSweepMarkingConditions(t *testing.T) {
 		}
 	})
 
-	t.Run("保存できなかった回は曲数を信用しない", func(t *testing.T) {
+	t.Run("0 曲のときだけ保存できたかを見る", func(t *testing.T) {
 		// SaveCommentSongs の DB エラーはログだけで err にならない。
 		// Saved を見ないと、キャッシュが無いまま処理済みになり
 		// refresh の対象（is_processed = FALSE）から永久に外れる。
-		if !strings.Contains(svc, "!resp.Stats.Saved") {
-			t.Error("保存できたかを見ていない")
+		//
+		// **ただし Saved=false は障害の印ではない** ── キャッシュ命中は
+		// 仕様として false を返す。曲数より先に評価すると、正常な経路を
+		// 毎回警告として報告することになる。
+		if !strings.Contains(svc, "if len(resp.Songs) == 0 && (resp.Stats == nil || !resp.Stats.Saved)") {
+			t.Error("保存確認が 0 曲のときに限られていない")
 		}
 		if !strings.Contains(svc, "return batchOutcomeDone, -1") {
 			t.Error("保存失敗を曲数 0 と区別していない")
 		}
 	})
 
-	t.Run("非表示の判定は書き込み側にもある", func(t *testing.T) {
-		// 呼び出し側が持っているのは列挙時のスナップショット。
-		// 処理中に編集者が表示へ戻しうるので、UPDATE でも確かめる。
-		if !strings.Contains(repo, "WHERE id = $1 AND is_hidden AND NOT is_processed") {
-			t.Error("MarkProcessedIfHidden が書き込み時に非表示を確かめていない")
+	t.Run("前提は書き込み側でも確かめる", func(t *testing.T) {
+		// 呼び出し側が持っているのは列挙時と分析時のスナップショット。
+		// 処理中に編集者が表示へ戻す／同期が新しいコメントを入れてキャッシュを
+		// NULL に戻す、のどちらも起きうるので UPDATE でも確かめる。
+		for _, cond := range []string{
+			"AND is_hidden AND NOT is_processed",
+			"jsonb_typeof(comment_songs) = 'array' AND jsonb_array_length(comment_songs) = 0",
+		} {
+			if !strings.Contains(repo, cond) {
+				t.Errorf("MarkProcessedIfHiddenAndEmpty の書き込み条件から %q が消えている", cond)
+			}
 		}
 	})
 }
