@@ -470,8 +470,10 @@ run をまたぐと失われる。
 必ず失敗するプレイヤーを描くことになる。
 
 **「動画が無い」と「実行が失敗した」を分ける。** 記録すると
-`availability_checked_at` が立ち、`playabilityOf` は `unavailable` を返して
-プレイヤーを消し、`FindIDsWithoutAvailability` は二度と拾わない。
+`availability_checked_at` が立ち、`playabilityOf` は `unavailable` を返し、
+`FindIDsWithoutAvailability` は二度と拾わない。
+（2026-09-05 以降、画面が先に案内へ倒すのは会限だけなので「公開配信のプレイヤーが
+消える」ことは無くなった。だが**判定が誤りのまま二度と調べ直されない**ことは変わらない。）
 740 件の backfill 中に 429 や通信障害が起きれば、残り全部がまとめて誤分類される。
 実測：到達できない proxy を挟むと、公開動画の `wB3qGgT1XIQ` が exit=1・stdout 空で返る
 ── 削除済みと**同じ形**である。
