@@ -1973,8 +1973,9 @@ func (r *Router) handleUpdateSingerMembersPolicy(w http.ResponseWriter, req *htt
 
 // handleUpdateSingerAutoFill は自動処理の対象かを切り替える（content:edit）。
 //
-// 立てると定期同期・コメント解析・歌単作成が自動で回る（issue #35）。
-// **最後の確認（is_processed）は自動では付かない。**
+// 立てると**将来**の自動処理（定期同期・コメント解析・歌単作成）の対象になる。
+// **定期実行器はまだ無い**（issue #35 の ③）ので、今は登録するだけ。
+// 動き出したあとも最後の確認（is_processed）は自動では付かない。
 func (r *Router) handleUpdateSingerAutoFill(w http.ResponseWriter, req *http.Request) {
 	id := req.PathValue("id")
 	if id == "" {
@@ -2005,8 +2006,8 @@ func (r *Router) handleUpdateSingerAutoFill(w http.ResponseWriter, req *http.Req
 	respondJSON(w, http.StatusOK, map[string]any{"id": id, "auto_fill_enabled": *body.Enabled})
 }
 
-// handleListAutoFillTargets は自動処理が有効なチャンネルの一覧（content:edit）。
-// **どのチャンネルが自動で動いているかを 1 か所で見て、まとめて止められること**が目的。
+// handleListAutoFillTargets は自動処理に登録したチャンネルの一覧（content:edit）。
+// **どのチャンネルが登録されているかを 1 か所で見て、まとめて外せること**が目的。
 func (r *Router) handleListAutoFillTargets(w http.ResponseWriter, req *http.Request) {
 	singers, err := r.singerService.ListAutoFillTargets()
 	if err != nil {

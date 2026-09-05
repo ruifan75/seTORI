@@ -789,7 +789,7 @@ function GapList({ runId }: { runId: string }) {
 
 // AutoFillTargets は自動処理が有効なチャンネルの一覧。
 //
-// **1 か所で見えて、ここから止められること**が目的。有効化はチャンネルページから
+// **1 か所で見えて、ここから外せること**が目的。登録はチャンネルページから
 // 個別にやるが、「今どれが自動で動いているか」を知るのに 148 件を見て回るのでは
 // 運用にならない。0 件のときも節ごと消さずに「無効」と出す ── 消すと
 // 「そんな仕組みは無い」と読めてしまう。
@@ -837,7 +837,7 @@ function AutoFillTargets() {
         対象になります。<strong>定期実行はまだ動いていません</strong>（登録だけ先にできます）。
         動き出したあとも、確信の無いものと未登録の曲は<strong>審査へ回り</strong>、
         <strong>処理完了のチェックは自動では付きません</strong>。
-        有効化は各チャンネルのページから。
+        登録は各チャンネルのページから。
       </p>
 
       {isLoading ? (
@@ -866,7 +866,7 @@ function AutoFillTargets() {
                 title="このチャンネルを自動処理の対象から外す"
                 className="shrink-0 px-2 py-1 text-xs text-gray-600 border border-gray-300 rounded-full hover:text-red-600 hover:border-red-300 disabled:opacity-50"
               >
-                止める
+                外す
               </button>
             </li>
           ))}

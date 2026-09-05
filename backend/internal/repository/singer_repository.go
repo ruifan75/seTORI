@@ -228,7 +228,8 @@ func (r *SingerRepository) SetAutoFill(id string, enabled bool) (bool, error) {
 	return n > 0, nil
 }
 
-// FindAutoFillTargets は自動処理が有効なチャンネルを返す。
+// FindAutoFillTargets は自動処理に登録されたチャンネルを返す。
+// **読むのは今のところ一覧 API だけ**（定期実行器は issue #35 の ③）。
 //
 // **非表示チャンネルも含める。** `is_hidden` は一覧に載せるかどうかの旗で、
 // 処理してよいかとは別の軸（CLAUDE.md §2）。隠してあるチャンネルの歌単を

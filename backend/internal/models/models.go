@@ -27,6 +27,7 @@ type Singer struct {
 	// 「まだ訊いていないチャンネル」を一覧するために分けてある。
 	MembersOnlyPolicy sql.NullString `json:"members_only_policy"`
 	// AutoFillEnabled は自動処理の対象か（定期同期＋コメント解析＋歌単作成）。
+	// **定期実行器はまだ無い**（issue #35 の ③）。今は登録の記録だけ。
 	// **既定は FALSE のオプトイン** ── 自動で外部 API と AI を呼ぶ旗なので、
 	// 黙って有効にしない。最後の確認（is_processed）は自動では付かない。
 	AutoFillEnabled bool      `json:"auto_fill_enabled"`
