@@ -5,10 +5,13 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -319,7 +322,7 @@ func (s *ChatEndService) fetchLiveChat(videoID string) (string, chatOutcome, err
 		return "", chatTransientError, fmt.Errorf("create cache dir: %w", err)
 	}
 	base := filepath.Join(s.cacheDir, videoID)
-	chat := base + ".live_chat.json"
+	chat := s.chatCachePath(videoID)
 	// **存在するだけでは証拠にならない。** 途中で切れた／空のファイルが残っていると、
 	// ParseLiveChatFile は壊れた行を黙って読み飛ばすので「0 件・エラー無し」になり、
 	// 「拍手が無かった」という結論として確定してしまう。しかもキャッシュなので
@@ -439,4 +442,213 @@ func (s *ChatEndService) saveAvailability(videoID, stdout string) {
 	if err := s.streamRepo.SaveAvailability(videoID, avail, a.PlayableInEmbed); err != nil {
 		logger.Warnf("[chatend] %s の再生可否を保存できません: %v", videoID, err)
 	}
+}
+
+// ========== 手動での取り込み（会限配信のため） ==========
+
+// youtubeIDRe は YouTube の動画 ID の形。本番 1320 行すべてがこの形（長さ 11、
+// `[A-Za-z0-9_-]`）で、これ以外は入らない。
+var youtubeIDRe = regexp.MustCompile(`^[A-Za-z0-9_-]{11}$`)
+
+// ErrInvalidVideoID は動画 ID の形をしていないこと。
+var ErrInvalidVideoID = errors.New("動画 ID の形ではありません")
+
+// validVideoID は**ファイル名を組む前に**必ず通す。
+//
+// **認可を通ったことは、値が安全であることを意味しない。** ID はパスの一部として
+// 届くので `..%2F..%2F` のような値が入りうる。`filepath.Join` は `../` を
+// 正規化するので、検証しないとキャッシュディレクトリの外の
+// `.live_chat.json` に手が届く。
+//
+// 判定を service に置くのは、**呼び出し口が増えても外から回り込めないようにする**
+// ため（ハンドラ側だけに置くと、次に足す人が忘れられる）。
+func validVideoID(videoID string) error {
+	if !youtubeIDRe.MatchString(videoID) {
+		return fmt.Errorf("%w: %q", ErrInvalidVideoID, videoID)
+	}
+	return nil
+}
+
+// chatCachePath は live chat replay のキャッシュ先。**yt-dlp の -o と同じ形**に
+// しておくこと（`fetchLiveChat` はここへ書かせている）。
+//
+// 呼ぶ前に `validVideoID` を通すこと。
+func (s *ChatEndService) chatCachePath(videoID string) string {
+	return filepath.Join(s.cacheDir, videoID+".live_chat.json")
+}
+
+// LiveChatImport は取り込んだ（または既にある）live chat の中身の要約。
+//
+// **人が「取り違えていないか」を判断するための材料。** live chat のファイルには
+// 動画 ID がどこにも入っていないので（実測：本番のキャッシュを grep して 0 件）、
+// 機械では別の配信のものと区別できない。時間の範囲と件数を出して人に見せるしかない。
+type LiveChatImport struct {
+	// Messages は**本文のあるイベントの数**。`ParseLiveChat` は本文の無い記録
+	// （システムメッセージ等）をイベントにしないので、「replay の記録数」とは
+	// 別物であり、ここでは数えていない ── 数えていないものを欄にすると、
+	// 画面が「0 件だから読めないファイル」と誤って言う。
+	Messages   int     `json:"messages"`
+	Applause   int     `json:"applause"` // うち「拍手だけ」のコメント
+	FirstAtSec float64 `json:"first_at_sec"`
+	LastAtSec  float64 `json:"last_at_sec"`
+	Bytes      int64   `json:"bytes"`
+}
+
+// ErrLiveChatUnreadable は取り込もうとしたファイルが live chat replay として読めないこと。
+var ErrLiveChatUnreadable = errors.New("live chat replay として読めません")
+
+// ImportLiveChat は編集者が手元の yt-dlp で取った live_chat.json を取り込む。
+//
+// **会限配信は本番から取れない。** cookie はデータセンター IP の BOT 判定を
+// 抜けるためのもので、視聴資格を与えるものではない（実測：cookie 無しでも
+// availability=subscriber_only は取れるが、replay の中身は取れない）。
+// メンバー資格のある編集者が手元で取ったものを持ち込む口がこれ。
+//
+// **検証してから置く。** 素通しでキャッシュへ書くと、壊れたファイルが
+// 「拍手が 0 件だった」という結論として確定し、しかもキャッシュなので
+// force 分析でも回復しない（§6.5 で踏んだのと同じ穴）。`ParseLiveChat` が
+// 「記録を認識でき、かつ壊れた行が無い」と言ったものだけを受け入れる。
+// **中身を全部メモリへ載せないこと。** 本番は 1 vCPU / 1GB で、実測の live chat は
+// 2 時間の歌枠で 12MB ある。読み切ってから検証する形にすると、上限のぶんだけ
+// RSS が跳ねて Postgres と同居している本番を落としうる。一時ファイルへ流し、
+// **ファイルのまま検証して、通ったら rename** する。
+func (s *ChatEndService) ImportLiveChat(videoID string, r io.Reader) (LiveChatImport, error) {
+	var out LiveChatImport
+
+	if err := validVideoID(videoID); err != nil {
+		return out, err
+	}
+	if err := os.MkdirAll(s.cacheDir, 0o755); err != nil {
+		return out, fmt.Errorf("create cache dir: %w", err)
+	}
+	// **書き換えは原子的に。** 検証を通るまで本来の名前には置かない ──
+	// 半分だけのファイルがその名前にあると、そのままキャッシュとして読まれる。
+	//
+	// **一時名はリクエストごとに分ける。** 固定名（`<id>.live_chat.json.tmp`）だと、
+	// 同じ配信へ二人が同時に送ったとき `os.Create` が相手の書き込み中のファイルを
+	// truncate し、さらに相手が rename したあとの inode へ書き続けることになる。
+	// そのあと自分が失敗しても、消すべき `.tmp` はもう無いので**書きかけが
+	// 本来の名前に残る**。
+	f, err := os.CreateTemp(s.cacheDir, videoID+".*.live_chat.tmp")
+	if err != nil {
+		return out, fmt.Errorf("write live chat: %w", err)
+	}
+	tmp := f.Name()
+	size, err := writeTempFile(f, r)
+	if err != nil {
+		_ = os.Remove(tmp)
+		return out, err
+	}
+
+	events, recognized, err := chatend.ParseLiveChatFile(tmp)
+	// **本文が 1 件も無いファイルは受け取らない。**
+	//
+	// パーサは「replay の記録は読めたが本文イベントは 0 件」を正常と認めるが、
+	// そのファイルからは拍手を 1 つも取れないので、置いても何も起きない。
+	// しかも受理すると**取り込み直後は成功と表示し、読み直すと「読めない
+	// ファイル」と表示する**という食い違いが出る（画面は本文 0 件を
+	// 「使えない」と判定するため）。受け取らなければ食い違いようがない。
+	if err == nil && recognized && len(events) == 0 {
+		recognized = false
+	}
+	if err != nil || !recognized {
+		// 記録が 1 つも無い、または壊れた行がある（＝途中で切れている）。
+		// **どちらも「拍手が無かった」とは別の事実**なので受け取らない。
+		// **弾いたものは置いていかない。**
+		_ = os.Remove(tmp)
+		if err != nil {
+			return out, fmt.Errorf("%w: %v", ErrLiveChatUnreadable, err)
+		}
+		return out, ErrLiveChatUnreadable
+	}
+
+	out = summarizeChat(events, size)
+	if err := os.Rename(tmp, s.chatCachePath(videoID)); err != nil {
+		_ = os.Remove(tmp)
+		return out, fmt.Errorf("place live chat: %w", err)
+	}
+
+	logger.Infof("[chatend] %s: live chat を手動で取り込みました（本文 %d・拍手 %d・%.0f〜%.0f 秒）",
+		videoID, out.Messages, out.Applause, out.FirstAtSec, out.LastAtSec)
+	return out, nil
+}
+
+// writeTempFile は r を f へ流して閉じ、書けたバイト数を返す（メモリには載せない）。
+func writeTempFile(f *os.File, r io.Reader) (int64, error) {
+	n, copyErr := io.Copy(f, r)
+	closeErr := f.Close()
+	if copyErr != nil {
+		// 上限に当たった場合もここへ来る（読み取り側が打ち切る）。
+		// **途中まで書けたものを成功として扱わない。**
+		return n, fmt.Errorf("write live chat: %w", copyErr)
+	}
+	if closeErr != nil {
+		return n, fmt.Errorf("write live chat: %w", closeErr)
+	}
+	return n, nil
+}
+
+// CachedLiveChat は既に置かれている live chat の要約を返す（無ければ ok=false）。
+// 取り違えたときに人が気付けるよう、画面へ出すためのもの。
+func (s *ChatEndService) CachedLiveChat(videoID string) (LiveChatImport, bool) {
+	if err := validVideoID(videoID); err != nil {
+		return LiveChatImport{}, false
+	}
+	path := s.chatCachePath(videoID)
+	info, err := os.Stat(path)
+	if err != nil {
+		return LiveChatImport{}, false
+	}
+	events, recognized, err := chatend.ParseLiveChatFile(path)
+	if err != nil || !recognized {
+		// 置いてあるが使えない。**「無い」とは違う**ので、そう言えるように
+		// 件数 0 の要約を返す（画面は取り直しを促せる）。
+		return LiveChatImport{Bytes: info.Size()}, true
+	}
+	return summarizeChat(events, info.Size()), true
+}
+
+// DeleteCachedLiveChat は置いてある live chat を消す。
+//
+// ファイルがあると yt-dlp は呼ばれず force 分析でも読み直さないので、
+// 消せないと別の配信のチャットが恒久的に居座る。取り違えたときの唯一の出口。
+//
+// **消せるのはファイルだけ。既に反映された結果は戻らない。**
+// そのチャットで拍手 end 検出を走らせたあとなら、`comment_songs` の
+// `end` / `chat_end` / `end_diff` に値が入っており、歌唱を保存していれば
+// `performances` にも残る。しかも拍手 end は「end が無い曲だけ採用」なので、
+// **正しいファイルを入れ直して再検出しても上書きされない**（§6.5 の設計）。
+//
+// つまり手動取り込みの安全性は「消せること」ではなく、
+// **解析を走らせる前に要約で気付けること**に依っている ── 取り込みの応答は
+// 記録数・拍手数・時間の範囲を返し、画面が配信の長さと並べて出す。
+// 誤って反映してしまった終了時間は、編集画面で直すことになる。
+func (s *ChatEndService) DeleteCachedLiveChat(videoID string) error {
+	if err := validVideoID(videoID); err != nil {
+		return err
+	}
+	err := os.Remove(s.chatCachePath(videoID))
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove live chat: %w", err)
+	}
+	return nil
+}
+
+// summarizeChat は取り込み前後の確認に出す要約を作る。
+func summarizeChat(events []chatend.Event, size int64) LiveChatImport {
+	// `ParseLiveChat` が返すのは**本文のあるイベントだけ**なので、
+	// ここで数えられるのは Messages だけ（Records という別の欄は持たない）。
+	out := LiveChatImport{Messages: len(events), Bytes: size}
+	for i, e := range events {
+		if chatend.IsPureApplause(e.Text) {
+			out.Applause++
+		}
+		if i == 0 || e.T < out.FirstAtSec {
+			out.FirstAtSec = e.T
+		}
+		if e.T > out.LastAtSec {
+			out.LastAtSec = e.T
+		}
+	}
+	return out
 }

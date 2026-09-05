@@ -151,6 +151,12 @@ func (s *BatchAnalyzeService) run(mode, singerID string, hidden *bool) {
 		if mode == BatchModeRefresh {
 			n, err := s.commentService.RefreshCommentRaw(stream.ID)
 			switch {
+			case errors.Is(err, ErrEmptyFetchKept):
+				// **「取れなかった」であって「0 件だった」ではない。**
+				// 保存済みの入力（手元から持ち込んだコメントなど）はそのまま
+				// 残っているので、**分析は続ける** ── ここを 0 件と同じに
+				// 扱うと、その入力が一度も分析されないまま処理済みになる。
+				logger.Infof("[batch-analyze] %s: 取得 0 件だったので保存済みのコメントで分析します", stream.ID)
 			case err != nil:
 				logger.Warnf("[batch-analyze] refresh comments failed (%s): %v（既存の raw で分析を続行）", stream.ID, err)
 			case n == 0:

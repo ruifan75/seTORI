@@ -740,20 +740,72 @@ func (r *StreamRepository) ApplyTagRulesToAll() (int64, error) {
 
 // ========== 分析キャッシュ（comment / holodex の正規化結果。由来のハッシュをキーにする） ==========
 
-// SaveCommentRaw は comment_raw を更新し、内容が変わった場合は古いコメントから作られた分析キャッシュも消す。
-func (r *StreamRepository) SaveCommentRaw(id string, raw []byte) error {
+// EmptyWritePolicy は「取得結果が空だったとき、保存済みの非空を潰してよいか」。
+//
+// **取得経路によって答えが違うので、呼び出し側が決める。**
+//
+//   - 曖昧な経路（Holodex fallback つきの取り直し・同期）は `KeepExistingOnEmpty`。
+//     会限では YouTube が 403 を返し、Holodex は空配列を**正常応答**で返すので、
+//     「0 件だった」と「取れなかった」を区別できない。潰すと編集者が手元から
+//     持ち込んだコメントが消える
+//   - 取得元が確定している明示同期（`SyncYouTubeCommentRaw`）は `AllowEmptyWrite`。
+//     YouTube の失敗は error になり、正常な 0 件だけが空配列で来るので、
+//     「本当に全部消された」を反映できないと困る
+//
+// **引数を必須にしてあるのは、新しい呼び出し元がどちらか決めずに
+// コンパイルできないようにするため**（`SingerOrigin` / `ViewerAccess` と同じ）。
+type EmptyWritePolicy int
+
+const (
+	// KeepExistingOnEmpty … 空で非空を潰さない（既定として選ぶべき側）
+	KeepExistingOnEmpty EmptyWritePolicy = iota
+	// AllowEmptyWrite … 空でも書く（取得元が確定している経路だけ）
+	AllowEmptyWrite
+)
+
+// SaveCommentRaw は comment_raw を更新し、内容が変わった場合は古いコメントから作られた
+// 分析キャッシュも消す。戻り値は**実際に書いたか**。
+//
+// **`KeepExistingOnEmpty` のとき、空の値で非空を潰さない**（`AllowEmptyWrite`
+// では意図的に潰す ── どちらを選ぶかは `EmptyWritePolicy` を参照）。
+//
+// 潰さない側が要るのは、取得が「無かった」と「取れなかった」を区別できないため ──
+// 会限配信では YouTube が 403 を返し、Holodex は空配列を**正常応答**で返すので、
+// 取り直しは「成功・0 件」になる。そのまま保存すると、編集者が手元から持ち込んだ
+// コメント（`ImportInfoJSON`）が消える。**救うはずの入力を自動処理が奪う。**
+//
+// **判定はここ（SQL）に置く。** 呼び出し側で「読んでから決める」形にすると、
+//
+//   - 読んだあと保存するまでの間に手動 import が入ると、その直後に潰す（競合）
+//   - 呼び出し口ごとに書くので、**1 か所直しても他が残る**。実際
+//     `RefreshCommentRaw` だけ直して `holodex_service` の同期経路を見落とし、
+//     編集画面の「Holodex から同期」を押すだけで手動投入が消える状態だった
+//
+// **COALESCE を外さないこと。** `comment_raw` が NULL のとき
+// `jsonb_typeof(comment_raw) = 'array'` は NULL になり、三値論理では
+// `NOT NULL` も NULL ＝ 行が消える。実測すると「未取得の配信に 0 件を保存する」
+// （＝調べたが無かった、と記録する）ができなくなり、永遠に取り直し続ける。
+func (r *StreamRepository) SaveCommentRaw(id string, raw []byte, policy EmptyWritePolicy) (bool, error) {
 	raw = util.SanitizeJSONB(raw)
-	_, err := r.db.Exec(`
+	res, err := r.db.Exec(`
 		UPDATE streams
 		SET comment_songs = CASE WHEN comment_raw IS DISTINCT FROM $2 THEN NULL ELSE comment_songs END,
 		    comment_songs_hash = CASE WHEN comment_raw IS DISTINCT FROM $2 THEN NULL ELSE comment_songs_hash END,
 		    comment_raw = $2,
 		    updated_at = NOW()
-		WHERE id = $1`, id, raw)
+		WHERE id = $1
+		  AND ($3::bool OR NOT COALESCE(
+		        (jsonb_typeof($2::jsonb) IS DISTINCT FROM 'array' OR jsonb_array_length($2::jsonb) = 0)
+		        AND jsonb_typeof(comment_raw) = 'array' AND jsonb_array_length(comment_raw) > 0
+		      , FALSE))`, id, raw, policy == AllowEmptyWrite)
 	if err != nil {
-		return fmt.Errorf("save comment raw: %w", err)
+		return false, fmt.Errorf("save comment raw: %w", err)
 	}
-	return nil
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("save comment raw rows: %w", err)
+	}
+	return n > 0, nil
 }
 
 // GetCommentSongsHash は comment_songs の計算元となった comment_raw のハッシュを取得する（キャッシュの有効性判定用）。
@@ -1388,7 +1440,19 @@ func (r *StreamRepository) FindStreamsNeedingCommentRefresh(singerIDs []string, 
 		  -- SyncChannel は past しか取らないが、SyncVideo 等で先に登録されうる。
 		  AND s.stream_date <= NOW()
 		  AND s.stream_date > NOW() - ($1 || ' days')::INTERVAL
-		  AND NOT EXISTS (SELECT 1 FROM performances p WHERE p.stream_id = s.id)`
+		  AND NOT EXISTS (SELECT 1 FROM performances p WHERE p.stream_id = s.id)
+		  -- **会限は取り直さない。取りに行けないので。**
+		  -- YouTube Data API は commentThreads/forbidden で 403 を返し（API キー方式
+		  -- なので cookie では変わらない）、Holodex は空配列を**正常応答**で返す。
+		  -- つまり毎回「成功・0 件」になり、失敗として数えられないまま外部呼び出し
+		  -- だけが積み上がる（本番実測：SEHFB5EiKZo へ毎時 1 回）。
+		  --
+		  -- さらに、その 0 件は保存されるので、編集者が手元から持ち込んだコメント
+		  -- （ImportInfoJSON）を定期実行が消すことになる ── 救うはずの入力を
+		  -- 自動処理が奪う。RefreshCommentRaw 側にも「0 件で既存を消さない」歯止めを
+		  -- 置いたが、**取りに行かないのが本筋**（PR #43 が一括の対象から会限を
+		  -- 外したのと同じ）。
+		  AND NOT ` + MembersOnlyDetectedExpr("s")
 	args := []any{days}
 	if len(singerIDs) > 0 {
 		query += `

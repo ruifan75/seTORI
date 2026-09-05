@@ -825,9 +825,17 @@ func (s *HolodexService) loadAndSaveComments(videoID string) {
 		return
 	}
 
-	if err := s.streamRepo.SaveCommentRaw(videoID, util.SanitizeJSONB(commentRawJSON)); err != nil {
+	// **同期でも空で非空を潰さない。** 会限では取得が 0 件になるので、
+	// 編集画面の「Holodex から同期」を押すだけで手動投入が消えていた
+	// （`RefreshCommentRaw` だけ直してこの経路を見落としていた）。
+	// 判定は SaveCommentRaw（SQL）が持つので、ここは書けたかを見るだけ。
+	written, err := s.streamRepo.SaveCommentRaw(videoID, util.SanitizeJSONB(commentRawJSON), repository.KeepExistingOnEmpty)
+	switch {
+	case err != nil:
 		logger.Warnf("save comment raw error (video: %s): %v", videoID, err)
-	} else {
+	case !written:
+		logger.Infof("[holodex] %s: 取得 0 件のため保存済みのコメントを残しました", videoID)
+	default:
 		logger.Infof("[holodex] saved %d raw comments for %s", len(comments), videoID)
 	}
 }

@@ -1449,3 +1449,25 @@ export interface BatchFillRun {
   finished_at?: string;
   started_by_name?: string;
 }
+
+// ========== 手動での取り込み（会限配信のため） ==========
+
+export interface InfoJsonImportResult {
+  video_id: string;
+  title: string;
+  duration_seconds: number;
+  total: number;      // info.json に入っていたコメント数
+  top_level: number;  // うち返信でないもの
+  saved: number;      // 実際に取り込んだ数（本文が空のものは落ちる）
+  with_times: number; // うち時刻表記を含むもの（歌単の当たりを付ける材料）
+}
+
+export interface LiveChatImportResult {
+  // 本文のあるイベントの数。パーサは本文の無い記録をイベントにしないので、
+  // 「replay の記録数」とは別物（そちらは数えていないので欄も無い）。
+  messages: number;
+  applause: number;
+  first_at_sec: number;
+  last_at_sec: number;
+  bytes: number;
+}
