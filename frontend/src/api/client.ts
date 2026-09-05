@@ -1,6 +1,7 @@
 import axios from 'axios';
 import type {
   AutoFillSettings,
+  NonSingingCandidate,
   AutoFillRunResult,
   SongListResponse,
   Song,
@@ -392,6 +393,26 @@ export const singerApi = {
       members_only_policy: policy,
     });
     return data;
+  },
+};
+
+// ========== 見直しが要る配信 API ==========
+// 非表示だが現行規則で曲が出た配信。**自動で非表示は解除しない**
+// （誤判定は両方向にある）ので、判断は人が行う。
+export const nonSingingApi = {
+  // dismissed=true は「歌回ではないと判断した」一覧（取り消すため）。
+  list: async (limit = 100, dismissed = false): Promise<{ candidates: NonSingingCandidate[]; total: number }> => {
+    const { data } = await api.get('/api/non-singing-candidates', { params: { limit, dismissed } });
+    return data;
+  },
+
+  // 「見たが歌回ではない」を記録して候補から外す。取り消せる（下）。
+  dismiss: async (id: string, note = ''): Promise<void> => {
+    await api.post(`/api/non-singing-candidates/${id}/dismiss`, { note });
+  },
+
+  restore: async (id: string): Promise<void> => {
+    await api.delete(`/api/non-singing-candidates/${id}/dismiss`);
   },
 };
 

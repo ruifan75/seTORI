@@ -322,6 +322,23 @@ const (
 	PlayabilityUnavailable = "unavailable"
 )
 
+// NonSingingCandidate は「非表示だが現行規則で曲が出た」配信（issue #42）。
+type NonSingingCandidate struct {
+	ID         string `json:"id"`
+	Title      string `json:"title"`
+	StreamDate string `json:"stream_date"`
+	SongCount  int    `json:"song_count"`
+	// AnalyzedAt が無いなら**旧規則のままの抽出**。古い結果を根拠に
+	// 非表示を解くのは危ないので、判断材料として画面に出す。
+	AnalyzedAt *string  `json:"analyzed_at,omitempty"`
+	Tags       []string `json:"tags"`
+}
+
+type NonSingingCandidateList struct {
+	Candidates []NonSingingCandidate `json:"candidates"`
+	Total      int                   `json:"total"`
+}
+
 type StreamListResponse struct {
 	Streams    []StreamResponse   `json:"streams"`
 	Pagination PaginationResponse `json:"pagination"`
@@ -569,6 +586,10 @@ type BatchAnalyzeStatus struct {
 	Total    int    `json:"total"`
 	Done     int    `json:"done"`
 	Failed   int    `json:"failed"`
+	// MarkedProcessed は「曲が無かったので処理済みにした」件数（非表示のみ）。
+	// **黙って状態を変えない**ために数える ── 画面に出ないと、いつの間にか
+	// 処理済みが増えていて理由が分からなくなる。
+	MarkedProcessed int `json:"marked_processed"`
 	// Deferred は live chat の取得待ちで見送った件数（失敗ではない）。
 	// 次の実行で拾われるので、完了とも失敗とも分けて出す。
 	Deferred  int      `json:"deferred"`

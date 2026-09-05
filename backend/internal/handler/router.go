@@ -396,6 +396,11 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("GET /api/singers/auto-fill", r.handleListAutoFillTargets)
 
 	// 自動処理（定期実行）。設定・手動実行とも content:edit。
+	// 見直しが要る配信（非表示だが現行規則で曲が出た）。content:edit。
+	r.mux.HandleFunc("GET /api/non-singing-candidates", r.handleListNonSingingCandidates)
+	r.mux.HandleFunc("POST /api/non-singing-candidates/{id}/dismiss", r.handleDismissNonSingingCandidate)
+	r.mux.HandleFunc("DELETE /api/non-singing-candidates/{id}/dismiss", r.handleRestoreNonSingingCandidate)
+
 	r.mux.HandleFunc("GET /api/auto-fill/settings", r.handleGetAutoFillSettings)
 	r.mux.HandleFunc("PUT /api/auto-fill/settings", r.handleUpdateAutoFillSettings)
 	r.mux.HandleFunc("POST /api/auto-fill/run", r.handleRunAutoFill)
@@ -2031,6 +2036,64 @@ func (r *Router) handleListAutoFillTargets(w http.ResponseWriter, req *http.Requ
 	respondJSON(w, http.StatusOK, map[string]any{"singers": singers})
 }
 
+// handleListNonSingingCandidates は見直しが要る配信を返す（content:edit）。
+//
+// **自動で非表示は解除しない。** 誤判定は両方向にあるので判断は人に委ねる。
+func (r *Router) handleListNonSingingCandidates(w http.ResponseWriter, req *http.Request) {
+	limit := 100
+	if v := req.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			limit = n
+		}
+	}
+	// dismissed=true は「歌回ではないと判断した」一覧（取り消すため）。
+	dismissed := req.URL.Query().Get("dismissed") == "true"
+	result, err := r.streamService.ListNonSingingCandidates(limit, dismissed)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, result)
+}
+
+// handleDismissNonSingingCandidate は「見たが歌回ではない」を記録する（content:edit）。
+func (r *Router) handleDismissNonSingingCandidate(w http.ResponseWriter, req *http.Request) {
+	id := req.PathValue("id")
+	if id == "" {
+		respondError(w, http.StatusBadRequest, "配信IDは必須です")
+		return
+	}
+	var body struct {
+		Note string `json:"note"`
+	}
+	_ = json.NewDecoder(req.Body).Decode(&body) // note は任意
+	var by *uuid.UUID
+	if u := currentUser(req); u != nil {
+		by = &u.ID
+	}
+	if err := r.streamService.MarkNotSinging(id, by, body.Note); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	logger.Infof("non-singing check saved for %s", id)
+	respondJSON(w, http.StatusOK, map[string]any{"id": id, "dismissed": true})
+}
+
+// handleRestoreNonSingingCandidate は判断を取り消す（content:edit）。
+// **効き続けるものは見えて取り消せること**（CLAUDE.md §7.7）。
+func (r *Router) handleRestoreNonSingingCandidate(w http.ResponseWriter, req *http.Request) {
+	id := req.PathValue("id")
+	if id == "" {
+		respondError(w, http.StatusBadRequest, "配信IDは必須です")
+		return
+	}
+	if err := r.streamService.UnmarkNotSinging(id); err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"id": id, "dismissed": false})
+}
+
 // handleGetAutoFillSettings は自動処理の設定を返す（content:edit）。
 func (r *Router) handleGetAutoFillSettings(w http.ResponseWriter, req *http.Request) {
 	// 設定と実行結果は**別のキー**に保存している（実行結果の保存が設定を
@@ -3617,6 +3680,12 @@ func requiredPermission(method, path string) (perm string, needsAuth bool) {
 	// 再生可否の backfill も同じ理由で content:edit。全配信ぶんの yt-dlp を
 	// 運用者の cookie で起動するので、未ログインから叩ける状態にはできない。
 	if isRouteOrSubpath(path, "/api/availability/backfill") {
+		return auth.PermContentEdit, true
+	}
+
+	// 見直しが要る配信の一覧も content:edit。**GET は既定で公開に落ちる**ので、
+	// 書かないと「非表示にしている配信の題名」が未ログインから読める。
+	if isRouteOrSubpath(path, "/api/non-singing-candidates") {
 		return auth.PermContentEdit, true
 	}
 

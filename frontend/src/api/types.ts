@@ -511,6 +511,17 @@ export interface AnalyzeCommentsResponse {
 
 // 未処理配信の一括プレ分析ジョブの進捗
 /** 自動処理（定期実行）の設定。**content:edit のみ**。 */
+/** 「非表示だが現行規則で曲が出た」配信（issue #42）。**content:edit のみ**。 */
+export interface NonSingingCandidate {
+  id: string;
+  title: string;
+  stream_date: string;
+  song_count: number;
+  /** 無いなら**旧規則のままの抽出**。古い結果を根拠に非表示を解くのは危ない */
+  analyzed_at?: string;
+  tags: string[];
+}
+
 export interface AutoFillSettings {
   enabled: boolean;
   /** 実行間隔。短いほど「まだ変換中」の配信を何度も触ることになる */
@@ -550,6 +561,12 @@ export interface BatchAnalyzeStatus {
    * 完了に混ぜると、その配信の end が付かないまま「終わった」ことになる。
    */
   deferred: number;
+  /**
+   * 「曲が無かったので処理済みにした」件数（非表示のみ）。
+   * **黙って状態を変えない**ために出す ── 出さないと、いつの間にか
+   * 処理済みが増えていて理由が分からなくなる。
+   */
+  marked_processed: number;
   current?: string;
   failed_ids?: string[];
   message?: string;

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/lib/pq"
 	"github.com/ruifan75/setori/internal/models"
 	"github.com/ruifan75/setori/pkg/util"
@@ -532,7 +533,7 @@ func (r *StreamRepository) FindByTagID(tagID string, limit, offset int) ([]model
 	return streams, total, rows.Err()
 }
 
-// FindStreamsForBatch は一括分析の対象配信（id/title のみ）を mode と（任意の）歌手で
+// FindStreamsForBatch は一括分析の対象配信（id / title / is_hidden / is_processed）を mode と（任意の）歌手で
 // 絞り込んで古い順に返す。singerID が空なら全チャンネルが対象。
 //
 // mode 別の対象範囲（いずれも comment_raw あり）:
@@ -590,7 +591,11 @@ func (r *StreamRepository) FindStreamsForBatch(mode, singerID string, hidden *bo
 		where += fmt.Sprintf(" AND EXISTS (SELECT 1 FROM stream_singers ss WHERE ss.stream_id = s.id AND ss.singer_id = $%d)", len(args))
 	}
 
-	rows, err := r.db.Query(`SELECT s.id, s.title FROM streams s WHERE `+where+` ORDER BY s.stream_date ASC`, args...)
+	// **is_hidden と is_processed も引く。** 部分モデルにしていたので、
+	// 呼び出し側の `stream.IsHidden` が常にゼロ値 false になり、
+	// 「非表示で曲が出なければ処理済みにする」が**一度も発火しなかった**
+	// （コンパイルは通るので気付けない。SELECT と Scan の対の話と同じ形）。
+	rows, err := r.db.Query(`SELECT s.id, s.title, s.is_hidden, s.is_processed FROM streams s WHERE `+where+` ORDER BY s.stream_date ASC`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query batch streams: %w", err)
 	}
@@ -599,7 +604,7 @@ func (r *StreamRepository) FindStreamsForBatch(mode, singerID string, hidden *bo
 	var streams []models.Stream
 	for rows.Next() {
 		var s models.Stream
-		if err := rows.Scan(&s.ID, &s.Title); err != nil {
+		if err := rows.Scan(&s.ID, &s.Title, &s.IsHidden, &s.IsProcessed); err != nil {
 			return nil, fmt.Errorf("scan stream: %w", err)
 		}
 		streams = append(streams, s)
@@ -1220,6 +1225,124 @@ func (r *StreamRepository) FindBySingerID(singerID string, limit, offset int, fi
 	}
 
 	return streams, total, nil
+}
+
+// NonSingingCandidate は「非表示だが現行規則で曲が出た」配信（issue #42）。
+type NonSingingCandidate struct {
+	ID         string
+	Title      string
+	StreamDate time.Time
+	SongCount  int
+	// AnalyzedAt が NULL なら**旧規則のままの抽出**（現行規則で確かめ直していない）。
+	// 判断材料として画面に出す ── 古い結果を根拠に非表示を解くのは危ない。
+	AnalyzedAt sql.NullTime
+	Tags       []string
+}
+
+// FindNonSingingCandidates は見直しが要る配信を返す。
+//
+// **差分は保存しない。** 毎回計算する ── 抽出規則が変われば候補も変わるべきで、
+// 保存すると古い判断が残る（`/admin/missing-tags` と同じ約束）。
+//
+// 「見たが歌回ではない」と記録されたものは外す（`non_singing_checks`）。
+// 残し続けると作業一覧として使えなくなるうえ、別の担当が「漏れ」と読んでしまう。
+// dismissed=true なら「歌回ではないと判断した」ものを返す（取り消すため）。
+// **効き続けるものは見えて取り消せること**（CLAUDE.md §7.7）── 一覧から
+// 消えるだけで戻せないと、誤って却下した配信が二度と出てこない。
+func (r *StreamRepository) FindNonSingingCandidates(limit int, dismissed bool) ([]NonSingingCandidate, error) {
+	if limit < 1 || limit > 500 {
+		limit = 100
+	}
+	exists := "NOT EXISTS"
+	if dismissed {
+		exists = "EXISTS"
+	}
+	rows, err := r.db.Query(`
+		SELECT s.id, s.title, s.stream_date,
+		       jsonb_array_length(s.comment_songs) AS song_count,
+		       s.comment_songs_analyzed_at,
+		       COALESCE((SELECT array_agg(sst.tag_id ORDER BY sst.tag_id)
+		                 FROM stream_stream_tags sst WHERE sst.stream_id = s.id), '{}')
+		FROM streams s
+		WHERE s.is_hidden
+		  AND jsonb_typeof(s.comment_songs) = 'array'
+		  AND jsonb_array_length(s.comment_songs) > 0
+		  AND `+exists+` (SELECT 1 FROM non_singing_checks c WHERE c.stream_id = s.id)
+		ORDER BY jsonb_array_length(s.comment_songs) DESC, s.stream_date DESC
+		LIMIT $1`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query non singing candidates: %w", err)
+	}
+	defer rows.Close()
+
+	var out []NonSingingCandidate
+	for rows.Next() {
+		var c NonSingingCandidate
+		if err := rows.Scan(&c.ID, &c.Title, &c.StreamDate, &c.SongCount, &c.AnalyzedAt, pq.Array(&c.Tags)); err != nil {
+			return nil, fmt.Errorf("scan non singing candidate: %w", err)
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// SaveNonSingingCheck は「見たが歌回ではない」を記録する（候補から外し続ける）。
+func (r *StreamRepository) SaveNonSingingCheck(streamID string, by *uuid.UUID, note string) error {
+	_, err := r.db.Exec(`
+		INSERT INTO non_singing_checks (stream_id, checked_by, note)
+		VALUES ($1, $2, NULLIF($3, ''))
+		ON CONFLICT (stream_id) DO UPDATE SET checked_by = EXCLUDED.checked_by,
+		                                      checked_at = NOW(), note = EXCLUDED.note`,
+		streamID, by, note)
+	if err != nil {
+		return fmt.Errorf("save non singing check: %w", err)
+	}
+	return nil
+}
+
+// DeleteNonSingingCheck は判断を取り消す（**効き続けるものは見えて取り消せること**）。
+func (r *StreamRepository) DeleteNonSingingCheck(streamID string) error {
+	_, err := r.db.Exec("DELETE FROM non_singing_checks WHERE stream_id = $1", streamID)
+	if err != nil {
+		return fmt.Errorf("delete non singing check: %w", err)
+	}
+	return nil
+}
+
+// MarkProcessedIfHiddenAndEmpty は「もう手を入れなくてよい」印を立てる。
+// 戻り値は**実際に立てたか**（既に立っていた／条件を満たさなかったなら false）。
+//
+// **前提は全部ここで確かめる。** 呼び出し側が持っているのは列挙時と分析時の
+// スナップショットで、AI の処理中（数百本なら数分）に同期や編集者が横から書ける。
+// 読むときだけ確かめても、**書くときには古い前提**になっている。
+//
+//   - `is_hidden` … 編集者が表示へ戻していれば、Holodex や章節から歌単ができうる
+//   - `comment_songs = []` … 分析のあとに同期が新しいコメントを保存すると、
+//     `SaveCommentRaw` が抽出キャッシュを NULL に戻す。そのまま印を立てると
+//     **新しいコメントを一度も分析しないまま**処理済みになり、取り直しの対象
+//     （`is_processed = FALSE`）から永久に外れる
+//
+// 空配列であることを見れば足りるのは、キャッシュと `comment_raw` が常に一緒に
+// 書かれるため（`SaveCommentSongs` の CAS と `SaveCommentRaw` の NULL 化）。
+// 呼び出し時のハッシュと突き合わせるのではなく**今の値が空か**を見るので、
+// 別の入力から作られた空の結論でも、それが現在の入力のものなら正しく立つ。
+//
+// **既に立っている行は触らない**（updated_at を動かさない）。毎日回る同期が
+// 全配信の updated_at を押し上げるのと同じ問題を、こちらでも作らないため。
+//
+// 非表示を解除したり歌唱を消したりはしない。**「確認した」という結論だけ**を残す。
+func (r *StreamRepository) MarkProcessedIfHiddenAndEmpty(streamID string) (bool, error) {
+	res, err := r.db.Exec(`UPDATE streams SET is_processed = TRUE, updated_at = NOW()
+		WHERE id = $1 AND is_hidden AND NOT is_processed
+		  AND jsonb_typeof(comment_songs) = 'array' AND jsonb_array_length(comment_songs) = 0`, streamID)
+	if err != nil {
+		return false, fmt.Errorf("mark processed: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("mark processed rows: %w", err)
+	}
+	return n > 0, nil
 }
 
 // FindStreamsNeedingCommentRefresh はコメントを取り直す価値がある配信の ID を返す。
