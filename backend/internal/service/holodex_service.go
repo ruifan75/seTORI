@@ -829,7 +829,7 @@ func (s *HolodexService) loadAndSaveComments(videoID string) {
 	// 編集画面の「Holodex から同期」を押すだけで手動投入が消えていた
 	// （`RefreshCommentRaw` だけ直してこの経路を見落としていた）。
 	// 判定は SaveCommentRaw（SQL）が持つので、ここは書けたかを見るだけ。
-	written, err := s.streamRepo.SaveCommentRaw(videoID, util.SanitizeJSONB(commentRawJSON))
+	written, err := s.streamRepo.SaveCommentRaw(videoID, util.SanitizeJSONB(commentRawJSON), repository.KeepExistingOnEmpty)
 	switch {
 	case err != nil:
 		logger.Warnf("save comment raw error (video: %s): %v", videoID, err)

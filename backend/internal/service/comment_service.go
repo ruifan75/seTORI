@@ -612,16 +612,19 @@ func (s *CommentService) RefreshCommentRaw(videoID string) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("marshal comments: %w", err)
 	}
-	// **空で非空を潰さないのは SaveCommentRaw（SQL）が見る。** ここで
-	// 読んでから決めると、読んだあと保存するまでの間に手動 import が入った場合に
-	// その直後で潰してしまう。書けたかどうかだけ受け取る。
-	written, err := s.streamRepo.SaveCommentRaw(videoID, util.SanitizeJSONB(rawJSON))
+	// **Holodex fallback つきなので「0 件」と「取れなかった」を区別できない。**
+	// 空で非空を潰さないのは SaveCommentRaw（SQL）が見る。
+	written, err := s.streamRepo.SaveCommentRaw(videoID, util.SanitizeJSONB(rawJSON), repository.KeepExistingOnEmpty)
 	if err != nil {
 		return 0, fmt.Errorf("save comment raw: %w", err)
 	}
 	if !written {
+		// **「空を保存した」と同じ値を返さない。** 呼び出し元は 0 件を
+		// 「分析する材料が無い」と読んで分析を飛ばすので、同じにすると
+		// **手元から持ち込んだコメントが一度も分析されないまま
+		// 処理済みになる**（一つの結果値に二つの事実を入れない）。
 		logger.Infof("[comment] %s: 取得 0 件のため保存済みのコメントを残しました", videoID)
-		return 0, nil
+		return 0, ErrEmptyFetchKept
 	}
 	logger.Infof("[comment] refreshed %d raw comments for %s", len(comments), videoID)
 	return len(comments), nil
@@ -646,13 +649,9 @@ func (s *CommentService) SyncYouTubeCommentRaw(videoID string) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("marshal YouTube comments: %w", err)
 	}
-	written, err := s.streamRepo.SaveCommentRaw(videoID, util.SanitizeJSONB(rawJSON))
-	if err != nil {
+	// 取得元が確定している明示同期（EmptyWritePolicy の説明を参照）。
+	if _, err := s.streamRepo.SaveCommentRaw(videoID, util.SanitizeJSONB(rawJSON), repository.AllowEmptyWrite); err != nil {
 		return 0, fmt.Errorf("save YouTube comments: %w", err)
-	}
-	if !written {
-		// 人が押した操作なので黙って 0 件成功にしない（ErrEmptyFetchKept の説明）。
-		return 0, ErrEmptyFetchKept
 	}
 	logger.Infof("[comment] synced %d raw comments from YouTube for %s", len(comments), videoID)
 	return len(comments), nil
@@ -887,7 +886,7 @@ func (s *CommentService) getComments(videoID string, stream *models.Stream, dryR
 		return nil, fmt.Errorf("get comments: %w", err)
 	}
 	if raw, marshalErr := json.Marshal(comments); marshalErr == nil && !dryRun {
-		if _, saveErr := s.streamRepo.SaveCommentRaw(videoID, util.SanitizeJSONB(raw)); saveErr != nil {
+		if _, saveErr := s.streamRepo.SaveCommentRaw(videoID, util.SanitizeJSONB(raw), repository.KeepExistingOnEmpty); saveErr != nil {
 			logger.Warnf("save comment raw error (video: %s): %v", videoID, saveErr)
 		}
 	}
@@ -915,7 +914,7 @@ func (s *CommentService) GetRawComments(videoID string) ([]string, error) {
 		return nil, err
 	}
 	if raw, err := json.Marshal(comments); err == nil {
-		if _, saveErr := s.streamRepo.SaveCommentRaw(videoID, util.SanitizeJSONB(raw)); saveErr != nil {
+		if _, saveErr := s.streamRepo.SaveCommentRaw(videoID, util.SanitizeJSONB(raw), repository.KeepExistingOnEmpty); saveErr != nil {
 			logger.Warnf("save comment raw error (video: %s): %v", videoID, saveErr)
 		}
 	}
@@ -935,8 +934,10 @@ func storedCommentCount(raw []byte) int {
 
 // ErrEmptyFetchKept は「取得できたのが 0 件で、保存済みの非空を残した」こと。
 //
-// **失敗ではないが成功でもない。** 会限配信では YouTube が 403、Holodex が
-// 空配列を正常応答で返すので、取り直しは黙って「成功・0 件」になる。
-// 人が押した操作でそれを success として返すと、消えていないのに
-// 「0 件で更新した」と読めてしまう。
+// **失敗ではないし「0 件だった」でもない。** 会限配信では YouTube が 403、
+// Holodex が空配列を正常応答で返すので、取り直しは黙って「成功・0 件」になる。
+//
+// これを「0 件」と同じ値で返すと、呼び出し元は**分析する材料が無い**と読んで
+// 分析を飛ばす ── 手元から持ち込んだコメントが一度も分析されないまま
+// 処理済みになる。**入力は残っているので、分析は続けるのが正しい。**
 var ErrEmptyFetchKept = errors.New("取得できたコメントが 0 件だったため、保存済みのコメントを残しました")

@@ -740,6 +740,29 @@ func (r *StreamRepository) ApplyTagRulesToAll() (int64, error) {
 
 // ========== 分析キャッシュ（comment / holodex の正規化結果。由来のハッシュをキーにする） ==========
 
+// EmptyWritePolicy は「取得結果が空だったとき、保存済みの非空を潰してよいか」。
+//
+// **取得経路によって答えが違うので、呼び出し側が決める。**
+//
+//   - 曖昧な経路（Holodex fallback つきの取り直し・同期）は `KeepExistingOnEmpty`。
+//     会限では YouTube が 403 を返し、Holodex は空配列を**正常応答**で返すので、
+//     「0 件だった」と「取れなかった」を区別できない。潰すと編集者が手元から
+//     持ち込んだコメントが消える
+//   - 取得元が確定している明示同期（`SyncYouTubeCommentRaw`）は `AllowEmptyWrite`。
+//     YouTube の失敗は error になり、正常な 0 件だけが空配列で来るので、
+//     「本当に全部消された」を反映できないと困る
+//
+// **引数を必須にしてあるのは、新しい呼び出し元がどちらか決めずに
+// コンパイルできないようにするため**（`SingerOrigin` / `ViewerAccess` と同じ）。
+type EmptyWritePolicy int
+
+const (
+	// KeepExistingOnEmpty … 空で非空を潰さない（既定として選ぶべき側）
+	KeepExistingOnEmpty EmptyWritePolicy = iota
+	// AllowEmptyWrite … 空でも書く（取得元が確定している経路だけ）
+	AllowEmptyWrite
+)
+
 // SaveCommentRaw は comment_raw を更新し、内容が変わった場合は古いコメントから作られた
 // 分析キャッシュも消す。戻り値は**実際に書いたか**。
 //
@@ -759,7 +782,7 @@ func (r *StreamRepository) ApplyTagRulesToAll() (int64, error) {
 // `jsonb_typeof(comment_raw) = 'array'` は NULL になり、三値論理では
 // `NOT NULL` も NULL ＝ 行が消える。実測すると「未取得の配信に 0 件を保存する」
 // （＝調べたが無かった、と記録する）ができなくなり、永遠に取り直し続ける。
-func (r *StreamRepository) SaveCommentRaw(id string, raw []byte) (bool, error) {
+func (r *StreamRepository) SaveCommentRaw(id string, raw []byte, policy EmptyWritePolicy) (bool, error) {
 	raw = util.SanitizeJSONB(raw)
 	res, err := r.db.Exec(`
 		UPDATE streams
@@ -768,10 +791,10 @@ func (r *StreamRepository) SaveCommentRaw(id string, raw []byte) (bool, error) {
 		    comment_raw = $2,
 		    updated_at = NOW()
 		WHERE id = $1
-		  AND NOT COALESCE(
+		  AND ($3::bool OR NOT COALESCE(
 		        (jsonb_typeof($2::jsonb) IS DISTINCT FROM 'array' OR jsonb_array_length($2::jsonb) = 0)
 		        AND jsonb_typeof(comment_raw) = 'array' AND jsonb_array_length(comment_raw) > 0
-		      , FALSE)`, id, raw)
+		      , FALSE))`, id, raw, policy == AllowEmptyWrite)
 	if err != nil {
 		return false, fmt.Errorf("save comment raw: %w", err)
 	}

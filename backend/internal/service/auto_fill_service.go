@@ -346,13 +346,23 @@ func (s *AutoFillService) refreshComments(singerIDs []string, days int, justSync
 		logger.Warnf("[auto-fill] コメント取り直しの対象取得に失敗: %v", err)
 		return 0, 1
 	}
+	kept := 0
 	for _, id := range ids {
-		if _, err := s.comments.RefreshCommentRaw(id); err != nil {
+		switch _, err := s.comments.RefreshCommentRaw(id); {
+		case errors.Is(err, ErrEmptyFetchKept):
+			// 取得が 0 件で保存済みを残した。**失敗でも取り直しでもない**ので
+			// どちらにも数えない（数えると「取り直した」と報告されるが
+			// 入力は 1 文字も変わっていない）。
+			kept++
+		case err != nil:
 			logger.Warnf("[auto-fill] %s のコメント取り直しに失敗: %v", id, err)
 			failures++
-			continue
+		default:
+			refreshed++
 		}
-		refreshed++
+	}
+	if kept > 0 {
+		logger.Infof("[auto-fill] %d 本は取得 0 件だったので保存済みのコメントを残しました", kept)
 	}
 	if refreshed > 0 || failures > 0 {
 		logger.Infof("[auto-fill] コメントを取り直しました: %d/%d 本（失敗 %d）",

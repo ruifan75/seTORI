@@ -276,3 +276,50 @@ func TestImportLiveChatRejectsRecordsWithoutMessages(t *testing.T) {
 		t.Error("弾いたのにファイルが置かれている")
 	}
 }
+
+// **一つの結果値に二つの事実を入れない。**
+//
+// `RefreshCommentRaw` の「0 件」には二つの意味がありうる：
+//
+//	① 取得できて、本当に 0 件だった      → 分析する材料が無い
+//	② 取得が 0 件で、保存済みを残した    → 材料はある（手元から持ち込んだもの）
+//
+// 同じ値で返すと、②でも呼び出し元が分析を飛ばし、**持ち込んだコメントが
+// 一度も分析されないまま処理済みになる**。②は sentinel で区別する。
+//
+// このテストはソースを読む形（実際の分岐は外部取得と DB を挟むため）。
+// 説明が保証より広くならないよう、**何を確かめていないか**も書いておく：
+// 分岐が実行されることまでは見ていない。
+func TestEmptyFetchKeptIsDistinguishedFromZero(t *testing.T) {
+	svc := readFileForTest(t, "comment_service.go")
+	batch := readFileForTest(t, "batch_analyze_service.go")
+	auto := readFileForTest(t, "auto_fill_service.go")
+
+	t.Run("保護したときは sentinel を返す", func(t *testing.T) {
+		if !strings.Contains(svc, "return 0, ErrEmptyFetchKept") {
+			t.Error("保護を 0 件と同じ値で返している")
+		}
+	})
+
+	t.Run("一括は分析を飛ばさない", func(t *testing.T) {
+		// emptyByDesign にしてはいけない ── 材料は残っている。
+		i := strings.Index(batch, "errors.Is(err, ErrEmptyFetchKept)")
+		if i < 0 {
+			t.Fatal("一括が sentinel を見ていない")
+		}
+		j := strings.Index(batch[i:], "case ")
+		next := batch[i : i+j+400]
+		if strings.Contains(next[:strings.Index(next[5:], "case ")+5], "emptyByDesign = true") {
+			t.Error("保護されたのに分析を飛ばしている")
+		}
+	})
+
+	t.Run("自動処理は取り直しにも失敗にも数えない", func(t *testing.T) {
+		if !strings.Contains(auto, "errors.Is(err, ErrEmptyFetchKept)") {
+			t.Error("自動処理が sentinel を見ていない")
+		}
+		if !strings.Contains(auto, "kept++") {
+			t.Error("保護を別に数えていない（refreshed に混ざる）")
+		}
+	})
+}

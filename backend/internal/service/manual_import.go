@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/ruifan75/setori/internal/logger"
+	"github.com/ruifan75/setori/internal/repository"
 	"github.com/ruifan75/setori/pkg/comment"
 	"github.com/ruifan75/setori/pkg/util"
 )
@@ -85,7 +86,7 @@ func (s *CommentService) ImportInfoJSON(videoID string, data []byte) (InfoJSONIm
 	// 取り込みは必ず非空（`parseInfoJSON` が 0 件を弾く）なので、
 	// SaveCommentRaw の「空で非空を潰さない」歯止めには当たらない。
 	// それでも書けたかは確かめる ── 当たったなら前提が崩れている。
-	written, err := s.streamRepo.SaveCommentRaw(videoID, util.SanitizeJSONB(raw))
+	written, err := s.streamRepo.SaveCommentRaw(videoID, util.SanitizeJSONB(raw), repository.KeepExistingOnEmpty)
 	if err != nil {
 		return out, fmt.Errorf("save comment raw: %w", err)
 	}
