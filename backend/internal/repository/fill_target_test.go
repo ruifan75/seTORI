@@ -27,17 +27,27 @@ func TestFillTargetWhere(t *testing.T) {
 	})
 
 	t.Run("入力源は OR で保つ", func(t *testing.T) {
-		// comment_raw が空でも、Holodex の曲・抽出済み・章節があれば対象に残る。
+		// comment_raw が空でも、Holodex の曲や章節があれば対象に残る。
 		// AND にすると、入力源が 1 つしか無い配信を全部落とす。
 		for _, src := range []string{
-			"s.holodex_data->'songs'", "s.comment_songs", "s.comment_raw", "s.chapter_raw",
+			"s.holodex_data->'songs'", "s.comment_raw", "s.chapter_raw",
 		} {
 			if !strings.Contains(unprocessed, src) {
 				t.Errorf("入力源 %s が条件から消えている", src)
 			}
 		}
-		if strings.Count(unprocessed, "OR (") != 3 {
-			t.Errorf("入力源の OR が 3 つでない（AND に変わっていないか）: %s", unprocessed)
+		if strings.Count(unprocessed, "OR (") != 2 {
+			t.Errorf("入力源の OR が 2 つでない（AND に変わっていないか）: %s", unprocessed)
+		}
+	})
+
+	t.Run("comment_songs 単独では対象にしない", func(t *testing.T) {
+		// 抽出結果は comment_raw から作るもの。raw が空だと rawHash が空になり
+		// キャッシュにも命中しないので、**選ばれるのに何も処理されない**
+		// （done に数えられるだけ）。しかも raw が空で songs だけある行は
+		// migration 014 の名残で、中身は旧規則の抽出。
+		if strings.Contains(unprocessed, "s.comment_songs") {
+			t.Error("comment_songs が入力源として残っている")
 		}
 	})
 

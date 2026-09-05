@@ -203,6 +203,14 @@ func (s *BatchAnalyzeService) processOne(videoID string, forceStart bool) batchO
 			}
 			return batchOutcomeDone
 		}
+		// **保存済みの入力が無いのは「分析して 0 曲」ではない。**
+		// 再試行しても遠隔へは行かない（一括は保存済みを処理する仕組み）ので、
+		// 冷却を挟まず即座に失敗として残す ── done に数えると、
+		// 取り直しに失敗した配信が「処理済み」に見えてしまう。
+		if errors.Is(err, ErrNoStoredComments) {
+			logger.Warnf("[batch-analyze] %s: 保存済みのコメントがありません（取り直しに失敗した可能性）", videoID)
+			return batchOutcomeFailed
+		}
 		// 分析中にコメントが差し替わっただけなら、待たずに読み直す。
 		// 90 秒の冷却は AI プロバイダーの劣化明けを待つためのもので、
 		// 競合に使うと 1 回で 90 秒・2 回で 180 秒待ってから failed になる。

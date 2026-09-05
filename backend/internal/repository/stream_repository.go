@@ -1322,6 +1322,13 @@ func fillTargetWhere(mode string) string {
 	// 未解析なら抽出から走らせるので、「コメントはあるがまだ解析していない」を
 	// 一括の対象外にしておく理由が無い。
 	//
+	// **comment_songs 単独では対象にしない。** 抽出結果は comment_raw から作るもので、
+	// raw が空だと rawHash が空になりキャッシュにも命中しないため、**選ばれるのに
+	// 何も処理されない**（done に数えられるだけ）。しかも raw が空で songs だけある行は
+	// migration 014 が raw を `[]` へ正規化した名残で、**中身は旧規則の抽出**
+	// （CLAUDE.md §6.1。現行規則に通すと落ちるものが多い）。使うと古い誤判定を
+	// 歌単へ注入することになる。raw が非空なら raw の条件で選ばれるので取りこぼさない。
+	//
 	// **ただし「非空の配列」で絞ること。** `IS NOT NULL AND != 'null'` では `[]` が通り、
 	// 「保存済みの入力を処理し直す」つもりの実行が遠隔からの再取得に化ける
 	// （CLAUDE.md §6.1。FindStreamsForBatch は直っていたが、こちらは残っていた）。
@@ -1334,7 +1341,6 @@ func fillTargetWhere(mode string) string {
 	// 読み込みの側が空を返すだけになる。先に POST /api/chapters/backfill を回すこと。
 	where := `s.is_hidden = FALSE AND (
 		(jsonb_typeof(s.holodex_data->'songs') = 'array' AND jsonb_array_length(s.holodex_data->'songs') > 0)
-		OR (jsonb_typeof(s.comment_songs) = 'array' AND jsonb_array_length(s.comment_songs) > 0)
 		OR (jsonb_typeof(s.comment_raw) = 'array' AND jsonb_array_length(s.comment_raw) > 0)
 		OR (jsonb_typeof(s.chapter_raw) = 'array' AND jsonb_array_length(s.chapter_raw) > 0))`
 	if mode == "unprocessed" {
@@ -1358,7 +1364,8 @@ func fillTargetWhere(mode string) string {
 // 一括プレ分析（FindStreamsForBatch）とは対象が違う。あちらは comment_raw を持つ配信だが、
 // こちらは**楽曲の入力元を持つ配信**（Holodex の曲か、解析済みのコメント）が対象になる。
 //
-//	unprocessed … まだ歌唱が 1 つも無い配信だけ。既にあるものは触らない
+//	unprocessed … まだ歌唱が 1 つも無く、**かつ処理済みでない**配信だけ。
+//	              既にあるものも、人が「処理した」と言ったものも触らない
 //	force       … 入力元を持つ配信すべて。既存と食い違う分は人の審査へ回す
 //
 // 範囲は singerIDs で絞る（空なら全チャンネル）。**既定はチャンネルの所有者**で、
@@ -1366,22 +1373,6 @@ func fillTargetWhere(mode string) string {
 // 以前は参加者で絞っていたので、あるチャンネルを選んだつもりが、そのチャンネルが
 // ゲスト参加しただけの他人の配信まで対象になっていた。
 func (r *StreamRepository) FindStreamsForFill(mode string, singerIDs []string, includeCollabs bool) ([]models.Stream, error) {
-	// jsonb_typeof で配列だけを見る。comment_songs には JSON のスカラー 'null' が入っている
-	// 行があり、jsonb_array_length に直接渡すと「cannot get array length of a scalar」で落ちる。
-	//
-	// comment_raw しか無い（まだ抽出していない）配信も対象に入れる。読み込みの側が
-	// 未解析なら抽出から走らせるので、「コメントはあるがまだ解析していない」を
-	// 一括の対象外にしておく理由が無い。
-	//
-	// **ただし「非空の配列」で絞ること。** `IS NOT NULL AND != 'null'` では `[]` が通り、
-	// 「保存済みの入力を処理し直す」つもりの実行が遠隔からの再取得に化ける
-	// （CLAUDE.md §6.1。FindStreamsForBatch は直っていたが、こちらは残っていた）。
-	// 実測（2026-09-05、本番）：これで通っていた 9 本はすべて会限で `comment_raw = []`。
-	// コメントは API key では読めない（403 forbidden。**配額ではなく権限**）ので、
-	// 毎時間 403 を叩いては何も得られずに終わっていた。
-	// チャプターは**取得済みで章節がある**配信だけを対象にする。yt-dlp は一括の中で
-	// 呼ばない約束（1 本あたり数秒かかる）なので、まだ調べていない配信を入れても
-	// 読み込みの側が空を返すだけになる。先に POST /api/chapters/backfill を回すこと。
 	where := fillTargetWhere(mode)
 
 	args := []any{}

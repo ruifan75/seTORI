@@ -274,3 +274,21 @@ func TestProbeChatFirstOnlyForBatch(t *testing.T) {
 		t.Error("dry run が書き込む側になっている")
 	}
 }
+
+// **「入力が無かった」を「分析して 0 曲だった」と混ぜない。**
+//
+// 空を返すと warning なしの 0 曲になり、一括プレ分析は done に数える。さらに
+// 「曲が無ければ処理済みにする」仕組み（issue #42）は、**読めなかった配信を
+// 「歌は無い」と確定させる**ことになる ── 人と機構が共有する結論なので性質が悪い。
+func TestBatchOptionsDoNotFetchRemotely(t *testing.T) {
+	if !batchAnalyzeOptions(false).NoRemoteFetch {
+		t.Error("一括が遠隔取得を許している（保存済みの入力を処理する仕組みのはず）")
+	}
+	// 対話と測定は従来どおり取りに行く（人がボタンを押した以上、取得してでも見せる）
+	if interactiveAnalyzeOptions(false).NoRemoteFetch {
+		t.Error("編集画面の読み込みが遠隔取得を止めている")
+	}
+	if dryRunAnalyzeOptions().NoRemoteFetch {
+		t.Error("dry run が遠隔取得を止めている（本番の挙動を測れない）")
+	}
+}

@@ -352,6 +352,11 @@ func filterScopeForPath(path string, filterKW, keepKW []string) (dict, keep []st
 
 // ErrCommentRawChanged は分析中に comment_raw が差し替わったことを示す。
 // 古い入力から作った結果は保存されていないので、呼び出し元は新しい raw で引き直すこと。
+// ErrNoStoredComments は保存済みのコメントが無く、遠隔取得も許可されていない状態。
+// **エラーだが異常ではない** ── 入力が無いだけ。ただし「分析して 0 曲だった」とは
+// 別物なので、呼び出し側が区別できるように返す。
+var ErrNoStoredComments = errors.New("保存済みのコメントがありません")
+
 var ErrCommentRawChanged = errors.New("分析中に comment_raw が変更されました")
 
 // ExtractSongs は「タイムスタンプ付きのテキスト」から歌唱行を抽出し、正規化して DB と照合する。
@@ -852,8 +857,13 @@ func (s *CommentService) getComments(videoID string, stream *models.Stream, dryR
 	}
 	// **保存済みが空なら、ここで取りに行かない経路がある**（一括）。
 	// 取りに行くと、別の入力源で対象に残った配信でも毎回外部呼び出しが起きる。
+	//
+	// **「入力が無かった」を「分析して 0 曲だった」と混ぜない。** 空を返すと
+	// warning なしの 0 曲になり、一括プレ分析は done に数え、
+	// 「曲が無ければ処理済みにする」仕組み（issue #42）は
+	// **読めなかった配信を「歌は無い」と確定させる**ことになる。
 	if noRemote {
-		return nil, nil
+		return nil, ErrNoStoredComments
 	}
 
 	comments, err := s.holodexService.GetVideoComments(videoID)
