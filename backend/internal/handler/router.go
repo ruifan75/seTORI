@@ -2038,12 +2038,14 @@ func (r *Router) handleGetAutoFillSettings(w http.ResponseWriter, req *http.Requ
 	settings := r.autoFillService.GetSettings()
 	last := r.autoFillService.GetLastRun()
 	respondJSON(w, http.StatusOK, map[string]any{
-		"enabled":        settings.Enabled,
-		"interval_hours": settings.IntervalHours,
-		"refresh_days":   settings.RefreshDays,
-		"last_run_at":    last.At,
-		"last_run_note":  last.Note,
-		"last_run_error": last.Error,
+		"enabled":         settings.Enabled,
+		"interval_hours":  settings.IntervalHours,
+		"refresh_days":    settings.RefreshDays,
+		"last_run_at":     last.At,
+		"last_skipped_at": last.SkippedAt,
+		"last_skip_note":  last.SkipNote,
+		"last_run_note":   last.Note,
+		"last_run_error":  last.Error,
 	})
 }
 
@@ -2070,12 +2072,14 @@ func (r *Router) handleUpdateAutoFillSettings(w http.ResponseWriter, req *http.R
 		settings.Enabled, settings.IntervalHours, settings.RefreshDays)
 	last := r.autoFillService.GetLastRun()
 	respondJSON(w, http.StatusOK, map[string]any{
-		"enabled":        settings.Enabled,
-		"interval_hours": settings.IntervalHours,
-		"refresh_days":   settings.RefreshDays,
-		"last_run_at":    last.At,
-		"last_run_note":  last.Note,
-		"last_run_error": last.Error,
+		"enabled":         settings.Enabled,
+		"interval_hours":  settings.IntervalHours,
+		"refresh_days":    settings.RefreshDays,
+		"last_run_at":     last.At,
+		"last_skipped_at": last.SkippedAt,
+		"last_skip_note":  last.SkipNote,
+		"last_run_note":   last.Note,
+		"last_run_error":  last.Error,
 	})
 }
 

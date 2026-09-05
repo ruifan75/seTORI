@@ -83,3 +83,27 @@ func TestAutoFillSkipDoesNotDelayNextRun(t *testing.T) {
 		t.Error("見送りの記録が実行時刻を進めている")
 	}
 }
+
+// **見送りの記録が、実行の記録と混ざらないこと。**
+// Note を共有すると、古い last_run_at と新しい見送り理由が組み合わさって
+// 「実在しない一回の結果」に見える。
+func TestAutoFillSkipKeepsRunRecordIntact(t *testing.T) {
+	b, err := json.Marshal(AutoFillLastRun{
+		Note: "実行の記録", Error: "実行のエラー", SkipNote: "見送りの理由",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
+	if m["last_run_note"] == m["last_skip_note"] {
+		t.Error("実行の記録と見送りの理由が同じ欄に入っている")
+	}
+	for _, k := range []string{"last_run_note", "last_skip_note", "last_run_error"} {
+		if _, ok := m[k]; !ok {
+			t.Errorf("%s が応答に出ない", k)
+		}
+	}
+}

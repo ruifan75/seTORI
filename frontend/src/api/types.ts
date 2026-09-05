@@ -520,6 +520,12 @@ export interface AutoFillSettings {
   last_run_at?: string;
   last_run_note?: string;
   last_run_error?: string;
+  /**
+   * 最後に見送ったとき（一括が実行中・停止要求）。**実行とは別に出す** ──
+   * 混ぜると古い実行時刻と新しい見送り理由が「実在しない一回」に見える。
+   */
+  last_skipped_at?: string;
+  last_skip_note?: string;
 }
 
 /** 自動処理を 1 回走らせた結果。 */

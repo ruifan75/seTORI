@@ -1020,6 +1020,13 @@ function AutoFillSchedule() {
             間隔を短くすると、配信直後で live chat がまだ取得できない配信を何度も処理し直します。
           </p>
 
+          {settings?.last_skipped_at && (
+            <p className="text-sm text-amber-700 mt-3">
+              前回の見送り: {new Date(settings.last_skipped_at).toLocaleString('ja-JP')}
+              {settings.last_skip_note && `（${settings.last_skip_note}）`}
+            </p>
+          )}
+
           {settings?.last_run_at && (
             <p className="text-sm text-gray-500 mt-3">
               前回: {new Date(settings.last_run_at).toLocaleString('ja-JP')}

@@ -176,11 +176,22 @@ func (s *BatchFillService) Reserve() bool {
 	return true
 }
 
+// Cancelled は停止が要求されたかを返す。
+//
+// **予約中も画面には停止ボタンが出る**（status.Running=true にするため）。
+// 予約の所有者がこれを見ないと、「停止しました」と答えたのに処理が続く。
+func (s *BatchFillService) Cancelled() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cancelled
+}
+
 // Release は Reserve を取り消す（開始しないと決めたとき）。
 func (s *BatchFillService) Release() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.running = false
+	s.cancelled = false
 	s.status = dto.BatchFillStatus{}
 }
 

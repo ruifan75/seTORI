@@ -1236,9 +1236,10 @@ func (r *StreamRepository) FindBySingerID(singerID string, limit, offset int, fi
 //	終了から days 日以内 … 古い配信に今さら歌単が貼られることは稀
 //	未来日でない        … 予約配信を配信前から取りに行かない
 //
-// なお `GetVideoComments` は YouTube → Holodex の 2 リクエストになりうるので、
-// 「1 本につき外部 API 1 回」ではない。コメントが空の配信はこの実行の中で
-// 複数回取りに行くこともある ── **飛ばして取りこぼすよりは安い**という判断。
+// 取り直しは外部 API を叩く（`GetVideoComments` は YouTube → Holodex の
+// 2 リクエストになりうるので、1 本につき 1 回とは限らない）。コメントが空の
+// 配信はこの実行の中で複数回取りに行くこともあるが、
+// **飛ばして取りこぼすよりは安い**という判断。
 //
 // singerIDs が空なら全チャンネル。**所有者で絞る**（ゲスト参加しただけの
 // 他人の配信まで対象にしない。FindStreamsForFill と同じ）。
@@ -1271,10 +1272,16 @@ func (r *StreamRepository) FindStreamsNeedingCommentRefresh(singerIDs []string, 
 		// 同期で入ってきて、**かつ実際にコメントが入った**ものだけ除外する。
 		// 空のまま（取得失敗・コメントがまだ無い）なら取り直す ── そちらは
 		// 再取得で結果が変わりうるし、飛ばすと今回の実行から漏れる。
+		// **COALESCE を外さないこと。** comment_raw が SQL NULL のとき
+		// `jsonb_typeof(NULL)` は NULL なので、条件全体が
+		// `TRUE AND NULL AND NULL` = NULL になり、`NOT NULL` も NULL。
+		// WHERE では NULL は不成立なので、**同期時にコメント取得が失敗した
+		// 新規配信こそが除外される** ── 意図の正反対で、しかも失敗にも数えられない。
+		// （本番で `false OR NULL = NULL` を踏んだのと同じ罠。CLAUDE.md §2）
 		query += fmt.Sprintf(`
-		  AND NOT (s.id = ANY($%d)
+		  AND NOT COALESCE(s.id = ANY($%d)
 		           AND jsonb_typeof(s.comment_raw) = 'array'
-		           AND jsonb_array_length(s.comment_raw) > 0)`, len(args)+1)
+		           AND jsonb_array_length(s.comment_raw) > 0, FALSE)`, len(args)+1)
 		args = append(args, pq.Array(justSynced))
 	}
 	query += `

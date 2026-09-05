@@ -45,8 +45,11 @@ type AutoFillLastRun struct {
 	// 重なっただけで次回が丸ごと 1 間隔ぶん先送りになる（168 時間設定なら 7 日後）。
 	// 見送りは 10 分ごとの tick で次に拾えばよい。
 	At *time.Time `json:"last_run_at,omitempty"`
-	// SkippedAt は最後に見送った時刻（表示用。次回の判定には使わない）。
+	// SkippedAt / SkipNote は最後に見送ったとき（表示用。次回の判定には使わない）。
+	// **実行の Note とは別に持つ** ── 混ぜると、古い実行時刻と新しい見送り理由が
+	// 組み合わさって「実在しない一回の結果」に見える。
 	SkippedAt *time.Time `json:"last_skipped_at,omitempty"`
+	SkipNote  string     `json:"last_skip_note,omitempty"`
 	Note      string     `json:"last_run_note,omitempty"`
 	Error     string     `json:"last_run_error,omitempty"`
 }
@@ -270,12 +273,22 @@ func (s *AutoFillService) RunOnce() (AutoFillResult, error) {
 		}
 		if syncRes != nil {
 			res.Synced += syncRes.SyncedCount
-			// 同期で入ってきた配信は**その場でコメントを取得済み**なので、
-			// 直後の取り直しから外す（同じ実行で 2 回取りに行かない）。
+			// 同期で入ってきた配信を控える。**除外するかどうかは SQL 側で決める**
+			// ── 新規というだけでは取得できた証拠にならない（取得に失敗しても
+			// 新規として返るため）。実際にコメントが入ったものだけが除外される。
 			for _, id := range syncRes.NewStreams {
 				justSynced[id] = true
 			}
 		}
+	}
+
+	// **停止要求を見る。** 予約中も画面には停止ボタンが出るので、押されたのに
+	// 続けると「停止しました」と答えたまま処理が進むことになる。
+	if s.batchFill.Cancelled() {
+		res.Note = "停止が要求されたため中止しました"
+		logger.Infof("[auto-fill] %s", res.Note)
+		s.recordSkip(res)
+		return res, nil // defer が予約を解放する
 	}
 
 	// 2. コメントの取り直し（歌単が空・非表示でない・N 日以内）
@@ -288,6 +301,13 @@ func (s *AutoFillService) RunOnce() (AutoFillResult, error) {
 	res.Failures += refreshFailures
 
 	// 3. 一括セットリスト作成。既に手動で走っていれば譲る（次の実行で拾う）。
+	if s.batchFill.Cancelled() {
+		res.Note = "停止が要求されたため中止しました"
+		logger.Infof("[auto-fill] %s", res.Note)
+		s.recordSkip(res)
+		return res, nil // defer が予約を解放する
+	}
+
 	runID, err := s.batchFill.StartReserved(BatchFillModeUnprocessed, singerIDs, false, nil)
 	if err != nil {
 		// StartReserved は失敗時に自分で予約を解放する。
@@ -308,8 +328,7 @@ func (s *AutoFillService) RunOnce() (AutoFillResult, error) {
 // refreshComments は歌単がまだ無い配信のコメントを取り直す。
 //
 // **全配信を取り直さない。** 既に歌単がある配信は取り直しても何も起きないし
-// （自動処理は既存の歌単に触らない）、取り直しは外部 API を叩く
-// （`GetVideoComments` は YouTube → Holodex の 2 リクエストになりうる）。
+// （自動処理は既存の歌単に触らない）、取り直しは外部 API を叩く。
 // justSynced はこの実行の同期で入ってきた配信。**除外の判断は SQL 側**で行う
 // （新規というだけでは取得できた証拠にならないため。repository の注記）。
 func (s *AutoFillService) refreshComments(singerIDs []string, days int, justSynced []string) (refreshed, failures int) {
@@ -339,7 +358,9 @@ func (s *AutoFillService) recordSkip(res AutoFillResult) {
 	last := s.GetLastRun()
 	now := time.Now()
 	last.SkippedAt = &now
-	last.Note = res.Note
+	// **見送りの理由は別の欄に置く。** Note を上書きすると、古い last_run_at と
+	// 新しい見送り理由が組み合わさって「実在しない一回の結果」に見える。
+	last.SkipNote = res.Note
 	if err := s.settingsRepo.Set(settingsKeyAutoFillRun, last); err != nil {
 		logger.Warnf("[auto-fill] 見送りの記録に失敗: %v", err)
 	}
