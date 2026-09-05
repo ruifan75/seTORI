@@ -510,6 +510,33 @@ export interface AnalyzeCommentsResponse {
 }
 
 // 未処理配信の一括プレ分析ジョブの進捗
+/** 自動処理（定期実行）の設定。**content:edit のみ**。 */
+export interface AutoFillSettings {
+  enabled: boolean;
+  /** 実行間隔。短いほど「まだ変換中」の配信を何度も触ることになる */
+  interval_hours: number;
+  /** コメントを取り直す対象の上限日数（歌単は配信後に貼られることが多い） */
+  refresh_days: number;
+  last_run_at?: string;
+  last_run_note?: string;
+  last_run_error?: string;
+  /**
+   * 最後に見送ったとき（一括が実行中・停止要求）。**実行とは別に出す** ──
+   * 混ぜると古い実行時刻と新しい見送り理由が「実在しない一回」に見える。
+   */
+  last_skipped_at?: string;
+  last_skip_note?: string;
+}
+
+/** 自動処理を 1 回走らせた結果。 */
+export interface AutoFillRunResult {
+  channels: number;
+  synced: number;
+  refreshed: number;
+  fill_run_id?: string;
+  note?: string;
+}
+
 export interface BatchAnalyzeStatus {
   running: boolean;
   mode?: string;

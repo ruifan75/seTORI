@@ -183,6 +183,17 @@ type UpdateSingerMembersPolicyRequest struct {
 	Policy *string `json:"members_only_policy"`
 }
 
+// UpdateAutoFillSettingsRequest は自動処理の設定。
+//
+// **すべてポインタにするのは「項目が無い」と「false / 0」を分けるため。**
+// 値型だと `{}` や項目名の typo が decode に成功し、動いている自動処理を
+// 黙って止めたり、間隔を最小値に丸めたりする。
+type UpdateAutoFillSettingsRequest struct {
+	Enabled       *bool `json:"enabled"`
+	IntervalHours *int  `json:"interval_hours"`
+	RefreshDays   *int  `json:"refresh_days"`
+}
+
 // UpdateSingerAutoFillRequest は自動処理の対象かの切り替え。
 // **ポインタにするのは「項目が無い」と「false」を分けるため**
 // （members-policy と同じ理由。`{}` が黙って無効化するのを防ぐ）。

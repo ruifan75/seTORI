@@ -1,5 +1,7 @@
 import axios from 'axios';
 import type {
+  AutoFillSettings,
+  AutoFillRunResult,
   SongListResponse,
   Song,
   SongPerformanceListResponse,
@@ -389,6 +391,38 @@ export const singerApi = {
     const { data } = await api.put(`/api/singers/${id}/members-policy`, {
       members_only_policy: policy,
     });
+    return data;
+  },
+};
+
+// ========== 自動処理（定期実行）API ==========
+// 登録チャンネルを定期的に 同期 → コメント取り直し → 歌単作成 する。
+// 審査と処理完了は自動化しない（設計上わざと人に残した関門）。
+export const autoFillApi = {
+  getSettings: async (): Promise<AutoFillSettings> => {
+    const { data } = await api.get('/api/auto-fill/settings');
+    return data;
+  },
+
+  updateSettings: async (
+    enabled: boolean,
+    intervalHours: number,
+    refreshDays: number,
+  ): Promise<AutoFillSettings> => {
+    // 3 項目とも送る。バックエンドは欠けていると 400 を返す
+    // （`{}` が黙って自動処理を止めるのを防ぐため）。
+    const { data } = await api.put('/api/auto-fill/settings', {
+      enabled,
+      interval_hours: intervalHours,
+      refresh_days: refreshDays,
+    });
+    return data;
+  },
+
+  // 今すぐ 1 回だけ走らせる。**設定が無効でも走る** ── 有効にする前に
+  // 何が起きるか確かめられないと、いきなり自動で回すことになる。
+  run: async (): Promise<AutoFillRunResult> => {
+    const { data } = await api.post('/api/auto-fill/run');
     return data;
   },
 };

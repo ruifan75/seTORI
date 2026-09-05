@@ -1222,6 +1222,88 @@ func (r *StreamRepository) FindBySingerID(singerID string, limit, offset int, fi
 	return streams, total, nil
 }
 
+// FindStreamsNeedingCommentRefresh はコメントを取り直す価値がある配信の ID を返す。
+//
+// **歌単は配信が終わったあとに貼られることが多い。** 同期は新規のときしか
+// コメントを取り直さない（`holodex_service.go` の `existing == nil || forceUpdate`）ので、
+// 取り直さなければ自動処理は何度走らせても同じ入力を見続けることになる。
+//
+// 一方で全配信を取り直すと、その本数ぶん外部 API を叩くことになる。そこで
+// 「取り直しても結果が変わりうるもの」だけに絞る：
+//
+//	歌単が空          … 既にある歌単には触らない約束なので、それ以外は取り直しても何も起きない
+//	非表示でない      … 雑談・ゲームまで対象にしない（本番では 731 → 14 まで減る）
+//	終了から days 日以内 … 古い配信に今さら歌単が貼られることは稀
+//	未来日でない        … 予約配信を配信前から取りに行かない
+//
+// 取り直しは外部 API を叩く（`GetVideoComments` は YouTube → Holodex の
+// 2 リクエストになりうるので、1 本につき 1 回とは限らない）。コメントが空の
+// 配信はこの実行の中で複数回取りに行くこともあるが、
+// **飛ばして取りこぼすよりは安い**という判断。
+//
+// singerIDs が空なら全チャンネル。**所有者で絞る**（ゲスト参加しただけの
+// 他人の配信まで対象にしない。FindStreamsForFill と同じ）。
+// justSynced はこの実行の同期で入ってきた配信。**それだけでは除外しない** ──
+// 同期のコメント取得は失敗してもログだけで、その配信は「新規」として返る。
+// 「新規だから取得済み」と決めつけると、取得に失敗した配信を黙って飛ばすことになる。
+// **実際にコメントが入っているものだけ**を除外する（＝取得できた証拠がある）。
+func (r *StreamRepository) FindStreamsNeedingCommentRefresh(singerIDs []string, days int, justSynced []string) ([]string, error) {
+	if days < 1 {
+		days = 30
+	}
+	query := `
+		SELECT s.id
+		FROM streams s
+		WHERE s.is_hidden = FALSE
+		  -- **上限も要る。** 予約配信（未来日）は「終了から N 日以内」に入って
+		  -- しまい、配信が始まる前から定期的にコメントを取りに行くことになる。
+		  -- SyncChannel は past しか取らないが、SyncVideo 等で先に登録されうる。
+		  AND s.stream_date <= NOW()
+		  AND s.stream_date > NOW() - ($1 || ' days')::INTERVAL
+		  AND NOT EXISTS (SELECT 1 FROM performances p WHERE p.stream_id = s.id)`
+	args := []any{days}
+	if len(singerIDs) > 0 {
+		query += `
+		  AND EXISTS (SELECT 1 FROM stream_singers ss
+		              WHERE ss.stream_id = s.id AND ss.is_owner AND ss.singer_id = ANY($2))`
+		args = append(args, pq.Array(singerIDs))
+	}
+	if len(justSynced) > 0 {
+		// 同期で入ってきて、**かつ実際にコメントが入った**ものだけ除外する。
+		// 空のまま（取得失敗・コメントがまだ無い）なら取り直す ── そちらは
+		// 再取得で結果が変わりうるし、飛ばすと今回の実行から漏れる。
+		// **COALESCE を外さないこと。** comment_raw が SQL NULL のとき
+		// `jsonb_typeof(NULL)` は NULL なので、条件全体が
+		// `TRUE AND NULL AND NULL` = NULL になり、`NOT NULL` も NULL。
+		// WHERE では NULL は不成立なので、**同期時にコメント取得が失敗した
+		// 新規配信こそが除外される** ── 意図の正反対で、しかも失敗にも数えられない。
+		// （本番で `false OR NULL = NULL` を踏んだのと同じ罠。CLAUDE.md §2）
+		query += fmt.Sprintf(`
+		  AND NOT COALESCE(s.id = ANY($%d)
+		           AND jsonb_typeof(s.comment_raw) = 'array'
+		           AND jsonb_array_length(s.comment_raw) > 0, FALSE)`, len(args)+1)
+		args = append(args, pq.Array(justSynced))
+	}
+	query += `
+		ORDER BY s.stream_date DESC`
+
+	rows, err := r.db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query streams needing comment refresh: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan stream id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 // FindStreamsForFill は一括セットリスト作成の対象を返す。
 //
 // 一括プレ分析（FindStreamsForBatch）とは対象が違う。あちらは comment_raw を持つ配信だが、

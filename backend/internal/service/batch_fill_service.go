@@ -83,6 +83,10 @@ var reliableEndSources = map[string]bool{
 
 var ErrBatchFillAlreadyRunning = errors.New("一括セットリスト作成は既に実行中です")
 
+// ErrBatchFillCancelled は予約中に停止が要求されたため開始しなかった。
+// **エラーだが異常ではない** ── 次の実行で拾えばよい。
+var ErrBatchFillCancelled = errors.New("停止が要求されたため開始しませんでした")
+
 func NewBatchFillService(
 	streamRepo *repository.StreamRepository,
 	perfRepo *repository.PerformanceRepository,
@@ -156,18 +160,83 @@ func (r *fillRow) hasReliableEnd() bool {
 //
 // singerIDs は対象チャンネル（空なら全部）。既定はそのチャンネルが**所有する**配信で、
 // includeCollabs を立てるとゲスト参加した配信も含む。
+// Reserve は「これから開始する」を**原子的に**押さえる。
+//
+// **入力を書き換える前に呼ぶこと。** 「走っていないか確認 → 入力を更新 → 開始」
+// の順では、確認と開始の間に手動の一括が始まりうる。その一括は古い入力
+// （raw=A）を読み込んだあとで更新（raw=B）を受け、**A のまま歌唱を作る**。
+// 開始を弾いても手遅れで、二重起動を防ぐだけでは足りない。
+//
+// 押さえたら必ず StartReserved か Release を呼ぶこと（呼ばないと以後
+// 一括が一切開始できなくなる）。
+func (s *BatchFillService) Reserve() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.running {
+		return false
+	}
+	s.running = true
+	// **前回の停止要求を持ち越さない。** 実行終了時の後始末は running しか
+	// 落とさないので、手動の一括を止めたあと cancelled=true が残る。
+	// 拾うと、次の自動処理が同期を全部やってから「停止要求」で見送ることになる。
+	s.cancelled = false
+	s.status = dto.BatchFillStatus{Running: true, Mode: "reserved"}
+	return true
+}
+
+// Cancelled は停止が要求されたかを返す。
+//
+// **予約中も画面には停止ボタンが出る**（status.Running=true にするため）。
+// 予約の所有者がこれを見ないと、「停止しました」と答えたのに処理が続く。
+func (s *BatchFillService) Cancelled() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cancelled
+}
+
+// Release は Reserve を取り消す（開始しないと決めたとき）。
+func (s *BatchFillService) Release() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.running = false
+	s.cancelled = false
+	s.status = dto.BatchFillStatus{}
+}
+
+// StartReserved は Reserve 済みの前提で開始する。
+func (s *BatchFillService) StartReserved(mode string, singerIDs []string, includeCollabs bool, startedBy *uuid.UUID) (uuid.UUID, error) {
+	return s.start(mode, singerIDs, includeCollabs, startedBy, true)
+}
+
 func (s *BatchFillService) Start(mode string, singerIDs []string, includeCollabs bool, startedBy *uuid.UUID) (uuid.UUID, error) {
+	return s.start(mode, singerIDs, includeCollabs, startedBy, false)
+}
+
+func (s *BatchFillService) start(mode string, singerIDs []string, includeCollabs bool, startedBy *uuid.UUID, reserved bool) (uuid.UUID, error) {
 	switch mode {
 	case BatchFillModeUnprocessed, BatchFillModeForce:
 	default:
+		if reserved {
+			s.Release()
+		}
 		return uuid.Nil, errors.New("無効なモードです（unprocessed / force）")
 	}
 	singerIDs = trimIDs(singerIDs)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.running {
+	// 予約済みなら running は既に立っている（立てたのは自分）。
+	if s.running && !reserved {
 		return uuid.Nil, ErrBatchFillAlreadyRunning
+	}
+	// **予約中に入った停止要求をここで見る。** 呼び出し側が直前に確認しても、
+	// 確認とロック取得の間に cancel が入りうる（同じ TOCTOU）。同じロックの
+	// 中で見て断るのが唯一の閉じ方。予約は解放して次の実行へ回す。
+	if reserved && s.cancelled {
+		s.running = false
+		s.cancelled = false
+		s.status = dto.BatchFillStatus{}
+		return uuid.Nil, ErrBatchFillCancelled
 	}
 
 	var sid *string
@@ -177,6 +246,11 @@ func (s *BatchFillService) Start(mode string, singerIDs []string, includeCollabs
 	}
 	runID, err := s.runRepo.CreateRun(mode, sid, startedBy)
 	if err != nil {
+		if reserved {
+			// 予約したまま抜けると、以後一括が一切開始できなくなる。
+			s.running = false
+			s.status = dto.BatchFillStatus{}
+		}
 		return uuid.Nil, err
 	}
 
