@@ -242,10 +242,13 @@ func ParseLiveChat(r io.Reader) ([]Event, bool, error) {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 1024*1024), 16*1024*1024) // 1 行が長い場合がある
 	var events []Event
-	// recognized は「これは live chat replay のファイルだ」と言える根拠。
+	// sawRecord は「replay の記録を最後まで読めた行がある」。
 	// **Event が 0 件でも真になりうる**（記録はあるが描画できるテキストが無い等）。
-	// 逆にここが偽なら、ファイルはあっても中身が replay ではない。
-	recognized := false
+	//
+	// sawMalformed は「非空なのに JSON として読めない行があった」＝**途中で切れている**。
+	// 正常な行が 1 行あっても、そのあとで切れていればファイルは不完全 ──
+	// ダウンロードが中断した典型的な形なので、記録の有無だけでは弾けない。
+	sawRecord, sawMalformed := false, false
 	for sc.Scan() {
 		line := sc.Bytes()
 		if len(line) == 0 {
@@ -253,16 +256,23 @@ func ParseLiveChat(r io.Reader) ([]Event, bool, error) {
 		}
 		var lc liveChatLine
 		if err := json.Unmarshal(line, &lc); err != nil {
-			continue // 壊れた行をスキップする
+			// 壊れた行はイベントとしては読み飛ばすが、**記録は残す**。
+			sawMalformed = true
+			continue
 		}
 		if lc.Replay.OffsetMs == "" {
+			// replay ではない行（別種の action 等）。JSON としては正しいので
+			// 壊れてはいない。
 			continue
 		}
-		recognized = true
 		ms, err := parseInt(lc.Replay.OffsetMs)
 		if err != nil {
+			// offset が数値でない＝この行は壊れている。**ここより前で
+			// sawRecord を立てない** ── 立てると壊れた行が「認識できた」に化ける。
+			sawMalformed = true
 			continue
 		}
+		sawRecord = true
 		text := ""
 		for _, a := range lc.Replay.Actions {
 			rend := a.Add.Item.Text
@@ -285,13 +295,15 @@ func ParseLiveChat(r io.Reader) ([]Event, bool, error) {
 		}
 	}
 	if err := sc.Err(); err != nil {
-		return nil, recognized, fmt.Errorf("scan live chat: %w", err)
+		return nil, false, fmt.Errorf("scan live chat: %w", err)
 	}
 	sort.Slice(events, func(i, j int) bool { return events[i].T < events[j].T })
-	return events, recognized, nil
+	// **記録があることと、ファイルが完全であることは別。** 途中で切れた
+	// ダウンロードは「正常な行が並んだあとに壊れた行」という形になるので、
+	// 記録の有無だけで判断すると不完全なファイルを確定させてしまう。
+	return events, sawRecord && !sawMalformed, nil
 }
 
-// ParseLiveChatFile はファイルから live chat を読み込んで解析する。
 // ParseLiveChatFile はファイルから live chat を読み込んで解析する
 // （戻り値は ParseLiveChat と同じ）。
 func ParseLiveChatFile(path string) ([]Event, bool, error) {

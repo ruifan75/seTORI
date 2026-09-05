@@ -145,6 +145,30 @@ func TestParseLiveChatRecognizesReplay(t *testing.T) {
 			body:           `{"replayChatItemAction":{"videoOffsetTimeMsec":"1000","actions":[]}}` + "\n",
 			wantRecognized: true,
 		},
+		{
+			// **ダウンロード中断の典型**：正常な行が並んだあとで切れる。
+			// 記録の有無だけで見ると通ってしまう。
+			name: "正常な行のあとで切れている",
+			body: `{"replayChatItemAction":{"videoOffsetTimeMsec":"1000","actions":[` +
+				`{"addChatItemAction":{"item":{"liveChatTextMessageRenderer":` +
+				`{"message":{"runs":[{"text":"888"}]}}}}}]}}` + "\n" + "{",
+			wantRecognized: false,
+		},
+		{
+			// offset が数値でない行も壊れている。ここで recognized を
+			// 立ててしまうと、壊れた行が「認識できた」に化ける。
+			name:           "offset が数値でない",
+			body:           `{"replayChatItemAction":{"videoOffsetTimeMsec":"broken","actions":[]}}` + "\n",
+			wantRecognized: false,
+		},
+		{
+			// replay ではない行が混ざっているのは正常（JSON としては正しい）
+			name: "replay 以外の行が混ざる",
+			body: `{"somethingElse":{}}` + "\n" + `{"replayChatItemAction":{"videoOffsetTimeMsec":"1000","actions":[` +
+				`{"addChatItemAction":{"item":{"liveChatTextMessageRenderer":` +
+				`{"message":{"runs":[{"text":"888"}]}}}}}]}}` + "\n",
+			wantRecognized: true,
+		},
 	}
 
 	for _, tt := range tests {
