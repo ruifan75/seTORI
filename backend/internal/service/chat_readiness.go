@@ -70,6 +70,19 @@ func streamEndedAt(stream models.Stream) (time.Time, bool, bool) {
 	return time.Time{}, false, false
 }
 
+// holdReason は保留の理由を人が読める形で返す（ログ用）。**保留していないときは空。**
+// 「変換待ち」と「一時的な障害」を同じ文言で出すと、古い配信に対して
+// 「終了から 48 時間以内」と嘘のログが出る。
+func holdReason(stream models.Stream, outcome chatOutcome, now time.Time) string {
+	if !holdCacheForChat(stream, outcome, now) {
+		return ""
+	}
+	if outcome == chatTransientError {
+		return "live chat の取得が一時的に失敗した（BOT 判定・レート制限・timeout 等）"
+	}
+	return "live chat replay がまだ無く、配信からの経過時間が短い（変換待ち）"
+}
+
 // holdCacheForChat は「抽出結果をキャッシュせずに次回やり直すべきか」を返す。
 //
 // **live chat に到達できなかったことと、到達したが拍手が無かったことは
@@ -85,19 +98,6 @@ func streamEndedAt(stream models.Stream) (time.Time, bool, bool) {
 // 年齢が分からない配信は保存する側に倒す（分からないものを無限に
 // 再試行するより、一度確定させて手動の backfill に任せるほうが安全）。
 // **一時的な障害はこの限りではない** ── そちらは年齢に関係なく保留する。
-// holdReason は保留の理由を人が読める形で返す（ログ用）。**保留していないときは空。**
-// 「変換待ち」と「一時的な障害」を同じ文言で出すと、古い配信に対して
-// 「終了から 48 時間以内」と嘘のログが出る。
-func holdReason(stream models.Stream, outcome chatOutcome, now time.Time) string {
-	if !holdCacheForChat(stream, outcome, now) {
-		return ""
-	}
-	if outcome == chatTransientError {
-		return "live chat の取得が一時的に失敗した（BOT 判定・レート制限・timeout 等）"
-	}
-	return "live chat replay がまだ無く、配信からの経過時間が短い（変換待ち）"
-}
-
 func holdCacheForChat(stream models.Stream, outcome chatOutcome, now time.Time) bool {
 	switch outcome {
 	case chatOK:

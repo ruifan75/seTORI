@@ -3,6 +3,7 @@ package chatend
 import (
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -57,9 +58,12 @@ func TestAgainstRealFile(t *testing.T) {
 	if path == "" {
 		t.Skip("set CHATEND_SAMPLE to a real live_chat.json to verify against Python")
 	}
-	ev, err := ParseLiveChatFile(path)
+	ev, recognized, err := ParseLiveChatFile(path)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !recognized {
+		t.Fatal("実ファイルなのに live chat replay として認識できていない")
 	}
 	pure := 0
 	for _, e := range ev {
@@ -107,4 +111,51 @@ func splitComma(s string) []string {
 		out = append(out, cur)
 	}
 	return out
+}
+
+// 壊れた／別物のファイルを「0 件・エラー無し」で返すと、呼び出し側は
+// 「拍手が無かった」という確かな結論と区別できない。**サイズでは判別できない**
+// （十分に長くても中身が別物なら同じ）ので、認識できたかを返す。
+func TestParseLiveChatRecognizesReplay(t *testing.T) {
+	tests := []struct {
+		name           string
+		body           string
+		wantRecognized bool
+	}{
+		{name: "空", body: "", wantRecognized: false},
+		{name: "途中で切れている", body: "{", wantRecognized: false},
+		{
+			// レビューで指摘された形：長いが中身が replay ではない。
+			// サイズ判定だけではこれを弾けない。
+			name:           "十分に長いが別物",
+			body:           strings.Repeat(`{"a":1}`+"\n", 64),
+			wantRecognized: false,
+		},
+		{
+			name: "replay の記録がある",
+			body: `{"replayChatItemAction":{"videoOffsetTimeMsec":"1000","actions":[` +
+				`{"addChatItemAction":{"item":{"liveChatTextMessageRenderer":` +
+				`{"message":{"runs":[{"text":"888"}]}}}}}]}}` + "\n",
+			wantRecognized: true,
+		},
+		{
+			// 記録はあるが描画できるテキストが無い → Event は 0 件でも
+			// 「replay のファイルである」ことは確か
+			name:           "記録はあるがテキストが無い",
+			body:           `{"replayChatItemAction":{"videoOffsetTimeMsec":"1000","actions":[]}}` + "\n",
+			wantRecognized: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, recognized, err := ParseLiveChat(strings.NewReader(tt.body))
+			if err != nil {
+				t.Fatalf("解析でエラー: %v", err)
+			}
+			if recognized != tt.wantRecognized {
+				t.Errorf("recognized = %v, want %v", recognized, tt.wantRecognized)
+			}
+		})
+	}
 }

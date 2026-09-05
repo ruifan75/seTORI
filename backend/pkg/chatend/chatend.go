@@ -231,10 +231,15 @@ type chatRenderer struct {
 }
 
 // ParseLiveChat は live_chat.json（1 行に 1 replay action の JSONL）を解析する。
-func ParseLiveChat(r io.Reader) ([]Event, error) {
+// 2 つ目の戻り値は「replay の記録を 1 つでも認識できたか」（ParseLiveChatFile の注記）。
+func ParseLiveChat(r io.Reader) ([]Event, bool, error) {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 1024*1024), 16*1024*1024) // 1 行が長い場合がある
 	var events []Event
+	// recognized は「これは live chat replay のファイルだ」と言える根拠。
+	// **Event が 0 件でも真になりうる**（記録はあるが描画できるテキストが無い等）。
+	// 逆にここが偽なら、ファイルはあっても中身が replay ではない。
+	recognized := false
 	for sc.Scan() {
 		line := sc.Bytes()
 		if len(line) == 0 {
@@ -247,6 +252,7 @@ func ParseLiveChat(r io.Reader) ([]Event, error) {
 		if lc.Replay.OffsetMs == "" {
 			continue
 		}
+		recognized = true
 		ms, err := parseInt(lc.Replay.OffsetMs)
 		if err != nil {
 			continue
@@ -273,17 +279,25 @@ func ParseLiveChat(r io.Reader) ([]Event, error) {
 		}
 	}
 	if err := sc.Err(); err != nil {
-		return nil, fmt.Errorf("scan live chat: %w", err)
+		return nil, recognized, fmt.Errorf("scan live chat: %w", err)
 	}
 	sort.Slice(events, func(i, j int) bool { return events[i].T < events[j].T })
-	return events, nil
+	return events, recognized, nil
 }
 
 // ParseLiveChatFile はファイルから live chat を読み込んで解析する。
-func ParseLiveChatFile(path string) ([]Event, error) {
+// ParseLiveChatFile はファイルから live chat を読み込んで解析する。
+//
+// **2 つ目の戻り値は「live chat replay として読めたか」。**
+// このパーサは壊れた行を黙って読み飛ばす設計なので、途中で切れたファイルや
+// 中身が別物のファイルでも「0 件・エラー無し」になる。呼び出し側はそれを
+// 「拍手が無かった」という確かな結論と区別できない ── サイズでは判別できない
+// （十分に長くても中身が別物なら同じことが起きる）ので、
+// **replay の記録を 1 つでも認識できたか**で見る。
+func ParseLiveChatFile(path string) ([]Event, bool, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	defer f.Close()
 	return ParseLiveChat(f)

@@ -90,11 +90,33 @@ func (s *ChatEndService) AnalyzeStream(videoID string) (AnalyzeResult, error) {
 
 // DetectEnds は指定された start 秒数に対して live chat の拍手から曲末 end を検出し、start→end の対応を返す。
 // DB には書かず、comment / holodex の両分析フローで共用する。live chat を使えなければ空の map を返す。
+// usableLiveChatFile はそのファイルを live chat として使ってよいかを見る。
+//
+// **取得の前後で同じ関数を通すこと。** キャッシュ側にだけ検証を置いていた頃は、
+// yt-dlp が小さい途中ファイルを残して失敗しても、存在するというだけで
+// 成功として返っていた（runErr や transient の判定より先に）。
+//
+// ここでの判定はサイズだけの**安い前濾し**で、有効性の根拠ではない。
+// 中身が replay かどうかは解析時に見る（ParseLiveChatFile の 2 つ目の戻り値）。
+func usableLiveChatFile(path, videoID, label string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	if info.Size() >= minLiveChatBytes {
+		return true
+	}
+	logger.Warnf("[chatend] %s: live chat の%sが小さすぎます (%d bytes)。取り直します",
+		videoID, label, info.Size())
+	_ = os.Remove(path)
+	return false
+}
+
 // DetectEnds は拍手 end を返す。**2 つ目の戻り値は取得の結果（3 態）。**
 //
-// 到達できなかったことと「到達したが拍手が無かった」ことは、どちらも空の結果に
-// なるので**呼び出し側では区別できない**。配信直後は YouTube の変換が終わって
-// おらず replay をしばらく取得できないため、この 2 つを混同すると
+// 「取れなかった」と「取れたが拍手が無かった」は**どちらも空の結果**になるので、
+// 戻り値で区別しないと呼び出し側では見分けられない。配信直後は YouTube の変換が
+// 終わっておらず replay をしばらく取得できないため、混同すると
 // 「まだ取れないだけ」の配信を「拍手が無い配信」として確定させてしまう。
 func (s *ChatEndService) DetectEnds(videoID string, durationSeconds int, starts []int) (map[int]int, chatOutcome) {
 	if len(starts) == 0 {
@@ -105,10 +127,19 @@ func (s *ChatEndService) DetectEnds(videoID string, durationSeconds int, starts 
 		logger.Warnf("[chatend] %s: live chat を利用できないため、end の推定をスキップ: %v", videoID, err)
 		return nil, outcome
 	}
-	events, err := chatend.ParseLiveChatFile(chatPath)
+	events, recognized, err := chatend.ParseLiveChatFile(chatPath)
 	if err != nil {
 		// ファイルは取れたが読めない（途中で切れた等）。**結論にはしない。**
 		logger.Warnf("[chatend] %s: live chat の解析に失敗: %v", videoID, err)
+		return nil, chatTransientError
+	}
+	// **サイズは有効性の根拠にならない。** 十分に長くても中身が replay でなければ、
+	// パーサは全行を読み飛ばして「0 件・エラー無し」を返す ── それを
+	// 「拍手が無かった」と結論すると、壊れたキャッシュのまま確定してしまう。
+	// 記録を 1 つも認識できなければ、消してから次回取り直す。
+	if !recognized {
+		logger.Warnf("[chatend] %s: live chat replay として読めませんでした。キャッシュを消して取り直します", videoID)
+		_ = os.Remove(chatPath)
 		return nil, chatTransientError
 	}
 
@@ -229,13 +260,8 @@ func (s *ChatEndService) fetchLiveChat(videoID string) (string, chatOutcome, err
 	// ParseLiveChatFile は壊れた行を黙って読み飛ばすので「0 件・エラー無し」になり、
 	// 「拍手が無かった」という結論として確定してしまう。しかもキャッシュなので
 	// force 分析でも同じファイルを読み直し、二度と回復しない。
-	if info, err := os.Stat(chat); err == nil {
-		if info.Size() >= minLiveChatBytes {
-			return chat, chatOK, nil
-		}
-		logger.Warnf("[chatend] %s: live chat のキャッシュが小さすぎます (%d bytes)。取り直します",
-			videoID, info.Size())
-		_ = os.Remove(chat)
+	if usableLiveChatFile(chat, videoID, "キャッシュ") {
+		return chat, chatOK, nil
 	}
 
 	args := []string{
@@ -272,7 +298,9 @@ func (s *ChatEndService) fetchLiveChat(videoID string) (string, chatOutcome, err
 	s.saveAvailability(videoID, stdout.String())
 
 	// 警告だけで終了コードが非 0 になることがあるので、まずファイルの有無で判断する。
-	if _, err := os.Stat(chat); err == nil {
+	// **キャッシュと同じ検証を通す。** 存在だけを見ると、yt-dlp が途中まで書いて
+	// 失敗したファイルが runErr や transient の判定より先に成功として返る。
+	if usableLiveChatFile(chat, videoID, "取得したファイル") {
 		return chat, chatOK, nil
 	}
 

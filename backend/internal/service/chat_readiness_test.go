@@ -193,13 +193,32 @@ func TestSuspectLiveChatCacheIsRejected(t *testing.T) {
 		t.Error("壊れたキャッシュが残っている（取り直せない）")
 	}
 
-	// 十分な大きさのファイルはそのまま使う（正常系を巻き込んでいないこと）
+	// 正常系を巻き込んでいないこと。**中身も本物にする** ── 以前ここは
+	// `{"a":1}` を並べただけで、サイズは足りるが replay としては無効だった。
+	// つまりこのテスト自体が「長ければ中身が壊れていても通る」ことを実証していた。
 	good := filepath.Join(dir, "vid2.live_chat.json")
-	if err := os.WriteFile(good, []byte(strings.Repeat(`{"a":1}`+"\n", 64)), 0o644); err != nil {
+	record := `{"replayChatItemAction":{"videoOffsetTimeMsec":"1000","actions":[` +
+		`{"addChatItemAction":{"item":{"liveChatTextMessageRenderer":` +
+		`{"message":{"runs":[{"text":"888"}]}}}}}]}}` + "\n"
+	if err := os.WriteFile(good, []byte(strings.Repeat(record, 4)), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	path, outcome, err := svc.fetchLiveChat("vid2")
 	if err != nil || outcome != chatOK || path != good {
 		t.Errorf("正常なキャッシュを使っていない (outcome=%v err=%v)", outcome, err)
+	}
+
+	// **サイズは有効性の根拠にならない。** 長さは足りるが replay ではないファイルは、
+	// パーサが全行を読み飛ばして「0 件・エラー無し」になる。これを結論にすると
+	// 壊れたキャッシュのまま確定するので、解析側で気付いて消す必要がある。
+	junk := filepath.Join(dir, "vid3.live_chat.json")
+	if err := os.WriteFile(junk, []byte(strings.Repeat(`{"a":1}`+"\n", 64)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, outcome := svc.DetectEnds("vid3", 600, []int{0}); outcome != chatTransientError {
+		t.Errorf("中身が replay でないファイルを結論にしてしまった (outcome=%v)", outcome)
+	}
+	if _, statErr := os.Stat(junk); statErr == nil {
+		t.Error("中身が壊れたキャッシュが残っている（取り直せない）")
 	}
 }
