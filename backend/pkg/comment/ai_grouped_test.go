@@ -194,3 +194,33 @@ func TestGroupedPromptDoesNotInventArtist(t *testing.T) {
 		t.Error("例が「歌手を補う」挙動を示している。指示と矛盾する")
 	}
 }
+
+// HasTimestampLines は「AI を呼ぶ前に対象を絞る」ための判定なので、
+// **抽出そのものと同じ答え**でなければならない。ずれると、曲が出るのに
+// 準備（live chat の取得）を飛ばす／出ないのに準備してしまう。
+func TestHasTimestampLinesMatchesExtraction(t *testing.T) {
+	cases := []struct {
+		name     string
+		comments []string
+		want     bool
+	}{
+		{name: "空", comments: nil, want: false},
+		{name: "タイムスタンプなし", comments: []string{"配信お疲れさまでした！", "楽しかった"}, want: false},
+		{name: "MM:SS", comments: []string{"12:34 曲名"}, want: true},
+		{name: "HH:MM:SS", comments: []string{"1:02:03 曲名 / アーティスト"}, want: true},
+		{name: "複数行のうち 1 行だけ", comments: []string{"こんばんは\n5:00 曲名\nまたね"}, want: true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := HasTimestampLines(c.comments)
+			// 抽出側の判定（候補が 0 行なら ErrNoTimestampLines）と一致すること
+			want := len(extractTimestampLinesGrouped(c.comments)) > 0
+			if got != want {
+				t.Fatalf("抽出とずれている: HasTimestampLines=%v, 抽出の候補あり=%v", got, want)
+			}
+			if got != c.want {
+				t.Errorf("HasTimestampLines = %v, want %v", got, c.want)
+			}
+		})
+	}
+}

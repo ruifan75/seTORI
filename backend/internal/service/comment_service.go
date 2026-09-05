@@ -172,35 +172,6 @@ func (s *CommentService) analyzeComments(videoID string, opts analyzeOptions) (*
 		}
 	}
 
-	// **AI 抽出より先に live chat を探る**（一括だけ。analyzeOptions.ProbeChatFirst）。
-	//
-	// ここで早退しないと、抽出（AI）を使い切ってから「今回は結論を出さない」と
-	// 分かることになり、その結果は捨てられる。しかも見送った回は hash を
-	// 保存しないので、**次の実行でも必ず再抽出する** ── 定期実行では
-	// 見送るたびに AI を呼び直すことになる。
-	//
-	// キャッシュ命中の後に置くのは、命中した回は chat を見る必要が無いため。
-	// probed は先行確認の結果。**後段へ引き継ぐ** ── 引き継がないと、
-	// replay が無い配信では yt-dlp を同じ解析の中で 2 回実行することになる
-	// （成功時はファイルキャッシュが効くが、無い場合は毎回取りに行く）。
-	probed := chatOK
-	probeRan := false
-	if opts.ProbeChatFirst && s.chatEndService != nil {
-		// **Probe は DetectEnds と同じ検証を通す。** サイズだけ見て「使える」と
-		// 判断すると、中身が壊れたキャッシュのときに AI 抽出を使い切ってから
-		// transient と分かる ── この先行確認が避けたかった費用をそのまま払う。
-		probed, probeRan = s.chatEndService.Probe(videoID), true
-		if probed != chatOK {
-			if holdCacheForChat(*stream, probed, time.Now()) {
-				logger.Infof("[comment] %s: %s。AI 抽出を行わずに見送ります",
-					videoID, holdReason(*stream, probed, time.Now()))
-				return &dto.AnalyzeCommentsResponse{Deferred: true}, nil
-			}
-			// 見送らない＝結論にしてよい（十分に古い等）。このまま続ける。
-			logger.Infof("[comment] %s: live chat は使えませんが結論として続行します", videoID)
-		}
-	}
-
 	// 1. 元コメントを取得する（DB を優先し、なければ YouTube/Holodex から取得）
 	logger.Infof("starting comment analysis for %s (force=%v, raw len=%d)", videoID, force, len(stream.CommentRaw))
 	comments, err := s.getComments(videoID, stream, dryRun)
@@ -209,6 +180,39 @@ func (s *CommentService) analyzeComments(videoID string, opts analyzeOptions) (*
 	}
 	// リモートから再取得した場合も、分析結果は実際に使ったコメント内容の hash に結び付ける。
 	rawHash = hashComments(comments)
+
+	// **AI 抽出より先に live chat を探る**（一括だけ。analyzeOptions.ProbeChatFirst）。
+	//
+	// ここで早退しないと、抽出（AI）を使い切ってから「今回は結論を出さない」と
+	// 分かることになり、その結果は捨てられる。しかも見送った回は hash を
+	// 保存しないので、**次の実行でも必ず再抽出する** ── 定期実行では
+	// 見送るたびに AI を呼び直すことになる。
+	//
+	// **曲が出ない配信では探らない。** 抽出の候補（タイムスタンプらしき行）が
+	// 1 つも無ければ曲は 0 件で、end を付ける対象そのものが無い。無条件に探ると、
+	// 従来 chat を一切取りに行かなかった配信にまで yt-dlp を足すことになる
+	// （`DetectEndsForSongs` は曲が 0 件なら取得せずに返る）。判定は抽出と
+	// 同じ関数を通すので、両者がずれることはない。
+	//
+	// 取得した結果は**後段へ引き継ぐ** ── 引き継がないと、成功時も同じ JSONL を
+	// 2 回読み込んで解析し、replay が無い配信では yt-dlp を 2 回実行することになる。
+	var probed ChatLoad
+	probeRan := false
+	if opts.ProbeChatFirst && s.chatEndService != nil && comment.HasTimestampLines(comments) {
+		// **Probe は DetectEnds と同じ検証を通す。** サイズだけ見て「使える」と
+		// 判断すると、中身が壊れたキャッシュのときに AI 抽出を使い切ってから
+		// transient と分かる ── この先行確認が避けたかった費用をそのまま払う。
+		probed, probeRan = s.chatEndService.Probe(videoID), true
+		if probed.Outcome() != chatOK {
+			if holdCacheForChat(*stream, probed.Outcome(), time.Now()) {
+				logger.Infof("[comment] %s: %s。AI 抽出を行わずに見送ります",
+					videoID, holdReason(*stream, probed.Outcome(), time.Now()))
+				return &dto.AnalyzeCommentsResponse{Deferred: true}, nil
+			}
+			// 見送らない＝結論にしてよい（十分に古い等）。このまま続ける。
+			logger.Infof("[comment] %s: live chat は使えませんが結論として続行します", videoID)
+		}
+	}
 
 	// 2〜5. 抽出 → 除外・重複排除 → 正規化 → DB 照合（チャプター経路と共通）
 	songs, aiWarning, path := s.ExtractSongs(comments)
@@ -237,16 +241,17 @@ func (s *CommentService) analyzeComments(videoID string, opts analyzeOptions) (*
 	chatState := chatOK
 	switch {
 	case s.chatEndService == nil:
-	case probeRan && probed != chatOK:
+	case probeRan && probed.Outcome() != chatOK:
 		// 先行確認で「使えない」と分かっている。**もう一度取りに行かない**
 		// ── replay が無い配信では yt-dlp をこの解析の中で 2 回走らせることになる。
-		chatState = probed
+		chatState = probed.Outcome()
 	default:
 		var duration int
 		if stream.DurationSeconds.Valid {
 			duration = int(stream.DurationSeconds.Int32)
 		}
-		songs, _, _, chatState = s.chatEndService.DetectEndsForSongs(videoID, duration, songs)
+		// 先行確認で取得済みなら**その結果を渡す**（同じ JSONL を 2 回解析しない）。
+		songs, _, _, chatState = s.chatEndService.DetectEndsForSongsLoaded(probed, videoID, duration, songs)
 	}
 
 	// 7. 永続化（comment_songs + 由来のハッシュ）→ 次回からはキャッシュを直接読む

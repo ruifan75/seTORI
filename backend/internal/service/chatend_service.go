@@ -147,9 +147,26 @@ func (s *ChatEndService) loadChat(videoID string) ([]chatend.Event, chatOutcome)
 // ── この先行確認が避けたかった費用をそのまま払うことになる。
 //
 // 成功時はファイルがディスクに載るので、後段の DetectEnds は再取得しない。
-func (s *ChatEndService) Probe(videoID string) chatOutcome {
-	_, outcome := s.loadChat(videoID)
-	return outcome
+func (s *ChatEndService) Probe(videoID string) ChatLoad {
+	events, outcome := s.loadChat(videoID)
+	return ChatLoad{events: events, outcome: outcome, loaded: true}
+}
+
+// ChatLoad は取得・検証済みの live chat。**先行確認の結果を後段へ渡すためのもの。**
+// 渡さないと、数 MB の JSONL を同じ解析の中で 2 回読み込んで解析することになる
+// （外部取得は重複しないが、読み込みと JSON 解析は重複する）。
+type ChatLoad struct {
+	events  []chatend.Event
+	outcome chatOutcome
+	loaded  bool
+}
+
+// Outcome は取得の結果（未取得なら chatOK 扱い＝呼び出し側が改めて取りに行く）。
+func (c ChatLoad) Outcome() chatOutcome {
+	if !c.loaded {
+		return chatOK
+	}
+	return c.outcome
 }
 
 // DetectEnds は指定された start 秒数に対して live chat の拍手から曲末 end を検出し、
@@ -166,10 +183,19 @@ func (s *ChatEndService) DetectEnds(videoID string, durationSeconds int, starts 
 	if len(starts) == 0 {
 		return nil, chatOK
 	}
-	events, outcome := s.loadChat(videoID)
-	if outcome != chatOK {
-		return nil, outcome
+	loaded := s.Probe(videoID)
+	return s.detectEndsFrom(loaded, durationSeconds, starts)
+}
+
+// detectEndsFrom は取得済みの live chat から end を求める（再取得も再解析もしない）。
+func (s *ChatEndService) detectEndsFrom(loaded ChatLoad, durationSeconds int, starts []int) (map[int]int, chatOutcome) {
+	if len(starts) == 0 {
+		return nil, loaded.Outcome()
 	}
+	if loaded.Outcome() != chatOK {
+		return nil, loaded.Outcome()
+	}
+	events := loaded.events
 
 	fstarts := make([]float64, len(starts))
 	for i, st := range starts {
@@ -197,14 +223,24 @@ func (s *ChatEndService) DetectEnds(videoID string, durationSeconds int, starts 
 // DetectEndsForSongs は comment songs に拍手 end を適用する。
 // 4 つ目の戻り値は取得の結果（3 態。DetectEnds の注記を参照）。
 func (s *ChatEndService) DetectEndsForSongs(videoID string, durationSeconds int, songs []dto.CommentSong) ([]dto.CommentSong, int, int, chatOutcome) {
+	return s.DetectEndsForSongsLoaded(ChatLoad{}, videoID, durationSeconds, songs)
+}
+
+// DetectEndsForSongsLoaded は取得済みの live chat があればそれを使う。
+// **先行確認をした呼び出し側は必ずこちらを使うこと** ── 渡さないと同じ
+// JSONL を 2 回読み込んで解析することになる。
+func (s *ChatEndService) DetectEndsForSongsLoaded(loaded ChatLoad, videoID string, durationSeconds int, songs []dto.CommentSong) ([]dto.CommentSong, int, int, chatOutcome) {
 	if len(songs) == 0 {
 		return songs, 0, 0, chatOK
+	}
+	if !loaded.loaded {
+		loaded = s.Probe(videoID)
 	}
 	starts := make([]int, len(songs))
 	for i, sg := range songs {
 		starts[i] = sg.Start
 	}
-	endByStart, outcome := s.DetectEnds(videoID, durationSeconds, starts)
+	endByStart, outcome := s.detectEndsFrom(loaded, durationSeconds, starts)
 	filled, changed := 0, 0
 
 	for i := range songs {
