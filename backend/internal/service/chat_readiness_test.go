@@ -221,4 +221,18 @@ func TestSuspectLiveChatCacheIsRejected(t *testing.T) {
 	if _, statErr := os.Stat(junk); statErr == nil {
 		t.Error("中身が壊れたキャッシュが残っている（取り直せない）")
 	}
+
+	// **解析エラーでも消すこと。** 消さずに transient を返すと、次回も同じ
+	// キャッシュが採用されて「取り直す」が永久に起きない。
+	// 16MiB を超える 1 行は scanner error になる（バッファ上限）。
+	huge := filepath.Join(dir, "vid4.live_chat.json")
+	if err := os.WriteFile(huge, []byte(strings.Repeat("x", 17*1024*1024)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, outcome := svc.DetectEnds("vid4", 600, []int{0}); outcome != chatTransientError {
+		t.Errorf("解析エラーを結論にしてしまった (outcome=%v)", outcome)
+	}
+	if _, statErr := os.Stat(huge); statErr == nil {
+		t.Error("解析に失敗したキャッシュが残っている（永久に取り直せない）")
+	}
 }
