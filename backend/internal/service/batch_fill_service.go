@@ -397,6 +397,15 @@ func (s *BatchFillService) loadRows(streamID string) ([]*fillRow, bool) {
 		logger.Warnf("[batch-fill] コメント分析に失敗 (%s): %v", streamID, err)
 		resp = nil
 	}
+	// **見送りは「コメントが無い」ではない。** live chat がまだ取得できないので
+	// 結論を出さなかった状態で、上の ErrCommentRawChanged と同じ危険がある ──
+	// 空のまま先へ進むと、Holodex に曲が無ければチャプターへ落ち、曲があっても
+	// コメント固有の差分を丸ごと落とす。**この配信ごと今回は扱わない。**
+	// 初回と読み直しの両方を見る（読み直しでも見送りになりうる）。
+	if resp != nil && resp.Deferred {
+		logger.Infof("[batch-fill] live chat 待ちのため見送り (%s)。この配信は今回は扱いません", streamID)
+		return nil, false
+	}
 	if resp != nil {
 		s.normalization.ResolveForDisplay(resp.Songs)
 		for _, cs := range resp.Songs {

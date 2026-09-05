@@ -110,6 +110,48 @@ func usableLiveChatFile(path, videoID, label string) bool {
 	return false
 }
 
+// loadChat は live chat を取得して**中身まで検証**し、イベントと結果を返す。
+//
+// 取得と検証をここ 1 か所にまとめてあるのは、**呼び出し側が「取れたか」だけを見て
+// 先へ進めないようにする**ため。サイズは有効性の根拠にならない ── 十分に長くても
+// 中身が replay でなければ、パーサは全行を読み飛ばして「0 件・エラー無し」を返す。
+func (s *ChatEndService) loadChat(videoID string) ([]chatend.Event, chatOutcome) {
+	chatPath, outcome, err := s.fetchLiveChat(videoID)
+	if err != nil {
+		logger.Warnf("[chatend] %s: live chat を利用できません: %v", videoID, err)
+		return nil, outcome
+	}
+
+	// **使えないファイルは必ず消す。** 消さずに transient を返すと、次回も同じ
+	// キャッシュが採用されて**「取り直す」が永久に起きない**。
+	// 解析エラー（16MiB を超える壊れた 1 行など）と「replay として認識できない」は
+	// 原因が違うだけで、どちらもこのファイルでは進めないという点は同じ。
+	events, recognized, err := chatend.ParseLiveChatFile(chatPath)
+	switch {
+	case err != nil:
+		logger.Warnf("[chatend] %s: live chat の解析に失敗。キャッシュを消して取り直します: %v", videoID, err)
+		_ = os.Remove(chatPath)
+		return nil, chatTransientError
+	case !recognized:
+		logger.Warnf("[chatend] %s: live chat replay として読めませんでした。キャッシュを消して取り直します", videoID)
+		_ = os.Remove(chatPath)
+		return nil, chatTransientError
+	}
+	return events, chatOK
+}
+
+// Probe は live chat が使えるかだけを確かめる（曲目が要らない段階で呼ぶ）。
+//
+// **DetectEnds と同じ検証を通す。** サイズだけ見て「使える」と判断すると、
+// 中身が壊れたキャッシュのときに AI 抽出を使い切ってから transient と分かる
+// ── この先行確認が避けたかった費用をそのまま払うことになる。
+//
+// 成功時はファイルがディスクに載るので、後段の DetectEnds は再取得しない。
+func (s *ChatEndService) Probe(videoID string) chatOutcome {
+	_, outcome := s.loadChat(videoID)
+	return outcome
+}
+
 // DetectEnds は指定された start 秒数に対して live chat の拍手から曲末 end を検出し、
 // start→end の対応を返す。DB には書かず、comment / holodex の両分析フローで共用する。
 // live chat を使えなければ空の map を返す。
@@ -124,29 +166,9 @@ func (s *ChatEndService) DetectEnds(videoID string, durationSeconds int, starts 
 	if len(starts) == 0 {
 		return nil, chatOK
 	}
-	chatPath, outcome, err := s.fetchLiveChat(videoID)
-	if err != nil {
-		logger.Warnf("[chatend] %s: live chat を利用できないため、end の推定をスキップ: %v", videoID, err)
+	events, outcome := s.loadChat(videoID)
+	if outcome != chatOK {
 		return nil, outcome
-	}
-	// **使えないファイルは必ず消す。** 消さずに transient を返すと、次回も同じ
-	// キャッシュが採用されて**「取り直す」が永久に起きない**。
-	// 解析エラー（16MiB を超える壊れた 1 行など）と「replay として認識できない」は
-	// 原因が違うだけで、どちらもこのファイルでは進めないという点は同じ。
-	//
-	// サイズは有効性の根拠にならない ── 十分に長くても中身が replay でなければ、
-	// パーサは全行を読み飛ばして「0 件・エラー無し」を返す。それを
-	// 「拍手が無かった」と結論すると、壊れたキャッシュのまま確定してしまう。
-	events, recognized, err := chatend.ParseLiveChatFile(chatPath)
-	switch {
-	case err != nil:
-		logger.Warnf("[chatend] %s: live chat の解析に失敗。キャッシュを消して取り直します: %v", videoID, err)
-		_ = os.Remove(chatPath)
-		return nil, chatTransientError
-	case !recognized:
-		logger.Warnf("[chatend] %s: live chat replay として読めませんでした。キャッシュを消して取り直します", videoID)
-		_ = os.Remove(chatPath)
-		return nil, chatTransientError
 	}
 
 	fstarts := make([]float64, len(starts))

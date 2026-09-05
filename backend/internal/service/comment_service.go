@@ -180,15 +180,24 @@ func (s *CommentService) analyzeComments(videoID string, opts analyzeOptions) (*
 	// 見送るたびに AI を呼び直すことになる。
 	//
 	// キャッシュ命中の後に置くのは、命中した回は chat を見る必要が無いため。
+	// probed は先行確認の結果。**後段へ引き継ぐ** ── 引き継がないと、
+	// replay が無い配信では yt-dlp を同じ解析の中で 2 回実行することになる
+	// （成功時はファイルキャッシュが効くが、無い場合は毎回取りに行く）。
+	probed := chatOK
+	probeRan := false
 	if opts.ProbeChatFirst && s.chatEndService != nil {
-		if _, outcome, err := s.chatEndService.fetchLiveChat(videoID); err != nil {
-			if holdCacheForChat(*stream, outcome, time.Now()) {
+		// **Probe は DetectEnds と同じ検証を通す。** サイズだけ見て「使える」と
+		// 判断すると、中身が壊れたキャッシュのときに AI 抽出を使い切ってから
+		// transient と分かる ── この先行確認が避けたかった費用をそのまま払う。
+		probed, probeRan = s.chatEndService.Probe(videoID), true
+		if probed != chatOK {
+			if holdCacheForChat(*stream, probed, time.Now()) {
 				logger.Infof("[comment] %s: %s。AI 抽出を行わずに見送ります",
-					videoID, holdReason(*stream, outcome, time.Now()))
+					videoID, holdReason(*stream, probed, time.Now()))
 				return &dto.AnalyzeCommentsResponse{Deferred: true}, nil
 			}
 			// 見送らない＝結論にしてよい（十分に古い等）。このまま続ける。
-			logger.Infof("[comment] %s: live chat は使えませんが結論として続行します: %v", videoID, err)
+			logger.Infof("[comment] %s: live chat は使えませんが結論として続行します", videoID)
 		}
 	}
 
@@ -226,7 +235,13 @@ func (s *CommentService) analyzeComments(videoID string, opts analyzeOptions) (*
 	// chatState は live chat 取得の結果（到達 / replay 無し / 一時的な障害）。
 	// キャッシュすると、その配信の end はコメントの値のまま固定される（下の 7 を参照）。
 	chatState := chatOK
-	if s.chatEndService != nil {
+	switch {
+	case s.chatEndService == nil:
+	case probeRan && probed != chatOK:
+		// 先行確認で「使えない」と分かっている。**もう一度取りに行かない**
+		// ── replay が無い配信では yt-dlp をこの解析の中で 2 回走らせることになる。
+		chatState = probed
+	default:
 		var duration int
 		if stream.DurationSeconds.Valid {
 			duration = int(stream.DurationSeconds.Int32)
