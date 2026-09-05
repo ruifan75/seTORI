@@ -13,6 +13,7 @@ import { useAuthStore, hasPermission, PERM } from '../store/auth';
 import { usePlayerStore, type PlayerTrack } from '../store/player';
 import YoutubePlayer from '../components/YoutubePlayer';
 import UnplayableNotice, { type NoticeKind } from '../components/UnplayableNotice';
+import ManualInputImport from '../components/ManualInputImport';
 import { playerSeekTo } from '../components/youtubePlayerControl';
 import type { YouTubePlayerInstance } from '../types/youtube';
 import QueueAddButton from '../components/QueueAddButton';
@@ -190,7 +191,7 @@ export default function StreamDetailPage() {
     [id],
   );
   // 編集モード左上のタブ（操作 / Holodex / コメント / 生コメント）
-  const [editTab, setEditTab] = useState<'actions' | 'holodex' | 'comment' | 'chapter' | 'raw'>('actions');
+  const [editTab, setEditTab] = useState<'actions' | 'holodex' | 'comment' | 'chapter' | 'import' | 'raw'>('actions');
   // 閲覧モードのクイック編集 UI（タグ選択・参加者追加）の開閉
   const [tagPickerOpen, setTagPickerOpen] = useState(false);
   const [participantAddOpen, setParticipantAddOpen] = useState(false);
@@ -1298,6 +1299,10 @@ export default function StreamDetailPage() {
                   { key: 'holodex', label: 'Holodex' },
                   { key: 'comment', label: 'コメント' },
                   { key: 'chapter', label: 'チャプター' },
+                  // 会限配信はサーバーから入力源を取れないので、編集者が手元の
+                  // yt-dlp で取ったものを持ち込む口。コメントと live chat の
+                  // 両方を扱うので、どちらかのタブに寄せず独立させる。
+                  { key: 'import', label: '手動' },
                   { key: 'raw', label: '生コメント' },
                 ] as const).map((t) => (
                   <button
@@ -1557,6 +1562,13 @@ export default function StreamDetailPage() {
                       emptyMessage="分析済みの曲がありません（「全部読み込む」で分析を実行）"
                     />
                   </div>
+                )}
+
+                {editTab === 'import' && (
+                  <ManualInputImport
+                    videoId={stream.id}
+                    durationSeconds={stream.duration_seconds}
+                  />
                 )}
 
                 {editTab === 'raw' && (

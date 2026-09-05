@@ -31,6 +31,8 @@ import type {
   TagGapDismissal,
   AnalyzeCommentsResponse,
   Chapter,
+  InfoJsonImportResult,
+  LiveChatImportResult,
   BatchAnalyzeStatus,
   BatchFillStatus,
   BatchFillRun,
@@ -535,6 +537,45 @@ export const commentApi = {
   // 自動採用に届かなかった候補を人が確定させる（AI は呼ばない）。
   // 確定は別表記として学習されるので、同じ表記は次から迷わない。
   // name は画面に出ていた曲名で、保存する行がズレていないかの確認に使う。
+};
+
+// ========== 手動での取り込み API（会限配信のため） ==========
+//
+// **会限配信は本番から入力源を取れない。** コメントは YouTube Data API が 403
+// （API キー方式なので cookie を足しても変わらない）、live chat は視聴資格が要る。
+// メンバー資格のある編集者が手元で yt-dlp を回し、その出力をここへ持ち込む。
+export const manualImportApi = {
+  // yt-dlp の info.json からコメントを取り込む。**取り違えは id で弾かれる**
+  // （別の配信のものなら 400 で、どの配信のものだったかが返る）。
+  importInfoJson: async (videoId: string, file: File): Promise<InfoJsonImportResult> => {
+    const form = new FormData();
+    form.append('file', file);
+    const { data } = await api.post(`/api/streams/${videoId}/import/info-json`, form);
+    return data;
+  },
+
+  // yt-dlp の live_chat.json を取り込む。ファイルに動画 ID が入っていないので
+  // 取り違えは機械では弾けない ── 返ってくる要約（記録数・拍手・時間の範囲）を
+  // 画面に出して人が確かめる。
+  importLiveChat: async (videoId: string, file: File): Promise<LiveChatImportResult> => {
+    const form = new FormData();
+    form.append('file', file);
+    const { data } = await api.post(`/api/streams/${videoId}/import/live-chat`, form);
+    return data;
+  },
+
+  getLiveChat: async (
+    videoId: string,
+  ): Promise<{ present: boolean; chat: LiveChatImportResult }> => {
+    const { data } = await api.get(`/api/streams/${videoId}/import/live-chat`);
+    return data;
+  },
+
+  // 取り違えたときの取り消し。ファイルがあると yt-dlp は呼ばれず force 分析でも
+  // 読み直さないので、これが無いと別の配信のチャットが恒久的に居座る。
+  deleteLiveChat: async (videoId: string): Promise<void> => {
+    await api.delete(`/api/streams/${videoId}/import/live-chat`);
+  },
 };
 
 // ========== チャプター API ==========
