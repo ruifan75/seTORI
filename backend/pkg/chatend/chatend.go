@@ -231,10 +231,26 @@ type chatRenderer struct {
 }
 
 // ParseLiveChat は live_chat.json（1 行に 1 replay action の JSONL）を解析する。
-func ParseLiveChat(r io.Reader) ([]Event, error) {
+//
+// **2 つ目の戻り値は「live chat replay として完全に読めたか」**
+// ＝ 記録を認識でき、かつ壊れた行が 1 つも無かったか。
+//
+// このパーサは壊れた行を黙って読み飛ばす設計なので、途中で切れたファイルや
+// 中身が別物のファイルでも「0 件・エラー無し」になる。呼び出し側はそれを
+// 「拍手が無かった」という確かな結論と区別できない。サイズでは判別できず
+// （十分に長くても中身が別物なら同じ）、記録の有無だけでも足りない
+// ── ダウンロードの中断は「正常な行のあとで切れる」形になるため。
+func ParseLiveChat(r io.Reader) ([]Event, bool, error) {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 1024*1024), 16*1024*1024) // 1 行が長い場合がある
 	var events []Event
+	// sawRecord は「replay の記録を最後まで読めた行がある」。
+	// **Event が 0 件でも真になりうる**（記録はあるが描画できるテキストが無い等）。
+	//
+	// sawMalformed は「非空なのに JSON として読めない行があった」＝**途中で切れている**。
+	// 正常な行が 1 行あっても、そのあとで切れていればファイルは不完全 ──
+	// ダウンロードが中断した典型的な形なので、記録の有無だけでは弾けない。
+	sawRecord, sawMalformed := false, false
 	for sc.Scan() {
 		line := sc.Bytes()
 		if len(line) == 0 {
@@ -242,15 +258,23 @@ func ParseLiveChat(r io.Reader) ([]Event, error) {
 		}
 		var lc liveChatLine
 		if err := json.Unmarshal(line, &lc); err != nil {
-			continue // 壊れた行をスキップする
+			// 壊れた行はイベントとしては読み飛ばすが、**記録は残す**。
+			sawMalformed = true
+			continue
 		}
 		if lc.Replay.OffsetMs == "" {
+			// replay ではない行（別種の action 等）。JSON としては正しいので
+			// 壊れてはいない。
 			continue
 		}
 		ms, err := parseInt(lc.Replay.OffsetMs)
 		if err != nil {
+			// offset が数値でない＝この行は壊れている。**ここより前で
+			// sawRecord を立てない** ── 立てると壊れた行が「認識できた」に化ける。
+			sawMalformed = true
 			continue
 		}
+		sawRecord = true
 		text := ""
 		for _, a := range lc.Replay.Actions {
 			rend := a.Add.Item.Text
@@ -273,17 +297,21 @@ func ParseLiveChat(r io.Reader) ([]Event, error) {
 		}
 	}
 	if err := sc.Err(); err != nil {
-		return nil, fmt.Errorf("scan live chat: %w", err)
+		return nil, false, fmt.Errorf("scan live chat: %w", err)
 	}
 	sort.Slice(events, func(i, j int) bool { return events[i].T < events[j].T })
-	return events, nil
+	// **記録があることと、ファイルが完全であることは別。** 途中で切れた
+	// ダウンロードは「正常な行が並んだあとに壊れた行」という形になるので、
+	// 記録の有無だけで判断すると不完全なファイルを確定させてしまう。
+	return events, sawRecord && !sawMalformed, nil
 }
 
-// ParseLiveChatFile はファイルから live chat を読み込んで解析する。
-func ParseLiveChatFile(path string) ([]Event, error) {
+// ParseLiveChatFile はファイルから live chat を読み込んで解析する
+// （戻り値は ParseLiveChat と同じ）。
+func ParseLiveChatFile(path string) ([]Event, bool, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	defer f.Close()
 	return ParseLiveChat(f)

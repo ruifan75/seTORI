@@ -518,6 +518,11 @@ export interface BatchAnalyzeStatus {
   total: number;
   done: number;
   failed: number;
+  /**
+   * live chat の取得待ちで見送った件数。**失敗ではない**（次の実行で拾われる）。
+   * 完了に混ぜると、その配信の end が付かないまま「終わった」ことになる。
+   */
+  deferred: number;
   current?: string;
   failed_ids?: string[];
   message?: string;

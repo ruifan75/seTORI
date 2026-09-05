@@ -146,11 +146,20 @@ func (s *BatchAnalyzeService) run(mode, singerID string, hidden *bool) {
 			}
 		}
 
-		if s.processOne(stream.ID, forceStart) {
+		switch s.processOne(stream.ID, forceStart) {
+		case batchOutcomeDone:
 			s.update(func(st *dto.BatchAnalyzeStatus) { st.Done++ })
-		} else if s.isCancelled() {
-			return
-		} else {
+		case batchOutcomeDeferred:
+			// live chat の取得待ち。**失敗ではないが完了でもない** ── ここで
+			// Done に数えると再試行されず、その配信の end は付かないまま残る。
+			// 同じ実行の中で待っても無駄なので（変換は数時間、BOT 判定は
+			// cookie を入れるまで直らない）、次の実行に任せる。
+			logger.Infof("[batch-analyze] %s: live chat 待ちのため見送り（次回やり直します）", stream.ID)
+			s.update(func(st *dto.BatchAnalyzeStatus) { st.Deferred++ })
+		default:
+			if s.isCancelled() {
+				return
+			}
 			s.update(func(st *dto.BatchAnalyzeStatus) {
 				st.Failed++
 				st.FailedIDs = append(st.FailedIDs, stream.ID)
@@ -161,20 +170,38 @@ func (s *BatchAnalyzeService) run(mode, singerID string, hidden *bool) {
 	}
 }
 
+// batchOutcome は 1 配信の処理結果。**完了・失敗の 2 値では足りない。**
+// live chat の取得待ちは失敗ではないが完了でもなく、同じ実行で待っても無駄
+// （変換は数時間、BOT 判定は cookie を入れるまで直らない）ので、
+// 次の実行に任せる第 3 の状態が要る。
+type batchOutcome int
+
+const (
+	batchOutcomeFailed batchOutcome = iota
+	batchOutcomeDone
+	batchOutcomeDeferred
+)
+
 // processOne は1配信を分析する。AI 劣化（warning あり）は冷却待ち後に force で再試行。
 // forceStart=true のときは初回から force（キャッシュ無視）で分析する（reanalyze 用）。
-func (s *BatchAnalyzeService) processOne(videoID string, forceStart bool) bool {
+func (s *BatchAnalyzeService) processOne(videoID string, forceStart bool) batchOutcome {
 	force := forceStart
 	for attempt := 1; attempt <= batchMaxAttempts; attempt++ {
 		if s.isCancelled() {
-			return false
+			return batchOutcomeFailed
 		}
 
 		// 一括プレ分析は抽出までにとどめる。**この経路では**照合の AI 判定を行わない
 		// ── 行うのは対話の analyze と、歌唱を作る batch-fill。
 		resp, err := s.commentService.AnalyzeCommentsForBatch(videoID, force)
 		if err == nil && resp.Warning == "" {
-			return true
+			// **見送りを完了と混ぜない。** live chat が取れず結論を保留した回は
+			// キャッシュを書いていないので、完了に数えると再試行されないまま
+			// その配信の end が付かずに残る。
+			if resp.Deferred {
+				return batchOutcomeDeferred
+			}
+			return batchOutcomeDone
 		}
 		// 分析中にコメントが差し替わっただけなら、待たずに読み直す。
 		// 90 秒の冷却は AI プロバイダーの劣化明けを待つためのもので、
@@ -183,7 +210,7 @@ func (s *BatchAnalyzeService) processOne(videoID string, forceStart bool) bool {
 			logger.Warnf("[batch-analyze] %s attempt %d: コメントが変わったので読み直します", videoID, attempt)
 			force = true
 			if attempt == batchMaxAttempts {
-				return false
+				return batchOutcomeFailed
 			}
 			continue
 		}
@@ -194,16 +221,16 @@ func (s *BatchAnalyzeService) processOne(videoID string, forceStart bool) bool {
 		}
 
 		if attempt == batchMaxAttempts {
-			return false
+			return batchOutcomeFailed
 		}
 		// 劣化結果がキャッシュに載っているため、次は force で作り直す。
 		// AI プロバイダーの冷却明けを待ってから再試行する。
 		force = true
 		if !s.sleepInterruptible(batchCooldownWait) {
-			return false
+			return batchOutcomeFailed
 		}
 	}
-	return false
+	return batchOutcomeFailed
 }
 
 // sleepInterruptible はキャンセルに反応しつつ待機する。継続可否を返す。

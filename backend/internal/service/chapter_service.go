@@ -179,21 +179,29 @@ func (s *ChapterService) analyzeChapters(videoID string, force, adjudicate bool)
 	// 拍手で得た確かな値に負けて推定値が残る。
 	applyChapterEnds(songs, chapters)
 
-	// 拍手 end（live chat）。ここで埋まったものだけが確かな end になる
+	// 拍手 end（live chat）。ここで埋まったものだけが確かな end になる。
+	// chatState は取得の結果で、保存の可否に効く（下を参照）。
+	chatState := chatOK
 	if s.chatEnd != nil {
 		var duration int
 		if stream.DurationSeconds.Valid {
 			duration = int(stream.DurationSeconds.Int32)
 		}
-		songs, _, _ = s.chatEnd.DetectEndsForSongs(videoID, duration, songs)
+		songs, _, _, chatState = s.chatEnd.DetectEndsForSongs(videoID, duration, songs)
 	}
 
-	// 永続化。AI が失敗した回は保存しない（劣化結果をキャッシュに固定しないため）
+	// 永続化。AI が失敗した回は保存しない（劣化結果をキャッシュに固定しないため）。
+	// live chat に到達できなかった回も同じ理由で保存しない（chat_readiness.go）。
 	saved := false
 	switch {
 	case rawHash == "":
 	case warning != "":
 		logger.Warnf("[chapter] skipping cache write for %s due to AI degradation: %s", videoID, warning)
+	case holdCacheForChat(*stream, chatState, time.Now()):
+		// コメント経路と同じ理由（chat_readiness.go）。配信直後は replay が
+		// 取れず、保存すると hash 命中で拍手検出まで飛ばされ end が固定される。
+		logger.Warnf("[chapter] skipping cache write for %s: %s。次回やり直します",
+			videoID, holdReason(*stream, chatState, time.Now()))
 	default:
 		if b, mErr := json.Marshal(stripMatchForStorage(songs)); mErr == nil {
 			if err := s.streamRepo.SaveChapterSongs(videoID, b, rawHash); err != nil {
