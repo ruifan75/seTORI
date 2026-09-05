@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -478,30 +479,38 @@ var ErrLiveChatUnreadable = errors.New("live chat replay として読めませ�
 // 「拍手が 0 件だった」という結論として確定し、しかもキャッシュなので
 // force 分析でも回復しない（§6.5 で踏んだのと同じ穴）。`ParseLiveChat` が
 // 「記録を認識でき、かつ壊れた行が無い」と言ったものだけを受け入れる。
-func (s *ChatEndService) ImportLiveChat(videoID string, data []byte) (LiveChatImport, error) {
+// **中身を全部メモリへ載せないこと。** 本番は 1 vCPU / 1GB で、実測の live chat は
+// 2 時間の歌枠で 12MB ある。読み切ってから検証する形にすると、上限のぶんだけ
+// RSS が跳ねて Postgres と同居している本番を落としうる。一時ファイルへ流し、
+// **ファイルのまま検証して、通ったら rename** する。
+func (s *ChatEndService) ImportLiveChat(videoID string, r io.Reader) (LiveChatImport, error) {
 	var out LiveChatImport
-
-	events, recognized, err := chatend.ParseLiveChat(bytes.NewReader(data))
-	if err != nil {
-		return out, fmt.Errorf("%w: %v", ErrLiveChatUnreadable, err)
-	}
-	if !recognized {
-		// 記録が 1 つも無い、または壊れた行がある（＝途中で切れている）。
-		// **どちらも「拍手が無かった」とは別の事実**なので受け取らない。
-		return out, ErrLiveChatUnreadable
-	}
-
-	out = summarizeChat(events, int64(len(data)))
 
 	if err := os.MkdirAll(s.cacheDir, 0o755); err != nil {
 		return out, fmt.Errorf("create cache dir: %w", err)
 	}
-	// **書き換えは原子的に。** 途中で失敗して半分だけのファイルが残ると、
-	// それがそのままキャッシュとして読まれる。
+	// **書き換えは原子的に。** 検証を通るまで本来の名前には置かない ──
+	// 半分だけのファイルがその名前にあると、そのままキャッシュとして読まれる。
 	tmp := s.chatCachePath(videoID) + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		return out, fmt.Errorf("write live chat: %w", err)
+	size, err := writeTempFile(tmp, r)
+	if err != nil {
+		_ = os.Remove(tmp)
+		return out, err
 	}
+
+	events, recognized, err := chatend.ParseLiveChatFile(tmp)
+	if err != nil || !recognized {
+		// 記録が 1 つも無い、または壊れた行がある（＝途中で切れている）。
+		// **どちらも「拍手が無かった」とは別の事実**なので受け取らない。
+		// **弾いたものは置いていかない。**
+		_ = os.Remove(tmp)
+		if err != nil {
+			return out, fmt.Errorf("%w: %v", ErrLiveChatUnreadable, err)
+		}
+		return out, ErrLiveChatUnreadable
+	}
+
+	out = summarizeChat(events, size)
 	if err := os.Rename(tmp, s.chatCachePath(videoID)); err != nil {
 		_ = os.Remove(tmp)
 		return out, fmt.Errorf("place live chat: %w", err)
@@ -510,6 +519,25 @@ func (s *ChatEndService) ImportLiveChat(videoID string, data []byte) (LiveChatIm
 	logger.Infof("[chatend] %s: live chat を手動で取り込みました（記録 %d・拍手 %d・%.0f〜%.0f 秒）",
 		videoID, out.Records, out.Applause, out.FirstAtSec, out.LastAtSec)
 	return out, nil
+}
+
+// writeTempFile は r を path へ流し、書けたバイト数を返す（メモリには載せない）。
+func writeTempFile(path string, r io.Reader) (int64, error) {
+	f, err := os.Create(path)
+	if err != nil {
+		return 0, fmt.Errorf("write live chat: %w", err)
+	}
+	n, copyErr := io.Copy(f, r)
+	closeErr := f.Close()
+	if copyErr != nil {
+		// 上限に当たった場合もここへ来る（読み取り側が打ち切る）。
+		// **途中まで書けたものを成功として扱わない。**
+		return n, fmt.Errorf("write live chat: %w", copyErr)
+	}
+	if closeErr != nil {
+		return n, fmt.Errorf("write live chat: %w", closeErr)
+	}
+	return n, nil
 }
 
 // CachedLiveChat は既に置かれている live chat の要約を返す（無ければ ok=false）。

@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -81,7 +82,7 @@ func TestImportLiveChatRejectsTruncatedFile(t *testing.T) {
 	// ダウンロードの中断は「正常な行のあとで切れる」形になる。
 	truncated := good + "\n" + `{"replayChatItemAction":{"videoOffsetTi`
 
-	if _, err := svc.ImportLiveChat("vid1", []byte(truncated)); !errors.Is(err, ErrLiveChatUnreadable) {
+	if _, err := svc.ImportLiveChat("vid1", strings.NewReader(truncated)); !errors.Is(err, ErrLiveChatUnreadable) {
 		t.Fatalf("err = %v, want ErrLiveChatUnreadable", err)
 	}
 	// **弾いたものを置いていかない。** 中途半端なファイルが残ると、それが
@@ -101,7 +102,7 @@ func TestImportLiveChatAcceptsAndSummarizes(t *testing.T) {
 		chatLine("3000", "かわいい"),   // 拍手ではない
 		chatLine("600000", "👏"),    // 拍手
 	}
-	res, err := svc.ImportLiveChat("vid2", []byte(strings.Join(lines, "\n")))
+	res, err := svc.ImportLiveChat("vid2", strings.NewReader(strings.Join(lines, "\n")))
 	if err != nil {
 		t.Fatalf("ImportLiveChat: %v", err)
 	}
@@ -133,3 +134,28 @@ func chatLine(offsetMs, text string) string {
 		`","actions":[{"addChatItemAction":{"item":{"liveChatTextMessageRenderer":{"message":{"runs":[{"text":"` +
 		text + `"}]}}}}}]}}`
 }
+
+// 中身をメモリへ載せずに一時ファイルへ流すようにしたので、**流している途中で
+// 失敗する**経路ができた（上限に当たる・接続が切れる）。そのとき書きかけの
+// ファイルが残ると、次にそれがキャッシュとして読まれる。
+func TestImportLiveChatLeavesNothingWhenStreamFails(t *testing.T) {
+	dir := t.TempDir()
+	svc := NewChatEndService(nil, "", dir)
+
+	src := io.MultiReader(
+		strings.NewReader(chatLine("1000", "888")+"\n"),
+		errReader{errors.New("connection reset")},
+	)
+	if _, err := svc.ImportLiveChat("vid3", src); err == nil {
+		t.Fatal("途中で切れたのに成功している")
+	}
+	for _, name := range []string{"vid3.live_chat.json", "vid3.live_chat.json.tmp"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); !os.IsNotExist(err) {
+			t.Errorf("%s が残っている", name)
+		}
+	}
+}
+
+type errReader struct{ err error }
+
+func (r errReader) Read([]byte) (int, error) { return 0, r.err }
