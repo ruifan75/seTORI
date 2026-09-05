@@ -1,6 +1,9 @@
 package service
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -142,5 +145,61 @@ func TestStreamEndedAtHandlesBrokenHolodexData(t *testing.T) {
 		if !got.Equal(date) {
 			t.Errorf("raw=%s: stream_date が返らない", raw)
 		}
+	}
+}
+
+// 保留の理由はログにそのまま出る。障害を「変換待ち」と説明すると、
+// 古い配信に対して「終了から 48 時間以内」という嘘のログになる。
+func TestHoldReasonDistinguishesCause(t *testing.T) {
+	now := time.Now()
+	old := streamEndedAgo(30 * 24 * time.Hour)
+
+	if r := holdReason(old, chatTransientError, now); r == "" {
+		t.Fatal("障害は保留されるので理由が要る")
+	} else if !strings.Contains(r, "一時的") {
+		t.Errorf("障害の理由が「一時的」と読めない: %q", r)
+	}
+
+	fresh := streamEndedAgo(1 * time.Hour)
+	if r := holdReason(fresh, chatNoReplay, now); !strings.Contains(r, "変換待ち") {
+		t.Errorf("変換待ちの理由がそう読めない: %q", r)
+	}
+
+	// 保留していないときは空（呼び出し側がログを出さない判断に使える）
+	if r := holdReason(fresh, chatOK, now); r != "" {
+		t.Errorf("保留していないのに理由がある: %q", r)
+	}
+}
+
+// 壊れた／空のキャッシュを chatOK として確定しないこと。
+// 実ファイルで確かめる（サイズ判定なのでモックでは意味が無い）。
+func TestSuspectLiveChatCacheIsRejected(t *testing.T) {
+	dir := t.TempDir()
+	svc := NewChatEndService(nil, "yt-dlp-does-not-exist-for-this-test", dir)
+
+	// 途中で切れたファイル（codex の指摘そのもの：`{` だけ）
+	broken := filepath.Join(dir, "vid1.live_chat.json")
+	if err := os.WriteFile(broken, []byte("{"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// yt-dlp は存在しないので取得は失敗するが、**キャッシュを信用していれば
+	// そこで chatOK を返して終わる**。返らないこと＝小さいファイルを弾いたこと。
+	_, outcome, err := svc.fetchLiveChat("vid1")
+	if err == nil || outcome == chatOK {
+		t.Fatalf("壊れたキャッシュを採用してしまった (outcome=%v err=%v)", outcome, err)
+	}
+	if _, statErr := os.Stat(broken); statErr == nil {
+		t.Error("壊れたキャッシュが残っている（取り直せない）")
+	}
+
+	// 十分な大きさのファイルはそのまま使う（正常系を巻き込んでいないこと）
+	good := filepath.Join(dir, "vid2.live_chat.json")
+	if err := os.WriteFile(good, []byte(strings.Repeat(`{"a":1}`+"\n", 64)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	path, outcome, err := svc.fetchLiveChat("vid2")
+	if err != nil || outcome != chatOK || path != good {
+		t.Errorf("正常なキャッシュを使っていない (outcome=%v err=%v)", outcome, err)
 	}
 }

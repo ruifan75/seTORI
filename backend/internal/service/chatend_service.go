@@ -90,7 +90,7 @@ func (s *ChatEndService) AnalyzeStream(videoID string) (AnalyzeResult, error) {
 
 // DetectEnds は指定された start 秒数に対して live chat の拍手から曲末 end を検出し、start→end の対応を返す。
 // DB には書かず、comment / holodex の両分析フローで共用する。live chat を使えなければ空の map を返す。
-// DetectEnds は拍手 end を返す。**2 つ目の戻り値は「live chat に到達できたか」。**
+// DetectEnds は拍手 end を返す。**2 つ目の戻り値は取得の結果（3 態）。**
 //
 // 到達できなかったことと「到達したが拍手が無かった」ことは、どちらも空の結果に
 // なるので**呼び出し側では区別できない**。配信直後は YouTube の変換が終わって
@@ -136,7 +136,7 @@ func (s *ChatEndService) DetectEnds(videoID string, durationSeconds int, starts 
 // changed は ChatEnd/EndDiff だけの記録も含めた「実際に書き換わった」曲数で、
 // 呼び出し側が保存の要否を判断するのに使う。
 // DetectEndsForSongs は comment songs に拍手 end を適用する。
-// 4 つ目の戻り値は「live chat に到達できたか」（DetectEnds の注記を参照）。
+// 4 つ目の戻り値は取得の結果（3 態。DetectEnds の注記を参照）。
 func (s *ChatEndService) DetectEndsForSongs(videoID string, durationSeconds int, songs []dto.CommentSong) ([]dto.CommentSong, int, int, chatOutcome) {
 	if len(songs) == 0 {
 		return songs, 0, 0, chatOK
@@ -225,8 +225,17 @@ func (s *ChatEndService) fetchLiveChat(videoID string) (string, chatOutcome, err
 	}
 	base := filepath.Join(s.cacheDir, videoID)
 	chat := base + ".live_chat.json"
-	if _, err := os.Stat(chat); err == nil {
-		return chat, chatOK, nil
+	// **存在するだけでは証拠にならない。** 途中で切れた／空のファイルが残っていると、
+	// ParseLiveChatFile は壊れた行を黙って読み飛ばすので「0 件・エラー無し」になり、
+	// 「拍手が無かった」という結論として確定してしまう。しかもキャッシュなので
+	// force 分析でも同じファイルを読み直し、二度と回復しない。
+	if info, err := os.Stat(chat); err == nil {
+		if info.Size() >= minLiveChatBytes {
+			return chat, chatOK, nil
+		}
+		logger.Warnf("[chatend] %s: live chat のキャッシュが小さすぎます (%d bytes)。取り直します",
+			videoID, info.Size())
+		_ = os.Remove(chat)
 	}
 
 	args := []string{
@@ -284,6 +293,17 @@ func (s *ChatEndService) fetchLiveChat(videoID string) (string, chatOutcome, err
 	case runErr != nil:
 		return "", chatTransientError, fmt.Errorf("yt-dlp に失敗 (%v): %s", runErr, ytdlpErrorLine(stderr.String()))
 	}
+	// **終了コード 0 でも「取れなかっただけ」がある。** `--ignore-no-formats-error`
+	// を付けているので、レート制限や一時的な不可視は警告へ降格し、runErr は nil の
+	// ままファイルだけが無い状態になる。しかもレート制限の stderr は
+	// `Video unavailable` で始まるので、素朴に見ると「消えた動画」と読める
+	// （availability_service.go の isTransientFailure の注記）。
+	// ここを chatNoReplay に落とすと、古い配信では結論として保存されてしまう。
+	if isTransientFailure(stderr.String()) {
+		return "", chatTransientError, fmt.Errorf("live chat を取得できませんでした（一時的な失敗）: %s",
+			ytdlpErrorLine(stderr.String()))
+	}
+
 	// yt-dlp は正常終了したがファイルが無い。**まだ変換中の可能性がある**ので、
 	// 「この配信にはチャットが無い」と言い切れるのは配信から十分に時間が
 	// 経っているときだけ（chat_readiness.go）。

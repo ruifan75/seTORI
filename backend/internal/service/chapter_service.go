@@ -200,8 +200,8 @@ func (s *ChapterService) analyzeChapters(videoID string, force, adjudicate bool)
 	case holdCacheForChat(*stream, chatState, time.Now()):
 		// コメント経路と同じ理由（chat_readiness.go）。配信直後は replay が
 		// 取れず、保存すると hash 命中で拍手検出まで飛ばされ end が固定される。
-		logger.Warnf("[chapter] skipping cache write for %s: live chat に到達できず、"+
-			"終了から %s 以内なので変換待ちとみなして次回やり直します", videoID, chatRetryWindow)
+		logger.Warnf("[chapter] skipping cache write for %s: %s。次回やり直します",
+			videoID, holdReason(*stream, chatState, time.Now()))
 	default:
 		if b, mErr := json.Marshal(stripMatchForStorage(songs)); mErr == nil {
 			if err := s.streamRepo.SaveChapterSongs(videoID, b, rawHash); err != nil {

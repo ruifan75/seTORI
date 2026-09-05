@@ -26,6 +26,18 @@ const (
 	chatTransientError
 )
 
+// minLiveChatBytes は live chat のキャッシュとして信用する最小サイズ。
+//
+// **ファイルの存在は証拠にならない。** 途中で切れた／空のファイルが残っていると、
+// パーサは壊れた行を黙って読み飛ばすので「0 件・エラー無し」になり、
+// 「拍手が無かった」という確かな結論として保存されてしまう。しかもキャッシュなので
+// force 分析でも同じファイルを読み直し、二度と回復しない。
+//
+// 実際の live_chat.json は 1 行 1 メッセージの JSONL で、数十 KB〜数 MB になる。
+// ここは「明らかに壊れている」を弾くための下限で、正常な値の推定ではない
+// （チャットが本当に静かだった配信を弾かないよう、小さめに取ってある）。
+const minLiveChatBytes = 64
+
 // chatRetryWindow は「まだ変換中かもしれない」と見なす期間。
 //
 // 配信が終わった直後は YouTube の変換が終わっておらず、live chat replay を
@@ -73,6 +85,19 @@ func streamEndedAt(stream models.Stream) (time.Time, bool, bool) {
 // 年齢が分からない配信は保存する側に倒す（分からないものを無限に
 // 再試行するより、一度確定させて手動の backfill に任せるほうが安全）。
 // **一時的な障害はこの限りではない** ── そちらは年齢に関係なく保留する。
+// holdReason は保留の理由を人が読める形で返す（ログ用）。**保留していないときは空。**
+// 「変換待ち」と「一時的な障害」を同じ文言で出すと、古い配信に対して
+// 「終了から 48 時間以内」と嘘のログが出る。
+func holdReason(stream models.Stream, outcome chatOutcome, now time.Time) string {
+	if !holdCacheForChat(stream, outcome, now) {
+		return ""
+	}
+	if outcome == chatTransientError {
+		return "live chat の取得が一時的に失敗した（BOT 判定・レート制限・timeout 等）"
+	}
+	return "live chat replay がまだ無く、配信からの経過時間が短い（変換待ち）"
+}
+
 func holdCacheForChat(stream models.Stream, outcome chatOutcome, now time.Time) bool {
 	switch outcome {
 	case chatOK:

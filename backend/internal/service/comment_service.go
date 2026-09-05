@@ -195,8 +195,8 @@ func (s *CommentService) analyzeComments(videoID string, force, dryRun, adjudica
 		// hash が入り、次の一括プレ分析はキャッシュ命中で拍手検出まで飛ばすので、
 		// この配信の end はコメントに書かれた値のまま固定される。
 		// 抽出をやり直すぶん AI を呼び直すことになるが、固定されるよりは安い。
-		logger.Warnf("[comment] skipping cache write for %s: live chat に到達できず、"+
-			"終了から %s 以内なので変換待ちとみなして次回やり直します", videoID, chatRetryWindow)
+		logger.Warnf("[comment] skipping cache write for %s: %s。次回やり直します",
+			videoID, holdReason(*stream, chatState, time.Now()))
 	default:
 		// 照合の結果は保存しない（読み取り時に計算する）
 		songsJSON, mErr := json.Marshal(stripMatchForStorage(songs))

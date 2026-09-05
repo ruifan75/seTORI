@@ -987,8 +987,8 @@ func (s *HolodexService) analyzeHolodexSongs(videoID string, force, adjudicate b
 	switch {
 	case holodexHash == "":
 	case holdCacheForChat(*stream, chatState, time.Now()):
-		logger.Warnf("[holodex] skipping cache write for %s: live chat に到達できず（%v）、"+
-			"次回やり直します", videoID, chatState)
+		logger.Warnf("[holodex] skipping cache write for %s: %s。次回やり直します",
+			videoID, holdReason(*stream, chatState, time.Now()))
 	default:
 		if b, mErr := json.Marshal(stripMatchFromSuggestions(songs)); mErr == nil {
 			if err := s.streamRepo.SaveHolodexSongs(videoID, b, holodexHash); err != nil {
