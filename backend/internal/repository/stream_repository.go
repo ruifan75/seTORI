@@ -533,7 +533,7 @@ func (r *StreamRepository) FindByTagID(tagID string, limit, offset int) ([]model
 	return streams, total, rows.Err()
 }
 
-// FindStreamsForBatch は一括分析の対象配信（id/title のみ）を mode と（任意の）歌手で
+// FindStreamsForBatch は一括分析の対象配信（id / title / is_hidden / is_processed）を mode と（任意の）歌手で
 // 絞り込んで古い順に返す。singerID が空なら全チャンネルが対象。
 //
 // mode 別の対象範囲（いずれも comment_raw あり）:
@@ -1309,20 +1309,28 @@ func (r *StreamRepository) DeleteNonSingingCheck(streamID string) error {
 	return nil
 }
 
-// MarkProcessed は「もう手を入れなくてよい」印を立てる。
+// MarkProcessedIfHidden は「もう手を入れなくてよい」印を立てる。
+// 戻り値は**実際に立てたか**（既に立っていた／条件を満たさなかったなら false）。
+//
+// **非表示の条件を書き込み時にも見る。** 呼び出し側が持っているのは列挙時の
+// スナップショットで、AI の処理中（数百本なら数分）に編集者が表示へ戻しうる。
+// 読むときだけ確かめても、**書くときには古い前提**になっている。
 //
 // **既に立っている行は触らない**（updated_at を動かさない）。毎日回る同期が
 // 全配信の updated_at を押し上げるのと同じ問題を、こちらでも作らないため。
 //
 // 非表示を解除したり歌唱を消したりはしない。**「確認した」という結論だけ**を残す。
-func (r *StreamRepository) MarkProcessed(streamID string) error {
-	_, err := r.db.Exec(
-		"UPDATE streams SET is_processed = TRUE, updated_at = NOW() WHERE id = $1 AND NOT is_processed",
-		streamID)
+func (r *StreamRepository) MarkProcessedIfHidden(streamID string) (bool, error) {
+	res, err := r.db.Exec(`UPDATE streams SET is_processed = TRUE, updated_at = NOW()
+		WHERE id = $1 AND is_hidden AND NOT is_processed`, streamID)
 	if err != nil {
-		return fmt.Errorf("mark processed: %w", err)
+		return false, fmt.Errorf("mark processed: %w", err)
 	}
-	return nil
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("mark processed rows: %w", err)
+	}
+	return n > 0, nil
 }
 
 // FindStreamsNeedingCommentRefresh はコメントを取り直す価値がある配信の ID を返す。
