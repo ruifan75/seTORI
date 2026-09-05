@@ -96,6 +96,59 @@ func TestStreamAnalysisEndpointsRequireContentEdit(t *testing.T) {
 	}
 }
 
+// 認可が見るパスは、**ServeMux が実際にどのハンドラへ配るか**と一致していなければ
+// ならない。食い違うと「ルーティングは通るのに認可だけが別のパスを見る」形の
+// バイパスになる。2026-09-06 に本番で成立していた：未ログインの
+// `GET /api/streams/.%2FhVfDBfreYNI/comments` が 401 ではなく 200 を返した。
+//
+// 食い違いは**二方向**ある。片方だけ直すともう片方が開く：
+//
+//	区切り … 復号済みパスを分割すると `%2F` が区切りに化けてセグメントがずれる
+//	内容  … escape されたまま比べると `%63omments` が `comments` に一致しない
+//
+// **攻撃経路が実在することも併せて確かめる。** 認可だけを試すと、ServeMux が
+// そもそも配らないパス（404 や 301 になるもの）を「塞いだ」と誤認しうる。
+func TestEncodedPathDoesNotBypassStreamAuthz(t *testing.T) {
+	// 本物と同じパターンで dispatch を確かめる。
+	mux := http.NewServeMux()
+	reached := ""
+	for _, pat := range []string{
+		"GET /api/streams/{id}/comments",
+		"GET /api/streams/{id}/chapters",
+		"GET /api/streams/{id}/holodex-songs",
+		"GET /api/streams/{id}/availability",
+	} {
+		p := pat
+		mux.HandleFunc(p, func(w http.ResponseWriter, r *http.Request) { reached = p })
+	}
+
+	for _, path := range []string{
+		"/api/streams/.%2FhVfDBfreYNI/comments", // 区切りを増やす
+		"/api/streams/%2E%2E/comments",          // 復号すると ".."
+		"/api/streams/hVfDBfreYNI/%63omments",   // 内容を符号化する
+		"/api/streams/hVfDBfreYNI/co%6Dments",   //
+		"/api/streams/hVfDBfreYNI/%63hapters",   //
+		"/api/streams/.%2FhVfDBfreYNI/%68olodex-songs",
+		"/api/streams/hVfDBfreYNI/%61vailability",
+	} {
+		t.Run(path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+
+			// ① この形は実際にハンドラへ届く（届かないなら塞ぐ意味が無い）
+			reached = ""
+			mux.ServeHTTP(httptest.NewRecorder(), req)
+			if reached == "" {
+				t.Fatalf("ServeMux が配っていない。この経路は実在しないので、固定しても意味が無い")
+			}
+
+			// ② それでも未ログインでは通らない
+			if authorizeRequest(req, nil) {
+				t.Errorf("未ログインで通っている（%s へ配られる経路）", reached)
+			}
+		})
+	}
+}
+
 // **認可は escape されたパスで判定する。** decode 済みだと `%2F` が本物の `/` に
 // なって区切りが 1 つずれ、`isStreamSubresource` が外れて公開既定へ落ちる。
 // ServeMux（Go 1.22+）は wildcard の中の `%2F` を区切りとして扱わないので、
