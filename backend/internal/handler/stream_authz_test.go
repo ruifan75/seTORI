@@ -65,6 +65,13 @@ func TestStreamAnalysisEndpointsRequireContentEdit(t *testing.T) {
 		// 近い名前の別ルートを巻き込まない
 		{"近い名前の別ルート", http.MethodGet, "/api/singers/auto-fill-report", "", false},
 
+		// 自動処理（定期実行）。設定の GET も content:edit ── ここに書かないと
+		// 「いつ・どれを自動で回しているか」と最後の実行結果が未ログインから読める
+		{"自動処理の設定", http.MethodGet, "/api/auto-fill/settings", auth.PermContentEdit, true},
+		{"自動処理の設定変更", http.MethodPut, "/api/auto-fill/settings", auth.PermContentEdit, true},
+		{"自動処理の手動実行", http.MethodPost, "/api/auto-fill/run", auth.PermContentEdit, true},
+		{"近い名前の別ルート(auto-fill)", http.MethodGet, "/api/auto-fill-report", "", false},
+
 		// 語尾だけで見ると逆に漏れる形（サブリソースを足したとき）
 		{"サブリソース", http.MethodGet, "/api/streams/abc123/comments/raw", auth.PermContentEdit, true},
 		{"末尾スラッシュ", http.MethodGet, "/api/streams/abc123/comments/", auth.PermContentEdit, true},

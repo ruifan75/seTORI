@@ -1222,6 +1222,58 @@ func (r *StreamRepository) FindBySingerID(singerID string, limit, offset int, fi
 	return streams, total, nil
 }
 
+// FindStreamsNeedingCommentRefresh はコメントを取り直す価値がある配信の ID を返す。
+//
+// **歌単は配信が終わったあとに貼られることが多い。** 同期は新規のときしか
+// コメントを取り直さない（`holodex_service.go` の `existing == nil || forceUpdate`）ので、
+// 取り直さなければ自動処理は何度走らせても同じ入力を見続けることになる。
+//
+// 一方で全配信を取り直すと **1 本につき外部 API を 1 回**叩く。そこで
+// 「取り直しても結果が変わりうるもの」だけに絞る：
+//
+//	歌単が空          … 既にある歌単には触らない約束なので、それ以外は取り直しても何も起きない
+//	非表示でない      … 雑談・ゲームまで対象にしない（本番では 731 → 14 まで減る）
+//	終了から days 日以内 … 古い配信に今さら歌単が貼られることは稀
+//
+// singerIDs が空なら全チャンネル。**所有者で絞る**（ゲスト参加しただけの
+// 他人の配信まで対象にしない。FindStreamsForFill と同じ）。
+func (r *StreamRepository) FindStreamsNeedingCommentRefresh(singerIDs []string, days int) ([]string, error) {
+	if days < 1 {
+		days = 30
+	}
+	query := `
+		SELECT s.id
+		FROM streams s
+		WHERE s.is_hidden = FALSE
+		  AND s.stream_date > NOW() - ($1 || ' days')::INTERVAL
+		  AND NOT EXISTS (SELECT 1 FROM performances p WHERE p.stream_id = s.id)`
+	args := []any{days}
+	if len(singerIDs) > 0 {
+		query += `
+		  AND EXISTS (SELECT 1 FROM stream_singers ss
+		              WHERE ss.stream_id = s.id AND ss.is_owner AND ss.singer_id = ANY($2))`
+		args = append(args, pq.Array(singerIDs))
+	}
+	query += `
+		ORDER BY s.stream_date DESC`
+
+	rows, err := r.db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query streams needing comment refresh: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan stream id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 // FindStreamsForFill は一括セットリスト作成の対象を返す。
 //
 // 一括プレ分析（FindStreamsForBatch）とは対象が違う。あちらは comment_raw を持つ配信だが、

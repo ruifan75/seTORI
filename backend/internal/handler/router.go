@@ -59,6 +59,7 @@ type Router struct {
 	readingService    *service.ReadingService
 	suggestionService *service.SuggestionService
 	backupService     *service.BackupService
+	autoFillService   *service.AutoFillService
 	playlistService   *service.PlaylistService
 	presetService     *service.PresetService
 	oauthService      *service.OAuthService
@@ -147,6 +148,8 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 		commentService, holodexService, chapterService, normalizationService, performanceService, suggestionService)
 	driveClient := gdrive.NewClient(cfg.GoogleOAuthClientID, cfg.GoogleOAuthSecret)
 	backupService := service.NewBackupService(db, appSettingsRepo, driveClient, settingsCipher, cfg.DatabaseURL, cfg.BackupDir, cfg.BackupDockerContainer)
+	autoFillService := service.NewAutoFillService(appSettingsRepo, singerRepo, streamRepo,
+		holodexService, commentService, batchFillService)
 	if migrated, err := backupService.EncryptPlaintextDriveToken(); err != nil {
 		logger.Warnf("Google Drive refresh token の暗号化移行に失敗しました: %v", err)
 	} else if migrated {
@@ -204,6 +207,7 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 		readingService:       readingService,
 		suggestionService:    suggestionService,
 		backupService:        backupService,
+		autoFillService:      autoFillService,
 		playlistService:      playlistService,
 		presetService:        presetService,
 		oauthService:         oauthService,
@@ -225,6 +229,11 @@ func (r *Router) AuthService() *service.AuthService {
 }
 
 // BackupService は main.go での自動バックアップスケジューラ起動に使う。
+// AutoFillService は自動処理のスケジューラを起動するために main から使う。
+func (r *Router) AutoFillService() *service.AutoFillService {
+	return r.autoFillService
+}
+
 func (r *Router) BackupService() *service.BackupService {
 	return r.backupService
 }
@@ -385,6 +394,11 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("PUT /api/singers/{id}/members-policy", r.handleUpdateSingerMembersPolicy)
 	r.mux.HandleFunc("PUT /api/singers/{id}/auto-fill", r.handleUpdateSingerAutoFill)
 	r.mux.HandleFunc("GET /api/singers/auto-fill", r.handleListAutoFillTargets)
+
+	// 自動処理（定期実行）。設定・手動実行とも content:edit。
+	r.mux.HandleFunc("GET /api/auto-fill/settings", r.handleGetAutoFillSettings)
+	r.mux.HandleFunc("PUT /api/auto-fill/settings", r.handleUpdateAutoFillSettings)
+	r.mux.HandleFunc("POST /api/auto-fill/run", r.handleRunAutoFill)
 	r.mux.HandleFunc("PUT /api/singers/{id}/organization", r.handleUpdateSingerOrganization)
 
 	// 事務所（取り込み時の key と表示名を分けて持つ）
@@ -2017,6 +2031,48 @@ func (r *Router) handleListAutoFillTargets(w http.ResponseWriter, req *http.Requ
 	respondJSON(w, http.StatusOK, map[string]any{"singers": singers})
 }
 
+// handleGetAutoFillSettings は自動処理の設定を返す（content:edit）。
+func (r *Router) handleGetAutoFillSettings(w http.ResponseWriter, req *http.Request) {
+	respondJSON(w, http.StatusOK, r.autoFillService.GetSettings())
+}
+
+// handleUpdateAutoFillSettings は自動処理の設定を保存する（content:edit）。
+func (r *Router) handleUpdateAutoFillSettings(w http.ResponseWriter, req *http.Request) {
+	var body dto.UpdateAutoFillSettingsRequest
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		respondError(w, http.StatusBadRequest, "無効なリクエスト形式")
+		return
+	}
+	// **項目が無いのを false / 0 と読まない。** `{}` や項目名の typo が decode に
+	// 成功して、動いている自動処理を黙って止めたり間隔を最小にしたりする。
+	if body.Enabled == nil || body.IntervalHours == nil || body.RefreshDays == nil {
+		respondError(w, http.StatusBadRequest,
+			"enabled / interval_hours / refresh_days はすべて必須です")
+		return
+	}
+	settings, err := r.autoFillService.UpdateSettings(*body.Enabled, *body.IntervalHours, *body.RefreshDays)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	logger.Infof("auto fill settings updated: enabled=%v interval=%dh refresh=%dd",
+		settings.Enabled, settings.IntervalHours, settings.RefreshDays)
+	respondJSON(w, http.StatusOK, settings)
+}
+
+// handleRunAutoFill は自動処理を今すぐ 1 回走らせる（content:edit）。
+//
+// **設定が無効でも走る。** 定期実行を有効にする前に「何が起きるか」を
+// 確かめられないと、いきなり自動で回すことになる。
+func (r *Router) handleRunAutoFill(w http.ResponseWriter, req *http.Request) {
+	res, err := r.autoFillService.RunOnce()
+	if err != nil {
+		respondError(w, http.StatusConflict, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, res)
+}
+
 // handleUpdateSingerVisibility はチャンネルの非表示を切り替える（content:edit）。
 // 非表示にしてもチャンネルページ自体は誰でも開ける。隠すのは一覧に載る場所だけ。
 func (r *Router) handleUpdateSingerVisibility(w http.ResponseWriter, req *http.Request) {
@@ -3538,6 +3594,13 @@ func requiredPermission(method, path string) (perm string, needsAuth bool) {
 	// 再生可否の backfill も同じ理由で content:edit。全配信ぶんの yt-dlp を
 	// 運用者の cookie で起動するので、未ログインから叩ける状態にはできない。
 	if isRouteOrSubpath(path, "/api/availability/backfill") {
+		return auth.PermContentEdit, true
+	}
+
+	// 自動処理（定期実行）の設定と手動実行。**GET は既定で公開に落ちる**ので、
+	// 設定の取得もここに書かないと「いつ・どれを自動で回しているか」と
+	// 最後の実行結果が未ログインから読める。
+	if isRouteOrSubpath(path, "/api/auto-fill") {
 		return auth.PermContentEdit, true
 	}
 

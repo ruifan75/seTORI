@@ -85,6 +85,10 @@ func main() {
 	// 自動バックアップ（設定で有効な場合、間隔ごとに pg_dump + Google Drive アップロード）
 	router.BackupService().StartScheduler()
 
+	// 自動処理（設定で有効な場合、間隔ごとに 同期 → コメント取り直し → 歌単作成）。
+	// **既定は無効**なので、設定しない限り何も起きない。
+	router.AutoFillService().StartScheduler()
+
 	// サーバーを起動
 	port := os.Getenv("PORT")
 	if port == "" {

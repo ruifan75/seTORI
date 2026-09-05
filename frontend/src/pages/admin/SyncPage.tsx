@@ -1,7 +1,7 @@
 import { Fragment, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { holodexApi, batchAnalyzeApi, batchFillApi, singerApi, availabilityApi } from '../../api/client';
+import { holodexApi, batchAnalyzeApi, batchFillApi, singerApi, availabilityApi, autoFillApi } from '../../api/client';
 import { useToast } from '../../components/ui/ToastContext';
 import { useAuthStore, hasPermission, PERM } from '../../store/auth';
 import { formatSeconds } from '../../components/usePerformanceTiming';
@@ -183,6 +183,7 @@ export default function SyncPage() {
       <h1 className="text-3xl font-bold text-gray-900">Holodex 同期</h1>
 
       <AutoFillTargets />
+      <AutoFillSchedule />
 
       {/* Sync by Channel */}
       <div className="bg-white rounded-lg shadow-sm border p-6">
@@ -876,6 +877,153 @@ function AutoFillTargets() {
             </li>
           ))}
         </ul>
+      )}
+    </div>
+  );
+}
+
+
+// AutoFillSchedule は自動処理の定期実行の設定と手動実行。
+//
+// **既定は無効。** 外部 API と AI を自動で叩くので、設定しない限り動かない。
+// 手動実行は設定が無効でも走る ── 有効にする前に何が起きるか確かめられないと、
+// いきなり自動で回すことになる。
+function AutoFillSchedule() {
+  const queryClient = useQueryClient();
+  const { showToast } = useToast();
+  const canEdit = hasPermission(useAuthStore((st) => st.user), PERM.CONTENT_EDIT);
+  const authStatus = useAuthStore((st) => st.status);
+
+  const { data: settings, isError } = useQuery({
+    queryKey: ['autoFillSettings', canEdit],
+    queryFn: autoFillApi.getSettings,
+    enabled: canEdit && authStatus !== 'loading',
+  });
+
+  const [interval, setInterval] = useState<number | null>(null);
+  const [refreshDays, setRefreshDays] = useState<number | null>(null);
+
+  const save = useMutation({
+    mutationFn: (next: { enabled: boolean; interval: number; refreshDays: number }) =>
+      autoFillApi.updateSettings(next.enabled, next.interval, next.refreshDays),
+    onSuccess: (data) => {
+      queryClient.setQueryData(['autoFillSettings', canEdit], data);
+      showToast(data.enabled ? '自動処理を有効にしました' : '自動処理を止めました', 'success');
+    },
+    onError: (err: Error) => showToast(err.message, 'error'),
+  });
+
+  const runNow = useMutation({
+    mutationFn: autoFillApi.run,
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ['autoFillSettings'] });
+      queryClient.invalidateQueries({ queryKey: ['batchFillStatus'] });
+      showToast(
+        `同期 ${res.synced} 件 / コメント取り直し ${res.refreshed} 件` +
+          (res.note ? `（${res.note}）` : ''),
+        'success',
+      );
+    },
+    // 実行中（409）も含めてそのまま出す。「既に走っている」は失敗ではないので
+    // 文言はバックエンドのものを見せる
+    onError: (err: Error) => showToast(err.message, 'error'),
+  });
+
+  if (!canEdit) return null;
+
+  const effInterval = interval ?? settings?.interval_hours ?? 6;
+  const effRefresh = refreshDays ?? settings?.refresh_days ?? 30;
+
+  return (
+    <div className="bg-white rounded-lg shadow-sm border p-6">
+      <h2 className="text-xl font-bold text-gray-900 mb-2">自動処理の定期実行</h2>
+      <p className="text-gray-500 mb-4 text-sm">
+        上で登録したチャンネルを定期的に処理します：
+        <strong>同期 → 歌単が空の配信のコメント取り直し → 歌単作成</strong>。
+        確信の無いものと未登録の曲は<strong>審査へ回り</strong>、
+        <strong>処理完了のチェックは自動では付きません</strong>。
+      </p>
+
+      {isError ? (
+        <p className="text-red-600 text-sm">設定の取得に失敗しました（無効という意味ではありません）。</p>
+      ) : (
+        <>
+          <div className="flex flex-wrap items-end gap-4">
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={settings?.enabled ?? false}
+                onChange={(e) =>
+                  save.mutate({ enabled: e.target.checked, interval: effInterval, refreshDays: effRefresh })
+                }
+                disabled={save.isPending}
+                className="w-4 h-4 rounded border-gray-300"
+              />
+              定期実行を有効にする
+            </label>
+
+            <label className="flex items-center gap-2 text-sm">
+              実行間隔
+              <input
+                type="number"
+                min={1}
+                max={168}
+                value={effInterval}
+                onChange={(e) => setInterval(Number(e.target.value))}
+                className="w-20 px-2 py-1 border border-gray-300 rounded"
+              />
+              時間
+            </label>
+
+            <label className="flex items-center gap-2 text-sm">
+              コメント取り直しの範囲
+              <input
+                type="number"
+                min={1}
+                max={365}
+                value={effRefresh}
+                onChange={(e) => setRefreshDays(Number(e.target.value))}
+                className="w-20 px-2 py-1 border border-gray-300 rounded"
+              />
+              日以内
+            </label>
+
+            <button
+              onClick={() =>
+                save.mutate({ enabled: settings?.enabled ?? false, interval: effInterval, refreshDays: effRefresh })
+              }
+              disabled={save.isPending}
+              className="px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+            >
+              保存
+            </button>
+
+            <button
+              onClick={() => runNow.mutate()}
+              disabled={runNow.isPending}
+              title="設定が無効でも 1 回だけ走らせます（有効にする前の確認用）"
+              className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:border-indigo-300 disabled:opacity-50"
+            >
+              {runNow.isPending ? '実行中...' : '今すぐ 1 回実行'}
+            </button>
+          </div>
+
+          {/* **間隔を短くする側の代償を書いておく。** live chat がまだ無い配信は
+              次の実行でやり直すので、間隔が短いほど同じ配信を何度も触る */}
+          <p className="text-xs text-gray-400 mt-3">
+            間隔を短くすると、配信直後で live chat がまだ取得できない配信を何度も処理し直します。
+          </p>
+
+          {settings?.last_run_at && (
+            <p className="text-sm text-gray-500 mt-3">
+              前回: {new Date(settings.last_run_at).toLocaleString('ja-JP')}
+              {settings.last_run_note && `（${settings.last_run_note}）`}
+              {settings.last_run_error && (
+                <span className="text-red-600"> エラー: {settings.last_run_error}</span>
+              )}
+            </p>
+          )}
+        </>
       )}
     </div>
   );
