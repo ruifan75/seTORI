@@ -1,6 +1,7 @@
 package comment
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -226,9 +227,17 @@ func TestHasTimestampLines(t *testing.T) {
 		})
 	}
 
-	// 「候補が無ければ必ず 0 曲」の一方向を固定する。抽出は候補行が空なら
-	// ErrNoTimestampLines を返す（AI を呼ぶ前に返るので、ここでは client 不要）。
-	if _, err := ParseNormalizeAndDedupWithAI(nil, []string{"タイムスタンプのない感想"}); err == nil {
-		t.Error("候補が無いのに抽出が進んでいる")
+	// 「候補が無ければ必ず 0 曲」の一方向を固定する。
+	//
+	// **nil の client を渡さないこと。** 抽出は候補行を見る前に nil を弾くので、
+	// 候補なしの処理を丸ごと削ってもテストが通ってしまう（＝何も守れない）。
+	// stub を渡したうえで ErrNoTimestampLines であることまで見る。
+	stub := &stubChatter{response: `{"songs":[]}`}
+	_, err := ParseNormalizeAndDedupWithAI(stub, []string{"タイムスタンプのない感想"})
+	if !errors.Is(err, ErrNoTimestampLines) {
+		t.Errorf("候補が無いときは ErrNoTimestampLines のはず: %v", err)
+	}
+	if stub.gotUser != "" {
+		t.Error("候補が無いのに AI を呼んでいる")
 	}
 }
