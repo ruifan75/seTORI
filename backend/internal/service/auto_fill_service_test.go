@@ -119,8 +119,13 @@ func TestApplySkipKeepsRunRecordIntact(t *testing.T) {
 	}
 }
 
-// 応答に必要な欄がすべて出ること（handler が落とすと画面に何も出ない）。
-func TestAutoFillLastRunSerialisesAllFields(t *testing.T) {
+// 記録の構造体が 5 つの欄を**別々に**持ち、JSON でも別々に出ること。
+//
+// **これは handler の応答を保証しない。** handler は明示的な map を組み立てて
+// 返すので、そこから項目を落としてもこのテストは通る。ここで固定できるのは
+// 「欄が混ざっていない」ことだけ（見送りと実行が同じ欄に入ると、
+// 古い実行時刻と新しい見送り理由が「実在しない一回」に見える）。
+func TestAutoFillLastRunFieldsAreSeparate(t *testing.T) {
 	now := time.Now()
 	b, err := json.Marshal(AutoFillLastRun{
 		At: &now, SkippedAt: &now,
@@ -135,7 +140,7 @@ func TestAutoFillLastRunSerialisesAllFields(t *testing.T) {
 	}
 	for _, k := range []string{"last_run_at", "last_skipped_at", "last_run_note", "last_skip_note", "last_run_error"} {
 		if _, ok := m[k]; !ok {
-			t.Errorf("%s が応答に出ない", k)
+			t.Errorf("%s が JSON に出ない（欄が混ざっている）", k)
 		}
 	}
 }
