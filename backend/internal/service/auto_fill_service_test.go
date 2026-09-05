@@ -84,12 +84,47 @@ func TestAutoFillSkipDoesNotDelayNextRun(t *testing.T) {
 	}
 }
 
-// **見送りの記録が、実行の記録と混ざらないこと。**
-// Note を共有すると、古い last_run_at と新しい見送り理由が組み合わさって
-// 「実在しない一回の結果」に見える。
-func TestAutoFillSkipKeepsRunRecordIntact(t *testing.T) {
+// **見送りが実行の記録を汚さないこと。** 手で組み立てた構造体を marshal しても
+// 何も固定できない（recordSkip が Note を上書きし直しても通ってしまう）ので、
+// 実際の重ね方（applySkip）を通す。
+func TestApplySkipKeepsRunRecordIntact(t *testing.T) {
+	runAt := time.Now().Add(-2 * time.Hour)
+	before := AutoFillLastRun{
+		At:    &runAt,
+		Note:  "チャンネル 1 / 同期 3 / コメント取り直し 2",
+		Error: "1 件の失敗（詳細はログ）",
+	}
+
+	now := time.Now()
+	after := applySkip(before, "一括セットリスト作成が実行中のため見送りました", now)
+
+	// 見送りは自分の欄にだけ書く
+	if after.SkippedAt == nil || !after.SkippedAt.Equal(now) {
+		t.Error("見送り時刻が記録されていない")
+	}
+	if after.SkipNote == "" {
+		t.Error("見送りの理由が記録されていない")
+	}
+
+	// **実行の記録は 1 つも変わらない。** ここが崩れると、古い実行時刻と
+	// 新しい見送り理由が「実在しない一回の結果」として画面に出る。
+	if after.At == nil || !after.At.Equal(runAt) {
+		t.Error("見送りが実行時刻を進めている（次回が 1 間隔ぶん遅れる）")
+	}
+	if after.Note != before.Note {
+		t.Errorf("見送りが実行の内容を上書きした: %q", after.Note)
+	}
+	if after.Error != before.Error {
+		t.Errorf("見送りが実行のエラーを上書きした: %q", after.Error)
+	}
+}
+
+// 応答に必要な欄がすべて出ること（handler が落とすと画面に何も出ない）。
+func TestAutoFillLastRunSerialisesAllFields(t *testing.T) {
+	now := time.Now()
 	b, err := json.Marshal(AutoFillLastRun{
-		Note: "実行の記録", Error: "実行のエラー", SkipNote: "見送りの理由",
+		At: &now, SkippedAt: &now,
+		Note: "n", SkipNote: "s", Error: "e",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -98,10 +133,7 @@ func TestAutoFillSkipKeepsRunRecordIntact(t *testing.T) {
 	if err := json.Unmarshal(b, &m); err != nil {
 		t.Fatal(err)
 	}
-	if m["last_run_note"] == m["last_skip_note"] {
-		t.Error("実行の記録と見送りの理由が同じ欄に入っている")
-	}
-	for _, k := range []string{"last_run_note", "last_skip_note", "last_run_error"} {
+	for _, k := range []string{"last_run_at", "last_skipped_at", "last_run_note", "last_skip_note", "last_run_error"} {
 		if _, ok := m[k]; !ok {
 			t.Errorf("%s が応答に出ない", k)
 		}

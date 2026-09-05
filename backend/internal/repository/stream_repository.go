@@ -1228,7 +1228,7 @@ func (r *StreamRepository) FindBySingerID(singerID string, limit, offset int, fi
 // コメントを取り直さない（`holodex_service.go` の `existing == nil || forceUpdate`）ので、
 // 取り直さなければ自動処理は何度走らせても同じ入力を見続けることになる。
 //
-// 一方で全配信を取り直すと **1 本につき外部 API を 1 回**叩く。そこで
+// 一方で全配信を取り直すと、その本数ぶん外部 API を叩くことになる。そこで
 // 「取り直しても結果が変わりうるもの」だけに絞る：
 //
 //	歌単が空          … 既にある歌単には触らない約束なので、それ以外は取り直しても何も起きない

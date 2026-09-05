@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -312,6 +313,14 @@ func (s *AutoFillService) RunOnce() (AutoFillResult, error) {
 	if err != nil {
 		// StartReserved は失敗時に自分で予約を解放する。
 		reserved = false
+		// 停止要求で開始しなかったのは**異常ではない**。次の実行で拾えばよいので、
+		// 失敗として記録するとログとエラー表示が汚れる。
+		if errors.Is(err, ErrBatchFillCancelled) {
+			res.Note = "停止が要求されたため中止しました"
+			logger.Infof("[auto-fill] %s", res.Note)
+			s.recordSkip(res)
+			return res, nil
+		}
 		s.recordRun(res, err)
 		return res, fmt.Errorf("一括セットリスト作成の開始に失敗: %w", err)
 	}
@@ -355,15 +364,19 @@ func (s *AutoFillService) refreshComments(singerIDs []string, days int, justSync
 // recordRun は最後の実行を設定へ書き戻す（画面に出すため）。
 // recordSkip は見送りを記録する。**At は進めない**（上の注記）。
 func (s *AutoFillService) recordSkip(res AutoFillResult) {
-	last := s.GetLastRun()
-	now := time.Now()
-	last.SkippedAt = &now
-	// **見送りの理由は別の欄に置く。** Note を上書きすると、古い last_run_at と
-	// 新しい見送り理由が組み合わさって「実在しない一回の結果」に見える。
-	last.SkipNote = res.Note
-	if err := s.settingsRepo.Set(settingsKeyAutoFillRun, last); err != nil {
+	if err := s.settingsRepo.Set(settingsKeyAutoFillRun,
+		applySkip(s.GetLastRun(), res.Note, time.Now())); err != nil {
 		logger.Warnf("[auto-fill] 見送りの記録に失敗: %v", err)
 	}
+}
+
+// applySkip は見送りを既存の記録へ重ねる。**実行の記録は一切触らない** ──
+// 触ると、古い last_run_at と新しい見送り理由が組み合わさって
+// 「実在しない一回の結果」に見える。
+func applySkip(last AutoFillLastRun, note string, now time.Time) AutoFillLastRun {
+	last.SkippedAt = &now
+	last.SkipNote = note
+	return last
 }
 
 func (s *AutoFillService) recordRun(res AutoFillResult, runErr error) {
