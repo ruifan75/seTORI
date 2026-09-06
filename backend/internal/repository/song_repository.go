@@ -245,6 +245,26 @@ func (r *SongRepository) GetPerformanceCount(songID uuid.UUID) (int, error) {
 	return count, nil
 }
 
+// HasAnyPerformance は歌唱が 1 件でもあるかを返す。**濾さない。**
+//
+// `GetPerformanceCount` は非表示・秘匿を落とすが、削除の可否はそれで決められない
+// ── 見えない歌唱も `performances.song_id` の参照なので、消そうとすれば
+// `ON DELETE RESTRICT` に当たる。画面の「0 件」を信じて削除を試すと、
+// 理由の分からない失敗になる。
+//
+// **件数は返さない。** 見えている件数は既に画面へ出ているので隠す意味が無いが、
+// 隠している歌唱を数に混ぜると、そこから存在が漏れる（§2 で count も濾している
+// のと同じ理由）。削除を止めるのに必要なのは「あるか」だけ。
+func (r *SongRepository) HasAnyPerformance(songID uuid.UUID) (bool, error) {
+	var exists bool
+	err := r.db.QueryRow(
+		`SELECT EXISTS (SELECT 1 FROM performances WHERE song_id = $1)`, songID).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("check song performances: %w", err)
+	}
+	return exists, nil
+}
+
 // GetPerformanceCounts は複数楽曲の歌唱回数を一括取得し（非表示でない配信だけを集計）、N+1 を避ける。
 func (r *SongRepository) GetPerformanceCounts(songIDs []uuid.UUID) (map[uuid.UUID]int, error) {
 	counts := make(map[uuid.UUID]int, len(songIDs))
