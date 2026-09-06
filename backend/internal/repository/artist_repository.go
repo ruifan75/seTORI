@@ -224,7 +224,7 @@ func (r *ArtistRepository) MergeArtists(sourceID, targetID uuid.UUID) error {
 }
 
 // FindSongsByArtist はアーティストに紐づく楽曲を歌唱回数付きで返す。
-func (r *ArtistRepository) FindSongsByArtist(artistID uuid.UUID, limit, offset int, sort, dir string) ([]models.Song, map[uuid.UUID]int, int, error) {
+func (r *ArtistRepository) FindSongsByArtist(artistID uuid.UUID, limit, offset int, sort, dir string, access ViewerAccess) ([]models.Song, map[uuid.UUID]int, int, error) {
 	var total int
 	if err := r.db.QueryRow(`SELECT COUNT(*) FROM song_artists WHERE artist_id = $1`, artistID).Scan(&total); err != nil {
 		return nil, nil, 0, fmt.Errorf("count artist songs: %w", err)
@@ -240,7 +240,7 @@ func (r *ArtistRepository) FindSongsByArtist(artistID uuid.UUID, limit, offset i
 		SELECT s.id, s.name, s.name_reading, s.original_artist, s.original_artist_reading, s.arts,
 		       s.created_at, s.updated_at,
 		       (SELECT COUNT(*) FROM performances p JOIN streams st ON st.id = p.stream_id
-		        WHERE p.song_id = s.id AND st.is_hidden = FALSE AND `+NotRestricted("st")+`) AS perf_count
+		        WHERE p.song_id = s.id AND `+DiscoverableFor("st", access)+`) AS perf_count
 		FROM songs s
 		JOIN song_artists sa ON sa.song_id = s.id
 		WHERE sa.artist_id = $1

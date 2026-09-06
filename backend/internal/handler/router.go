@@ -628,7 +628,7 @@ func (r *Router) handleGlobalSearch(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// テキスト検索：楽曲・歌枠・チャンネルを横断。個別の失敗は空リストで続行する。
-	if songs, err := r.songService.GetAll(1, limit, query, "", ""); err != nil {
+	if songs, err := r.songService.GetAll(1, limit, query, "", "", viewerAccess(req)); err != nil {
 		logger.Warnf("global search songs failed: %v", err)
 	} else if songs != nil {
 		resp.Songs = songs.Songs
@@ -659,7 +659,7 @@ func (r *Router) handleGlobalSearch(w http.ResponseWriter, req *http.Request) {
 	} else {
 		resp.StreamTags = toSearchTagItems(tags)
 	}
-	if tags, err := r.tagRepo.SearchPerformanceTags(query, limit); err != nil {
+	if tags, err := r.tagRepo.SearchPerformanceTags(query, limit, viewerAccess(req)); err != nil {
 		logger.Warnf("global search performance tags failed: %v", err)
 	} else {
 		resp.PerformanceTags = toSearchTagItems(tags)
@@ -689,7 +689,7 @@ func (r *Router) handleSearchStreams(w http.ResponseWriter, req *http.Request) {
 	page, _ := strconv.Atoi(req.URL.Query().Get("page"))
 	limit, _ := strconv.Atoi(req.URL.Query().Get("limit"))
 
-	result, err := r.streamService.SearchStreams(filters, page, limit, userHasPermission(req, auth.PermContentEdit))
+	result, err := r.streamService.SearchStreams(filters, page, limit, userHasPermission(req, auth.PermContentEdit), viewerAccess(req))
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -994,7 +994,7 @@ func (r *Router) handleGetArtist(w http.ResponseWriter, req *http.Request) {
 	sort := req.URL.Query().Get("sort")
 	dir := req.URL.Query().Get("dir")
 
-	result, err := r.artistService.GetByID(id, page, limit, sort, dir)
+	result, err := r.artistService.GetByID(id, page, limit, sort, dir, viewerAccess(req))
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1589,7 +1589,7 @@ func (r *Router) handleGetPerformancesByTag(w http.ResponseWriter, req *http.Req
 	page, _ := strconv.Atoi(req.URL.Query().Get("page"))
 	limit, _ := strconv.Atoi(req.URL.Query().Get("limit"))
 
-	result, err := r.streamService.GetPerformancesByTag(tagID, page, limit)
+	result, err := r.streamService.GetPerformancesByTag(tagID, page, limit, viewerAccess(req))
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1603,7 +1603,7 @@ func (r *Router) handleGetPerformancesByTag(w http.ResponseWriter, req *http.Req
 func (r *Router) handleRandomPerformances(w http.ResponseWriter, req *http.Request) {
 	limit, _ := strconv.Atoi(req.URL.Query().Get("limit"))
 	excludedSongIDs := parseUUIDCSVQueryParam(req, "exclude_song_ids")
-	result, err := r.streamService.GetRandomPerformances(limit, excludedSongIDs)
+	result, err := r.streamService.GetRandomPerformances(limit, excludedSongIDs, viewerAccess(req))
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1627,7 +1627,7 @@ func (r *Router) handleListSongs(w http.ResponseWriter, req *http.Request) {
 		limit = 20
 	}
 
-	result, err := r.songService.GetAll(page, limit, search, sort, dir)
+	result, err := r.songService.GetAll(page, limit, search, sort, dir, viewerAccess(req))
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1644,7 +1644,7 @@ func (r *Router) handleGetSong(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	result, err := r.songService.GetByID(id)
+	result, err := r.songService.GetByID(id, viewerAccess(req))
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1675,7 +1675,7 @@ func (r *Router) handleGetSongPerformances(w http.ResponseWriter, req *http.Requ
 		limit = 20
 	}
 
-	result, err := r.songService.GetPerformances(id, page, limit)
+	result, err := r.songService.GetPerformances(id, page, limit, viewerAccess(req))
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1728,7 +1728,7 @@ func (r *Router) handleUpdateSong(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	result, err := r.songService.Update(id, &songReq)
+	result, err := r.songService.Update(id, &songReq, viewerAccess(req))
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1751,7 +1751,7 @@ func (r *Router) handleDeleteSong(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// 楽曲が存在するか確認する
-	song, err := r.songService.GetByID(id)
+	song, err := r.songService.GetByID(id, viewerAccess(req))
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1810,8 +1810,10 @@ func (r *Router) handleMergeSong(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// 両方の楽曲が存在することを検証する
-	sourceSong, err := r.songService.GetByID(sourceSongID)
+	// 両方の楽曲が存在することを検証する。
+	// **閲覧ではなく操作の前提確認**なので、要求者の権限ではなく全部を見る
+	// （濾すと、秘匿の歌唱しか持たない楽曲を統合できなくなる）。
+	sourceSong, err := r.songService.GetByID(sourceSongID, repository.RestrictedView)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1821,7 +1823,7 @@ func (r *Router) handleMergeSong(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	targetSong, err := r.songService.GetByID(targetSongID)
+	targetSong, err := r.songService.GetByID(targetSongID, repository.RestrictedView)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -2263,7 +2265,7 @@ func (r *Router) handleGetSinger(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// 会限の方針など運用の内部情報は content:edit のときだけ載せる。
-	result, err := r.singerService.GetByID(id, userHasPermission(req, auth.PermContentEdit))
+	result, err := r.singerService.GetByID(id, userHasPermission(req, auth.PermContentEdit), viewerAccess(req))
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -2365,7 +2367,7 @@ func (r *Router) handleGetSingerPerformances(w http.ResponseWriter, req *http.Re
 		limit = 20
 	}
 
-	result, err := r.singerService.GetPerformances(id, page, limit, sort, dir)
+	result, err := r.singerService.GetPerformances(id, page, limit, sort, dir, viewerAccess(req))
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -3360,6 +3362,11 @@ func (r *Router) handleItunesQueryByID(w http.ResponseWriter, req *http.Request)
 // existingSongBrief は iTunes ID に紐づく既存楽曲を返す。無ければ nil。
 // **検索と ID 直引きで同じものを通す** ── 片方だけが「もう DB にある」を
 // 知っている状態になると、同じ曲を二重に作る入口ができる。
+// existingSongBrief は iTunes ID から既存の楽曲を引く（編集画面の重複警告用）。
+//
+// **件数は濾さない。** ここは「その楽曲が既にあるか」を編集者へ知らせる場所で、
+// 0 件と出ると「使われていない」と読める ── 秘匿の歌唱しか無い楽曲がまさにそれ。
+// 呼ぶのは content:edit の経路だけ。
 func existingSongBrief(songRepo *repository.SongRepository, itunesID int64) *dto.SongBrief {
 	song, err := songRepo.FindByItunesID(itunesID)
 	if err != nil {
@@ -3369,7 +3376,7 @@ func existingSongBrief(songRepo *repository.SongRepository, itunesID int64) *dto
 	if song == nil {
 		return nil
 	}
-	perfCount, err := songRepo.GetPerformanceCount(song.ID)
+	perfCount, err := songRepo.GetPerformanceCount(song.ID, repository.RestrictedView)
 	if err != nil {
 		logger.Warnf("Error counting performances for song %s: %v", song.ID, err)
 		perfCount = 0
@@ -3701,9 +3708,16 @@ func authorize(method, path string, user *models.User) bool {
 // **bool を配り歩かない。** 「解析結果を載せるか」と「秘匿された配信の中身を返すか」は
 // 別の判断だが、今はどちらも content:edit で決まる。同じ述語を 2 つの bool で持つと、
 // 片方だけ渡し忘れても型が通ってしまう。
+// viewerAccess は「この要求者に秘匿の中身を見せてよいか」を返す。
+//
+// **`content:edit` ではなく `restricted:view` で判定する。** 会限のセットリストを
+// 公開してよいかは配信者に訊いて決めることで、編集作業の一部ではない ──
+// 編集者は「まだ許可が取れていない会限の中身」を見る必要が無い。
+//
+// `admin` は `*` を持つので自動的に通る。
 func viewerAccess(req *http.Request) repository.ViewerAccess {
-	if userHasPermission(req, auth.PermContentEdit) {
-		return repository.EditorAccess
+	if userHasPermission(req, auth.PermRestrictedView) {
+		return repository.RestrictedView
 	}
 	return repository.PublicAccess
 }

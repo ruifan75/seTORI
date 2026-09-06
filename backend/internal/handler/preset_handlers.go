@@ -21,7 +21,7 @@ func presetErrStatus(err error) int {
 
 // GET /api/presets — プリセットプレイリストの一覧（未ログインでも可）
 func (r *Router) handleListPresets(w http.ResponseWriter, req *http.Request) {
-	result, err := r.presetService.List(viewerID(req))
+	result, err := r.presetService.List(viewerID(req), viewerAccess(req))
 	if err != nil {
 		respondError(w, presetErrStatus(err), err.Error())
 		return
@@ -35,7 +35,7 @@ func (r *Router) handleListFollowedPresets(w http.ResponseWriter, req *http.Requ
 	if !ok {
 		return
 	}
-	result, err := r.presetService.ListFollowed(userID)
+	result, err := r.presetService.ListFollowed(userID, viewerAccess(req))
 	if err != nil {
 		respondError(w, presetErrStatus(err), err.Error())
 		return
@@ -45,7 +45,7 @@ func (r *Router) handleListFollowedPresets(w http.ResponseWriter, req *http.Requ
 
 // GET /api/presets/{key} — 1 件の情報（未ログインでも可）
 func (r *Router) handleGetPreset(w http.ResponseWriter, req *http.Request) {
-	result, err := r.presetService.Get(req.PathValue("key"), viewerID(req))
+	result, err := r.presetService.Get(req.PathValue("key"), viewerID(req), viewerAccess(req))
 	if err != nil {
 		respondError(w, presetErrStatus(err), err.Error())
 		return
@@ -56,7 +56,7 @@ func (r *Router) handleGetPreset(w http.ResponseWriter, req *http.Request) {
 // GET /api/presets/{key}/items — 中身（未ログインでも可）
 func (r *Router) handleListPresetItems(w http.ResponseWriter, req *http.Request) {
 	limit, _ := strconv.Atoi(req.URL.Query().Get("limit"))
-	perfs, err := r.presetService.ListItems(req.PathValue("key"), limit)
+	perfs, err := r.presetService.ListItems(req.PathValue("key"), limit, viewerAccess(req))
 	if err != nil {
 		respondError(w, presetErrStatus(err), err.Error())
 		return
@@ -103,7 +103,7 @@ func (r *Router) handleAddPresetToPlaylist(w http.ResponseWriter, req *http.Requ
 		respondError(w, http.StatusBadRequest, "リクエストの形式が不正です")
 		return
 	}
-	result, err := r.presetService.AddToPlaylist(userID, req.PathValue("key"), &body)
+	result, err := r.presetService.AddToPlaylist(userID, req.PathValue("key"), &body, viewerAccess(req))
 	if err != nil {
 		respondError(w, presetErrStatus(err), err.Error())
 		return

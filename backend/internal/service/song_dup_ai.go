@@ -82,7 +82,7 @@ func (s *SongMatchService) AdjudicateDuplicates(aiClient ai.Chatter, limit int) 
 	if aiClient == nil {
 		return 0, fmt.Errorf("AI プロバイダーが設定されていません")
 	}
-	pending, err := s.matchRepo.ListUnjudgedCandidates(limit)
+	pending, err := s.matchRepo.ListUnjudgedCandidates(limit, repository.RestrictedView)
 	if err != nil {
 		return 0, err
 	}
