@@ -103,6 +103,11 @@ export default function ManualInputImport({
       // 配信の情報も引き直す（`has_comment_raw` が変わる）。
       // 前方一致なので ['stream', id, canEdit] も拾う。
       queryClient.invalidateQueries({ queryKey: ['stream', videoId] });
+      // **生コメントも引き直す。** こちらは `staleTime: Infinity` なので、
+      // 明示的に無効化しないと**再読み込みするまで古いまま**になる
+      // ── 取り込んだ本人が「入っていない」と読んでしまう。
+      queryClient.invalidateQueries({ queryKey: ['raw-comments', videoId] });
+
     },
     onError: (e: unknown) => setError(errorMessage(e)),
   });
