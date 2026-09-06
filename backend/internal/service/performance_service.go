@@ -237,7 +237,7 @@ func (s *PerformanceService) GetByID(id uuid.UUID, access repository.ViewerAcces
 // 1件だけ直す必要があるため、こちらを使う。performance ID は変えない
 // （プレイリストが performance_id を参照しているため）。
 func (s *PerformanceService) UpdatePerformance(id uuid.UUID, req *dto.UpdatePerformanceRequest) (*repository.PerformanceWithDetails, error) {
-	cur, err := s.perfRepo.FindByID(id, repository.EditorAccess)
+	cur, err := s.perfRepo.FindByID(id, repository.RestrictedView)
 	if err != nil {
 		return nil, fmt.Errorf("find performance: %w", err)
 	}
@@ -299,7 +299,7 @@ func (s *PerformanceService) UpdatePerformance(id uuid.UUID, req *dto.UpdatePerf
 		}
 	}
 
-	updated, err := s.perfRepo.FindByID(id, repository.EditorAccess)
+	updated, err := s.perfRepo.FindByID(id, repository.RestrictedView)
 	if err != nil {
 		return nil, fmt.Errorf("reload performance: %w", err)
 	}
@@ -588,7 +588,7 @@ func (s *PerformanceService) ApplyEditableFields(id uuid.UUID, fields map[string
 // 編集時の保存は ReconcilePerformances による差分更新を使い、ここは通らない。
 func (s *PerformanceService) DeleteByStreamID(streamID string) error {
 	// **削除は必ず全件見る。** 秘匿を理由に取りこぼすと、消したつもりの歌唱が残る。
-	performances, err := s.perfRepo.FindByStreamID(streamID, repository.EditorAccess)
+	performances, err := s.perfRepo.FindByStreamID(streamID, repository.RestrictedView)
 	if err != nil {
 		return fmt.Errorf("find performances: %w", err)
 	}

@@ -388,11 +388,11 @@ func (r *SongMatchRepository) SetMergeVerdict(id uuid.UUID, v MergeVerdict) erro
 }
 
 // ListUnjudgedCandidates は未判定の候補を返す（AI に聞く対象）。
-func (r *SongMatchRepository) ListUnjudgedCandidates(limit int) ([]MergeCandidate, error) {
+func (r *SongMatchRepository) ListUnjudgedCandidates(limit int, access ViewerAccess) ([]MergeCandidate, error) {
 	if limit <= 0 {
 		limit = 30
 	}
-	rows, err := r.db.Query(mergeCandidateSelect+`
+	rows, err := r.db.Query(mergeCandidateSelect(access)+`
 		WHERE c.status = 'open' AND c.verdict_at IS NULL
 		ORDER BY c.created_at
 		LIMIT $1`, limit)
@@ -435,11 +435,11 @@ type MergeVerdict struct {
 }
 
 // ListOpenMergeCandidates は未処理の統合候補を新しい順で返す。
-func (r *SongMatchRepository) ListOpenMergeCandidates(limit int) ([]MergeCandidate, error) {
+func (r *SongMatchRepository) ListOpenMergeCandidates(limit int, access ViewerAccess) ([]MergeCandidate, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := r.db.Query(mergeCandidateSelect+`
+	rows, err := r.db.Query(mergeCandidateSelect(access)+`
 		WHERE c.status = 'open'
 		ORDER BY
 			CASE c.recommendation WHEN 'merge' THEN 0 WHEN 'keep_separate' THEN 2 ELSE 1 END,
@@ -455,18 +455,22 @@ func (r *SongMatchRepository) ListOpenMergeCandidates(limit int) ([]MergeCandida
 // mergeCandidateSelect は候補一覧の共通 SELECT。
 // iTunes ID を一緒に引くのは、編曲の違いを人が判断する材料
 // （収録アルバム・再生時間）をフロントが引けるようにするため。
-// **件数は秘匿を濾す。** この SELECT は公開の GET /api/songs/{id}/merge-candidates と
-// 編集者向けの一覧で共用されるが、件数だけは公開側に合わせて常に濾す
-// ── 編集者は歌唱一覧そのものを見られるので、ここで秘匿分を数えても得られる情報は無く、
-// 逆に濾さないと公開側で「詳細の件数」と食い違う。
-var mergeCandidateSelect = `
+// **件数は閲覧者に合わせて濾す。** この SELECT は公開の
+// GET /api/songs/{id}/merge-candidates と編集者向けの一覧で共用される。
+//
+// 以前は「編集者は歌唱一覧そのものを見られるので濾しても情報は減らない」として
+// 常に濾していたが、`restricted:view` を `content:edit` から分けた時点で
+// **その前提が消えた** ── 統合の向きは件数を見て決めるので、
+// 秘匿の歌唱しか無い楽曲が 0 件に見えると、残すべきほうを消す方向へ誘導する。
+func mergeCandidateSelect(access ViewerAccess) string {
+	return `
 	SELECT c.id, c.score, c.reason, c.status, c.origin,
 	       n.id, n.name, n.name_reading, n.original_artist, n.original_artist_reading, n.arts, n.created_at, n.updated_at,
 	       e.id, e.name, e.name_reading, e.original_artist, e.original_artist_reading, e.arts, e.created_at, e.updated_at,
 	       (SELECT COUNT(*) FROM performances p JOIN streams st ON st.id = p.stream_id
-	         WHERE p.song_id = n.id AND st.is_hidden = FALSE AND ` + NotRestricted("st") + `),
+	         WHERE p.song_id = n.id AND ` + DiscoverableFor("st", access) + `),
 	       (SELECT COUNT(*) FROM performances p JOIN streams st ON st.id = p.stream_id
-	         WHERE p.song_id = e.id AND st.is_hidden = FALSE AND ` + NotRestricted("st") + `),
+	         WHERE p.song_id = e.id AND ` + DiscoverableFor("st", access) + `),
 	       ARRAY(SELECT si.itunes_id FROM song_itunes si WHERE si.song_id = n.id ORDER BY si.is_primary DESC),
 	       ARRAY(SELECT si.itunes_id FROM song_itunes si WHERE si.song_id = e.id ORDER BY si.is_primary DESC),
 	       c.same_composition, c.same_arrangement, COALESCE(c.recommendation, ''),
@@ -475,6 +479,7 @@ var mergeCandidateSelect = `
 	FROM song_merge_candidates c
 	JOIN songs n ON n.id = c.new_song_id
 	JOIN songs e ON e.id = c.existing_song_id`
+}
 
 func scanMergeCandidates(rows *sql.Rows) ([]MergeCandidate, error) {
 	var out []MergeCandidate
@@ -511,8 +516,8 @@ func (r *SongMatchRepository) CountOpenMergeCandidates() (int, error) {
 }
 
 // FindOpenMergeCandidatesForSong は特定の楽曲に紐づく未処理候補を返す（楽曲詳細で出す用）。
-func (r *SongMatchRepository) FindOpenMergeCandidatesForSong(songID uuid.UUID) ([]MergeCandidate, error) {
-	rows, err := r.db.Query(mergeCandidateSelect+`
+func (r *SongMatchRepository) FindOpenMergeCandidatesForSong(songID uuid.UUID, access ViewerAccess) ([]MergeCandidate, error) {
+	rows, err := r.db.Query(mergeCandidateSelect(access)+`
 		WHERE c.status = 'open' AND (c.new_song_id = $1 OR c.existing_song_id = $1)
 		ORDER BY c.score DESC`, songID)
 	if err != nil {

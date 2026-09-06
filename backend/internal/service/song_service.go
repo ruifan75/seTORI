@@ -49,7 +49,7 @@ func (s *SongService) syncArtistMapping(song *models.Song) {
 }
 
 // GetAll は楽曲一覧を取得する。
-func (s *SongService) GetAll(page, limit int, search, sort, dir string) (*dto.SongListResponse, error) {
+func (s *SongService) GetAll(page, limit int, search, sort, dir string, access repository.ViewerAccess) (*dto.SongListResponse, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -58,7 +58,7 @@ func (s *SongService) GetAll(page, limit int, search, sort, dir string) (*dto.So
 	}
 	offset := (page - 1) * limit
 
-	songs, total, err := s.songRepo.FindAll(limit, offset, search, sort, dir)
+	songs, total, err := s.songRepo.FindAll(limit, offset, search, sort, dir, access)
 	if err != nil {
 		return nil, fmt.Errorf("get songs: %w", err)
 	}
@@ -68,7 +68,7 @@ func (s *SongService) GetAll(page, limit int, search, sort, dir string) (*dto.So
 	for i, song := range songs {
 		songIDs[i] = song.ID
 	}
-	counts, err := s.songRepo.GetPerformanceCounts(songIDs)
+	counts, err := s.songRepo.GetPerformanceCounts(songIDs, access)
 	if err != nil {
 		return nil, fmt.Errorf("get performance counts: %w", err)
 	}
@@ -102,7 +102,7 @@ func (s *SongService) GetAll(page, limit int, search, sort, dir string) (*dto.So
 }
 
 // GetByID は楽曲を 1 件取得する。
-func (s *SongService) GetByID(id uuid.UUID) (*dto.SongResponse, error) {
+func (s *SongService) GetByID(id uuid.UUID, access repository.ViewerAccess) (*dto.SongResponse, error) {
 	song, err := s.songRepo.FindByID(id)
 	if err != nil {
 		return nil, fmt.Errorf("get song: %w", err)
@@ -111,13 +111,13 @@ func (s *SongService) GetByID(id uuid.UUID) (*dto.SongResponse, error) {
 		return nil, nil
 	}
 
-	count, _ := s.songRepo.GetPerformanceCount(song.ID)
+	count, _ := s.songRepo.GetPerformanceCount(song.ID, access)
 	resp := s.toSongResponse(*song, count)
 	return &resp, nil
 }
 
 // GetPerformances は楽曲のすべての歌唱を取得する（逆引き）。
-func (s *SongService) GetPerformances(songID uuid.UUID, page, limit int) (*dto.SongPerformanceListResponse, error) {
+func (s *SongService) GetPerformances(songID uuid.UUID, page, limit int, access repository.ViewerAccess) (*dto.SongPerformanceListResponse, error) {
 	song, err := s.songRepo.FindByID(songID)
 	if err != nil {
 		return nil, fmt.Errorf("get song: %w", err)
@@ -135,7 +135,7 @@ func (s *SongService) GetPerformances(songID uuid.UUID, page, limit int) (*dto.S
 	offset := (page - 1) * limit
 
 	// 曲ページは発見面。秘匿された配信の歌唱は出さない。
-	performances, total, err := s.perfRepo.FindBySongID(songID, limit, offset, repository.PublicAccess)
+	performances, total, err := s.perfRepo.FindBySongID(songID, limit, offset, access)
 	if err != nil {
 		return nil, fmt.Errorf("get performances: %w", err)
 	}
@@ -146,7 +146,7 @@ func (s *SongService) GetPerformances(songID uuid.UUID, page, limit int) (*dto.S
 		perfResponses[i] = s.toSongPerformanceResponse(perf)
 	}
 
-	count, _ := s.songRepo.GetPerformanceCount(songID)
+	count, _ := s.songRepo.GetPerformanceCount(songID, access)
 	songResp := s.toSongResponse(*song, count)
 	totalPages := (total + limit - 1) / limit
 
@@ -219,7 +219,7 @@ func (s *SongService) Create(req *dto.CreateSongRequest) (*dto.SongResponse, err
 }
 
 // Update は楽曲を更新する。
-func (s *SongService) Update(id uuid.UUID, req *dto.UpdateSongRequest) (*dto.SongResponse, error) {
+func (s *SongService) Update(id uuid.UUID, req *dto.UpdateSongRequest, access repository.ViewerAccess) (*dto.SongResponse, error) {
 	song, err := s.songRepo.FindByID(id)
 	if err != nil {
 		return nil, fmt.Errorf("get song: %w", err)
@@ -269,7 +269,7 @@ func (s *SongService) Update(id uuid.UUID, req *dto.UpdateSongRequest) (*dto.Son
 		_ = s.songItunesRepo.DeleteBySongID(song.ID)
 	}
 
-	count, _ := s.songRepo.GetPerformanceCount(song.ID)
+	count, _ := s.songRepo.GetPerformanceCount(song.ID, access)
 	resp := s.toSongResponse(*song, count)
 	return &resp, nil
 }
@@ -391,7 +391,7 @@ func (s *SongService) MergeSongs(sourceSongID, targetSongID uuid.UUID) error {
 }
 
 // SearchSimilar は類似楽曲を検索する（AI 正規化候補用）。
-func (s *SongService) SearchSimilar(name string, limit int) ([]dto.SongResponse, error) {
+func (s *SongService) SearchSimilar(name string, limit int, access repository.ViewerAccess) ([]dto.SongResponse, error) {
 	songs, err := s.songRepo.SearchSimilar(name, limit)
 	if err != nil {
 		return nil, fmt.Errorf("search similar: %w", err)
@@ -399,7 +399,7 @@ func (s *SongService) SearchSimilar(name string, limit int) ([]dto.SongResponse,
 
 	responses := make([]dto.SongResponse, len(songs))
 	for i, song := range songs {
-		count, _ := s.songRepo.GetPerformanceCount(song.ID)
+		count, _ := s.songRepo.GetPerformanceCount(song.ID, access)
 		responses[i] = s.toSongResponse(song, count)
 	}
 	return responses, nil

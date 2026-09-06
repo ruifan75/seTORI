@@ -171,13 +171,13 @@ func (r *TagRepository) SearchStreamTags(query string, limit int) ([]TagWithCoun
 }
 
 // SearchPerformanceTags は id / 表示名の部分一致で演出タグを検索し、使用件数付きで返す。
-func (r *TagRepository) SearchPerformanceTags(query string, limit int) ([]TagWithCount, error) {
+func (r *TagRepository) SearchPerformanceTags(query string, limit int, access ViewerAccess) ([]TagWithCount, error) {
 	rows, err := r.db.Query(`
 		SELECT t.id, t.display_name, COALESCE(t.color, ''),
 		       (SELECT COUNT(*) FROM performance_performance_tags ppt
 		        JOIN performances p ON p.id = ppt.performance_id
 		        JOIN streams s ON s.id = p.stream_id
-		        WHERE ppt.tag_id = t.id AND s.is_hidden = FALSE AND `+NotRestricted("s")+`) AS cnt
+		        WHERE ppt.tag_id = t.id AND `+DiscoverableFor("s", access)+`) AS cnt
 		FROM performance_tags t
 		WHERE t.id ILIKE '%' || $1 || '%' OR t.display_name ILIKE '%' || $1 || '%'
 		ORDER BY cnt DESC, t.id

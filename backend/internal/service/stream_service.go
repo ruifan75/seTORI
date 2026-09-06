@@ -159,14 +159,14 @@ func (s *StreamService) GetByTag(tagID string, page, limit int, isEditor bool) (
 }
 
 // SearchStreams は非表示を含め、配信元・参加者・ボーカル・タグを組み合わせて配信を検索する。
-func (s *StreamService) SearchStreams(filters models.StreamSearchFilters, page, limit int, isEditor bool) (*dto.StreamListResponse, error) {
+func (s *StreamService) SearchStreams(filters models.StreamSearchFilters, page, limit int, isEditor bool, access repository.ViewerAccess) (*dto.StreamListResponse, error) {
 	if page < 1 {
 		page = 1
 	}
 	if limit < 1 || limit > 100 {
 		limit = 20
 	}
-	streams, total, err := s.streamRepo.SearchStreams(filters, limit, (page-1)*limit)
+	streams, total, err := s.streamRepo.SearchStreams(filters, limit, (page-1)*limit, access)
 	if err != nil {
 		return nil, fmt.Errorf("search streams: %w", err)
 	}
@@ -174,7 +174,7 @@ func (s *StreamService) SearchStreams(filters models.StreamSearchFilters, page, 
 }
 
 // GetPerformancesByTag は指定の演出タグが付いた演出一覧を返す（タグ検索ページ用）。
-func (s *StreamService) GetPerformancesByTag(tagID string, page, limit int) (*dto.TagPerformanceListResponse, error) {
+func (s *StreamService) GetPerformancesByTag(tagID string, page, limit int, access repository.ViewerAccess) (*dto.TagPerformanceListResponse, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -184,7 +184,7 @@ func (s *StreamService) GetPerformancesByTag(tagID string, page, limit int) (*dt
 	offset := (page - 1) * limit
 
 	// タグページは発見面。秘匿された配信の歌唱は出さない。
-	performances, total, err := s.perfRepo.FindByTagID(tagID, limit, offset, repository.PublicAccess)
+	performances, total, err := s.perfRepo.FindByTagID(tagID, limit, offset, access)
 	if err != nil {
 		return nil, fmt.Errorf("get performances by tag: %w", err)
 	}
@@ -252,7 +252,7 @@ func (s *StreamService) UnmarkNotSinging(streamID string) error {
 // GetByID は配信の詳細を返す。includeAnalysis は解析結果を載せるか
 // （toStreamResponse のコメント参照。呼び出し側が権限を見て決める）。
 func (s *StreamService) GetByID(id string, access repository.ViewerAccess) (*dto.StreamDetailResponse, error) {
-	view := editorView(access == repository.EditorAccess)
+	view := editorView(access == repository.RestrictedView)
 	stream, err := s.streamRepo.FindByID(id)
 	if err != nil {
 		return nil, fmt.Errorf("get stream: %w", err)
@@ -648,7 +648,7 @@ func (s *StreamService) Update(id string, req *dto.UpdateStreamRequest) (*dto.St
 
 	// 更新後のデータを返す。Update は content:edit の経路なので解析結果も秘匿された
 	// 歌唱も載せる（編集画面がそのまま使う）。
-	return s.GetByID(id, repository.EditorAccess)
+	return s.GetByID(id, repository.RestrictedView)
 }
 
 // ========== ホーム（ランダム再生） ==========
@@ -670,12 +670,12 @@ func (s *StreamService) ComposePerformanceList(perfs []repository.PerformanceWit
 }
 
 // GetRandomPerformances は既出曲を除外した、曲単位で重複しないランダムな歌唱一覧を返す。
-func (s *StreamService) GetRandomPerformances(limit int, excludedSongIDs []string) (*dto.PerformanceListResponse, error) {
+func (s *StreamService) GetRandomPerformances(limit int, excludedSongIDs []string, access repository.ViewerAccess) (*dto.PerformanceListResponse, error) {
 	if limit < 1 || limit > 100 {
 		limit = 50
 	}
 	// ランダム再生は発見面。秘匿された配信の歌唱は出さない。
-	perfs, err := s.perfRepo.FindRandom(limit, excludedSongIDs, repository.PublicAccess)
+	perfs, err := s.perfRepo.FindRandom(limit, excludedSongIDs, access)
 	if err != nil {
 		return nil, fmt.Errorf("get random performances: %w", err)
 	}

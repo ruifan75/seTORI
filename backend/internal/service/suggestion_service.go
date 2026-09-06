@@ -82,17 +82,19 @@ func (e *ConflictError) Error() string {
 // actorAccess は投稿者の立場を歌唱の読み取り単位へ写す。
 //
 // **提案の投稿と自分の提案一覧はログインだけで通る**（権限は要らない）ので、
-// ここを EditorAccess で固定すると、権限の無い利用者が秘匿された配信の
+// ここを RestrictedView で固定すると、権限の無い利用者が秘匿された配信の
 // 曲名・時刻を提案の応答から読み出せる（実測で確認した）。
 func actorAccess(actor SuggestionActor) repository.ViewerAccess {
 	if actor.System {
-		return repository.EditorAccess // seTORI 自身が積む審査待ち
+		return repository.RestrictedView // seTORI 自身が積む審査待ち
 	}
 	if actor.User != nil {
-		for _, p := range actor.User.Permissions {
-			if p == "*" || p == auth.PermContentEdit {
-				return repository.EditorAccess
-			}
+		// **`restricted:view` で判定する。** `content:edit` では通さない ──
+		// 公開してよいかは配信者に訊いて決めることで、編集作業の一部ではない。
+		// ここを content:edit のままにすると、秘匿を見せない方針にした編集者が
+		// 提案の応答から曲名・時刻を読めてしまう。
+		if auth.HasPermission(actor.User.Permissions, auth.PermRestrictedView) {
+			return repository.RestrictedView
 		}
 	}
 	return repository.PublicAccess
@@ -506,7 +508,7 @@ func reviewerLabel(u *models.User) string {
 type SongSwapper interface {
 	// SongLabelOf は歌唱の現在の曲名と、対象の表示ラベルを返す。歌唱が無ければ空文字。
 	// access は読む側の立場。**field 提案だけでなく perf.meta（曲の差し替え）も塞ぐ**
-	// ── ここを EditorAccess で固定すると、秘匿された歌唱の UUID を知っている
+	// ── ここを RestrictedView で固定すると、秘匿された歌唱の UUID を知っている
 	// 非編集者が perf.meta を投稿し、自分の提案一覧から曲名と配信タイトルを読める。
 	SongLabelOf(performanceID uuid.UUID, access repository.ViewerAccess) (songName string, label string, err error)
 	// ApplySongSwap は歌唱の曲を差し替える（未登録の曲名なら曲も作る）。
@@ -595,7 +597,7 @@ func (s *SuggestionService) approveSongSwap(sug *models.EditSuggestion, reviewer
 	}
 
 	if !force {
-		currentSong, label, err := s.swapper.SongLabelOf(sug.TargetID, repository.EditorAccess)
+		currentSong, label, err := s.swapper.SongLabelOf(sug.TargetID, repository.RestrictedView)
 		if err != nil {
 			return err
 		}
@@ -714,7 +716,7 @@ func (s *SuggestionService) tryAutoApply(targetType string, targetID uuid.UUID) 
 	if !ok {
 		return nil
 	}
-	current, _, err := editor.GetEditableFields(targetID, repository.EditorAccess)
+	current, _, err := editor.GetEditableFields(targetID, repository.RestrictedView)
 	if err != nil || current == nil {
 		return err
 	}
@@ -856,7 +858,7 @@ func (s *SuggestionService) List(status, kind string, page, limit int) (*dto.Sug
 	}
 	resp := make([]dto.SuggestionResponse, len(items))
 	for i, it := range items {
-		resp[i] = s.toSuggestionResponse(it, repository.EditorAccess)
+		resp[i] = s.toSuggestionResponse(it, repository.RestrictedView)
 	}
 	return &dto.SuggestionListResponse{
 		Suggestions: resp,
@@ -915,12 +917,12 @@ func (s *SuggestionService) ListGrouped(status, kind string, page, limit int) (*
 	for _, g := range groups {
 		items := make([]dto.SuggestionResponse, len(g.Suggestions))
 		for i, it := range g.Suggestions {
-			items[i] = s.toSuggestionResponse(it, repository.EditorAccess)
+			items[i] = s.toSuggestionResponse(it, repository.RestrictedView)
 		}
 		// 現在値はグループで1回だけ引く（提案ごとに引くと同じ対象を何度も読むことになる）
 		current := map[string]string{}
 		if editor, ok := s.editors[g.TargetType]; ok {
-			if fields, _, err := editor.GetEditableFields(g.TargetID, repository.EditorAccess); err == nil && fields != nil {
+			if fields, _, err := editor.GetEditableFields(g.TargetID, repository.RestrictedView); err == nil && fields != nil {
 				current = fields
 			}
 		}
@@ -992,7 +994,7 @@ func (s *SuggestionService) Merge(req *dto.MergeSuggestionsRequest, reviewer *mo
 		return nil, invalid("反映する値がありません")
 	}
 
-	current, _, err := editor.GetEditableFields(targetID, repository.EditorAccess)
+	current, _, err := editor.GetEditableFields(targetID, repository.RestrictedView)
 	if err != nil {
 		return nil, err
 	}
@@ -1175,7 +1177,7 @@ func (s *SuggestionService) ApproveWithEdits(id uuid.UUID, reviewer *models.User
 
 	if !force {
 		// 承認は content:edit の経路なので、秘匿された対象も現在値を読む。
-		conflicts, err := s.detectConflicts(editor, sug, repository.EditorAccess)
+		conflicts, err := s.detectConflicts(editor, sug, repository.RestrictedView)
 		if err != nil {
 			return err
 		}

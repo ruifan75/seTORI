@@ -187,7 +187,7 @@ func (s *SingerService) Search(query string, limit int) ([]dto.SingerResponse, e
 
 // GetByID は歌手の詳細を取得する。
 // includeOperational を立てると、会限の方針など運用の内部情報も載せる（content:edit 用）。
-func (s *SingerService) GetByID(id string, includeOperational bool) (*dto.SingerDetailResponse, error) {
+func (s *SingerService) GetByID(id string, includeOperational bool, access repository.ViewerAccess) (*dto.SingerDetailResponse, error) {
 	singer, err := s.singerRepo.FindByID(id)
 	if err != nil {
 		return nil, fmt.Errorf("get singer: %w", err)
@@ -198,7 +198,7 @@ func (s *SingerService) GetByID(id string, includeOperational bool) (*dto.Singer
 
 	// 統計データを取得する
 	streamCount, _ := s.singerRepo.GetStreamCount(id)
-	performanceCount, _ := s.singerRepo.GetPerformanceCount(id)
+	performanceCount, _ := s.singerRepo.GetPerformanceCount(id, access)
 
 	// **本数もここで引く。** 詳細だけ counts を渡さずにいたため、方針を設定する
 	// Picker の表示条件（会限を 1 本以上持つ）が常に偽になり、画面から設定できなかった。
@@ -286,7 +286,7 @@ func (s *SingerService) GetStreams(singerID string, page, limit int, processedFi
 }
 
 // GetPerformances は歌手のすべての歌唱記録を取得する。
-func (s *SingerService) GetPerformances(singerID string, page, limit int, sort, dir string) (*dto.SingerPerformanceListResponse, error) {
+func (s *SingerService) GetPerformances(singerID string, page, limit int, sort, dir string, access repository.ViewerAccess) (*dto.SingerPerformanceListResponse, error) {
 	offset := (page - 1) * limit
 
 	// 先に歌手情報を取得する
@@ -299,7 +299,7 @@ func (s *SingerService) GetPerformances(singerID string, page, limit int, sort, 
 	}
 
 	// 歌手ページは発見面。秘匿された配信の歌唱は出さない。
-	performances, total, err := s.perfRepo.FindBySingerID(singerID, limit, offset, sort, dir, repository.PublicAccess)
+	performances, total, err := s.perfRepo.FindBySingerID(singerID, limit, offset, sort, dir, access)
 	if err != nil {
 		return nil, fmt.Errorf("get performances: %w", err)
 	}
