@@ -1763,6 +1763,14 @@ func (r *Router) handleDeleteSong(w http.ResponseWriter, req *http.Request) {
 
 	// 楽曲を削除する
 	if err := r.songService.Delete(id); err != nil {
+		// **歌唱が残っているのは 500 ではない。** 押した人の操作が
+		// 「今はできない」だけなので、理由が伝わる形で返す
+		// ── 画面に 0 件と出ていても秘匿・非表示の歌唱が残っていることがあり、
+		// これまでは Postgres の FK エラーがそのまま 500 になっていた。
+		if errors.Is(err, service.ErrSongHasPerformances) {
+			respondError(w, http.StatusConflict, err.Error())
+			return
+		}
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

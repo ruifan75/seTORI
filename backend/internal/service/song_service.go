@@ -2,6 +2,7 @@ package service
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -274,7 +275,25 @@ func (s *SongService) Update(id uuid.UUID, req *dto.UpdateSongRequest) (*dto.Son
 }
 
 // Delete は楽曲を削除する。
+// ErrSongHasPerformances は歌唱が残っている楽曲を消そうとしたこと。
+//
+// DB の `ON DELETE RESTRICT` でも止まるが、それは Postgres のエラーとして
+// 出てくるだけで、押した人には理由が分からない。
+var ErrSongHasPerformances = errors.New("この楽曲には歌唱が登録されているため削除できません")
+
+// Delete は楽曲を削除する。歌唱が 1 件でも残っていれば拒否する。
+//
+// **判定に濾さない件数を使う。** 画面の歌唱一覧は非表示・秘匿を落とすので、
+// 「0 件」に見えても参照は残っていることがある ── 実際、会限配信の歌唱を
+// 作ったあとの楽曲がこの状態になる。**見えているものだけで削除を判断させない。**
 func (s *SongService) Delete(id uuid.UUID) error {
+	has, err := s.songRepo.HasAnyPerformance(id)
+	if err != nil {
+		return err
+	}
+	if has {
+		return ErrSongHasPerformances
+	}
 	return s.songRepo.Delete(id)
 }
 
