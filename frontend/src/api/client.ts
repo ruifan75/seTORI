@@ -539,6 +539,22 @@ export const commentApi = {
   // name は画面に出ていた曲名で、保存する行がズレていないかの確認に使う。
 };
 
+// uploadConfig は FormData を送るときに**必ず**付ける。
+//
+// **既定の `Content-Type: application/json`（このファイルの先頭）を上書きしないと、
+// axios が FormData を JSON へ変換して送る。** 1.x の `transformRequest` は
+//
+//	const hasJSONContentType = contentType.indexOf('application/json') > -1;
+//	return hasJSONContentType ? JSON.stringify(formDataToJSON(data)) : data;
+//
+// なので、既定のままだと**ファイルの中身が消えたリクエスト**になり、
+// サーバーは body を読む前に弾く（本番実測：POST が 4ms で 400）。
+//
+// ここで指定する値に boundary は要らない。axios のブラウザ用アダプタが
+// FormData を見て Content-Type を外し、ブラウザが boundary つきで付け直す。
+// **要るのは「application/json ではない」と言うことだけ。**
+const uploadConfig = { headers: { 'Content-Type': 'multipart/form-data' } };
+
 // ========== 手動での取り込み API（会限配信のため） ==========
 //
 // **会限配信は本番から入力源を取れない。** コメントは YouTube Data API が 403
@@ -550,7 +566,7 @@ export const manualImportApi = {
   importInfoJson: async (videoId: string, file: File): Promise<InfoJsonImportResult> => {
     const form = new FormData();
     form.append('file', file);
-    const { data } = await api.post(`/api/streams/${videoId}/import/info-json`, form);
+    const { data } = await api.post(`/api/streams/${videoId}/import/info-json`, form, uploadConfig);
     return data;
   },
 
@@ -560,7 +576,7 @@ export const manualImportApi = {
   importLiveChat: async (videoId: string, file: File): Promise<LiveChatImportResult> => {
     const form = new FormData();
     form.append('file', file);
-    const { data } = await api.post(`/api/streams/${videoId}/import/live-chat`, form);
+    const { data } = await api.post(`/api/streams/${videoId}/import/live-chat`, form, uploadConfig);
     return data;
   },
 
