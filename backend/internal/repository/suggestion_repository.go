@@ -60,7 +60,7 @@ func (r *SuggestionRepository) Create(s *models.EditSuggestion) (*models.EditSug
 // 並びは COALESCE(reviewed_at, created_at) の降順。処理済みのタブで見たいのは
 // 「いつ投稿されたか」ではなく「いつ処理したか」で、直前に承認したものを
 // 探しに来るため。未処理は reviewed_at が無いので投稿順のまま。
-func (r *SuggestionRepository) List(status, kind string, limit, offset int) ([]models.EditSuggestion, int, error) {
+func (r *SuggestionRepository) List(status, kind string, limit, offset int, access ViewerAccess) ([]models.EditSuggestion, int, error) {
 	var conds []string
 	args := []any{}
 	if status != "" {
@@ -71,10 +71,13 @@ func (r *SuggestionRepository) List(status, kind string, limit, offset int) ([]m
 		args = append(args, kind)
 		conds = append(conds, fmt.Sprintf("kind = $%d", len(args)))
 	}
-	where := ""
+	where := "WHERE TRUE"
 	if len(conds) > 0 {
 		where = "WHERE " + strings.Join(conds, " AND ")
 	}
+	// **レビュー一覧も濾す。** 対象が秘匿の提案は、保存済みの before/after/payload に
+	// 曲名も時刻もそのまま入っている ── 現在値だけ濾しても中身は残る。
+	where += restrictSuggestionsClause(access)
 
 	var total int
 	if err := r.db.QueryRow("SELECT COUNT(*) FROM edit_suggestions "+where, args...).Scan(&total); err != nil {
@@ -122,7 +125,7 @@ type TargetGroup struct {
 //
 // 返るグループは「最も新しい提案が新しい順」、グループ内は投稿の古い順。
 // kind が空でなければその種別だけを返す（レビュー画面の種別の絞り込み用）。
-func (r *SuggestionRepository) ListGroupedByTarget(status, kind string, limit, offset int) ([]TargetGroup, int, error) {
+func (r *SuggestionRepository) ListGroupedByTarget(status, kind string, limit, offset int, access ViewerAccess) ([]TargetGroup, int, error) {
 	var conds []string
 	args := []any{}
 	if status != "" {
@@ -133,10 +136,12 @@ func (r *SuggestionRepository) ListGroupedByTarget(status, kind string, limit, o
 		args = append(args, kind)
 		conds = append(conds, fmt.Sprintf("kind = $%d", len(args)))
 	}
-	where := ""
+	where := "WHERE TRUE"
 	if len(conds) > 0 {
 		where = "WHERE " + strings.Join(conds, " AND ")
 	}
+	// グループ一覧も同じ条件で濾す（COUNT も同じ where を使うので件数も合う）。
+	where += restrictSuggestionsClause(access)
 
 	// グループ総数（＝対象の種類数）
 	var total int
@@ -250,6 +255,38 @@ func (r *SuggestionRepository) ListGroupedByTarget(status, kind string, limit, o
 //
 // **一覧と COUNT の両方に同じ条件を掛ける。** DTO の側で落とすと、件数とページングが
 // 合わなくなり、伏せたはずの提案が「何件あるか」だけ残る。
+// restrictSuggestionsClause は「対象が秘匿でない提案だけ」に絞る条件を返す。
+//
+// **提案そのものを落とす。** DTO で中身だけ落とすと「何件伏せたか」が件数から
+// 漏れるうえ、ページングも合わなくなる。**一覧と COUNT の両方に同じ条件を使うこと。**
+//
+// 保存済みの提案は投稿時の値を非正規化して持つ（before / after / payload /
+// target_label）ので、**対象が後から秘匿になっても中身はそのまま残る**。
+// 現在値を濾すだけでは足りない ── レビュー一覧はそこを見落としていた。
+func restrictSuggestionsClause(access ViewerAccess) string {
+	if access == RestrictedView {
+		return ""
+	}
+	return `
+		  AND (
+			CASE edit_suggestions.target_type
+			WHEN 'performance' THEN EXISTS (
+				SELECT 1 FROM performances p JOIN streams st ON st.id = p.stream_id
+				WHERE p.id = edit_suggestions.target_id AND ` + NotRestricted("st") + `
+			)
+			WHEN 'stream' THEN EXISTS (
+				SELECT 1 FROM streams st
+				WHERE st.id = edit_suggestions.target_key AND ` + NotRestricted("st") + `
+			)
+			-- 配信に紐付かない対象は秘匿の対象外。**明示した種類だけ通す** ──
+			-- ELSE TRUE にすると、将来知らない target_type が増えたときに公開側へ倒れる。
+			WHEN 'song' THEN TRUE
+			WHEN 'artist' THEN TRUE
+			ELSE FALSE
+			END
+		  )`
+}
+
 func (r *SuggestionRepository) ListByCreator(userID uuid.UUID, status string, limit, offset int, access ViewerAccess) ([]models.EditSuggestion, int, error) {
 	where := "WHERE created_by = $1"
 	args := []any{userID}
@@ -272,26 +309,7 @@ func (r *SuggestionRepository) ListByCreator(userID uuid.UUID, status string, li
 	// 対象の辿り方は 2 通り：
 	//   target_id  … performance を指す（field / perf.meta）
 	//   target_key … 配信の動画 ID（perf.missing。UUID を持たないため target_type='stream'）
-	if access == PublicAccess {
-		where += `
-		  AND (
-			CASE edit_suggestions.target_type
-			WHEN 'performance' THEN EXISTS (
-				SELECT 1 FROM performances p JOIN streams st ON st.id = p.stream_id
-				WHERE p.id = edit_suggestions.target_id AND ` + NotRestricted("st") + `
-			)
-			WHEN 'stream' THEN EXISTS (
-				SELECT 1 FROM streams st
-				WHERE st.id = edit_suggestions.target_key AND ` + NotRestricted("st") + `
-			)
-			-- 配信に紐付かない対象は秘匿の対象外。**明示した種類だけ通す** ──
-			-- ELSE TRUE にすると、将来知らない target_type が増えたときに公開側へ倒れる。
-			WHEN 'song' THEN TRUE
-			WHEN 'artist' THEN TRUE
-			ELSE FALSE
-			END
-		  )`
-	}
+	where += restrictSuggestionsClause(access)
 
 	var total int
 	if err := r.db.QueryRow("SELECT COUNT(*) FROM edit_suggestions "+where, args...).Scan(&total); err != nil {

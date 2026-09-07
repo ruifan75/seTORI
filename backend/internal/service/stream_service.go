@@ -260,13 +260,27 @@ func (s *StreamService) UnmarkNotSinging(streamID string) error {
 // 権限を分けた時点で**公開配信を編集する editor から編集用の情報が消えた**
 // ── 処理済みの配信が未完了に見える、という形で表面化する。
 func (s *StreamService) GetByID(id string, isEditor bool, access repository.ViewerAccess) (*dto.StreamDetailResponse, error) {
-	view := editorView(isEditor)
 	stream, err := s.streamRepo.FindByID(id)
 	if err != nil {
 		return nil, fmt.Errorf("get stream: %w", err)
 	}
 	if stream == nil {
 		return nil, nil
+	}
+
+	// **運用フラグと解析内容で判定が違う。**
+	//
+	//	Operational（is_processed 等） … `content:edit` があれば公開・秘匿を問わず出す。
+	//	                                 編集作業そのものに要る
+	//	Analysis（コメント・章節・Holodex のタイムライン） … 解析の *元データ* で、
+	//	                                 曲名も時刻もそのまま入っている。**秘匿配信では
+	//	                                 `restricted:view` も要る** ── ここを editor だけで
+	//	                                 出すと、歌唱を濾しても同じ内容がタイムラインから読める
+	//
+	// 直前の修正で `editorView(isEditor)` に戻したとき、この違いを潰していた。
+	view := streamView{
+		Operational: isEditor,
+		Analysis:    isEditor && (!stream.IsRestrictedEffective || access == repository.RestrictedView),
 	}
 
 	tags, _ := s.streamRepo.GetTags(stream.ID)

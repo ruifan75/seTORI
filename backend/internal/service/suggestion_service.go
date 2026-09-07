@@ -855,7 +855,7 @@ func (s *SuggestionService) List(status, kind string, page, limit int, access re
 	if limit < 1 || limit > 100 {
 		limit = 20
 	}
-	items, total, err := s.repo.List(status, kind, limit, (page-1)*limit)
+	items, total, err := s.repo.List(status, kind, limit, (page-1)*limit, access)
 	if err != nil {
 		return nil, err
 	}
@@ -911,7 +911,7 @@ func (s *SuggestionService) ListGrouped(status, kind string, page, limit int, ac
 	if limit < 1 || limit > 100 {
 		limit = 20
 	}
-	groups, total, err := s.repo.ListGroupedByTarget(status, kind, limit, (page-1)*limit)
+	groups, total, err := s.repo.ListGroupedByTarget(status, kind, limit, (page-1)*limit, access)
 	if err != nil {
 		return nil, err
 	}

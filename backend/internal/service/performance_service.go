@@ -236,12 +236,17 @@ func (s *PerformanceService) GetByID(id uuid.UUID, access repository.ViewerAcces
 // 再生中の「開始/終了がずれている」報告や修正提案の反映は、他の曲を巻き込まずに
 // 1件だけ直す必要があるため、こちらを使う。performance ID は変えない
 // （プレイリストが performance_id を参照しているため）。
-// UpdatePerformance は歌唱を部分更新し、**要求者へ返してよい形**で読み直す。
+// UpdatePerformance は歌唱を部分更新する。
 //
-// **内部の読み直しと、要求者へ返す内容は別**（StreamService.Update と同じ）。
-// 固定で全部見て返していたので、更新の応答から秘匿の歌唱が読めた。
+// **可否は書き込む前に決める。** 読み直しのときだけ access を見ていたので、
+// 見えない歌唱を更新すると「保存は成功したのに 404」になっていた ──
+// 利用者には失敗と映るが DB は変わっている、という一番たちの悪い形。
+//
+// 見えないものは**触れない**（404）。更新の応答も同じ access で読み直すので、
+// ここを通れば必ず読み直せる。
 func (s *PerformanceService) UpdatePerformance(id uuid.UUID, req *dto.UpdatePerformanceRequest, access repository.ViewerAccess) (*repository.PerformanceWithDetails, error) {
-	cur, err := s.perfRepo.FindByID(id, repository.RestrictedView)
+	// **要求者の視界で引く。** 見えない歌唱はここで 404 になり、書き込みへ進まない。
+	cur, err := s.perfRepo.FindByID(id, access)
 	if err != nil {
 		return nil, fmt.Errorf("find performance: %w", err)
 	}
