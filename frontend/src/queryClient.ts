@@ -39,8 +39,13 @@ export function resetQueryCacheForAuthChange() {
 
 // ========== 権限が変わったときに捨てるもの ==========
 
-// currentViewerID は「いま誰として見ているか」。**キャッシュの外へコピーした
+// currentViewerKey は「いま何が見える状態か」。**キャッシュの外へコピーした
 // データを捨てる判断に使う。**
+//
+// **利用者 ID だけでは足りない。** 同じ人でも権限が変わることがある
+// （`restricted:view` を外された、ロールを下げられた、など）ので、
+// ID で比べると「再認証したのに秘匿データが残る」。見えるものが変わったかを
+// 判断したいのだから、**鍵は権限まで含める**。
 //
 // query cache は `resetQueries()` で取り直せるが、**コピーされたものには届かない**
 // ── 編集フォーム、再生キュー、ポップアップ、通知。これらは自分で捨てるしかない。
@@ -48,7 +53,7 @@ export function resetQueryCacheForAuthChange() {
 // 非同期処理は「始めたときの利用者」を覚えておき、**完了時に照合する**こと。
 // 応答が返るまでの間にログアウトすると、捨てたはずのデータが復活する
 // （実測：おすすめ全曲再生の補充リクエストで再現）。
-let currentViewerID: string | null = null;
+let currentViewerKey: string | null = null;
 
 // ViewerChangeListener は利用者が変わったときに呼ばれる。
 type ViewerChangeListener = () => void;
@@ -61,23 +66,30 @@ export function onViewerChange(fn: ViewerChangeListener): () => void {
   return () => viewerChangeListeners.delete(fn);
 }
 
-// viewerID は現在の利用者。非同期処理の前後で比べる。
+// viewerID は現在の視界の鍵。非同期処理の前後で比べる。
 export function viewerID(): string | null {
-  return currentViewerID;
+  return currentViewerKey;
 }
 
-// sameViewer は「始めたときと同じ利用者か」。**非同期の完了時に必ず確かめる。**
+// sameViewer は「始めたときと同じ視界か」。**非同期の完了時に必ず確かめる。**
 export function sameViewer(startedAs: string | null): boolean {
-  return currentViewerID === startedAs;
+  return currentViewerKey === startedAs;
+}
+
+// viewerKey は利用者と権限から鍵を作る。**権限を含めるのが要点**
+// （同じ人の権限が減ったときも「変わった」と判断するため）。
+export function viewerKey(userID: string | null | undefined, permissions: string[] | undefined): string | null {
+  if (!userID) return null;
+  return userID + '|' + [...(permissions ?? [])].sort().join(',');
 }
 
 // applyViewerChange は利用者が変わったときの後始末を 1 か所で行う。
 //
 // **散らばらせないこと。** 以前はログアウト時にしか捨てていなかったので、
 // ログイン（利用者の切り替え）・非同期の完了・ポップアップ・通知が全部漏れた。
-export function applyViewerChange(nextViewerID: string | null) {
-  if (currentViewerID === nextViewerID) return;
-  currentViewerID = nextViewerID;
+export function applyViewerChange(nextKey: string | null) {
+  if (currentViewerKey === nextKey) return;
+  currentViewerKey = nextKey;
   // 表示中も含めて初期状態へ戻し、購読中のものは取り直させる。
   void queryClient.resetQueries();
   for (const fn of viewerChangeListeners) fn();
