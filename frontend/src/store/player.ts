@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { onViewerChange } from '../queryClient';
 import type { ArtistReference, Singer } from '../api/types';
 
 // 再生キューの1トラック＝1歌唱記録（配信内の start〜end 区間）
@@ -193,4 +194,14 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   setQueueOpen: (open) => set({ queueOpen: open }),
   // プレイヤーごと閉じるので、開きっぱなしの報告ダイアログも畳む
   clear: () => set({ queue: [], index: 0, playing: false, queueOpen: false, editing: null }),
-}));
+}))
+
+// **利用者が変わったらキューを捨てる。** キューは曲名・歌手・配信タイトルを
+// **複製して**持つので、query を取り直しても残る。
+//
+// 代償：セッションが切れると再生も止まる。キューが秘匿を含むかで判断したい
+// ところだが、キューは秘匿かどうかを持っていない ── 持たせると判定の二重化に
+// なる（`EffectiveRestrictedExpr` を Go 側にも書いて食い違った前例がある）。
+// 止まるほうを選ぶ（キューはリロードでも消えるので、期待値としても近い）。
+onViewerChange(() => usePlayerStore.getState().clear());
+;

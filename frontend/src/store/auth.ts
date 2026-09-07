@@ -2,8 +2,7 @@ import { create } from 'zustand';
 import { authApi, setAuthToken, setUnauthorizedHandler } from '../api/client';
 import type { AuthUser } from '../api/types';
 
-import { resetQueryCacheForAuthChange } from '../queryClient';
-import { usePlayerStore } from './player';
+import { applyViewerChange } from '../queryClient';
 
 const TOKEN_KEY = 'setori_token';
 
@@ -40,18 +39,7 @@ function clearLocalSession(set: (partial: Partial<AuthState>) => void) {
   localStorage.removeItem(TOKEN_KEY);
   setAuthToken(null);
   set({ token: null, user: null, status: 'anonymous' });
-  // **キャッシュも捨てる。** 応答の中身は権限で変わる（秘匿された配信の歌唱は
-  // `restricted:view` を持つ人にしか返らない）ので、権限が変わったのに
-  // 前の結果が残っていると、ログアウト後も admin の視界が見える。
-  resetQueryCacheForAuthChange();
-  // **キャッシュの外へコピーされたものも捨てる。** 再生キューは曲名・歌手・
-  // 配信タイトルを**複製して**持つので、query を取り直しても残る。
-  //
-  // 代償：セッションが切れると再生も止まる。公開の曲だけを聴いていた人には
-  // 損なので、**キューが秘匿を含むかで判断したい**ところだが、キューは
-  // 秘匿かどうかを持っていない ── 持たせると今度はそれが判定の二重化になる。
-  // 止まるほうを選ぶ（キューはリロードでも消えるので、期待値としても近い）。
-  usePlayerStore.getState().clear();
+  applyViewerChange(null);
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -64,9 +52,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     localStorage.setItem(TOKEN_KEY, token);
     setAuthToken(token);
     set({ token, user, status: 'authenticated' });
-    // **ログインでも捨てる。** 匿名で見ていた結果（秘匿を落とした 0 件など）が
-    // 残っていると、権限を得たのに前の視界のままになる。
-    resetQueryCacheForAuthChange();
+    applyViewerChange(user.id);
   },
 
   loginWithOAuthCode: async (code) => {
@@ -74,7 +60,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     localStorage.setItem(TOKEN_KEY, token);
     setAuthToken(token);
     set({ token, user, status: 'authenticated' });
-    resetQueryCacheForAuthChange();
+    applyViewerChange(user.id);
   },
 
   logout: async () => {
@@ -97,9 +83,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const user = await authApi.me();
       set({ token, user, status: 'authenticated' });
-      // 起動時の復元。`status: 'loading'` の間に匿名で投げた query が
-      // 残っていることがある。
-      resetQueryCacheForAuthChange();
+      applyViewerChange(user.id);
     } catch {
       clearLocalSession(set);
     }

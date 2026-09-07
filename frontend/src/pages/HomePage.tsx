@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { homeApi, presetPlaylistApi, songApi, tagApi } from '../api/client';
+import { sameViewer, viewerID } from '../queryClient';
 import type { Performance, PresetPlaylist } from '../api/types';
 import Loading from '../components/ui/Loading';
 import Tag from '../components/ui/Tag';
@@ -228,6 +229,10 @@ export default function HomePage() {
   const playAllRecommendations = async () => {
     if (reco.length === 0 || isPreparingRecommendations) return;
     setIsPreparingRecommendations(true);
+    // **始めたときの利用者を覚えておく。** 補充リクエストの応答が返るまでの間に
+    // ログアウトすると、捨てたはずの秘匿曲がキューへ再投入される ──
+    // 破棄は「今」を捨てるだけで、**飛んでいる非同期処理までは止められない**。
+    const startedAs = viewerID();
     let playbackRecommendations = reco;
     try {
       if (playbackRecommendations.length < RECOMMENDATION_PLAYBACK_MIN) {
@@ -237,6 +242,7 @@ export default function HomePage() {
         );
         playbackRecommendations = uniqueSongs([...playbackRecommendations, ...supplement.performances]);
       }
+      if (!sameViewer(startedAs)) return; // 待っている間に利用者が変わった
       usePlayerStore.getState().playTracks(toTracks(playbackRecommendations));
       if (playbackRecommendations.length < RECOMMENDATION_PLAYBACK_MIN) {
         showToast(`再生可能なおすすめ${playbackRecommendations.length}曲を読み込みました`, 'info');

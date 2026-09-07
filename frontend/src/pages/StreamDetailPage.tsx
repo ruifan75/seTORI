@@ -10,6 +10,7 @@ import Loading from '../components/ui/Loading';
 import Tag from '../components/ui/Tag';
 import { useToast } from '../components/ui/ToastContext';
 import { useAuthStore, hasPermission, PERM } from '../store/auth';
+import { onViewerChange } from '../queryClient';
 import { usePlayerStore, type PlayerTrack } from '../store/player';
 import YoutubePlayer from '../components/YoutubePlayer';
 import UnplayableNotice, { type NoticeKind } from '../components/UnplayableNotice';
@@ -214,23 +215,24 @@ export default function StreamDetailPage() {
     if (isEditing) usePlayerStore.getState().setPlaying(false);
   }, [isEditing]);
 
-  // **利用者が変わったら編集状態を捨てる。**
+  // **利用者が変わったら、キャッシュの外へコピーしたものを全部捨てる。**
   //
-  // 歌唱は `editableSongs` へ**コピー**されるので、そこから先は query cache と
-  // 無関係になる ── `resetQueries()` はキャッシュを取り直すだけで、
-  // 既にコピーされた曲名・アーティスト・時刻には届かない。
-  // セッションが切れて自動ログアウトしても、フォームには秘匿の中身が残っていた。
+  // 歌唱は `editableSongs` や `vocalistPopupSingers` へ**コピー**されるので、
+  // そこから先は query cache と無関係になる ── `resetQueries()` は
+  // キャッシュを取り直すだけで、既にコピーされた曲名・歌手・時刻には届かない。
   //
-  // **`canEdit` ではなく利用者の同一性を見る。** 別の編集者へ切り替わったときは
-  // canEdit が true のままなので、それでは検出できない。
-  const viewerID = useAuthStore((s) => s.user?.id ?? null);
-  const viewerIDRef = useRef(viewerID);
-  useEffect(() => {
-    if (viewerIDRef.current === viewerID) return;
-    viewerIDRef.current = viewerID;
-    setIsEditing(false);
-    setEditableSongs([]);
-  }, [viewerID]);
+  // 登録は `onViewerChange` に寄せる。**個別に利用者 ID を見張る形は漏れる**
+  // ── ログアウトだけ見ていてログイン（利用者の切り替え）を落とした、
+  // というのを実際にやった。
+  useEffect(
+    () =>
+      onViewerChange(() => {
+        setIsEditing(false);
+        setEditableSongs([]);
+        setVocalistPopupSingers(null);
+      }),
+    [],
+  );
 
   // 曲を選択してプレイヤーをその開始位置へ（Holodex の編集フローと同じ）
   const selectSong = (index: number, seek = true) => {

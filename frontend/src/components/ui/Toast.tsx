@@ -1,4 +1,5 @@
-import { useState, useCallback, useRef, type ReactNode } from 'react';
+import { useState, useCallback, useEffect, useRef, type ReactNode } from 'react';
+import { onViewerChange } from '../../queryClient';
 import { ToastContext, type ToastMessage } from './ToastContext';
 
 export function ToastProvider({ children }: { children: ReactNode }) {
@@ -14,6 +15,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       setToasts((prev) => prev.filter((t) => t.id !== id));
     }, 5000);
   }, []);
+
+  // **利用者が変わったら通知も捨てる。** 文面に曲名などがコピーされているので、
+  // 「『曲名』をキューに追加しました」が失効後も 5 秒間残る。
+  useEffect(() => onViewerChange(() => setToasts([])), []);
 
   const removeToast = useCallback((id: number) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));

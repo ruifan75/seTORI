@@ -36,3 +36,49 @@ export function resetQueryCacheForAuthChange() {
   // 表示中も含めて初期状態へ戻し、購読中のものは取り直させる。
   void queryClient.resetQueries();
 }
+
+// ========== 権限が変わったときに捨てるもの ==========
+
+// currentViewerID は「いま誰として見ているか」。**キャッシュの外へコピーした
+// データを捨てる判断に使う。**
+//
+// query cache は `resetQueries()` で取り直せるが、**コピーされたものには届かない**
+// ── 編集フォーム、再生キュー、ポップアップ、通知。これらは自分で捨てるしかない。
+//
+// 非同期処理は「始めたときの利用者」を覚えておき、**完了時に照合する**こと。
+// 応答が返るまでの間にログアウトすると、捨てたはずのデータが復活する
+// （実測：おすすめ全曲再生の補充リクエストで再現）。
+let currentViewerID: string | null = null;
+
+// ViewerChangeListener は利用者が変わったときに呼ばれる。
+type ViewerChangeListener = () => void;
+
+const viewerChangeListeners = new Set<ViewerChangeListener>();
+
+// onViewerChange は破棄処理を登録する（戻り値で解除）。
+export function onViewerChange(fn: ViewerChangeListener): () => void {
+  viewerChangeListeners.add(fn);
+  return () => viewerChangeListeners.delete(fn);
+}
+
+// viewerID は現在の利用者。非同期処理の前後で比べる。
+export function viewerID(): string | null {
+  return currentViewerID;
+}
+
+// sameViewer は「始めたときと同じ利用者か」。**非同期の完了時に必ず確かめる。**
+export function sameViewer(startedAs: string | null): boolean {
+  return currentViewerID === startedAs;
+}
+
+// applyViewerChange は利用者が変わったときの後始末を 1 か所で行う。
+//
+// **散らばらせないこと。** 以前はログアウト時にしか捨てていなかったので、
+// ログイン（利用者の切り替え）・非同期の完了・ポップアップ・通知が全部漏れた。
+export function applyViewerChange(nextViewerID: string | null) {
+  if (currentViewerID === nextViewerID) return;
+  currentViewerID = nextViewerID;
+  // 表示中も含めて初期状態へ戻し、購読中のものは取り直させる。
+  void queryClient.resetQueries();
+  for (const fn of viewerChangeListeners) fn();
+}
