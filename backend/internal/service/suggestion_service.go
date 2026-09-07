@@ -1120,8 +1120,8 @@ func (s *SuggestionService) Withdraw(id uuid.UUID, user *models.User) error {
 }
 
 // CountPending は未処理提案数を返す（バッジ表示用）。
-func (s *SuggestionService) CountPending() (int, error) {
-	return s.repo.CountPending()
+func (s *SuggestionService) CountPending(access repository.ViewerAccess) (int, error) {
+	return s.repo.CountPending(access)
 }
 
 // Approve は提案を対象へ反映し approved にする。反映に失敗した場合はステータスを変えない。

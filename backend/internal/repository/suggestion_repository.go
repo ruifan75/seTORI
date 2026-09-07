@@ -429,10 +429,16 @@ func (r *SuggestionRepository) UpdateStatus(id uuid.UUID, status string, reviewe
 
 // CountPending は未処理（pending）の提案件数を返す（バッジ表示用）。
 // 衝突（conflict）も人手の判断待ちなので同じバッジに含める。
-func (r *SuggestionRepository) CountPending() (int, error) {
+// CountPending はヘッダーのバッジに出す未処理件数。
+//
+// **一覧と同じ条件で濾す。** 濾さないと「一覧は 0 件なのにバッジは 1」になり、
+// **そこから秘匿の提案が存在することが分かる** ── 件数だけ残すのは
+// 中身を見せるのと同じ（§2 の「count も通す」と同じ話）。
+func (r *SuggestionRepository) CountPending(access ViewerAccess) (int, error) {
 	var n int
-	if err := r.db.QueryRow(
-		`SELECT COUNT(*) FROM edit_suggestions WHERE status IN ('pending', 'conflict')`).Scan(&n); err != nil {
+	query := `SELECT COUNT(*) FROM edit_suggestions
+		WHERE status IN ('pending', 'conflict')` + restrictSuggestionsClause(access)
+	if err := r.db.QueryRow(query).Scan(&n); err != nil {
 		return 0, fmt.Errorf("count pending suggestions: %w", err)
 	}
 	return n, nil

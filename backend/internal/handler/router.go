@@ -1428,7 +1428,7 @@ func (r *Router) handleMergeSuggestions(w http.ResponseWriter, req *http.Request
 
 // handleCountSuggestions は未処理の提案数を返す（バッジ表示用、content:edit）。
 func (r *Router) handleCountSuggestions(w http.ResponseWriter, req *http.Request) {
-	n, err := r.suggestionService.CountPending()
+	n, err := r.suggestionService.CountPending(viewerAccess(req))
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return

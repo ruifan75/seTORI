@@ -46,20 +46,11 @@ function App() {
     init();
   }, [init]);
 
-  // **認証が変わったら画面ごと作り直す。**
-  //
-  // `queryClient.clear()` はキャッシュを空にするが、**購読中の QueryObserver は
-  // 直前の結果を保持したままで、再取得もしない** ── そのため、秘匿の歌唱を
-  // 表示している画面はログアウト後もそのまま残る（キャッシュは 0 件なのに）。
-  //
-  // 応答の中身が権限で変わる以上、権限が変わったら描画も捨てるしかない。
-  // key を変えると React が subtree を作り直し、各画面の query が改めて走る。
-  const authIdentity = useAuthStore((s) => s.user?.id ?? (s.status === 'loading' ? 'loading' : 'anonymous'));
 
   return (
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
-        <BrowserRouter key={authIdentity}>
+        <BrowserRouter>
           <ActivityTracker />
           <Routes>
             <Route path="/login" element={<LoginPage />} />
