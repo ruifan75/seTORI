@@ -3,6 +3,7 @@ import { authApi, setAuthToken, setUnauthorizedHandler } from '../api/client';
 import type { AuthUser } from '../api/types';
 
 import { resetQueryCacheForAuthChange } from '../queryClient';
+import { usePlayerStore } from './player';
 
 const TOKEN_KEY = 'setori_token';
 
@@ -43,6 +44,14 @@ function clearLocalSession(set: (partial: Partial<AuthState>) => void) {
   // `restricted:view` を持つ人にしか返らない）ので、権限が変わったのに
   // 前の結果が残っていると、ログアウト後も admin の視界が見える。
   resetQueryCacheForAuthChange();
+  // **キャッシュの外へコピーされたものも捨てる。** 再生キューは曲名・歌手・
+  // 配信タイトルを**複製して**持つので、query を取り直しても残る。
+  //
+  // 代償：セッションが切れると再生も止まる。公開の曲だけを聴いていた人には
+  // 損なので、**キューが秘匿を含むかで判断したい**ところだが、キューは
+  // 秘匿かどうかを持っていない ── 持たせると今度はそれが判定の二重化になる。
+  // 止まるほうを選ぶ（キューはリロードでも消えるので、期待値としても近い）。
+  usePlayerStore.getState().clear();
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
