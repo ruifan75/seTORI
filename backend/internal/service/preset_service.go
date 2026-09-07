@@ -252,18 +252,21 @@ func (s *PresetService) Unfollow(userID uuid.UUID, key string) error {
 //
 // 入るのは押した時点の中身で、以後はプリセット側の変更と無関係になる
 // （常に最新を追いたい人向けにはフォローがある）。
-// AddToPlaylist はプリセットの中身を利用者のプレイリストへ入れる。
 //
-// **入れるのは「その人に見えているもの」だけ。** 見えない歌唱まで入れると、
-// 返す件数（added）と実際に見える件数が食い違う ── プレイリストは読むときにも
-// 濾すので、入れた本人にも出てこない。
-func (s *PresetService) AddToPlaylist(userID uuid.UUID, key string, req *dto.AddPresetToPlaylistRequest, access repository.ViewerAccess) (*dto.AddPresetToPlaylistResponse, error) {
+// **選ぶ基準は「入れる先で見えるか」であって、入れる人が見えるかではない。**
+// プレイリストは読むときに常に公開の視界で濾す（`PlaylistService.ListItems`）ので、
+// 要求者の権限で選ぶと、`restricted:view` を持つ人が「added 190」と言われた
+// あとに 180 件しか見えない、ということが起きる ── しかも本人にも出てこない。
+//
+// なので access を引数で受け取らない。**選択の基準は行き先が決めている。**
+func (s *PresetService) AddToPlaylist(userID uuid.UUID, key string, req *dto.AddPresetToPlaylistRequest) (*dto.AddPresetToPlaylistResponse, error) {
 	preset := FindPreset(key)
 	if preset == nil {
 		return nil, ErrPresetNotFound
 	}
 
-	ids, err := s.perfRepo.FindIDsByPreset(preset.Filter, preset.itemLimit(0), access)
+	// 行き先（プレイリスト）の可視条件に合わせる。上の説明を参照。
+	ids, err := s.perfRepo.FindIDsByPreset(preset.Filter, preset.itemLimit(0), repository.PublicAccess)
 	if err != nil {
 		return nil, err
 	}

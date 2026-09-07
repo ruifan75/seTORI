@@ -103,7 +103,7 @@ func (r *Router) handleAddPresetToPlaylist(w http.ResponseWriter, req *http.Requ
 		respondError(w, http.StatusBadRequest, "リクエストの形式が不正です")
 		return
 	}
-	result, err := r.presetService.AddToPlaylist(userID, req.PathValue("key"), &body, viewerAccess(req))
+	result, err := r.presetService.AddToPlaylist(userID, req.PathValue("key"), &body)
 	if err != nil {
 		respondError(w, presetErrStatus(err), err.Error())
 		return

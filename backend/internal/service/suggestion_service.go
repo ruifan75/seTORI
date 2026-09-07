@@ -597,6 +597,8 @@ func (s *SuggestionService) approveSongSwap(sug *models.EditSuggestion, reviewer
 	}
 
 	if !force {
+		// 承認による内部適用。**要求者へ返す値ではない**ので全部見る
+		// （濾すと「承認したのに対象が見つからない」で失敗する）。
 		currentSong, label, err := s.swapper.SongLabelOf(sug.TargetID, repository.RestrictedView)
 		if err != nil {
 			return err
@@ -716,6 +718,7 @@ func (s *SuggestionService) tryAutoApply(targetType string, targetID uuid.UUID) 
 	if !ok {
 		return nil
 	}
+	// 自動適用の突き合わせ。内部処理なので全部見る（応答には出ない）。
 	current, _, err := editor.GetEditableFields(targetID, repository.RestrictedView)
 	if err != nil || current == nil {
 		return err
@@ -845,7 +848,7 @@ func (s *SuggestionService) checkRate(actor SuggestionActor) error {
 }
 
 // List は status / kind（どちらも空なら全件）で絞った提案一覧を返す。
-func (s *SuggestionService) List(status, kind string, page, limit int) (*dto.SuggestionListResponse, error) {
+func (s *SuggestionService) List(status, kind string, page, limit int, access repository.ViewerAccess) (*dto.SuggestionListResponse, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -858,7 +861,7 @@ func (s *SuggestionService) List(status, kind string, page, limit int) (*dto.Sug
 	}
 	resp := make([]dto.SuggestionResponse, len(items))
 	for i, it := range items {
-		resp[i] = s.toSuggestionResponse(it, repository.RestrictedView)
+		resp[i] = s.toSuggestionResponse(it, access)
 	}
 	return &dto.SuggestionListResponse{
 		Suggestions: resp,
@@ -901,7 +904,7 @@ func (s *SuggestionService) ListMine(user *models.User, status string, page, lim
 // 再生中のワンタップ通報は同じ歌唱に何件も集まるため、1件ずつではなく
 // 対象単位で見比べて処理できるようにする。
 // kind が空でなければその種別だけを返す（レビュー画面の種別の絞り込み用）。
-func (s *SuggestionService) ListGrouped(status, kind string, page, limit int) (*dto.SuggestionGroupListResponse, error) {
+func (s *SuggestionService) ListGrouped(status, kind string, page, limit int, access repository.ViewerAccess) (*dto.SuggestionGroupListResponse, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -917,12 +920,12 @@ func (s *SuggestionService) ListGrouped(status, kind string, page, limit int) (*
 	for _, g := range groups {
 		items := make([]dto.SuggestionResponse, len(g.Suggestions))
 		for i, it := range g.Suggestions {
-			items[i] = s.toSuggestionResponse(it, repository.RestrictedView)
+			items[i] = s.toSuggestionResponse(it, access)
 		}
 		// 現在値はグループで1回だけ引く（提案ごとに引くと同じ対象を何度も読むことになる）
 		current := map[string]string{}
 		if editor, ok := s.editors[g.TargetType]; ok {
-			if fields, _, err := editor.GetEditableFields(g.TargetID, repository.RestrictedView); err == nil && fields != nil {
+			if fields, _, err := editor.GetEditableFields(g.TargetID, access); err == nil && fields != nil {
 				current = fields
 			}
 		}

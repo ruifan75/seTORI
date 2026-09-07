@@ -249,10 +249,18 @@ func (s *StreamService) UnmarkNotSinging(streamID string) error {
 	return s.streamRepo.DeleteNonSingingCheck(streamID)
 }
 
-// GetByID は配信の詳細を返す。includeAnalysis は解析結果を載せるか
-// （toStreamResponse のコメント参照。呼び出し側が権限を見て決める）。
-func (s *StreamService) GetByID(id string, access repository.ViewerAccess) (*dto.StreamDetailResponse, error) {
-	view := editorView(access == repository.RestrictedView)
+// GetByID は配信の詳細を返す。
+//
+// **2 つの軸を別々に受け取る。** 混ぜてはいけない：
+//
+//	isEditor … `content:edit`。解析結果と運用フラグ（is_processed 等）を載せるか
+//	access   … `restricted:view`。秘匿された配信の歌唱を返すか
+//
+// 以前は access から isEditor を導いていた（`access == RestrictedView`）が、
+// 権限を分けた時点で**公開配信を編集する editor から編集用の情報が消えた**
+// ── 処理済みの配信が未完了に見える、という形で表面化する。
+func (s *StreamService) GetByID(id string, isEditor bool, access repository.ViewerAccess) (*dto.StreamDetailResponse, error) {
+	view := editorView(isEditor)
 	stream, err := s.streamRepo.FindByID(id)
 	if err != nil {
 		return nil, fmt.Errorf("get stream: %w", err)
@@ -578,7 +586,13 @@ func (s *StreamService) toPerformanceResponse(perf repository.PerformanceWithDet
 }
 
 // Update は歌枠の情報を更新する。
-func (s *StreamService) Update(id string, req *dto.UpdateStreamRequest) (*dto.StreamDetailResponse, error) {
+// Update は配信を更新し、**要求者へ返してよい形**で読み直したものを返す。
+//
+// **内部の読み直しと、要求者へ返す内容は別。** 固定で全部見て返していたので、
+// `PUT /api/streams/{id}` に `{}` を送るだけで秘匿のセットリストが読めた
+// ── 更新は `content:edit` で通るので、`restricted:view` を持たない編集者にも
+// 返っていた。
+func (s *StreamService) Update(id string, req *dto.UpdateStreamRequest, isEditor bool, access repository.ViewerAccess) (*dto.StreamDetailResponse, error) {
 	stream, err := s.streamRepo.FindByID(id)
 	if err != nil {
 		return nil, fmt.Errorf("find stream: %w", err)
@@ -648,7 +662,9 @@ func (s *StreamService) Update(id string, req *dto.UpdateStreamRequest) (*dto.St
 
 	// 更新後のデータを返す。Update は content:edit の経路なので解析結果も秘匿された
 	// 歌唱も載せる（編集画面がそのまま使う）。
-	return s.GetByID(id, repository.RestrictedView)
+	// 内部の読み直し。**閲覧ではないので両方とも全部見る。**
+	// 返す内容の判断は呼び出し側が行う（要求者へそのまま返さないこと）。
+	return s.GetByID(id, isEditor, access)
 }
 
 // ========== ホーム（ランダム再生） ==========

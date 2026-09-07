@@ -1287,7 +1287,7 @@ func (r *Router) handleListSuggestions(w http.ResponseWriter, req *http.Request)
 	limit, _ := strconv.Atoi(req.URL.Query().Get("limit"))
 
 	if req.URL.Query().Get("group") == "target" {
-		grouped, err := r.suggestionService.ListGrouped(status, kind, page, limit)
+		grouped, err := r.suggestionService.ListGrouped(status, kind, page, limit, viewerAccess(req))
 		if err != nil {
 			respondError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -1296,7 +1296,7 @@ func (r *Router) handleListSuggestions(w http.ResponseWriter, req *http.Request)
 		return
 	}
 
-	result, err := r.suggestionService.List(status, kind, page, limit)
+	result, err := r.suggestionService.List(status, kind, page, limit, viewerAccess(req))
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1823,7 +1823,9 @@ func (r *Router) handleMergeSong(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	targetSong, err := r.songService.GetByID(targetSongID, repository.RestrictedView)
+	// **存在確認は全部見る（操作の前提）が、応答へ返す件数は要求者の視界に合わせる。**
+	// 固定で引いた件数をそのまま返すと、秘匿の歌唱数が漏れる。
+	targetSong, err := r.songService.GetByID(targetSongID, viewerAccess(req))
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1880,7 +1882,7 @@ func (r *Router) handleGetStream(w http.ResponseWriter, req *http.Request) {
 
 	// 解析結果（各タイムライン）は編集画面だけが読む中間生成物、
 	// 秘匿された配信の歌唱は公開可否が未確認のもの。どちらも編集者にだけ載せる。
-	result, err := r.streamService.GetByID(id, viewerAccess(req))
+	result, err := r.streamService.GetByID(id, userHasPermission(req, auth.PermContentEdit), viewerAccess(req))
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1912,7 +1914,7 @@ func (r *Router) handleUpdateStream(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	result, err := r.streamService.Update(id, &streamReq)
+	result, err := r.streamService.Update(id, &streamReq, userHasPermission(req, auth.PermContentEdit), viewerAccess(req))
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -2513,6 +2515,9 @@ func (r *Router) handleLoadHolodexSongs(w http.ResponseWriter, req *http.Request
 		respondError(w, http.StatusBadRequest, "無効な動画ID")
 		return
 	}
+	if !r.requireAnalysisAccess(w, req, videoID) {
+		return
+	}
 
 	result, err := r.holodexService.LoadHolodexSongs(videoID)
 	if err != nil {
@@ -2630,7 +2635,7 @@ func (r *Router) handleUpdatePerformance(w http.ResponseWriter, req *http.Reques
 		return
 	}
 
-	updated, err := r.performanceService.UpdatePerformance(id, &body)
+	updated, err := r.performanceService.UpdatePerformance(id, &body, viewerAccess(req))
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrPerformanceNotFound):
@@ -2649,8 +2654,39 @@ func (r *Router) handleUpdatePerformance(w http.ResponseWriter, req *http.Reques
 
 // ========== Comment Analysis Handlers ==========
 
+// requireAnalysisAccess は「この配信の解析素材を要求者へ渡してよいか」を確かめる。
+//
+// **`/comments` `/chapters` `/holodex-songs` は解析の *元データ* を返す。**
+// セットリストを濾しても、ここから元の曲名・時刻がそのまま読める ──
+// むしろこちらのほうが生々しい（コメント原文・章節の見出し）。
+//
+// 権限は `content:edit` なので、`restricted:view` を持たない編集者も通る。
+// **公開配信の編集は妨げず、秘匿配信のときだけ止める**（403）。
+//
+// 配信が見つからないときは通す ── 存在しない ID を秘匿と区別しない
+// （各ハンドラが自分で 404 なり空なりを返す）。
+func (r *Router) requireAnalysisAccess(w http.ResponseWriter, req *http.Request, videoID string) bool {
+	if viewerAccess(req) == repository.RestrictedView {
+		return true
+	}
+	stream, err := repository.NewStreamRepository(r.db).FindByID(videoID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return false
+	}
+	if stream != nil && stream.IsRestrictedEffective {
+		respondError(w, http.StatusForbidden,
+			"この配信は公開可否が未確認のため、解析素材を表示できません")
+		return false
+	}
+	return true
+}
+
 func (r *Router) handleGetComments(w http.ResponseWriter, req *http.Request) {
 	videoID := req.PathValue("id")
+	if !r.requireAnalysisAccess(w, req, videoID) {
+		return
+	}
 	if videoID == "" {
 		respondError(w, http.StatusBadRequest, "無効な動画ID")
 		return
@@ -2816,6 +2852,9 @@ func (r *Router) handleBackfillChatEnds(w http.ResponseWriter, req *http.Request
 // handleGetChapters は保存済みのチャプターを返す（未取得なら yt-dlp で取りに行く）。
 func (r *Router) handleGetChapters(w http.ResponseWriter, req *http.Request) {
 	videoID := req.PathValue("id")
+	if !r.requireAnalysisAccess(w, req, videoID) {
+		return
+	}
 	if videoID == "" {
 		respondError(w, http.StatusBadRequest, "無効な動画ID")
 		return
@@ -3314,7 +3353,7 @@ func (r *Router) handleItunesSearch(w http.ResponseWriter, req *http.Request) {
 			Country:        itunesItem.Country,
 		}
 
-		enhanced.ExistingSong = existingSongBrief(songRepo, itunesItem.ItunesID)
+		enhanced.ExistingSong = existingSongBrief(songRepo, itunesItem.ItunesID, viewerAccess(req))
 		enhancedResults = append(enhancedResults, enhanced)
 	}
 
@@ -3355,19 +3394,23 @@ func (r *Router) handleItunesQueryByID(w http.ResponseWriter, req *http.Request)
 		TrackTimeMillis: result.TrackTimeMillis,
 		PreviewURL:      result.PreviewURL,
 		Country:         result.Country,
-		ExistingSong:    existingSongBrief(repository.NewSongRepository(r.db), result.ItunesID),
+		ExistingSong:    existingSongBrief(repository.NewSongRepository(r.db), result.ItunesID, viewerAccess(req)),
 	})
 }
 
 // existingSongBrief は iTunes ID に紐づく既存楽曲を返す。無ければ nil。
 // **検索と ID 直引きで同じものを通す** ── 片方だけが「もう DB にある」を
 // 知っている状態になると、同じ曲を二重に作る入口ができる。
-// existingSongBrief は iTunes ID から既存の楽曲を引く（編集画面の重複警告用）。
+// existingSongBrief は iTunes ID から既存の楽曲を引く（重複の警告用）。
 //
-// **件数は濾さない。** ここは「その楽曲が既にあるか」を編集者へ知らせる場所で、
-// 0 件と出ると「使われていない」と読める ── 秘匿の歌唱しか無い楽曲がまさにそれ。
-// 呼ぶのは content:edit の経路だけ。
-func existingSongBrief(songRepo *repository.SongRepository, itunesID int64) *dto.SongBrief {
+// **件数は要求者の access で濾す。** ここを固定にしていたせいで、
+// `GET /api/itunes/search` と `/api/itunes/{id}` ── どちらも**公開端点** ──
+// から未ログインでも秘匿歌唱の実件数が返っていた（公開の楽曲詳細では 0 件なのに）。
+//
+// 「呼ぶのは content:edit の経路だけ」と書いていたが、**確かめていない思い込み**
+// だった。認可はパス文字列で決まるので、コメントではなく `requiredPermission` を
+// 見ること。
+func existingSongBrief(songRepo *repository.SongRepository, itunesID int64, access repository.ViewerAccess) *dto.SongBrief {
 	song, err := songRepo.FindByItunesID(itunesID)
 	if err != nil {
 		logger.Warnf("Error checking iTunes ID %d: %v", itunesID, err)
@@ -3376,7 +3419,7 @@ func existingSongBrief(songRepo *repository.SongRepository, itunesID int64) *dto
 	if song == nil {
 		return nil
 	}
-	perfCount, err := songRepo.GetPerformanceCount(song.ID, repository.RestrictedView)
+	perfCount, err := songRepo.GetPerformanceCount(song.ID, access)
 	if err != nil {
 		logger.Warnf("Error counting performances for song %s: %v", song.ID, err)
 		perfCount = 0

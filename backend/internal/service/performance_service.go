@@ -236,7 +236,11 @@ func (s *PerformanceService) GetByID(id uuid.UUID, access repository.ViewerAcces
 // 再生中の「開始/終了がずれている」報告や修正提案の反映は、他の曲を巻き込まずに
 // 1件だけ直す必要があるため、こちらを使う。performance ID は変えない
 // （プレイリストが performance_id を参照しているため）。
-func (s *PerformanceService) UpdatePerformance(id uuid.UUID, req *dto.UpdatePerformanceRequest) (*repository.PerformanceWithDetails, error) {
+// UpdatePerformance は歌唱を部分更新し、**要求者へ返してよい形**で読み直す。
+//
+// **内部の読み直しと、要求者へ返す内容は別**（StreamService.Update と同じ）。
+// 固定で全部見て返していたので、更新の応答から秘匿の歌唱が読めた。
+func (s *PerformanceService) UpdatePerformance(id uuid.UUID, req *dto.UpdatePerformanceRequest, access repository.ViewerAccess) (*repository.PerformanceWithDetails, error) {
 	cur, err := s.perfRepo.FindByID(id, repository.RestrictedView)
 	if err != nil {
 		return nil, fmt.Errorf("find performance: %w", err)
@@ -299,7 +303,7 @@ func (s *PerformanceService) UpdatePerformance(id uuid.UUID, req *dto.UpdatePerf
 		}
 	}
 
-	updated, err := s.perfRepo.FindByID(id, repository.RestrictedView)
+	updated, err := s.perfRepo.FindByID(id, access)
 	if err != nil {
 		return nil, fmt.Errorf("reload performance: %w", err)
 	}
@@ -510,7 +514,9 @@ func (s *PerformanceService) ApplySongSwap(performanceID uuid.UUID, p dto.SongSw
 		}
 		songID = song.ID.String()
 	}
-	_, err := s.UpdatePerformance(performanceID, &dto.UpdatePerformanceRequest{SongID: &songID})
+	// 提案の承認による内部適用。**結果は捨てるので要求者へは返らない** ──
+	// 濾すと「更新したのに読み直せない」で失敗する。
+	_, err := s.UpdatePerformance(performanceID, &dto.UpdatePerformanceRequest{SongID: &songID}, repository.RestrictedView)
 	return err
 }
 
@@ -580,7 +586,8 @@ func (s *PerformanceService) ApplyEditableFields(id uuid.UUID, fields map[string
 		}
 		req.SingerIDs = &ids
 	}
-	_, err := s.UpdatePerformance(id, req)
+	// 同上。内部適用なので全部見る（結果は返らない）。
+	_, err := s.UpdatePerformance(id, req, repository.RestrictedView)
 	return err
 }
 

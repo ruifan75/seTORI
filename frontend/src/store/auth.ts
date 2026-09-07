@@ -2,6 +2,8 @@ import { create } from 'zustand';
 import { authApi, setAuthToken, setUnauthorizedHandler } from '../api/client';
 import type { AuthUser } from '../api/types';
 
+import { resetQueryCacheForAuthChange } from '../queryClient';
+
 const TOKEN_KEY = 'setori_token';
 
 // 権限キー（バックエンドの pkg/auth/permissions.go と対応）
@@ -37,6 +39,10 @@ function clearLocalSession(set: (partial: Partial<AuthState>) => void) {
   localStorage.removeItem(TOKEN_KEY);
   setAuthToken(null);
   set({ token: null, user: null, status: 'anonymous' });
+  // **キャッシュも捨てる。** 応答の中身は権限で変わる（秘匿された配信の歌唱は
+  // `restricted:view` を持つ人にしか返らない）ので、権限が変わったのに
+  // 前の結果が残っていると、ログアウト後も admin の視界が見える。
+  resetQueryCacheForAuthChange();
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -49,6 +55,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     localStorage.setItem(TOKEN_KEY, token);
     setAuthToken(token);
     set({ token, user, status: 'authenticated' });
+    // **ログインでも捨てる。** 匿名で見ていた結果（秘匿を落とした 0 件など）が
+    // 残っていると、権限を得たのに前の視界のままになる。
+    resetQueryCacheForAuthChange();
   },
 
   loginWithOAuthCode: async (code) => {
@@ -56,6 +65,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     localStorage.setItem(TOKEN_KEY, token);
     setAuthToken(token);
     set({ token, user, status: 'authenticated' });
+    resetQueryCacheForAuthChange();
   },
 
   logout: async () => {
@@ -78,6 +88,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const user = await authApi.me();
       set({ token, user, status: 'authenticated' });
+      // 起動時の復元。`status: 'loading'` の間に匿名で投げた query が
+      // 残っていることがある。
+      resetQueryCacheForAuthChange();
     } catch {
       clearLocalSession(set);
     }
