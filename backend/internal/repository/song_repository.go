@@ -31,7 +31,7 @@ func NewSongRepository(db *sql.DB) *SongRepository {
 // 既定の jit_above_cost=100000 を越え、ページ要求のたびに JIT のコンパイル費を
 // 払っていた（issue #30）。配信ごとに 1 回だけ数えて JOIN すると 16,410 まで下がり、
 // JIT は発火しない（実測 44.6ms → 9.0ms）。
-func songListBody(sort, dir, where string) string {
+func songListBody(sort, dir, where string, access ViewerAccess) string {
 	from := "FROM songs"
 	var order string
 
@@ -44,7 +44,7 @@ func songListBody(sort, dir, where string) string {
 			    SELECT p.song_id, COUNT(*) AS n
 			    FROM performances p
 			    JOIN streams st ON st.id = p.stream_id
-			    WHERE st.is_hidden = FALSE AND ` + NotRestricted("st") + `
+			    WHERE ` + DiscoverableFor("st", access) + `
 			    GROUP BY p.song_id
 			) visible ON visible.song_id = songs.id`
 		// 歌唱が 1 件も無い曲は JOIN で NULL になる。COALESCE を外すと
@@ -62,7 +62,7 @@ func songListBody(sort, dir, where string) string {
 }
 
 // FindAll はすべての楽曲を取得する（ページング、検索、並び替え対応）。
-func (r *SongRepository) FindAll(limit, offset int, search, sort, dir string) ([]models.Song, int, error) {
+func (r *SongRepository) FindAll(limit, offset int, search, sort, dir string, access ViewerAccess) ([]models.Song, int, error) {
 	var total int
 	var rows *sql.Rows
 	var err error
@@ -82,7 +82,7 @@ func (r *SongRepository) FindAll(limit, offset int, search, sort, dir string) ([
 			SELECT songs.id, songs.name, songs.name_reading, songs.original_artist,
 			       songs.original_artist_reading, songs.arts, songs.created_at, songs.updated_at
 			` + songListBody(sort, dir,
-			"WHERE songs.name ILIKE $1 OR songs.original_artist ILIKE $1 OR songs.name_reading ILIKE $1") + `
+			"WHERE songs.name ILIKE $1 OR songs.original_artist ILIKE $1 OR songs.name_reading ILIKE $1", access) + `
 			LIMIT $2 OFFSET $3`
 		rows, err = r.db.Query(query, searchPattern, limit, offset)
 	} else {
@@ -94,7 +94,7 @@ func (r *SongRepository) FindAll(limit, offset int, search, sort, dir string) ([
 		query := `
 			SELECT songs.id, songs.name, songs.name_reading, songs.original_artist,
 			       songs.original_artist_reading, songs.arts, songs.created_at, songs.updated_at
-			` + songListBody(sort, dir, "") + `
+			` + songListBody(sort, dir, "", access) + `
 			LIMIT $1 OFFSET $2`
 		rows, err = r.db.Query(query, limit, offset)
 	}
@@ -231,13 +231,13 @@ func (r *SongRepository) Delete(id uuid.UUID) error {
 
 // GetPerformanceCount は楽曲の歌唱回数を取得する（非表示・秘匿でない配信だけを集計）。
 // **件数も秘匿の対象。** 一覧から歌唱を落としても、件数が合わなければ存在が漏れる。
-func (r *SongRepository) GetPerformanceCount(songID uuid.UUID) (int, error) {
+func (r *SongRepository) GetPerformanceCount(songID uuid.UUID, access ViewerAccess) (int, error) {
 	var count int
 	err := r.db.QueryRow(`
 		SELECT COUNT(*)
 		FROM performances p
 		JOIN streams st ON p.stream_id = st.id
-		WHERE p.song_id = $1 AND st.is_hidden = FALSE AND `+NotRestricted("st")+`
+		WHERE p.song_id = $1 AND `+DiscoverableFor("st", access)+`
 	`, songID).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("get performance count: %w", err)
@@ -266,7 +266,7 @@ func (r *SongRepository) HasAnyPerformance(songID uuid.UUID) (bool, error) {
 }
 
 // GetPerformanceCounts は複数楽曲の歌唱回数を一括取得し（非表示でない配信だけを集計）、N+1 を避ける。
-func (r *SongRepository) GetPerformanceCounts(songIDs []uuid.UUID) (map[uuid.UUID]int, error) {
+func (r *SongRepository) GetPerformanceCounts(songIDs []uuid.UUID, access ViewerAccess) (map[uuid.UUID]int, error) {
 	counts := make(map[uuid.UUID]int, len(songIDs))
 	if len(songIDs) == 0 {
 		return counts, nil
@@ -281,7 +281,7 @@ func (r *SongRepository) GetPerformanceCounts(songIDs []uuid.UUID) (map[uuid.UUI
 		SELECT p.song_id, COUNT(*)
 		FROM performances p
 		JOIN streams st ON p.stream_id = st.id
-		WHERE p.song_id = ANY($1::uuid[]) AND st.is_hidden = FALSE AND ` + NotRestricted("st") + `
+		WHERE p.song_id = ANY($1::uuid[]) AND ` + DiscoverableFor("st", access) + `
 		GROUP BY p.song_id`
 
 	rows, err := r.db.Query(query, pq.Array(ids))

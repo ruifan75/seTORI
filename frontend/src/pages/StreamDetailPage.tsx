@@ -10,6 +10,7 @@ import Loading from '../components/ui/Loading';
 import Tag from '../components/ui/Tag';
 import { useToast } from '../components/ui/ToastContext';
 import { useAuthStore, hasPermission, PERM } from '../store/auth';
+import { onViewerChange, sameViewer, viewerID } from '../queryClient';
 import { usePlayerStore, type PlayerTrack } from '../store/player';
 import YoutubePlayer from '../components/YoutubePlayer';
 import UnplayableNotice, { type NoticeKind } from '../components/UnplayableNotice';
@@ -214,6 +215,25 @@ export default function StreamDetailPage() {
     if (isEditing) usePlayerStore.getState().setPlaying(false);
   }, [isEditing]);
 
+  // **利用者が変わったら、キャッシュの外へコピーしたものを全部捨てる。**
+  //
+  // 歌唱は `editableSongs` や `vocalistPopupSingers` へ**コピー**されるので、
+  // そこから先は query cache と無関係になる ── `resetQueries()` は
+  // キャッシュを取り直すだけで、既にコピーされた曲名・歌手・時刻には届かない。
+  //
+  // 登録は `onViewerChange` に寄せる。**個別に利用者 ID を見張る形は漏れる**
+  // ── ログアウトだけ見ていてログイン（利用者の切り替え）を落とした、
+  // というのを実際にやった。
+  useEffect(
+    () =>
+      onViewerChange(() => {
+        setIsEditing(false);
+        setEditableSongs([]);
+        setVocalistPopupSingers(null);
+      }),
+    [],
+  );
+
   // 曲を選択してプレイヤーをその開始位置へ（Holodex の編集フローと同じ）
   const selectSong = (index: number, seek = true) => {
     setSelectedSongIndex(index);
@@ -350,9 +370,14 @@ export default function StreamDetailPage() {
 
   // AI 正規化
   const aiNormalizeMutation = useMutation({
-    mutationFn: (items: AINormalizationItem[]) =>
-      aiApi.normalize({ items }),
-    onSuccess: async (data) => {
+    // **開始時の視界を持ち回る。** onSuccess は古いレンダーの editableSongs を
+    // コピーするので、待っている間に権限が変わると破棄した秘匿曲が戻る。
+    mutationFn: async (items: AINormalizationItem[]) => ({
+      startedAs: viewerID(),
+      data: await aiApi.normalize({ items }),
+    }),
+    onSuccess: async ({ startedAs, data }) => {
+      if (!sameViewer(startedAs)) return;
       // AI 結果を反映
       const updated: EditableSong[] = [...editableSongs];
 
@@ -406,6 +431,9 @@ export default function StreamDetailPage() {
       // 正規化後の名前が同じ重複楽曲を統合する
       const merged = mergeDuplicateSongs(updated);
       const mergedCount = updated.length - merged.length;
+      // **ループ内で iTunes を取りに行くので、書く直前にもう一度確かめる。**
+      // 入口の照合だけでは、その await の間に権限が変わった場合を取り逃す。
+      if (!sameViewer(startedAs)) return;
       setEditableSongs(merged);
       const mergeMsg = mergedCount > 0 ? `（${mergedCount}曲の重複を統合）` : '';
       if (data.warning) {
@@ -587,6 +615,7 @@ export default function StreamDetailPage() {
   };
 
   const loadFromHolodex = async (force = false) => {
+    const startedAs = viewerID();
     if (!id) return;
     if (!stream?.holodex_timeline_songs || stream.holodex_timeline_songs.length === 0) {
       showToast('Holodexデータがありません', 'info');
@@ -596,6 +625,10 @@ export default function StreamDetailPage() {
     try {
       // 分析（正規化＋DB照合＋拍手end）を実行し、結果をそのまま反映する
       const analyzed = await holodexApi.analyzeSongs(id, force);
+      // **照合は応答の直後、最初の state 更新より前に置く。**
+      // あとに置くと、編集リストへの反映は止まってもタイムラインには
+      // 秘匿の曲名が残る（実際そうなっていた）。
+      if (!sameViewer(startedAs)) return;
       const sortedSongs = [...analyzed].sort((a, b) => a.start_seconds - b.start_seconds);
       setHolodexTimelineSongs(sortedSongs);
 
@@ -604,6 +637,10 @@ export default function StreamDetailPage() {
         songs.push(await suggestionToEditableSong(sortedSongs[index], `holodex-${index}`, getDefaultSingerIds()));
       }
 
+      // **ループ内で iTunes を取りに行くので、書く直前にもう一度確かめる。**
+      // 応答直後の照合は「分析結果を書くか」を決めるもので、その後の
+      // await までは守らない ── 前回ここを「重複」と読んで消してしまった。
+      if (!sameViewer(startedAs)) return;
       const merged = mergeDuplicateSongs(songs);
       const mergedCount = songs.length - merged.length;
       setEditableSongs(merged);
@@ -621,6 +658,7 @@ export default function StreamDetailPage() {
 
   // force=true でキャッシュを無視し AI 再分析（再正規化）。通常はキャッシュ済みの結果を即座に読み込む。
   const loadFromComments = async (force = false) => {
+    const startedAs = viewerID();
     if (!id) return;
     setCommentAnalyzeLoading(true);
     try {
@@ -634,6 +672,7 @@ export default function StreamDetailPage() {
 
       const merged = mergeDuplicateSongs(songs);
       const mergedCount = songs.length - merged.length;
+      if (!sameViewer(startedAs)) return;
       setEditableSongs(merged);
       // 照合の結果（候補・変更履歴）はこの応答にしか無い。配信を開いただけの
       // 読み取りでは照合しないので、タイムライン側もここで差し替える。
@@ -653,6 +692,7 @@ export default function StreamDetailPage() {
   // 配信者が付けた目次から読み込む。Holodex にも曲が無く、コメントも取れない配信の受け皿。
   // force=true はチャプターを yt-dlp で取り直してから再分析する（数秒かかる）。
   const loadFromChapters = async (force = false) => {
+    const startedAs = viewerID();
     if (!id) return;
     setChapterAnalyzeLoading(true);
     try {
@@ -665,6 +705,7 @@ export default function StreamDetailPage() {
       }
 
       const merged = mergeDuplicateSongs(songs);
+      if (!sameViewer(startedAs)) return;
       setEditableSongs(merged);
       setChapterTimelineSongs(sortedSongs);
       // chapter_count（未取得か / 章節が無いか）が変わりうるので配信を読み直す
@@ -704,7 +745,11 @@ export default function StreamDetailPage() {
   });
 
   // 提案リストから1曲だけ編集リストへ追加（開始秒順に挿入し、ハイライトしてスクロール）
-  const addSingleSong = (newSong: EditableSong) => {
+  // **非同期の完了後に呼ばれることがある**（`addSuggestionSong` は
+  // `suggestionToEditableSong` を await する）。待っている間に権限が変われば
+  // 編集リストは破棄されているので、そこへ戻すと秘匿の曲名が復活する。
+  const addSingleSong = (newSong: EditableSong, startedAs: string | null) => {
+    if (!sameViewer(startedAs)) return;
     setEditableSongs((prev) => [...prev, newSong].sort((a, b) => a.start - b.start));
     showToast(`「${newSong.name}」を追加しました`, 'success');
     setTimeout(() => {
@@ -716,17 +761,20 @@ export default function StreamDetailPage() {
 
   // Holodex タブ：1曲追加
   const addSuggestionSong = async (song: SongSuggestion) => {
-    addSingleSong(await suggestionToEditableSong(song, `holodex-add-${Date.now()}`, getDefaultSingerIds()));
+    const startedAs = viewerID();
+    addSingleSong(await suggestionToEditableSong(song, `holodex-add-${Date.now()}`, getDefaultSingerIds()), startedAs);
   };
 
   // コメントタブ：1曲追加
   const addCommentSongToList = async (song: CommentSong) => {
-    addSingleSong(await commentSongToEditableSong(song, `comment-add-${Date.now()}`, getDefaultSingerIds()));
+    const startedAs = viewerID();
+    addSingleSong(await commentSongToEditableSong(song, `comment-add-${Date.now()}`, getDefaultSingerIds()), startedAs);
   };
 
   // チャプタータブ：1曲追加（終了時間の確度が違うので入力元を伝える）
   const addChapterSongToList = async (song: CommentSong) => {
-    addSingleSong(await commentSongToEditableSong(song, `chapter-add-${Date.now()}`, getDefaultSingerIds(), 'chapter'));
+    const startedAs = viewerID();
+    addSingleSong(await commentSongToEditableSong(song, `chapter-add-${Date.now()}`, getDefaultSingerIds(), 'chapter'), startedAs);
   };
 
   // 自動採用に届かなかった候補（0.50〜0.85）を人が確定させる。
@@ -735,6 +783,7 @@ export default function StreamDetailPage() {
   // 「feat. や CV 名の表記が違う」といった、文字列では原理的に決まらない組が来る。
   // 確定は別表記として学習されるので、同じ表記は次から自動で当たる。
   const addFromRawComment = async ({ start, name, artist }: { start: number; name: string; artist: string }) => {
+    const startedAs = viewerID();
     let end = 0;
     let chatEnd: number | undefined;
     try {
@@ -766,7 +815,7 @@ export default function StreamDetailPage() {
       chatEnd,
       endSource: chatEnd !== undefined ? 'chat' : undefined,
       customTags: [],
-    });
+    }, startedAs);
   };
 
   // 自動読み込み：Holodex → コメント の優先順。どちらも正規化＋chat 比較込み
@@ -922,9 +971,11 @@ export default function StreamDetailPage() {
 
   // 検索結果から楽曲を選ぶ
   const handleSelectExistingSong = async (index: number, song: Song) => {
+    const startedAs = viewerID();
     const selectedItunesId = song.itunes_ids && song.itunes_ids.length > 0 ? Number(song.itunes_ids[0].itunes_id) : null;
     const selectedTrackDuration = selectedItunesId ? await fetchTrackDurationByItunesId(selectedItunesId) : null;
 
+    if (!sameViewer(startedAs)) return;
     setEditableSongs((prev) => {
       const updated = [...prev];
       const current = updated[index];
@@ -1120,6 +1171,7 @@ export default function StreamDetailPage() {
   // チェックの入った別名義を登録する。1 件ずつ独立して扱い、失敗しても保存は止めない
   // （別名義は付随的な情報で、セットリストの保存の方が主目的）。
   const registerCheckedAliases = async () => {
+    const startedAs = viewerID();
     const seen = new Set<string>();
     const targets = editableSongs
       .filter((s) => s.aliasChecked && s.artistAlias)
@@ -1134,6 +1186,10 @@ export default function StreamDetailPage() {
     let applied = 0;
     let proposed = 0;
     for (const a of targets) {
+      // **各リクエストの前に確かめる。** ループの外に照合を置くだけでは、
+      // 途中で利用者が変わっても残りの登録が**新しい認証情報で送られる**
+      // ── 別の利用者の名義で即時反映または提案として記録されてしまう。
+      if (!sameViewer(startedAs)) return;
       try {
         const res = await artistApi.proposeAlias(a.canonical, a.alias);
         if (res.applied) {
@@ -1142,10 +1198,15 @@ export default function StreamDetailPage() {
           proposed++;
         }
       } catch (err) {
-        showToast(`別名義の登録に失敗しました（${a.alias}）`, 'error');
         console.error('alias registration failed:', err);
+        // **通知に編集リスト由来の名義が載る。** 待っている間に権限が変われば、
+        // 破棄したあとに秘匿入力由来の名義が再表示される。
+        if (sameViewer(startedAs)) {
+          showToast(`別名義の登録に失敗しました（${a.alias}）`, 'error');
+        }
       }
     }
+    if (!sameViewer(startedAs)) return;
     if (applied > 0) showToast(`${applied}件の別名義を登録しました`, 'success');
     if (proposed > 0) showToast(`${proposed}件の別名義を提案として登録しました`, 'info');
   };

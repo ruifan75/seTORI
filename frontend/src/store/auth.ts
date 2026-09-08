@@ -2,6 +2,8 @@ import { create } from 'zustand';
 import { authApi, setAuthToken, setUnauthorizedHandler } from '../api/client';
 import type { AuthUser } from '../api/types';
 
+import { applyViewerChange, viewerKey } from '../queryClient';
+
 const TOKEN_KEY = 'setori_token';
 
 // 権限キー（バックエンドの pkg/auth/permissions.go と対応）
@@ -37,6 +39,7 @@ function clearLocalSession(set: (partial: Partial<AuthState>) => void) {
   localStorage.removeItem(TOKEN_KEY);
   setAuthToken(null);
   set({ token: null, user: null, status: 'anonymous' });
+  applyViewerChange(null);
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -49,6 +52,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     localStorage.setItem(TOKEN_KEY, token);
     setAuthToken(token);
     set({ token, user, status: 'authenticated' });
+    applyViewerChange(viewerKey(user.id, user.permissions));
   },
 
   loginWithOAuthCode: async (code) => {
@@ -56,6 +60,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     localStorage.setItem(TOKEN_KEY, token);
     setAuthToken(token);
     set({ token, user, status: 'authenticated' });
+    applyViewerChange(viewerKey(user.id, user.permissions));
   },
 
   logout: async () => {
@@ -78,6 +83,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const user = await authApi.me();
       set({ token, user, status: 'authenticated' });
+      applyViewerChange(viewerKey(user.id, user.permissions));
     } catch {
       clearLocalSession(set);
     }

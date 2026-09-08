@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { homeApi, presetPlaylistApi, songApi, tagApi } from '../api/client';
+import { sameViewer, viewerID } from '../queryClient';
 import type { Performance, PresetPlaylist } from '../api/types';
 import Loading from '../components/ui/Loading';
 import Tag from '../components/ui/Tag';
@@ -69,10 +70,15 @@ function PresetSection({ preset }: { preset: PresetPlaylist }) {
       return;
     }
     setIsPreparingPlayback(true);
+    // **成功側だけでなく失敗側も照合する。** 取得に失敗しても表示中の曲を
+    // 流すので、待っている間に利用者が変わっていれば同じことが起きる。
+    const startedAs = viewerID();
     try {
       const full = await presetPlaylistApi.items(preset.key);
+      if (!sameViewer(startedAs)) return;
       usePlayerStore.getState().playTracks(toTracks(full.performances));
     } catch {
+      if (!sameViewer(startedAs)) return;
       usePlayerStore.getState().playTracks(toTracks(performances));
       showToast('全曲を取得できなかったため、表示中の曲を再生します', 'error');
     } finally {
@@ -228,6 +234,10 @@ export default function HomePage() {
   const playAllRecommendations = async () => {
     if (reco.length === 0 || isPreparingRecommendations) return;
     setIsPreparingRecommendations(true);
+    // **始めたときの利用者を覚えておく。** 補充リクエストの応答が返るまでの間に
+    // ログアウトすると、捨てたはずの秘匿曲がキューへ再投入される ──
+    // 破棄は「今」を捨てるだけで、**飛んでいる非同期処理までは止められない**。
+    const startedAs = viewerID();
     let playbackRecommendations = reco;
     try {
       if (playbackRecommendations.length < RECOMMENDATION_PLAYBACK_MIN) {
@@ -237,11 +247,15 @@ export default function HomePage() {
         );
         playbackRecommendations = uniqueSongs([...playbackRecommendations, ...supplement.performances]);
       }
+      if (!sameViewer(startedAs)) return; // 待っている間に利用者が変わった
       usePlayerStore.getState().playTracks(toTracks(playbackRecommendations));
       if (playbackRecommendations.length < RECOMMENDATION_PLAYBACK_MIN) {
         showToast(`再生可能なおすすめ${playbackRecommendations.length}曲を読み込みました`, 'info');
       }
     } catch {
+      // **失敗側も照合する。** 補充に失敗しても現在のリストを流すので、
+      // 待っている間に利用者が変わっていれば同じことが起きる。
+      if (!sameViewer(startedAs)) return;
       usePlayerStore.getState().playTracks(toTracks(reco));
       showToast('追加のおすすめを取得できなかったため、現在のリストを再生します', 'error');
     } finally {

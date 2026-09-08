@@ -244,6 +244,9 @@ func (s *PlaylistService) ListItems(id uuid.UUID, viewerID *uuid.UUID) ([]reposi
 	if p == nil || !canView(p, viewerID) {
 		return nil, ErrPlaylistNotFound
 	}
+	// **プレイリストは閲覧者の権限で広げない。** 利用者が自分で入れたものを
+	// 見せる場所で、管理の視界ではない ── 秘匿の歌唱を入れた本人にも出さない
+	// （入れられるのは秘匿になる前に入れた場合だけ）。
 	return s.repo.ListItems(id, repository.PublicAccess)
 }
 
@@ -260,6 +263,7 @@ func (s *PlaylistService) ListItemsByShareSlug(slug string, viewerID *uuid.UUID)
 	if meta.Visibility == models.PlaylistPrivate && !isOwner {
 		return nil, ErrPlaylistNotFound
 	}
+	// 限定公開の共有リンク。**リンクを知る人＝未ログインなので常に公開の視界。**
 	return s.repo.ListItems(meta.ID, repository.PublicAccess)
 }
 

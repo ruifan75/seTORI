@@ -376,8 +376,8 @@ func (s *SongMatchService) RecordMergeCandidate(newSongID, existingSongID uuid.U
 }
 
 // ListOpenMergeCandidates は未処理の統合候補を返す。
-func (s *SongMatchService) ListOpenMergeCandidates(limit int) ([]repository.MergeCandidate, error) {
-	return s.matchRepo.ListOpenMergeCandidates(limit)
+func (s *SongMatchService) ListOpenMergeCandidates(limit int, access repository.ViewerAccess) ([]repository.MergeCandidate, error) {
+	return s.matchRepo.ListOpenMergeCandidates(limit, access)
 }
 
 // CountOpenMergeCandidates は未処理件数を返す。
@@ -386,8 +386,8 @@ func (s *SongMatchService) CountOpenMergeCandidates() (int, error) {
 }
 
 // FindOpenMergeCandidatesForSong は楽曲詳細で出すための候補を返す。
-func (s *SongMatchService) FindOpenMergeCandidatesForSong(songID uuid.UUID) ([]repository.MergeCandidate, error) {
-	return s.matchRepo.FindOpenMergeCandidatesForSong(songID)
+func (s *SongMatchService) FindOpenMergeCandidatesForSong(songID uuid.UUID, access repository.ViewerAccess) ([]repository.MergeCandidate, error) {
+	return s.matchRepo.FindOpenMergeCandidatesForSong(songID, access)
 }
 
 // DismissMergeCandidate は「別の曲なので統合しない」と記録する。

@@ -24,7 +24,7 @@ import (
 // handleListMergeCandidates は未処理の統合候補を返す（content:edit）。
 func (r *Router) handleListMergeCandidates(w http.ResponseWriter, req *http.Request) {
 	limit, _ := strconv.Atoi(req.URL.Query().Get("limit"))
-	candidates, err := r.songMatchService.ListOpenMergeCandidates(limit)
+	candidates, err := r.songMatchService.ListOpenMergeCandidates(limit, viewerAccess(req))
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -42,7 +42,7 @@ func (r *Router) handleGetSongMergeCandidates(w http.ResponseWriter, req *http.R
 		respondError(w, http.StatusBadRequest, "無効な曲ID")
 		return
 	}
-	candidates, err := r.songMatchService.FindOpenMergeCandidatesForSong(songID)
+	candidates, err := r.songMatchService.FindOpenMergeCandidatesForSong(songID, viewerAccess(req))
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return

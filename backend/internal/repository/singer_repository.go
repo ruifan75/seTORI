@@ -471,14 +471,14 @@ func (r *SingerRepository) GetStreamCount(singerID string) (int, error) {
 
 // GetPerformanceCount は歌手の歌唱数を取得する（非表示・秘匿でない配信だけを集計）。
 // **件数も秘匿の対象**（一覧から落としても件数が合わなければ存在が漏れる）。
-func (r *SingerRepository) GetPerformanceCount(singerID string) (int, error) {
+func (r *SingerRepository) GetPerformanceCount(singerID string, access ViewerAccess) (int, error) {
 	var count int
 	err := r.db.QueryRow(`
 		SELECT COUNT(*)
 		FROM performance_singers ps
 		JOIN performances p ON ps.performance_id = p.id
 		JOIN streams st ON p.stream_id = st.id
-		WHERE ps.singer_id = $1 AND st.is_hidden = FALSE AND `+NotRestricted("st")+`
+		WHERE ps.singer_id = $1 AND `+DiscoverableFor("st", access)+`
 	`, singerID).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("count performances: %w", err)

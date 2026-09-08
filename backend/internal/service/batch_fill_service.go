@@ -596,7 +596,7 @@ func (s *BatchFillService) applyStream(runID uuid.UUID, streamID string, rows []
 
 	// 一括セットリスト作成は編集者の操作。秘匿された配信も対象に含める
 	// （中身を作れないと、公開してよいと決まったときに何も無い）。
-	existing, err := s.perfRepo.FindByStreamID(streamID, repository.EditorAccess)
+	existing, err := s.perfRepo.FindByStreamID(streamID, repository.RestrictedView)
 	if err != nil {
 		logger.Warnf("[batch-fill] 既存歌唱の取得に失敗 (%s): %v", streamID, err)
 		return applyResult{}

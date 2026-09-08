@@ -63,7 +63,7 @@ func (s *ArtistService) GetAll(page, limit int, search, sort, dir string) (*dto.
 }
 
 // GetByID はアーティスト詳細＋所属楽曲を返す。見つからなければ nil。
-func (s *ArtistService) GetByID(id uuid.UUID, page, limit int, sort, dir string) (*dto.ArtistDetailResponse, error) {
+func (s *ArtistService) GetByID(id uuid.UUID, page, limit int, sort, dir string, access repository.ViewerAccess) (*dto.ArtistDetailResponse, error) {
 	artist, err := s.artistRepo.FindByID(id)
 	if err != nil {
 		return nil, err
@@ -78,7 +78,7 @@ func (s *ArtistService) GetByID(id uuid.UUID, page, limit int, sort, dir string)
 	if limit < 1 || limit > 100 {
 		limit = 20
 	}
-	songs, counts, total, err := s.artistRepo.FindSongsByArtist(id, limit, (page-1)*limit, sort, dir)
+	songs, counts, total, err := s.artistRepo.FindSongsByArtist(id, limit, (page-1)*limit, sort, dir, access)
 	if err != nil {
 		return nil, err
 	}

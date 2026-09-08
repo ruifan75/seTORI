@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { presetPlaylistApi } from '../api/client';
+import { sameViewer, viewerID } from '../queryClient';
 import type { PresetPlaylist } from '../api/types';
 import { useToast } from './ui/ToastContext';
 import PlaylistPickerMenu, { PLAYLIST_MENU_WIDTH } from './PlaylistPickerMenu';
@@ -72,8 +73,14 @@ export default function PresetActions({ preset, onPlayAll, playDisabled }: Props
   });
 
   const enqueueMutation = useMutation({
-    mutationFn: () => presetPlaylistApi.items(preset.key),
-    onSuccess: (result) => {
+    // **非同期なので、始めたときの利用者を覚えて完了時に照合する。**
+    // 待っている間に権限が変わると、捨てたはずの秘匿曲がキューへ戻る。
+    mutationFn: async () => {
+      const startedAs = viewerID();
+      return { result: await presetPlaylistApi.items(preset.key), startedAs };
+    },
+    onSuccess: ({ result, startedAs }) => {
+      if (!sameViewer(startedAs)) return;
       const tracks = performancesToTracks(result.performances);
       usePlayerStore.getState().enqueue(tracks);
       setPickerOpen(false);

@@ -1143,6 +1143,9 @@ func (s *HolodexService) SyncSetoriToHolodex(streamID string) (*dto.SyncHolodexR
 		// **Holodex への書き戻しは公開行為**（運用者の名義で外部に残る）。
 		// 秘匿された配信の中身はここから出さない ── 公開してよいと決まってから、
 		// 編集画面で秘匿を外したうえで実行する。
+		// **ここは閲覧ではなく外部への公開行為。** 運用者の名義で Holodex に
+		// 残り、こちらからは取り消せない（CLAUDE.md §5）。要求者が
+		// restricted:view を持っていても、秘匿の歌唱を外へ出してはいけない。
 		perfs, err := s.perfRepo.FindByStreamID(streamID, repository.PublicAccess)
 		if err == nil && len(perfs) > 0 {
 			// **外部へ送る前に台帳を書く。書けなければ送らない。**

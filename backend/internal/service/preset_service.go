@@ -143,9 +143,9 @@ func (s *PresetService) followedSet(viewerID *uuid.UUID) (map[string]bool, error
 	return set, nil
 }
 
-func (s *PresetService) toResponse(p *Preset, followed map[string]bool) (dto.PresetPlaylistResponse, error) {
+func (s *PresetService) toResponse(p *Preset, followed map[string]bool, access repository.ViewerAccess) (dto.PresetPlaylistResponse, error) {
 	// プリセットは閲覧者向けの面なので、編集者にも秘匿された配信は出さない。
-	count, err := s.perfRepo.CountByPreset(p.Filter, repository.PublicAccess)
+	count, err := s.perfRepo.CountByPreset(p.Filter, access)
 	if err != nil {
 		return dto.PresetPlaylistResponse{}, err
 	}
@@ -164,14 +164,14 @@ func (s *PresetService) toResponse(p *Preset, followed map[string]bool) (dto.Pre
 }
 
 // List は全プリセットを曲数つきで返す。
-func (s *PresetService) List(viewerID *uuid.UUID) (*dto.PresetPlaylistListResponse, error) {
+func (s *PresetService) List(viewerID *uuid.UUID, access repository.ViewerAccess) (*dto.PresetPlaylistListResponse, error) {
 	followed, err := s.followedSet(viewerID)
 	if err != nil {
 		return nil, err
 	}
 	resp := &dto.PresetPlaylistListResponse{Presets: make([]dto.PresetPlaylistResponse, 0, len(Presets))}
 	for i := range Presets {
-		item, err := s.toResponse(&Presets[i], followed)
+		item, err := s.toResponse(&Presets[i], followed, access)
 		if err != nil {
 			return nil, err
 		}
@@ -182,7 +182,7 @@ func (s *PresetService) List(viewerID *uuid.UUID) (*dto.PresetPlaylistListRespon
 
 // ListFollowed はフォロー中のプリセットだけを返す。
 // 定義から消えたキーは黙って飛ばす（DB の行は残す。migration 048 のコメント参照）。
-func (s *PresetService) ListFollowed(userID uuid.UUID) (*dto.PresetPlaylistListResponse, error) {
+func (s *PresetService) ListFollowed(userID uuid.UUID, access repository.ViewerAccess) (*dto.PresetPlaylistListResponse, error) {
 	keys, err := s.playlistRepo.ListFollowedPresetKeys(userID)
 	if err != nil {
 		return nil, err
@@ -198,7 +198,7 @@ func (s *PresetService) ListFollowed(userID uuid.UUID) (*dto.PresetPlaylistListR
 		if preset == nil {
 			continue
 		}
-		item, err := s.toResponse(preset, followed)
+		item, err := s.toResponse(preset, followed, access)
 		if err != nil {
 			return nil, err
 		}
@@ -208,7 +208,7 @@ func (s *PresetService) ListFollowed(userID uuid.UUID) (*dto.PresetPlaylistListR
 }
 
 // Get は 1 件のプリセットを返す。
-func (s *PresetService) Get(key string, viewerID *uuid.UUID) (*dto.PresetPlaylistResponse, error) {
+func (s *PresetService) Get(key string, viewerID *uuid.UUID, access repository.ViewerAccess) (*dto.PresetPlaylistResponse, error) {
 	preset := FindPreset(key)
 	if preset == nil {
 		return nil, ErrPresetNotFound
@@ -217,7 +217,7 @@ func (s *PresetService) Get(key string, viewerID *uuid.UUID) (*dto.PresetPlaylis
 	if err != nil {
 		return nil, err
 	}
-	resp, err := s.toResponse(preset, followed)
+	resp, err := s.toResponse(preset, followed, access)
 	if err != nil {
 		return nil, err
 	}
@@ -225,12 +225,12 @@ func (s *PresetService) Get(key string, viewerID *uuid.UUID) (*dto.PresetPlaylis
 }
 
 // ListItems はプリセットの中身を返す。
-func (s *PresetService) ListItems(key string, limit int) ([]repository.PerformanceWithDetails, error) {
+func (s *PresetService) ListItems(key string, limit int, access repository.ViewerAccess) ([]repository.PerformanceWithDetails, error) {
 	preset := FindPreset(key)
 	if preset == nil {
 		return nil, ErrPresetNotFound
 	}
-	return s.perfRepo.FindByPreset(preset.Filter, preset.itemLimit(limit), repository.PublicAccess)
+	return s.perfRepo.FindByPreset(preset.Filter, preset.itemLimit(limit), access)
 }
 
 func (s *PresetService) Follow(userID uuid.UUID, key string) error {
@@ -252,12 +252,20 @@ func (s *PresetService) Unfollow(userID uuid.UUID, key string) error {
 //
 // 入るのは押した時点の中身で、以後はプリセット側の変更と無関係になる
 // （常に最新を追いたい人向けにはフォローがある）。
+//
+// **選ぶ基準は「入れる先で見えるか」であって、入れる人が見えるかではない。**
+// プレイリストは読むときに常に公開の視界で濾す（`PlaylistService.ListItems`）ので、
+// 要求者の権限で選ぶと、`restricted:view` を持つ人が「added 190」と言われた
+// あとに 180 件しか見えない、ということが起きる ── しかも本人にも出てこない。
+//
+// なので access を引数で受け取らない。**選択の基準は行き先が決めている。**
 func (s *PresetService) AddToPlaylist(userID uuid.UUID, key string, req *dto.AddPresetToPlaylistRequest) (*dto.AddPresetToPlaylistResponse, error) {
 	preset := FindPreset(key)
 	if preset == nil {
 		return nil, ErrPresetNotFound
 	}
 
+	// 行き先（プレイリスト）の可視条件に合わせる。上の説明を参照。
 	ids, err := s.perfRepo.FindIDsByPreset(preset.Filter, preset.itemLimit(0), repository.PublicAccess)
 	if err != nil {
 		return nil, err

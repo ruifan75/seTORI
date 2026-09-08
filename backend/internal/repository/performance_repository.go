@@ -219,7 +219,7 @@ func (r *PerformanceRepository) FindBySongID(songID uuid.UUID, limit, offset int
 		SELECT COUNT(*)
 		FROM performances p
 		JOIN streams st ON p.stream_id = st.id
-		WHERE p.song_id = $1 AND st.is_hidden = FALSE`+access.restrictClause()+`
+		WHERE p.song_id = $1 AND TRUE`+access.discoverClause()+`
 	`, songID).Scan(&total)
 	if err != nil {
 		return nil, 0, fmt.Errorf("count performances: %w", err)
@@ -233,7 +233,7 @@ func (r *PerformanceRepository) FindBySongID(songID uuid.UUID, limit, offset int
 		FROM performances p
 		JOIN streams st ON p.stream_id = st.id
 		JOIN songs s ON p.song_id = s.id
-		WHERE p.song_id = $1 AND st.is_hidden = FALSE` + access.restrictClause() + `
+		WHERE p.song_id = $1 AND TRUE` + access.discoverClause() + `
 		ORDER BY st.stream_date DESC
 		LIMIT $2 OFFSET $3`
 
@@ -288,7 +288,7 @@ func (r *PerformanceRepository) FindByTagID(tagID string, limit, offset int, acc
 		FROM performances p
 		JOIN streams st ON p.stream_id = st.id
 		JOIN performance_performance_tags ppt ON ppt.performance_id = p.id
-		WHERE ppt.tag_id = $1 AND st.is_hidden = FALSE`+access.restrictClause()+`
+		WHERE ppt.tag_id = $1 AND TRUE`+access.discoverClause()+`
 	`, tagID).Scan(&total)
 	if err != nil {
 		return nil, 0, fmt.Errorf("count performances by tag: %w", err)
@@ -303,7 +303,7 @@ func (r *PerformanceRepository) FindByTagID(tagID string, limit, offset int, acc
 		JOIN streams st ON p.stream_id = st.id
 		JOIN songs s ON p.song_id = s.id
 		JOIN performance_performance_tags ppt ON ppt.performance_id = p.id
-		WHERE ppt.tag_id = $1 AND st.is_hidden = FALSE` + access.restrictClause() + `
+		WHERE ppt.tag_id = $1 AND TRUE` + access.discoverClause() + `
 		ORDER BY st.stream_date DESC, p.order_index ASC
 		LIMIT $2 OFFSET $3`
 
@@ -782,7 +782,7 @@ func (r *PerformanceRepository) FindBySingerID(singerID string, limit, offset in
 		FROM performances p
 		JOIN performance_singers ps ON p.id = ps.performance_id
 		JOIN streams st ON p.stream_id = st.id
-		WHERE ps.singer_id = $1 AND st.is_hidden = FALSE`+access.restrictClause()+`
+		WHERE ps.singer_id = $1 AND TRUE`+access.discoverClause()+`
 	`, singerID).Scan(&total)
 	if err != nil {
 		return nil, 0, fmt.Errorf("count performances: %w", err)
@@ -806,7 +806,7 @@ func (r *PerformanceRepository) FindBySingerID(singerID string, limit, offset in
 		JOIN performance_singers ps ON p.id = ps.performance_id
 		JOIN streams st ON p.stream_id = st.id
 		JOIN songs s ON p.song_id = s.id
-		WHERE ps.singer_id = $1 AND st.is_hidden = FALSE` + access.restrictClause() + `
+		WHERE ps.singer_id = $1 AND TRUE` + access.discoverClause() + `
 		ORDER BY ` + order + `
 		LIMIT $2 OFFSET $3`
 
@@ -867,10 +867,21 @@ func (r *PerformanceRepository) FindBySingerID(singerID string, limit, offset in
 type ViewerAccess int
 
 const (
-	// PublicAccess … 未ログインを含む一般の閲覧者。秘匿された配信の歌唱は返さない。
+	// PublicAccess … 秘匿された配信の歌唱を返さない。**未ログインだけでなく、
+	// `restricted:view` を持たない編集者もここ。**
 	PublicAccess ViewerAccess = iota
-	// EditorAccess … content:edit を持つ利用者。秘匿された配信も編集対象なので返す。
-	EditorAccess
+	// RestrictedView … 秘匿された配信の歌唱も返す。
+	//
+	// 渡してよいのは 2 つの場合だけ：
+	//
+	//   - 閲覧者が `restricted:view` を持っている（`viewerAccess(req)` が判定する）
+	//   - **閲覧ではない内部操作**（更新・削除の前に対象を引く等）。
+	//     ここで濾すと「消したつもりの歌唱が残る」ので、誰が呼んでいるかに依らず
+	//     全部を見る必要がある
+	//
+	// **`content:edit` では通らない。** 公開してよいかは配信者に訊いて決めることで、
+	// 編集作業の一部ではない（`auth.PermRestrictedView` の説明を参照）。
+	RestrictedView
 )
 
 // NotRestricted は「実効的に秘匿されていない」を表す SQL 式を返す。
@@ -947,6 +958,42 @@ func NotRestricted(alias string) string {
 	return "NOT " + EffectiveRestrictedExpr(alias)
 }
 
+// NotRestrictedFor は「秘匿でない」条件だけを返す（`is_hidden` は見ない）。
+//
+// **使うのは検索の絞り込みだけ。** `GET /api/streams/search` は非表示の配信も
+// 意図的に含めるので（CLAUDE.md §2）、歌手・歌唱タグで絞るときに
+// `is_hidden` を混ぜると**非表示の配信が条件に合っても外れる**。
+//
+// 発見面で歌唱そのものを出す場所は `DiscoverableFor` を使うこと。
+func NotRestrictedFor(alias string, access ViewerAccess) string {
+	if access == RestrictedView {
+		return "TRUE"
+	}
+	return NotRestricted(alias)
+}
+
+// DiscoverableFor は発見面（曲・歌手・タグ・検索など）で歌唱を出してよいかの条件。
+//
+// **2 つの軸をまとめて扱う。** 公開の視界では両方が要る：
+//
+//	is_hidden = FALSE   … 一覧の既定から外した配信（雑談・ゲーム等 約 700 本）
+//	NOT <秘匿>          … 中身を公開してよいか未確認の配信（会限など）
+//
+// **`RestrictedView` では両方とも外す。** 本番の会限 86 本のうち **78 本は
+// is_hidden も立っている**ので、秘匿だけ外しても管理者からは見えないまま
+// ── 「歌唱があるのに 0 件に見える」を無くすのが目的なので、軸を分けても
+// 目的は達せられない。雑談・ゲーム配信はそもそも歌唱を持たないため、
+// 外しても一覧へ雑音は増えない。
+//
+// **分岐をここに集める**のは、濾すかどうかの判断を書き写さないため
+// （`EffectiveRestrictedExpr` を Go 側にも書いて食い違った過去がある）。
+func DiscoverableFor(alias string, access ViewerAccess) string {
+	if access == RestrictedView {
+		return "TRUE"
+	}
+	return alias + ".is_hidden = FALSE AND " + NotRestricted(alias)
+}
+
 // restrictClause は WHERE / JOIN の条件へ足す文字列を返す。
 //
 // **プレースホルダを含めない**（クエリごとに $N の番号が違うため、
@@ -959,10 +1006,29 @@ func NotRestricted(alias string) string {
 // 「秘匿が効いている」ように見えてしまう ── 実際に一度そう見えた。
 // 濾せているかは、**秘匿でない配信でちゃんと返ること**まで確かめないと分からない。
 func (a ViewerAccess) restrictClause() string {
-	if a == EditorAccess {
+	if a == RestrictedView {
 		return ""
 	}
 	return " AND " + NotRestricted("st")
+}
+
+// discoverClause は発見面の可視条件（**2 つの軸をまとめて**）。
+//
+//	is_hidden = FALSE   … 一覧の既定から外した配信（雑談・ゲーム等 約 700 本）
+//	NOT <秘匿>          … 中身を公開してよいか未確認の配信（会限など）
+//
+// **`RestrictedView` では両方とも外す。** 本番の会限 86 本のうち **78 本は
+// is_hidden も立っている**ので、秘匿だけ外しても管理者からは見えないまま
+// ──「歌唱があるのに 0 件に見える」を無くすのが目的なので、そこで軸を
+// 分けると目的を達せられない（実測で確認した）。
+//
+// **`is_hidden` を WHERE へ直接書かないこと。** 書くと access に関わらず
+// 常に濾すので、権限を渡しても効かない。
+func (a ViewerAccess) discoverClause() string {
+	if a == RestrictedView {
+		return ""
+	}
+	return " AND st.is_hidden = FALSE AND " + NotRestricted("st")
 }
 
 const perfDetailSelect = `
@@ -1019,7 +1085,7 @@ func (r *PerformanceRepository) FindRandom(limit int, excludedSongIDs []string, 
 			SELECT DISTINCT ON (p.song_id) p.id
 			FROM performances p
 			JOIN streams st ON p.stream_id = st.id
-			WHERE st.is_hidden = FALSE` + access.restrictClause() + `
+			WHERE TRUE` + access.discoverClause() + `
 			  AND NOT (p.song_id = ANY($2::uuid[]))
 			  AND NOT EXISTS (
 				SELECT 1 FROM stream_stream_tags sst
@@ -1055,7 +1121,7 @@ type PresetFilter struct {
 // **const ではなく関数**にしてある：秘匿の条件は読む側の立場で変わるため。
 func presetWhere(access ViewerAccess) string {
 	return `
-	WHERE st.is_hidden = FALSE` + access.restrictClause() + `
+	WHERE TRUE` + access.discoverClause() + `
 	  AND NOT EXISTS (
 		SELECT 1 FROM stream_stream_tags hid
 		WHERE hid.stream_id = st.id AND hid.tag_id IN ('members_only', 'unarchived')
