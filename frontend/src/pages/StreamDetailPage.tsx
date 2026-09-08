@@ -370,9 +370,14 @@ export default function StreamDetailPage() {
 
   // AI 正規化
   const aiNormalizeMutation = useMutation({
-    mutationFn: (items: AINormalizationItem[]) =>
-      aiApi.normalize({ items }),
-    onSuccess: async (data) => {
+    // **開始時の視界を持ち回る。** onSuccess は古いレンダーの editableSongs を
+    // コピーするので、待っている間に権限が変わると破棄した秘匿曲が戻る。
+    mutationFn: async (items: AINormalizationItem[]) => ({
+      startedAs: viewerID(),
+      data: await aiApi.normalize({ items }),
+    }),
+    onSuccess: async ({ startedAs, data }) => {
+      if (!sameViewer(startedAs)) return;
       // AI 結果を反映
       const updated: EditableSong[] = [...editableSongs];
 
@@ -426,6 +431,9 @@ export default function StreamDetailPage() {
       // 正規化後の名前が同じ重複楽曲を統合する
       const merged = mergeDuplicateSongs(updated);
       const mergedCount = updated.length - merged.length;
+      // **ループ内で iTunes を取りに行くので、書く直前にもう一度確かめる。**
+      // 入口の照合だけでは、その await の間に権限が変わった場合を取り逃す。
+      if (!sameViewer(startedAs)) return;
       setEditableSongs(merged);
       const mergeMsg = mergedCount > 0 ? `（${mergedCount}曲の重複を統合）` : '';
       if (data.warning) {
@@ -617,6 +625,10 @@ export default function StreamDetailPage() {
     try {
       // 分析（正規化＋DB照合＋拍手end）を実行し、結果をそのまま反映する
       const analyzed = await holodexApi.analyzeSongs(id, force);
+      // **照合は応答の直後、最初の state 更新より前に置く。**
+      // あとに置くと、編集リストへの反映は止まってもタイムラインには
+      // 秘匿の曲名が残る（実際そうなっていた）。
+      if (!sameViewer(startedAs)) return;
       const sortedSongs = [...analyzed].sort((a, b) => a.start_seconds - b.start_seconds);
       setHolodexTimelineSongs(sortedSongs);
 
@@ -627,9 +639,6 @@ export default function StreamDetailPage() {
 
       const merged = mergeDuplicateSongs(songs);
       const mergedCount = songs.length - merged.length;
-      // **await のあとに書くので照合する。** 破棄は今ある値を捨てるだけで、
-      // 飛んでいる非同期処理までは止められない。
-      if (!sameViewer(startedAs)) return;
       setEditableSongs(merged);
       const mergeMsg = mergedCount > 0 ? `（${mergedCount}曲の重複を統合）` : '';
       showToast(`Holodexから${merged.length}曲を読み込みました${mergeMsg}`, 'success');
@@ -1173,6 +1182,10 @@ export default function StreamDetailPage() {
     let applied = 0;
     let proposed = 0;
     for (const a of targets) {
+      // **各リクエストの前に確かめる。** ループの外に照合を置くだけでは、
+      // 途中で利用者が変わっても残りの登録が**新しい認証情報で送られる**
+      // ── 別の利用者の名義で即時反映または提案として記録されてしまう。
+      if (!sameViewer(startedAs)) return;
       try {
         const res = await artistApi.proposeAlias(a.canonical, a.alias);
         if (res.applied) {
