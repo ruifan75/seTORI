@@ -607,6 +607,7 @@ export default function StreamDetailPage() {
   };
 
   const loadFromHolodex = async (force = false) => {
+    const startedAs = viewerID();
     if (!id) return;
     if (!stream?.holodex_timeline_songs || stream.holodex_timeline_songs.length === 0) {
       showToast('Holodexデータがありません', 'info');
@@ -626,6 +627,9 @@ export default function StreamDetailPage() {
 
       const merged = mergeDuplicateSongs(songs);
       const mergedCount = songs.length - merged.length;
+      // **await のあとに書くので照合する。** 破棄は今ある値を捨てるだけで、
+      // 飛んでいる非同期処理までは止められない。
+      if (!sameViewer(startedAs)) return;
       setEditableSongs(merged);
       const mergeMsg = mergedCount > 0 ? `（${mergedCount}曲の重複を統合）` : '';
       showToast(`Holodexから${merged.length}曲を読み込みました${mergeMsg}`, 'success');
@@ -641,6 +645,7 @@ export default function StreamDetailPage() {
 
   // force=true でキャッシュを無視し AI 再分析（再正規化）。通常はキャッシュ済みの結果を即座に読み込む。
   const loadFromComments = async (force = false) => {
+    const startedAs = viewerID();
     if (!id) return;
     setCommentAnalyzeLoading(true);
     try {
@@ -654,6 +659,7 @@ export default function StreamDetailPage() {
 
       const merged = mergeDuplicateSongs(songs);
       const mergedCount = songs.length - merged.length;
+      if (!sameViewer(startedAs)) return;
       setEditableSongs(merged);
       // 照合の結果（候補・変更履歴）はこの応答にしか無い。配信を開いただけの
       // 読み取りでは照合しないので、タイムライン側もここで差し替える。
@@ -673,6 +679,7 @@ export default function StreamDetailPage() {
   // 配信者が付けた目次から読み込む。Holodex にも曲が無く、コメントも取れない配信の受け皿。
   // force=true はチャプターを yt-dlp で取り直してから再分析する（数秒かかる）。
   const loadFromChapters = async (force = false) => {
+    const startedAs = viewerID();
     if (!id) return;
     setChapterAnalyzeLoading(true);
     try {
@@ -685,6 +692,7 @@ export default function StreamDetailPage() {
       }
 
       const merged = mergeDuplicateSongs(songs);
+      if (!sameViewer(startedAs)) return;
       setEditableSongs(merged);
       setChapterTimelineSongs(sortedSongs);
       // chapter_count（未取得か / 章節が無いか）が変わりうるので配信を読み直す
@@ -950,9 +958,11 @@ export default function StreamDetailPage() {
 
   // 検索結果から楽曲を選ぶ
   const handleSelectExistingSong = async (index: number, song: Song) => {
+    const startedAs = viewerID();
     const selectedItunesId = song.itunes_ids && song.itunes_ids.length > 0 ? Number(song.itunes_ids[0].itunes_id) : null;
     const selectedTrackDuration = selectedItunesId ? await fetchTrackDurationByItunesId(selectedItunesId) : null;
 
+    if (!sameViewer(startedAs)) return;
     setEditableSongs((prev) => {
       const updated = [...prev];
       const current = updated[index];
@@ -1148,6 +1158,7 @@ export default function StreamDetailPage() {
   // チェックの入った別名義を登録する。1 件ずつ独立して扱い、失敗しても保存は止めない
   // （別名義は付随的な情報で、セットリストの保存の方が主目的）。
   const registerCheckedAliases = async () => {
+    const startedAs = viewerID();
     const seen = new Set<string>();
     const targets = editableSongs
       .filter((s) => s.aliasChecked && s.artistAlias)
@@ -1170,10 +1181,15 @@ export default function StreamDetailPage() {
           proposed++;
         }
       } catch (err) {
-        showToast(`別名義の登録に失敗しました（${a.alias}）`, 'error');
         console.error('alias registration failed:', err);
+        // **通知に編集リスト由来の名義が載る。** 待っている間に権限が変われば、
+        // 破棄したあとに秘匿入力由来の名義が再表示される。
+        if (sameViewer(startedAs)) {
+          showToast(`別名義の登録に失敗しました（${a.alias}）`, 'error');
+        }
       }
     }
+    if (!sameViewer(startedAs)) return;
     if (applied > 0) showToast(`${applied}件の別名義を登録しました`, 'success');
     if (proposed > 0) showToast(`${proposed}件の別名義を提案として登録しました`, 'info');
   };
