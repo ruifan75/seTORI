@@ -637,6 +637,10 @@ export default function StreamDetailPage() {
         songs.push(await suggestionToEditableSong(sortedSongs[index], `holodex-${index}`, getDefaultSingerIds()));
       }
 
+      // **ループ内で iTunes を取りに行くので、書く直前にもう一度確かめる。**
+      // 応答直後の照合は「分析結果を書くか」を決めるもので、その後の
+      // await までは守らない ── 前回ここを「重複」と読んで消してしまった。
+      if (!sameViewer(startedAs)) return;
       const merged = mergeDuplicateSongs(songs);
       const mergedCount = songs.length - merged.length;
       setEditableSongs(merged);
