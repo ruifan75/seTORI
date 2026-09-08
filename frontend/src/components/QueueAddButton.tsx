@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { sameViewer, viewerID } from '../queryClient';
 import { playlistApi } from '../api/client';
 import { useAuthStore } from '../store/auth';
 import { useToast } from './ui/ToastContext';
@@ -74,6 +75,9 @@ export default function QueueAddButton({
 
   const addMutation = useMutation({
     mutationFn: async (target: { playlistId?: string; playlistName?: string; name?: string }) => {
+      // **通知の文面に曲名が入るので、完了時に利用者を照合する。**
+      // 待っている間に権限が変わると、破棄したあとに秘匿曲名が再び現れる。
+      const startedAs = viewerID();
       const created = target.name ? await playlistApi.create({ name: target.name }) : undefined;
       const playlistId = created?.id ?? target.playlistId!;
       const result = await playlistApi.addItems(playlistId, selectedTracks.map((item) => item.performanceId));
@@ -82,9 +86,11 @@ export default function QueueAddButton({
         playlistId,
         playlistName: created?.name ?? target.playlistName ?? 'プレイリスト',
         created: !!created,
+        startedAs,
       };
     },
     onSuccess: (result) => {
+      if (!sameViewer(result.startedAs)) return;
       queryClient.invalidateQueries({ queryKey: ['playlists'] });
       queryClient.invalidateQueries({ queryKey: ['playlist', result.playlistId] });
       showToast(

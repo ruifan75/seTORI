@@ -1,4 +1,5 @@
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { sameViewer, viewerID } from '../queryClient';
 import { performanceApi, suggestionApi } from '../api/client';
 import { useAuthStore, hasPermission, PERM } from '../store/auth';
 import { usePlayerStore } from '../store/player';
@@ -103,9 +104,13 @@ export function usePerformanceTiming() {
       ...(c.end !== undefined ? { end_seconds: c.end } : {}),
     });
 
+    // **通知の文面に曲名が入るので、完了時に利用者を照合する。**
+    // 待っている間に権限が変わると、破棄したあとに秘匿曲名が再び現れる。
+    const startedAs = viewerID();
     try {
       if (canEdit) {
         await performanceApi.update(target.performanceId, toRequest(change));
+        if (!sameViewer(startedAs)) return false;
         // 再生中のキューにも反映しないと、古い end のまま次の曲へ送られてしまう
         updateTrackTiming(target.performanceId, change);
         invalidate();

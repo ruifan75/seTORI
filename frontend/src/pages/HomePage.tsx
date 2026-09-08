@@ -70,10 +70,15 @@ function PresetSection({ preset }: { preset: PresetPlaylist }) {
       return;
     }
     setIsPreparingPlayback(true);
+    // **成功側だけでなく失敗側も照合する。** 取得に失敗しても表示中の曲を
+    // 流すので、待っている間に利用者が変わっていれば同じことが起きる。
+    const startedAs = viewerID();
     try {
       const full = await presetPlaylistApi.items(preset.key);
+      if (!sameViewer(startedAs)) return;
       usePlayerStore.getState().playTracks(toTracks(full.performances));
     } catch {
+      if (!sameViewer(startedAs)) return;
       usePlayerStore.getState().playTracks(toTracks(performances));
       showToast('全曲を取得できなかったため、表示中の曲を再生します', 'error');
     } finally {
@@ -248,6 +253,9 @@ export default function HomePage() {
         showToast(`再生可能なおすすめ${playbackRecommendations.length}曲を読み込みました`, 'info');
       }
     } catch {
+      // **失敗側も照合する。** 補充に失敗しても現在のリストを流すので、
+      // 待っている間に利用者が変わっていれば同じことが起きる。
+      if (!sameViewer(startedAs)) return;
       usePlayerStore.getState().playTracks(toTracks(reco));
       showToast('追加のおすすめを取得できなかったため、現在のリストを再生します', 'error');
     } finally {

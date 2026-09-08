@@ -10,7 +10,7 @@ import Loading from '../components/ui/Loading';
 import Tag from '../components/ui/Tag';
 import { useToast } from '../components/ui/ToastContext';
 import { useAuthStore, hasPermission, PERM } from '../store/auth';
-import { onViewerChange } from '../queryClient';
+import { onViewerChange, sameViewer, viewerID } from '../queryClient';
 import { usePlayerStore, type PlayerTrack } from '../store/player';
 import YoutubePlayer from '../components/YoutubePlayer';
 import UnplayableNotice, { type NoticeKind } from '../components/UnplayableNotice';
@@ -724,7 +724,11 @@ export default function StreamDetailPage() {
   });
 
   // 提案リストから1曲だけ編集リストへ追加（開始秒順に挿入し、ハイライトしてスクロール）
-  const addSingleSong = (newSong: EditableSong) => {
+  // **非同期の完了後に呼ばれることがある**（`addSuggestionSong` は
+  // `suggestionToEditableSong` を await する）。待っている間に権限が変われば
+  // 編集リストは破棄されているので、そこへ戻すと秘匿の曲名が復活する。
+  const addSingleSong = (newSong: EditableSong, startedAs: string | null) => {
+    if (!sameViewer(startedAs)) return;
     setEditableSongs((prev) => [...prev, newSong].sort((a, b) => a.start - b.start));
     showToast(`「${newSong.name}」を追加しました`, 'success');
     setTimeout(() => {
@@ -736,17 +740,20 @@ export default function StreamDetailPage() {
 
   // Holodex タブ：1曲追加
   const addSuggestionSong = async (song: SongSuggestion) => {
-    addSingleSong(await suggestionToEditableSong(song, `holodex-add-${Date.now()}`, getDefaultSingerIds()));
+    const startedAs = viewerID();
+    addSingleSong(await suggestionToEditableSong(song, `holodex-add-${Date.now()}`, getDefaultSingerIds()), startedAs);
   };
 
   // コメントタブ：1曲追加
   const addCommentSongToList = async (song: CommentSong) => {
-    addSingleSong(await commentSongToEditableSong(song, `comment-add-${Date.now()}`, getDefaultSingerIds()));
+    const startedAs = viewerID();
+    addSingleSong(await commentSongToEditableSong(song, `comment-add-${Date.now()}`, getDefaultSingerIds()), startedAs);
   };
 
   // チャプタータブ：1曲追加（終了時間の確度が違うので入力元を伝える）
   const addChapterSongToList = async (song: CommentSong) => {
-    addSingleSong(await commentSongToEditableSong(song, `chapter-add-${Date.now()}`, getDefaultSingerIds(), 'chapter'));
+    const startedAs = viewerID();
+    addSingleSong(await commentSongToEditableSong(song, `chapter-add-${Date.now()}`, getDefaultSingerIds(), 'chapter'), startedAs);
   };
 
   // 自動採用に届かなかった候補（0.50〜0.85）を人が確定させる。
@@ -755,6 +762,7 @@ export default function StreamDetailPage() {
   // 「feat. や CV 名の表記が違う」といった、文字列では原理的に決まらない組が来る。
   // 確定は別表記として学習されるので、同じ表記は次から自動で当たる。
   const addFromRawComment = async ({ start, name, artist }: { start: number; name: string; artist: string }) => {
+    const startedAs = viewerID();
     let end = 0;
     let chatEnd: number | undefined;
     try {
@@ -786,7 +794,7 @@ export default function StreamDetailPage() {
       chatEnd,
       endSource: chatEnd !== undefined ? 'chat' : undefined,
       customTags: [],
-    });
+    }, startedAs);
   };
 
   // 自動読み込み：Holodex → コメント の優先順。どちらも正規化＋chat 比較込み
