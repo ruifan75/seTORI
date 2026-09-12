@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import RestrictedBadge from '../components/RestrictedBadge';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { playlistApi } from '../api/client';
@@ -297,6 +298,8 @@ export default function PlaylistDetailPage({ shared = false }: { shared?: boolea
                   <ArtistLinks artists={perf.artists} fallback={perf.original_artist} />
                 </span>
               </div>
+              {perf.is_restricted && <RestrictedBadge />}
+
               <span className="hidden sm:block text-xs font-mono text-gray-400 shrink-0">
                 {formatTime(perf.start_seconds)}
               </span>

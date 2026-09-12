@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import RestrictedBadge from '../components/RestrictedBadge';
 import { Link, useParams } from 'react-router-dom';
 import { presetPlaylistApi } from '../api/client';
 import type { Performance } from '../api/types';
@@ -128,6 +129,8 @@ export default function PresetPlaylistPage() {
                   <ArtistLinks artists={perf.artists} fallback={perf.original_artist} />
                 </span>
               </div>
+
+              {perf.is_restricted && <RestrictedBadge />}
 
               <SingerAvatars singers={perf.singers} />
 

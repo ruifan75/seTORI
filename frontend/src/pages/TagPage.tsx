@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import RestrictedBadge from '../components/RestrictedBadge';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { tagApi } from '../api/client';
 import Loading from '../components/ui/Loading';
@@ -172,12 +173,15 @@ export default function TagPage() {
                       <Tag key={tag.id} label={tag.display_name} color={tag.color} />
                     ))}
                   </div>
-                  <Link
-                    to={`/streams/${perf.stream_id}`}
-                    className="block text-sm text-gray-600 hover:text-gray-900 truncate mt-1"
-                  >
-                    {perf.stream_title}
-                  </Link>
+                  <div className="flex items-center gap-2 min-w-0 mt-1">
+                    <Link
+                      to={`/streams/${perf.stream_id}`}
+                      className="block text-sm text-gray-600 hover:text-gray-900 truncate"
+                    >
+                      {perf.stream_title}
+                    </Link>
+                    {perf.is_restricted && <RestrictedBadge />}
+                  </div>
                   <p className="text-xs text-gray-400 mt-1">
                     {perf.stream_date && new Date(perf.stream_date).toLocaleDateString('ja-JP')}
                     {perf.singers.length > 0 && ` · ${perf.singers.map((s) => s.name).join('、')}`}

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import RestrictedBadge from '../components/RestrictedBadge';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { singerApi, holodexApi, organizationApi } from '../api/client';
@@ -625,12 +626,15 @@ export default function SingerDetailPage() {
                           {formatTime(perf.start_seconds)}
                         </span>
                         {/* 歌枠へは行きたいのでリンクのまま拾わせる */}
-                        <Link
-                          to={`/streams/${perf.stream_id}`}
-                          className="pointer-events-auto block truncate hover:text-indigo-600"
-                        >
-                          {perf.stream_title}
-                        </Link>
+                        <span className="flex items-center gap-1.5 min-w-0">
+                          <Link
+                            to={`/streams/${perf.stream_id}`}
+                            className="pointer-events-auto block truncate hover:text-indigo-600"
+                          >
+                            {perf.stream_title}
+                          </Link>
+                          {perf.is_restricted && <RestrictedBadge />}
+                        </span>
                       </>
                     }
                   />
@@ -684,12 +688,15 @@ export default function SingerDetailPage() {
                           )}
                         </td>
                         <td className="px-4 py-4">
-                          <Link
-                            to={`/streams/${perf.stream_id}`}
-                            className="text-gray-600 hover:text-gray-900 text-sm line-clamp-1"
-                          >
-                            {perf.stream_title}
-                          </Link>
+                          <div className="flex items-center gap-2 min-w-0">
+                            <Link
+                              to={`/streams/${perf.stream_id}`}
+                              className="text-gray-600 hover:text-gray-900 text-sm line-clamp-1"
+                            >
+                              {perf.stream_title}
+                            </Link>
+                            {perf.is_restricted && <RestrictedBadge />}
+                          </div>
                         </td>
                         <td className="px-4 py-4 text-sm text-gray-500">
                           {(() => {

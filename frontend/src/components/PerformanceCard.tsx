@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import RestrictedBadge from './RestrictedBadge';
 import type { Performance } from '../api/types';
 import ArtistLinks from './ArtistLinks';
 import QueueAddButton from './QueueAddButton';
@@ -63,6 +64,7 @@ export default function PerformanceCard({ performance, onPlay }: Props) {
           linkClassName="hover:text-indigo-600"
         />
         <div className="mt-1 flex min-h-7 items-center justify-between gap-2">
+          {performance.is_restricted && <RestrictedBadge />}
           {performance.stream_date ? (
             <time dateTime={performance.stream_date} className="min-w-0 text-xs text-gray-400">
               {new Date(performance.stream_date).toLocaleDateString('ja-JP')}

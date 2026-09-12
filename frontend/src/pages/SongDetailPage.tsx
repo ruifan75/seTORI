@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import RestrictedBadge from '../components/RestrictedBadge';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { isAxiosError } from 'axios';
 import { useParams, useSearchParams, Link, useNavigate } from 'react-router-dom';
@@ -942,6 +943,13 @@ export default function SongDetailPage() {
               <div className="mt-4 flex flex-wrap items-center gap-2">
               <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-indigo-100 text-indigo-800">
                 歌唱回数: {song.performance_count}回
+                {/* 内訳は秘匿が見える人にだけ返る。出さないと、この数字を
+                    そのまま対外的に使ってしまう */}
+                {!!song.restricted_performance_count && (
+                  <span className="ml-1 text-amber-700">
+                    （うち非公開 {song.restricted_performance_count} 回）
+                  </span>
+                )}
               </span>
               {/* iTunes/Apple Music Links */}
               {song.itunes_ids && song.itunes_ids.some(i => i.is_primary) && (
@@ -1074,12 +1082,15 @@ export default function SongDetailPage() {
                     <div className="flex-1 min-w-0 p-4">
                       <div className="flex items-start justify-between">
                         <div className="min-w-0">
-                          <Link
-                            to={`/streams/${perf.stream_id}`}
-                            className="font-medium text-gray-900 hover:text-indigo-600 line-clamp-1"
-                          >
-                            {perf.stream_title}
-                          </Link>
+                          <div className="flex items-center gap-2 min-w-0">
+                            <Link
+                              to={`/streams/${perf.stream_id}`}
+                              className="font-medium text-gray-900 hover:text-indigo-600 line-clamp-1"
+                            >
+                              {perf.stream_title}
+                            </Link>
+                            {perf.is_restricted && <RestrictedBadge />}
+                          </div>
                           <p className="text-sm text-gray-500 mt-1">
                             {(() => {
                               const streamDate = new Date(perf.stream_date);

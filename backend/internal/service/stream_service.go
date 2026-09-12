@@ -537,6 +537,7 @@ func (s *StreamService) toStreamResponse(stream models.Stream, tags []models.Str
 // toPerformanceResponse は歌唱を DTO に変換する。
 func (s *StreamService) toPerformanceResponse(perf repository.PerformanceWithDetails) dto.PerformanceResponse {
 	resp := dto.PerformanceResponse{
+		IsRestricted:   perf.IsRestricted,
 		ID:             perf.ID,
 		StreamID:       perf.StreamID,
 		SongID:         perf.SongID,

@@ -113,6 +113,10 @@ func (s *SongService) GetByID(id uuid.UUID, access repository.ViewerAccess) (*dt
 
 	count, _ := s.songRepo.GetPerformanceCount(song.ID, access)
 	resp := s.toSongResponse(*song, count)
+	// 内訳は**曲 1 件を返す経路にだけ**載せる。一覧は曲数ぶんの問い合わせになるうえ、
+	// 行に出す場所も無い（一覧の件数の内訳は別途）。
+	// **曲詳細ページが読むのは `GetPerformances` のほう**なので、あちらにも要る。
+	resp.RestrictedPerformanceCount, _ = s.songRepo.GetRestrictedPerformanceCount(song.ID, access)
 	return &resp, nil
 }
 
@@ -148,6 +152,9 @@ func (s *SongService) GetPerformances(songID uuid.UUID, page, limit int, access 
 
 	count, _ := s.songRepo.GetPerformanceCount(songID, access)
 	songResp := s.toSongResponse(*song, count)
+	// **画面が読む件数はこちら。** 曲詳細ページは `GET /api/songs/{id}` ではなく
+	// この端点の `song` を出しているので、`GetByID` にだけ載せると画面に出ない。
+	songResp.RestrictedPerformanceCount, _ = s.songRepo.GetRestrictedPerformanceCount(songID, access)
 	totalPages := (total + limit - 1) / limit
 
 	return &dto.SongPerformanceListResponse{
@@ -471,6 +478,7 @@ func buildSongResponse(song models.Song, count int, itunesRecords []models.SongI
 // toSongPerformanceResponse は歌唱を DTO に変換する。
 func (s *SongService) toSongPerformanceResponse(perf repository.PerformanceWithDetails) dto.SongPerformanceResponse {
 	resp := dto.SongPerformanceResponse{
+		IsRestricted:   perf.IsRestricted,
 		ID:             perf.ID,
 		StreamID:       perf.StreamID,
 		StreamTitle:    perf.StreamTitle,
