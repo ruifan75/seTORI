@@ -229,16 +229,33 @@ func (r *SongRepository) Delete(id uuid.UUID) error {
 	return nil
 }
 
+// songPerformanceCountQuery は楽曲の歌唱を数えるクエリを組み立てる。
+//
+// **総数と内訳を同じ母体から作るために 1 か所に置く。** 別々に書き下ろすと、
+// 内訳が総数の部分集合でなくなる ── 実際、内訳にだけ `is_hidden = FALSE` を
+// 書いていて、**非表示かつ秘匿の歌唱が総数には入るのに内訳から漏れて**いた。
+// 本番の会限 86 本のうち 78 本は `is_hidden` も立っているので、
+// 少数派ではなく多数派のほうが間違う形だった。
+//
+// restrictedOnly を立てると、母体はそのままに秘匿のものだけへ絞る。
+// **narrow するだけで母体は触らない**のが、この関数が守っている性質。
+func songPerformanceCountQuery(access ViewerAccess, restrictedOnly bool) string {
+	where := "p.song_id = $1 AND " + DiscoverableFor("st", access)
+	if restrictedOnly {
+		where += " AND " + EffectiveRestrictedExpr("st")
+	}
+	return `
+		SELECT COUNT(*)
+		FROM performances p
+		JOIN streams st ON p.stream_id = st.id
+		WHERE ` + where
+}
+
 // GetPerformanceCount は楽曲の歌唱回数を取得する（非表示・秘匿でない配信だけを集計）。
 // **件数も秘匿の対象。** 一覧から歌唱を落としても、件数が合わなければ存在が漏れる。
 func (r *SongRepository) GetPerformanceCount(songID uuid.UUID, access ViewerAccess) (int, error) {
 	var count int
-	err := r.db.QueryRow(`
-		SELECT COUNT(*)
-		FROM performances p
-		JOIN streams st ON p.stream_id = st.id
-		WHERE p.song_id = $1 AND `+DiscoverableFor("st", access)+`
-	`, songID).Scan(&count)
+	err := r.db.QueryRow(songPerformanceCountQuery(access, false), songID).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("get performance count: %w", err)
 	}
@@ -255,17 +272,19 @@ func (r *SongRepository) GetPerformanceCount(songID uuid.UUID, access ViewerAcce
 // 既に落としているので内訳は常に 0 であり、その人には出す内訳が無い。
 // ここで早退しておかないと、呼び出し側が「0 だから秘匿は無い」と
 // 「見えないから 0」を取り違える余地が残る。
+//
+// **母体は `GetPerformanceCount` と同じものを使う**（`DiscoverableFor` に
+// 秘匿の条件を足すだけ）。条件を書き下ろすと総数と母体がずれ、内訳が総数の
+// 部分集合でなくなる ── 実際、最初は `is_hidden = FALSE` を書いていて
+// **非表示かつ秘匿の歌唱が総数には入るのに内訳から漏れて**いた。
+// 本番の会限 86 本のうち 78 本は `is_hidden` も立っているので、
+// それは例外ではなく多数派のほうが間違う形だった。
 func (r *SongRepository) GetRestrictedPerformanceCount(songID uuid.UUID, access ViewerAccess) (int, error) {
 	if access != RestrictedView {
 		return 0, nil
 	}
 	var count int
-	err := r.db.QueryRow(`
-		SELECT COUNT(*)
-		FROM performances p
-		JOIN streams st ON p.stream_id = st.id
-		WHERE p.song_id = $1 AND st.is_hidden = FALSE AND `+EffectiveRestrictedExpr("st")+`
-	`, songID).Scan(&count)
+	err := r.db.QueryRow(songPerformanceCountQuery(access, true), songID).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("get restricted performance count: %w", err)
 	}

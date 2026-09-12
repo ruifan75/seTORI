@@ -114,3 +114,37 @@ func TestRestrictedPerformanceCountSkipsQueryWithoutPermission(t *testing.T) {
 		t.Error("RestrictedView で問い合わせていない（早退しすぎ）")
 	}
 }
+
+// 内訳は**総数を絞り込んだものでなければならない**。
+//
+// 別々に条件を書き下ろすと、内訳が総数の部分集合でなくなる。実際、内訳にだけ
+// `is_hidden = FALSE` を書いていて、**非表示かつ秘匿の歌唱が総数には入るのに
+// 内訳から漏れて**いた（本番の会限 86 本のうち 78 本は `is_hidden` も立っている
+// ので、少数派ではなく多数派のほうが間違う）。
+//
+// ここで確かめるのは「内訳のクエリが総数のクエリをそのまま含み、後ろに
+// 秘匿の条件を足しただけか」。**集計結果の正しさは見ていない** ── それは
+// 実 DB でないと確かめられないので、PR で端点を叩いて測ってある。
+func TestRestrictedCountOnlyNarrowsTheTotal(t *testing.T) {
+	for _, access := range []ViewerAccess{PublicAccess, RestrictedView} {
+		total := songPerformanceCountQuery(access, false)
+		restricted := songPerformanceCountQuery(access, true)
+
+		// 母体は発見面の判定（2 軸）でなければならない。ここを秘匿だけの判定に
+		// すり替えると、総数・内訳とも非表示の配信を数え始める（両方同時に
+		// ずれるので、上の絞り込みの検査だけでは気付けない）。
+		if want := DiscoverableFor("st", access); !strings.Contains(total, want) {
+			t.Errorf("access=%v: 総数の母体が発見面の判定ではない\n総数: %q\n期待に含む: %q", access, total, want)
+		}
+
+		if !strings.HasPrefix(restricted, total) {
+			t.Errorf("access=%v: 内訳が総数を絞り込む形になっていない\n総数: %q\n内訳: %q", access, total, restricted)
+			continue
+		}
+		// 足されたぶんが秘匿の条件だけであること（母体を触っていない）。
+		added := strings.TrimPrefix(restricted, total)
+		if want := " AND " + EffectiveRestrictedExpr("st"); added != want {
+			t.Errorf("access=%v: 秘匿の条件以外が足されている\n足された分: %q\n期待: %q", access, added, want)
+		}
+	}
+}
