@@ -225,57 +225,12 @@ func (r *PerformanceRepository) FindBySongID(songID uuid.UUID, limit, offset int
 		return nil, 0, fmt.Errorf("count performances: %w", err)
 	}
 
-	query := `
-		SELECT p.id, p.stream_id, p.song_id, p.start_seconds, p.end_seconds, p.order_index,
-		       p.holodex_song_id, p.custom_tags, p.created_at, p.end_source, p.end_confirmed,
-		       st.title AS stream_title, st.stream_date, st.thumbnail_url,
-		       s.name AS song_name, s.original_artist, s.arts
-		FROM performances p
-		JOIN streams st ON p.stream_id = st.id
-		JOIN songs s ON p.song_id = s.id
-		WHERE p.song_id = $1 AND TRUE` + access.discoverClause() + `
+	performances, err := r.queryPerformanceDetails(perfDetailSelect+`
+		WHERE p.song_id = $1 AND TRUE`+access.discoverClause()+`
 		ORDER BY st.stream_date DESC
-		LIMIT $2 OFFSET $3`
-
-	rows, err := r.db.Query(query, songID, limit, offset)
+		LIMIT $2 OFFSET $3`, songID, limit, offset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("query performances by song: %w", err)
-	}
-	defer rows.Close()
-
-	var performances []PerformanceWithDetails
-	for rows.Next() {
-		var p PerformanceWithDetails
-		err := rows.Scan(&p.ID, &p.StreamID, &p.SongID, &p.StartSeconds, &p.EndSeconds,
-			&p.OrderIndex, &p.HolodexSongID, &p.CustomTags, &p.CreatedAt, &p.EndSource, &p.EndConfirmed,
-			&p.StreamTitle, &p.StreamDate, &p.ThumbnailURL,
-			&p.SongName, &p.OriginalArtist, &p.Arts)
-		if err != nil {
-			return nil, 0, fmt.Errorf("scan performance: %w", err)
-		}
-
-		// タグを取得する
-		tags, err := r.GetTags(p.ID)
-		if err != nil {
-			return nil, 0, err
-		}
-		p.Tags = tags
-
-		// 歌手を取得する
-		singers, err := r.GetSingers(p.ID)
-		if err != nil {
-			return nil, 0, err
-		}
-		p.Singers = singers
-
-		performances = append(performances, p)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, 0, err
-	}
-	if err := r.attachArtistReferences(performances); err != nil {
-		return nil, 0, err
 	}
 	return performances, total, nil
 }
@@ -294,56 +249,13 @@ func (r *PerformanceRepository) FindByTagID(tagID string, limit, offset int, acc
 		return nil, 0, fmt.Errorf("count performances by tag: %w", err)
 	}
 
-	query := `
-		SELECT p.id, p.stream_id, p.song_id, p.start_seconds, p.end_seconds, p.order_index,
-		       p.holodex_song_id, p.custom_tags, p.created_at, p.end_source, p.end_confirmed,
-		       st.title AS stream_title, st.stream_date, st.thumbnail_url,
-		       s.name AS song_name, s.original_artist, s.arts
-		FROM performances p
-		JOIN streams st ON p.stream_id = st.id
-		JOIN songs s ON p.song_id = s.id
+	performances, err := r.queryPerformanceDetails(perfDetailSelect+`
 		JOIN performance_performance_tags ppt ON ppt.performance_id = p.id
-		WHERE ppt.tag_id = $1 AND TRUE` + access.discoverClause() + `
+		WHERE ppt.tag_id = $1 AND TRUE`+access.discoverClause()+`
 		ORDER BY st.stream_date DESC, p.order_index ASC
-		LIMIT $2 OFFSET $3`
-
-	rows, err := r.db.Query(query, tagID, limit, offset)
+		LIMIT $2 OFFSET $3`, tagID, limit, offset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("query performances by tag: %w", err)
-	}
-	defer rows.Close()
-
-	var performances []PerformanceWithDetails
-	for rows.Next() {
-		var p PerformanceWithDetails
-		err := rows.Scan(&p.ID, &p.StreamID, &p.SongID, &p.StartSeconds, &p.EndSeconds,
-			&p.OrderIndex, &p.HolodexSongID, &p.CustomTags, &p.CreatedAt, &p.EndSource, &p.EndConfirmed,
-			&p.StreamTitle, &p.StreamDate, &p.ThumbnailURL,
-			&p.SongName, &p.OriginalArtist, &p.Arts)
-		if err != nil {
-			return nil, 0, fmt.Errorf("scan performance: %w", err)
-		}
-
-		tags, err := r.GetTags(p.ID)
-		if err != nil {
-			return nil, 0, err
-		}
-		p.Tags = tags
-
-		singers, err := r.GetSingers(p.ID)
-		if err != nil {
-			return nil, 0, err
-		}
-		p.Singers = singers
-
-		performances = append(performances, p)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, 0, err
-	}
-	if err := r.attachArtistReferences(performances); err != nil {
-		return nil, 0, err
 	}
 	return performances, total, nil
 }
