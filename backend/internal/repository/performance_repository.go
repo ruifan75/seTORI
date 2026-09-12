@@ -33,6 +33,15 @@ type PerformanceWithDetails struct {
 	ItunesID sql.NullInt64           `json:"itunes_id"`
 	Tags     []models.PerformanceTag `json:"tags"`
 	Singers  []models.Singer         `json:"singers"`
+	// IsRestricted は**その歌唱が載っている配信が秘匿か**。
+	//
+	// `restricted:view` を持つ人には秘匿の歌唱も返るが、**見えるだけでは
+	// 見分けられない** ── 曲ページの件数が公開時と食い違う理由も分からないし、
+	// スクリーンショットに伏せているはずの内容が入る。画面に印を出すために要る。
+	//
+	// 判定は `EffectiveRestrictedExpr` をそのまま使う。**Go 側に書き写さない**
+	// ── 材料（チャンネルの方針）を SELECT していない経路で食い違った前例がある。
+	IsRestricted bool `json:"is_restricted"`
 }
 
 // attachArtistReferences は歌唱一覧に song_artists の安定した UUID 参照を一括で付与する。
@@ -162,7 +171,8 @@ func (r *PerformanceRepository) FindByStreamID(streamID string, access ViewerAcc
 	query := `
 		SELECT p.id, p.stream_id, p.song_id, p.start_seconds, p.end_seconds, p.order_index,
 		       p.holodex_song_id, p.custom_tags, p.created_at, p.end_source, p.end_confirmed,
-		       s.name AS song_name, s.original_artist, s.arts, si.itunes_id
+	       s.name AS song_name, s.original_artist, s.arts, si.itunes_id,
+		       ` + EffectiveRestrictedExpr("st") + `
 		FROM performances p
 		JOIN songs s ON p.song_id = s.id
 		JOIN streams st ON st.id = p.stream_id
@@ -180,7 +190,7 @@ func (r *PerformanceRepository) FindByStreamID(streamID string, access ViewerAcc
 	for rows.Next() {
 		var p PerformanceWithDetails
 		err := rows.Scan(&p.ID, &p.StreamID, &p.SongID, &p.StartSeconds, &p.EndSeconds,
-			&p.OrderIndex, &p.HolodexSongID, &p.CustomTags, &p.CreatedAt, &p.EndSource, &p.EndConfirmed, &p.SongName, &p.OriginalArtist, &p.Arts, &p.ItunesID)
+			&p.OrderIndex, &p.HolodexSongID, &p.CustomTags, &p.CreatedAt, &p.EndSource, &p.EndConfirmed, &p.SongName, &p.OriginalArtist, &p.Arts, &p.ItunesID, &p.IsRestricted)
 		if err != nil {
 			return nil, fmt.Errorf("scan performance: %w", err)
 		}
@@ -713,7 +723,8 @@ func (r *PerformanceRepository) FindBySingerID(singerID string, limit, offset in
 		SELECT p.id, p.stream_id, p.song_id, p.start_seconds, p.end_seconds, p.order_index,
 		       p.holodex_song_id, p.custom_tags, p.created_at, p.end_source, p.end_confirmed,
 		       st.title AS stream_title, st.stream_date, st.thumbnail_url,
-		       s.name AS song_name, s.original_artist
+	       s.name AS song_name, s.original_artist,
+		       ` + EffectiveRestrictedExpr("st") + `
 		FROM performances p
 		JOIN performance_singers ps ON p.id = ps.performance_id
 		JOIN streams st ON p.stream_id = st.id
@@ -734,7 +745,7 @@ func (r *PerformanceRepository) FindBySingerID(singerID string, limit, offset in
 		err := rows.Scan(&p.ID, &p.StreamID, &p.SongID, &p.StartSeconds, &p.EndSeconds,
 			&p.OrderIndex, &p.HolodexSongID, &p.CustomTags, &p.CreatedAt, &p.EndSource, &p.EndConfirmed,
 			&p.StreamTitle, &p.StreamDate, &p.ThumbnailURL,
-			&p.SongName, &p.OriginalArtist)
+			&p.SongName, &p.OriginalArtist, &p.IsRestricted)
 		if err != nil {
 			return nil, 0, fmt.Errorf("scan performance: %w", err)
 		}
@@ -943,11 +954,14 @@ func (a ViewerAccess) discoverClause() string {
 	return " AND st.is_hidden = FALSE AND " + NotRestricted("st")
 }
 
-const perfDetailSelect = `
+// perfDetailSelect は歌唱を配信・楽曲情報つきで引く共通 SELECT。
+// **queryPerformanceDetails の Scan と対で保つこと**（列を足すなら両方）。
+var perfDetailSelect = `
 	SELECT p.id, p.stream_id, p.song_id, p.start_seconds, p.end_seconds, p.order_index,
 	       p.holodex_song_id, p.custom_tags, p.created_at, p.end_source, p.end_confirmed,
 	       st.title AS stream_title, st.stream_date, st.thumbnail_url,
-	       s.name AS song_name, s.original_artist, s.arts
+	       s.name AS song_name, s.original_artist, s.arts,
+	       ` + EffectiveRestrictedExpr("st") + `
 	FROM performances p
 	JOIN streams st ON p.stream_id = st.id
 	JOIN songs s ON p.song_id = s.id`
@@ -966,7 +980,7 @@ func (r *PerformanceRepository) queryPerformanceDetails(query string, args ...in
 		err := rows.Scan(&p.ID, &p.StreamID, &p.SongID, &p.StartSeconds, &p.EndSeconds,
 			&p.OrderIndex, &p.HolodexSongID, &p.CustomTags, &p.CreatedAt, &p.EndSource, &p.EndConfirmed,
 			&p.StreamTitle, &p.StreamDate, &p.ThumbnailURL,
-			&p.SongName, &p.OriginalArtist, &p.Arts)
+			&p.SongName, &p.OriginalArtist, &p.Arts, &p.IsRestricted)
 		if err != nil {
 			return nil, fmt.Errorf("scan performance: %w", err)
 		}

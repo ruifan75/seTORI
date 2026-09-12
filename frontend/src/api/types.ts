@@ -30,6 +30,9 @@ export interface Song {
   artists: ArtistReference[];
   arts?: string;
   performance_count: number;
+  // 上の件数のうち秘匿の配信ぶん（`restricted:view` を持つ人にだけ返る）。
+  // 内訳を出さないと、公開時と食い違う理由が画面に無い
+  restricted_performance_count?: number;
   itunes_ids?: SongItunes[];
   created_at: string;
   updated_at: string;
@@ -354,6 +357,9 @@ export interface Performance {
   stream_title?: string;
   stream_date?: string;
   thumbnail_url?: string;
+  // この歌唱が載っている配信が秘匿か。`restricted:view` を持つ人にだけ true が返る
+  // （持たない人には行そのものが来ないので常に undefined）。「非公開」の印を出すために要る
+  is_restricted?: boolean;
 }
 
 export interface StreamDetailResponse extends Stream {
@@ -389,6 +395,9 @@ export interface SongPerformance {
   singers: Singer[];
   youtube_url: string;
   created_at: string;
+  // この歌唱が載っている配信が秘匿か。`restricted:view` を持つ人にだけ true が返る
+  // （持たない人には行そのものが来ないので常に undefined）。「非公開」の印を出すために要る
+  is_restricted?: boolean;
 }
 
 export interface SongPerformanceListResponse {

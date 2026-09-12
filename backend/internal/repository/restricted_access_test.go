@@ -1,8 +1,12 @@
 package repository
 
 import (
+	"database/sql"
 	"strings"
 	"testing"
+
+	"github.com/google/uuid"
+	_ "github.com/lib/pq"
 )
 
 // 秘匿を濾すかどうかの判断は **NotRestrictedFor に集約する**。
@@ -76,5 +80,37 @@ func TestDiscoveryQueriesUseAccessAwareFilter(t *testing.T) {
 				t.Errorf("%s: access を無視して濾している: %s", f, strings.TrimSpace(line))
 			}
 		}
+	}
+}
+
+// 件数の内訳は**権限が無ければ問い合わせない**。
+//
+// `GetRestrictedPerformanceCount` の集計は秘匿の行そのものを数えるので、
+// access を見ずに実行すると未ログインの利用者にも「秘匿が N 件ある」と返る
+// ── 一覧から落としても件数から存在が漏れる、というこの機能全体の前提が崩れる。
+// 早退しているかは「閉じた DB を渡しても成功する」ことで確かめられる。
+// 問い合わせに進んでいれば sql.ErrConnDone が返るため。
+func TestRestrictedPerformanceCountSkipsQueryWithoutPermission(t *testing.T) {
+	db, err := sql.Open("postgres", "postgres://nowhere/невозможно")
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	db.Close() // 以後どんな問い合わせも sql.ErrConnDone になる
+	repo := NewSongRepository(db)
+
+	for _, access := range []ViewerAccess{PublicAccess} {
+		got, err := repo.GetRestrictedPerformanceCount(uuid.New(), access)
+		if err != nil {
+			t.Errorf("access=%v で問い合わせに進んでいる: %v", access, err)
+		}
+		if got != 0 {
+			t.Errorf("access=%v の内訳は 0 のはず: %d", access, got)
+		}
+	}
+
+	// 陽性対照：権限があれば実際に問い合わせる（閉じた DB なのでエラーになる）。
+	// これが無いと、中身を空にしただけの関数でも上のテストは通ってしまう。
+	if _, err := repo.GetRestrictedPerformanceCount(uuid.New(), RestrictedView); err == nil {
+		t.Error("RestrictedView で問い合わせていない（早退しすぎ）")
 	}
 }

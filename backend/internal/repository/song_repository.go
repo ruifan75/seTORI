@@ -245,6 +245,33 @@ func (r *SongRepository) GetPerformanceCount(songID uuid.UUID, access ViewerAcce
 	return count, nil
 }
 
+// GetRestrictedPerformanceCount は歌唱回数のうち**秘匿の配信ぶん**を返す。
+//
+// `GetPerformanceCount` の内訳を出すためのもの。あちらは秘匿を落として数えるので、
+// `restricted:view` を持つ運用者には「5 回」と出ていても公開されているのは 3 回、
+// という食い違いが説明なしに起きる ── その数字を対外的に使えない。
+//
+// **権限が無ければ問い合わせずに 0 を返す。** 秘匿の行は `DiscoverableFor` が
+// 既に落としているので内訳は常に 0 であり、その人には出す内訳が無い。
+// ここで早退しておかないと、呼び出し側が「0 だから秘匿は無い」と
+// 「見えないから 0」を取り違える余地が残る。
+func (r *SongRepository) GetRestrictedPerformanceCount(songID uuid.UUID, access ViewerAccess) (int, error) {
+	if access != RestrictedView {
+		return 0, nil
+	}
+	var count int
+	err := r.db.QueryRow(`
+		SELECT COUNT(*)
+		FROM performances p
+		JOIN streams st ON p.stream_id = st.id
+		WHERE p.song_id = $1 AND st.is_hidden = FALSE AND `+EffectiveRestrictedExpr("st")+`
+	`, songID).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("get restricted performance count: %w", err)
+	}
+	return count, nil
+}
+
 // HasAnyPerformance は歌唱が 1 件でもあるかを返す。**濾さない。**
 //
 // `GetPerformanceCount` は非表示・秘匿を落とすが、削除の可否はそれで決められない

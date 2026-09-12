@@ -35,17 +35,21 @@ type ArtistReference struct {
 }
 
 type SongResponse struct {
-	ID                    uuid.UUID            `json:"id"`
-	Name                  string               `json:"name"`
-	NameReading           *string              `json:"name_reading,omitempty"`
-	OriginalArtist        string               `json:"original_artist"`
-	OriginalArtistReading *string              `json:"original_artist_reading,omitempty"`
-	Artists               []ArtistReference    `json:"artists"`
-	Arts                  *string              `json:"arts,omitempty"`
-	PerformanceCount      int                  `json:"performance_count"`
-	ItunesIDs             []SongItunesResponse `json:"itunes_ids,omitempty"`
-	CreatedAt             time.Time            `json:"created_at"`
-	UpdatedAt             time.Time            `json:"updated_at"`
+	ID                    uuid.UUID         `json:"id"`
+	Name                  string            `json:"name"`
+	NameReading           *string           `json:"name_reading,omitempty"`
+	OriginalArtist        string            `json:"original_artist"`
+	OriginalArtistReading *string           `json:"original_artist_reading,omitempty"`
+	Artists               []ArtistReference `json:"artists"`
+	Arts                  *string           `json:"arts,omitempty"`
+	PerformanceCount      int               `json:"performance_count"`
+	// RestrictedPerformanceCount は上の件数のうち秘匿の配信ぶん。
+	// `restricted:view` を持つ人にだけ返る（持たない人には秘匿は数に入っていない）。
+	// 内訳を出さないと、公開時と食い違う理由が画面に無い。
+	RestrictedPerformanceCount int                  `json:"restricted_performance_count,omitempty"`
+	ItunesIDs                  []SongItunesResponse `json:"itunes_ids,omitempty"`
+	CreatedAt                  time.Time            `json:"created_at"`
+	UpdatedAt                  time.Time            `json:"updated_at"`
 }
 
 type SongListResponse struct {
@@ -397,6 +401,11 @@ type PerformanceResponse struct {
 	StreamTitle  string  `json:"stream_title,omitempty"`
 	StreamDate   string  `json:"stream_date,omitempty"`
 	ThumbnailURL *string `json:"thumbnail_url,omitempty"`
+	// IsRestricted は**この歌唱が載っている配信が秘匿か**。`restricted:view` を
+	// 持つ人にだけ true が返りうる（持たない人には行そのものが返らないので常に false）。
+	// 画面に「非公開」の印を出すために要る ── 見えているだけでは、公開されている
+	// ものと見分けが付かない。
+	IsRestricted bool `json:"is_restricted,omitempty"`
 }
 
 // 楽曲詳細ページで使う逆引き。
@@ -421,6 +430,11 @@ type SongPerformanceResponse struct {
 	// 編集画面はこれを読んで endSource を復元し、保存時にそのまま送り返す。
 	EndSource    string `json:"end_source"`
 	EndConfirmed bool   `json:"end_confirmed"`
+	// IsRestricted は**この歌唱が載っている配信が秘匿か**。`restricted:view` を
+	// 持つ人にだけ true が返りうる（持たない人には行そのものが返らないので常に false）。
+	// 画面に「非公開」の印を出すために要る ── 見えているだけでは、公開されている
+	// ものと見分けが付かない。
+	IsRestricted bool `json:"is_restricted,omitempty"`
 }
 
 type SongPerformanceListResponse struct {
