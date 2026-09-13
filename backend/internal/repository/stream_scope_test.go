@@ -45,9 +45,7 @@ func TestStreamListsFilterCountAndRowsTogether(t *testing.T) {
 		}
 
 		for name, part := range map[string]string{"件数": countElse, "一覧": listElse} {
-			if !strings.Contains(part, "VisibleChannelExpr(") {
-				t.Errorf("通常表示の%sが濾していない: %q", name, part)
-			}
+			assertAndedVisibleChannel(t, "通常表示の"+name, part)
 		}
 		for name, part := range map[string]string{"件数": countIf, "一覧": listIf} {
 			if strings.Contains(part, "VisibleChannelExpr(") {
@@ -59,11 +57,7 @@ func TestStreamListsFilterCountAndRowsTogether(t *testing.T) {
 	t.Run("FindByTagID は件数と一覧の両方を濾す", func(t *testing.T) {
 		body := funcBody(t, src, "func (r *StreamRepository) FindByTagID")
 		countPart, listPart := splitAtStreamList(t, body, "FindByTagID")
-		if !strings.Contains(countPart, "VisibleChannelExpr(") {
-			t.Error("件数のクエリが濾していない")
-		}
-		if !strings.Contains(listPart, "VisibleChannelExpr(") {
-			t.Error("一覧のクエリが濾していない")
-		}
+		assertAndedVisibleChannel(t, "件数", countPart)
+		assertAndedVisibleChannel(t, "一覧", listPart)
 	})
 }

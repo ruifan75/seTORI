@@ -71,3 +71,39 @@ func ifElseBlocks(t *testing.T, body, cond string, nth int) (ifPart, elsePart st
 	}
 	return rest[:mid], after[:end]
 }
+
+// assertAndedVisibleChannel は、断片の中の VisibleChannelExpr が
+// **AND で繋がれている**ことまで確かめる。
+//
+// **呼び出しが在るだけでは足りない。** `AND` を `OR` に変えると一覧だけが広がり、
+// 件数は絞られたままなので元の症状（件数と一覧の食い違い）が再発する。それでも
+// 「分岐に呼び出しが在る」という検査は通ってしまう ── 実測で通った。
+//
+// Go の文字列連結（`" + ` や "`+") を落としてから直前の語を見る。
+func assertAndedVisibleChannel(t *testing.T, name, snippet string) {
+	t.Helper()
+	const call = "VisibleChannelExpr("
+	stripConcat := strings.NewReplacer("\"", "", "`", "", "+", "", "\n", " ", "\t", " ")
+
+	found := 0
+	for i := 0; ; {
+		k := strings.Index(snippet[i:], call)
+		if k < 0 {
+			break
+		}
+		pos := i + k
+		before := strings.TrimSpace(stripConcat.Replace(snippet[:pos]))
+		if !strings.HasSuffix(before, "AND") {
+			tail := before
+			if len(tail) > 48 {
+				tail = "…" + tail[len(tail)-48:]
+			}
+			t.Errorf("%s: VisibleChannelExpr が AND で繋がれていない（直前: %q）", name, tail)
+		}
+		found++
+		i = pos + len(call)
+	}
+	if found == 0 {
+		t.Errorf("%s: VisibleChannelExpr が無い", name)
+	}
+}
