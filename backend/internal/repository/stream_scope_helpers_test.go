@@ -41,3 +41,33 @@ func splitAtStreamList(t *testing.T, body, fn string) (countPart, listPart strin
 	}
 	return body[:k], body[k:]
 }
+
+// ifElseBlocks は `if <cond> {` … `} else {` … `}` を 3 つに割る。
+//
+// **分岐ごとに見ないと、条件を「もう片方の分岐へ移す」改変を見逃す。**
+// 実際、分岐をまとめて見ていたときは、通常表示の一覧から条件を外して
+// includeHidden 側へ移しても検査が通った ── 件数は濾しているのに一覧は
+// 素通りという、いちばん起きてほしくない状態が固定できていなかった。
+func ifElseBlocks(t *testing.T, body, cond string, nth int) (ifPart, elsePart string) {
+	t.Helper()
+	head := "\tif " + cond + " {\n"
+	pos := 0
+	for n := 0; n <= nth; n++ {
+		i := strings.Index(body[pos:], head)
+		if i < 0 {
+			t.Fatalf("if %s の %d 個目が見つからない", cond, nth+1)
+		}
+		pos += i + len(head)
+	}
+	rest := body[pos:]
+	mid := strings.Index(rest, "\n\t} else {\n")
+	if mid < 0 {
+		t.Fatalf("else が見つからない: if %s (%d 個目)", cond, nth+1)
+	}
+	after := rest[mid+len("\n\t} else {\n"):]
+	end := strings.Index(after, "\n\t}\n")
+	if end < 0 {
+		t.Fatalf("分岐の終わりが見つからない: if %s (%d 個目)", cond, nth+1)
+	}
+	return rest[:mid], after[:end]
+}

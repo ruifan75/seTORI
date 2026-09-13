@@ -28,21 +28,42 @@ func TestVisibleChannelExprUsesChannelVisibility(t *testing.T) {
 // **件数と一覧は必ず対で濾す。** 一覧から落としても件数が合わなければ、
 // 何件伏せたかが残る（秘匿の件数と同じ話）。実際、最初の実装では
 // 文字列置換が件数の行に 2 回当たって**一覧のほうが素通り**していた。
+//
+// **分岐ごとに見る。** `FindAll` は includeHidden で 2 通りに分かれるので、
+// まとめて見ると「通常表示から外して includeHidden 側へ移す」改変を見逃す
+// ── そのとき件数は濾していて一覧だけ素通りになる。
 func TestStreamListsFilterCountAndRowsTogether(t *testing.T) {
 	src := readSourceFile(t, "stream_repository.go")
 
-	for _, fn := range []string{"FindAll", "FindByTagID"} {
-		body := funcBody(t, src, "func (r *StreamRepository) "+fn)
-		if n := strings.Count(body, "VisibleChannelExpr("); n != 2 {
-			t.Errorf("%s: VisibleChannelExpr の出現が %d 回（件数と一覧で 2 回のはず）", fn, n)
+	t.Run("FindAll は通常表示の件数と一覧だけを濾す", func(t *testing.T) {
+		body := funcBody(t, src, "func (r *StreamRepository) FindAll")
+		// includeHidden の分岐は 2 つある。1 つ目が件数、2 つ目が一覧。
+		countIf, countElse := ifElseBlocks(t, body, "includeHidden", 0)
+		listIf, listElse := ifElseBlocks(t, body, "includeHidden", 1)
+		if !strings.Contains(listElse, "streamListQuery(") {
+			t.Fatalf("2 つ目の分岐が一覧ではない: %q", listElse)
 		}
-		// 件数側（COUNT）と一覧側（streamListQuery / SELECT）の両方に入っていること。
-		countPart, listPart := splitAtStreamList(t, body, fn)
+
+		for name, part := range map[string]string{"件数": countElse, "一覧": listElse} {
+			if !strings.Contains(part, "VisibleChannelExpr(") {
+				t.Errorf("通常表示の%sが濾していない: %q", name, part)
+			}
+		}
+		for name, part := range map[string]string{"件数": countIf, "一覧": listIf} {
+			if strings.Contains(part, "VisibleChannelExpr(") {
+				t.Errorf("includeHidden 側の%sまで濾している（全部見せる分岐のはず）: %q", name, part)
+			}
+		}
+	})
+
+	t.Run("FindByTagID は件数と一覧の両方を濾す", func(t *testing.T) {
+		body := funcBody(t, src, "func (r *StreamRepository) FindByTagID")
+		countPart, listPart := splitAtStreamList(t, body, "FindByTagID")
 		if !strings.Contains(countPart, "VisibleChannelExpr(") {
-			t.Errorf("%s: 件数のクエリが濾していない", fn)
+			t.Error("件数のクエリが濾していない")
 		}
 		if !strings.Contains(listPart, "VisibleChannelExpr(") {
-			t.Errorf("%s: 一覧のクエリが濾していない", fn)
+			t.Error("一覧のクエリが濾していない")
 		}
-	}
+	})
 }
