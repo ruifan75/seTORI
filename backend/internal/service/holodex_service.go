@@ -513,8 +513,8 @@ func (s *HolodexService) syncVideo(video holodex.Video, channelID string, forceU
 			return "", fmt.Errorf("set initial stream visibility: %w", err)
 		}
 
-		// **会限は同期の時点で印を付けておく。** availability を取りに行くのは yt-dlp を
-		// 呼んだときだけなので、それを待つ間このデータは公開側に置かれることになる。
+		// **会限は同期の時点で印を付けておく。** ここで付けないと、取り込んだ会限配信が
+		// 公開側に置かれたまま残る（あとから気付いて人が付けるまで）。
 		// 材料（Holodex の topic / タイトル規則で付く members_only タグ）はここで揃っている。
 		if initialMembersOnlyCandidate(video.TopicID, tagIDs) {
 			if err := s.streamRepo.MarkMembersOnly(video.ID); err != nil {

@@ -509,8 +509,8 @@ func (r *StreamRepository) MarkHolodexUploadAttempt(streamID string) error {
 
 // MarkMembersOnly は会限の検出を記録する（members_only タグを付ける）。
 //
-// **新規同期にも効かせるために要る。** yt-dlp が availability を取りに行くのは
-// 限られた経路だけなので、それを待つ間このデータは公開側に置かれてしまう。
+// **新規同期にも効かせるために要る。** ここで付けないと、取り込んだ会限配信が
+// 公開側に置かれたまま残る（あとから人が気付いて付けるまで）。
 // 会限と分かる材料（Holodex の topic / タイトル規則）は同期の時点で揃っている。
 //
 // **付けるだけで外さない。** 外せるのは人だけ（「これは会限ではない」という
