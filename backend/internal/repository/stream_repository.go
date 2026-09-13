@@ -23,12 +23,7 @@ func NewStreamRepository(db *sql.DB) *StreamRepository {
 // FindAll はすべての歌枠を取得する（ページング対応、既定では非表示を除外）。
 func (r *StreamRepository) FindAll(limit, offset int, includeHidden bool, sort, dir string) ([]models.Stream, int, error) {
 	var total int
-	var countQuery string
-	if includeHidden {
-		countQuery = "SELECT COUNT(*) FROM streams"
-	} else {
-		countQuery = "SELECT COUNT(*) FROM streams WHERE is_hidden = FALSE"
-	}
+	countQuery := "SELECT COUNT(*) FROM streams WHERE " + streamListFilter("streams", includeHidden)
 	err := r.db.QueryRow(countQuery).Scan(&total)
 	if err != nil {
 		return nil, 0, fmt.Errorf("count streams: %w", err)
@@ -40,17 +35,10 @@ func (r *StreamRepository) FindAll(limit, offset int, includeHidden bool, sort, 
 		order = nameSortOrderDir("title", "''", dir)
 	}
 
-	var query string
-	if includeHidden {
-		query = streamListQuery("streams", `
-			ORDER BY `+order+`
-			LIMIT $1 OFFSET $2`)
-	} else {
-		query = streamListQuery("streams", `
-			WHERE is_hidden = FALSE
-			ORDER BY `+order+`
-			LIMIT $1 OFFSET $2`)
-	}
+	query := streamListQuery("streams", `
+		WHERE `+streamListFilter("streams", includeHidden)+`
+		ORDER BY `+order+`
+		LIMIT $1 OFFSET $2`)
 
 	rows, err := r.db.Query(query, limit, offset)
 	if err != nil {
@@ -83,6 +71,44 @@ func streamListColumns(alias string) string {
 		p + "holodex_data, " + p + "holodex_hash, " + p + "comment_raw, " + p + "comment_songs, " +
 		p + "is_processed, " + p + "is_hidden, " + p + "restriction_override, " +
 		p + "created_at, " + p + "updated_at, " + EffectiveRestrictedExpr(alias)
+}
+
+// streamListFilter は配信一覧の WHERE 条件を返す。**件数と一覧で必ず共有する。**
+//
+// 別々に書き下ろすと件数と一覧がずれ、「一覧から落としたのに件数には残る」
+// ＝何件伏せたかが漏れる状態になる。実際この関数を作る前は、文字列置換が
+// 件数の行に 2 回当たって一覧が素通りしていた。**書き下ろせなくするのが目的。**
+//
+// includeHidden は編集者向けの「全部見せる」経路（現状 `/streams` は常に false）。
+// 非表示もチャンネルの範囲も両方外す ── 中途半端に片方だけ見せる用途は無い。
+func streamListFilter(alias string, includeHidden bool) string {
+	if includeHidden {
+		return "TRUE"
+	}
+	return alias + ".is_hidden = FALSE AND " + VisibleChannelExpr(alias)
+}
+
+// VisibleChannelExpr は「この配信が、一覧に出しているチャンネルのものか」を返す SQL 式。
+// 参加者に非表示でない singer が 1 人でも居れば true。
+//
+// **なぜ要るか。** 同期は動画の所有者だけでなく description の mention からも
+// 参加者を作るので、この站が扱っていないチャンネルの配信が混ざる。実測
+// （2026-09-13、本番）で 602 件中 4 件がそれで、うち 1 件は mention を読み違えて
+// 稀羽すうを参加者にしていた。人が参加者を手で外すと歌手ページからは消えるのに、
+// **`/streams` とタグ別一覧は参加者を見ていないので残り続けた**
+// ── 直したのに直っていないように見える。
+//
+// **判定はチャンネルの表示/非表示という既存の決定を使う**（新しい旗を足さない）。
+// チャンネル一覧に出ていないチャンネルの配信は配信一覧にも出さない、という対応に
+// しておけば、後からそのチャンネルを表示にすれば歌枠も自動で出る。旗を別に持つと、
+// 「チャンネルは出したのに歌枠が出ない」を直すのにもう 1 か所触ることになる。
+//
+// **件数にも必ず通すこと。** 一覧から落としても件数が合わなければ、
+// 何件伏せたかが残る（秘匿の件数と同じ話）。
+func VisibleChannelExpr(alias string) string {
+	return "EXISTS (SELECT 1 FROM stream_singers ss" +
+		" JOIN singers si ON si.id = ss.singer_id" +
+		" WHERE ss.stream_id = " + alias + ".id AND si.is_hidden = FALSE)"
 }
 
 // streamListQuery は一覧系の SELECT を丸ごと組み立てる。呼び出し側が書くのは
@@ -506,14 +532,14 @@ func (r *StreamRepository) FindByTagID(tagID string, limit, offset int) ([]model
 		SELECT COUNT(*)
 		FROM streams s
 		JOIN stream_stream_tags sst ON sst.stream_id = s.id
-		WHERE sst.tag_id = $1 AND s.is_hidden = FALSE`, tagID).Scan(&total)
+		WHERE sst.tag_id = $1 AND `+streamListFilter("s", false)+``, tagID).Scan(&total)
 	if err != nil {
 		return nil, 0, fmt.Errorf("count streams by tag: %w", err)
 	}
 
 	rows, err := r.db.Query(streamListQuery("s", `
 		JOIN stream_stream_tags sst ON sst.stream_id = s.id
-		WHERE sst.tag_id = $1 AND s.is_hidden = FALSE
+		WHERE sst.tag_id = $1 AND `+streamListFilter("s", false)+`
 		ORDER BY s.stream_date DESC
 		LIMIT $2 OFFSET $3`), tagID, limit, offset)
 	if err != nil {
