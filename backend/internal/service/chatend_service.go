@@ -356,9 +356,6 @@ func (s *ChatEndService) fetchLiveChat(videoID string) (string, chatOutcome, err
 	cmd.Stderr = &stderr
 	runErr := cmd.Run()
 
-	// 再生可否は chat の取得に失敗していても拾えることがある（会限は
-	// 「chat は取れないが subscriber_only とは分かる」）ので、先に保存する。
-
 	// 警告だけで終了コードが非 0 になることがあるので、まずファイルの有無で判断する。
 	// **キャッシュと同じ検証を通す。** 存在だけを見ると、yt-dlp が途中まで書いて
 	// 失敗したファイルが runErr や transient の判定より先に成功として返る。

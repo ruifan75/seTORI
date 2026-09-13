@@ -258,9 +258,6 @@ export interface Stream {
   chapter_timeline_songs?: CommentSong[];     // チャプター解析済みタイムライン（分析キャッシュ）
   // 配信者が付けた章節の数。-1 は「まだ調べていない」で、0（＝調べたが無い）とは別
   chapter_count?: number;
-  // 埋め込みプレイヤーで再生できるか。**詳細でしか返らない**（一覧・検索では undefined）。
-  // undefined＝この応答は判定していない。従来どおり描いてよい
-  // 生の判定材料は content:edit のときだけ返る
   created_at: string;
   updated_at: string;
 }

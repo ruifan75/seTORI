@@ -299,8 +299,6 @@ func (s *ChapterService) fetchChapters(videoID string) ([]Chapter, error) {
 		}
 	}
 
-	// 再生可否は章節が無くても拾えるので、章節の判定より先に保存する。
-
 	out := firstNonEmptyLine(stdout.String())
 	if out == "" || out == "NA" || out == "null" {
 		return []Chapter{}, nil // 章節の無い動画。これも結果なので空配列で保存する

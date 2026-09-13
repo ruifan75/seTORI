@@ -125,10 +125,10 @@ Holodex の分類もタイトルキーワード規則も自動判定であり、
 
 ### 自動判定と人の裁定は別の列に持つ
 
-**検出と裁定を 1 つにすると人の判断が消える。** 会限は chapters / live chat /
-availability backfill から繰り返し取り直されるので、次の順で必ず戻ってしまう：
+**検出と裁定を 1 つにすると人の判断が消える。** 検出は同期のたびに取り直されるので、
+次の順で必ず戻ってしまう：
 
-1. ~~`availability` が `subscriber_only` → 検出が立つ~~（PR #66 で廃止）
+1. 同期が会限と判定 → 検出が立つ
 2. 編集者が「公開してよい」と判断して外す
 3. 何かの取得で同じ動画をもう一度読む
 4. 自動の検出が **また立つ**
@@ -139,7 +139,7 @@ availability backfill から繰り返し取り直されるので、次の順で�
 
 | 列 | 誰が書くか | 意味 |
 |---|---|---|
-| `members_only` タグ | 自動（同期の候補判定・`SaveAvailability`）＋**人** | 会限だという**検出** |
+| `members_only` タグ | 自動（同期の候補判定）＋**人** | 会限だという**検出** |
 | `singers.members_only_policy` | 人だけ（`PUT /api/singers/{id}/members-policy`） | チャンネル単位の方針。NULL＝未確認 / `allow` / `deny` |
 | `restriction_override` | 人だけ（`PUT /api/streams/{id}`） | NULL＝未裁定 / TRUE＝伏せる / FALSE＝公開してよい |
 
@@ -152,19 +152,18 @@ Go に双子は置かない ── 材料（所有者の方針）を SELECT し�
 **自動判定の側は凍結しない。** `singers.is_hidden` のように固めると、後から会限化した
 配信を検出できなくなる。人の裁定が勝つので、検出が立ち続けていても表示は変わらない。
 
-**自動では外れない。** `availability = public` は「反証が無かった」という弱い結論なので
-（issue #3）、それで秘匿を解くと誤って公開する。`SaveAvailability` は立てる方向にしか動かない。
+**自動では外れない。** 検出は「会限らしい材料があった」という弱い結論でしかなく、
+材料が無いことは公開の証拠にならない。自動の経路は**立てる方向にしか動かない**（add-only）。
 
-> ⚠️ **`COALESCE` を外さないこと。** `SaveAvailability` は
-> `WHERE COALESCE($2 = 'subscriber_only', FALSE)` でタグ付けを決める。
-> `availability` が NULL のとき比較結果も NULL になり、SQL の三値論理では
-> `WHERE NULL` は真でも偽でもなく**行が消える**。列だった頃は NOT NULL 制約に当たり、
-> 秘匿でない行への「取得できなかった」の保存が本番で落ちた（該当しうる行が 1217）。
+> ⚠️ **`COALESCE` を外さないこと**（三値論理）。これは `SaveAvailability` で
+> 実際に踏んだ罠の記録。`WHERE COALESCE($2 = 'subscriber_only', FALSE)` の
+> `COALESCE` を外すと、`availability` が NULL のとき比較結果も NULL になり、
+> SQL では `WHERE NULL` は真でも偽でもなく**行が消える**。列だった頃は
+> NOT NULL 制約に当たり、秘匿でない行への保存が本番で落ちた（該当しうる行が 1217）。
 > 既に秘匿の行だけは通るので、会限の配信で試すと再現しない。
 >
-> **更新とタグ付けは 1 文（data-modifying CTE）にする。** 別々の Exec だと、間で
-> 失敗したときに「`availability` は `subscriber_only` なのに会限の印が無い」＝
-> 公開側に置かれた行が残る。
+> `SaveAvailability` 自体は PR #66 で削除したが、**条件つきで行を選ぶ UPDATE を
+> 書くときは同じ罠がある**ので残す。
 
 ### 候補は 3 つの材料から、全部の時点で倒す
 
@@ -176,17 +175,19 @@ Go に双子は置かない ── 材料（所有者の方針）を SELECT し�
 | ~~yt-dlp を呼んだとき~~ | ~~`availability = subscriber_only`~~（**PR #66 で廃止**。`SaveAvailability` ごと削除） |
 | **人** | 編集画面でタグを付ける／外す |
 
-**初回同期の判定が要る理由**：`availability` は yt-dlp を呼ぶまで埋まらないので、
-それを待つ間、新しく同期された会限配信は公開側に置かれてしまう。
+**初回同期の判定が要る理由**：同期の時点で印を付けないと、新しく取り込んだ会限配信が
+公開側に置かれたまま残る。
 
-**人が要る理由**：会限を確実に判定する方法が無い。yt-dlp の `availability` は本番の
-会限 86 本のうち 6 本を `public` と返し、Holodex の `topic_id` は単値なので `singing` と
-排他になり、タイトルに「メン限」と書かない会限もある。だから**タグが検出の器**で、
-自動の 2 経路は add-only（外すのは人だけ）。
+**人が要る理由**：会限を確実に判定する方法が無い。Holodex の `topic_id` は単値なので
+`singing` と排他になり、タイトルに「メン限」と書かない会限もある。だから**タグが検出の器**で、
+自動の経路は add-only（外すのは人だけ）。
+
+> かつては yt-dlp の `availability` も検出に使っていたが、**本番の会限 86 件のうち
+> Holodex が取りこぼしたものを 1 件も拾えなかった**ため 2026-09-14 に外した（PR #66）。
+> 実測と当時の設計は下の「再生可否」の節に残してある。
 
 Holodex の `topic_id` は単値で `singing` と排他になるため取りこぼすが、
-**倒す方向にしか使わない**ので害はない（取りこぼしは `members_only` タグと
-`availability` が拾う）。
+**倒す方向にしか使わない**ので害はない（取りこぼしは人がタグで拾う）。
 
 ### 落とす場所（**次に監査するときのチェックリスト。網羅である**）
 
@@ -331,7 +332,7 @@ ORDER BY p.start_seconds AND NOT COALESCE(...)
 ただし **route 単位が正しい場所もある。** `/comments` `/chapters` `/holodex-songs` のように
 **endpoint 全体が編集者専用**なら、いまの `requiredPermission` が正しい。
 route の列挙が不適切なのは、**同じ endpoint の中で行ごとに秘匿を分ける**場合。
-`availability` やチャンネル同意は配信ごとに違うので、path 文字列しか見ない
+秘匿の検出やチャンネル同意は配信ごとに違うので、path 文字列しか見ない
 `requiredPermission` では原理的に判定できない。
 
 行ごとの秘匿を入れるなら、**viewer の文脈を受け取る visibility policy を 1 つ作り、
@@ -390,8 +391,8 @@ PR #6 が解析結果でやったのと同じ考え方だが、通す場所は�
 3. **会限**（歌はあるが埋め込み再生できない）── 内容の公開可否は配信者本人の意思
 
 秘匿が要るのは 3 だけ。1 と 2 に秘匿を課すと上記の設計が壊れるので、
-**秘匿は `is_hidden` とは別の軸で持つ**。判定材料は yt-dlp の `availability`
-（`subscriber_only`）と、チャンネル単位の同意フラグ。設計は issue #4。
+**秘匿は `is_hidden` とは別の軸で持つ**。判定材料は `members_only` タグ（検出）と、
+チャンネル単位の同意フラグ・`restriction_override`（裁定）。設計は issue #4。
 
 ### 再生可否（`availability` / `playable_in_embed`）
 
@@ -573,10 +574,10 @@ subreason が `This content isn't available, try again later` で、yt-dlp は�
 rate-limited の案内を足す（`extractor/youtube/_video.py`）。
 つまり **`Video unavailable` だけで消失と判定すると、レート制限に当たった公開配信を
 恒久的に `unavailable` として記録する**。backfill は 700 件超を並列で回すので、これは
-起きにくい事故ではなく起こしにいく事故になる。判定は `classifyFetchFailure` に閉じ込めてある
-── 述語を 2 つ順に呼ぶ形にすると、順序を入れ替えても型は通りテストも書きにくい。
-`availability_failure_test.go` は**決定そのもの**を検査するので、順序を逆にすると落ちる
-（実際に入れ替えて確認済み）。
+起きにくい事故ではなく起こしにいく事故になる。判定を述語 2 つの呼び分けにすると、順序を入れ替えても型は通る
+── だから**決定そのもの**を検査すること。`availability` の経路は PR #66 で消えたが、
+同じ罠は live chat に残っており、`chatend_outcome_test.go` が
+偽の yt-dlp で `fetchLiveChat` を実際に呼んで順序を固定している。
 
 文言に依存するのは避けたかったが、ここでは**外したときに安全側へ倒れる** ──
 一致しなければ未調査のまま残るだけ。会限を文字列で見分けるのは逆に危険なので、
@@ -590,14 +591,16 @@ cookie の判定は `HasCookies()` ではなく**実際に渡せたか**で見�
 
 埋める経路は 3 つ。**相乗りだけでは埋まらない**ので専用の backfill がある：
 
-| 経路 | 追加リクエスト | 埋まらない場合 |
-|---|---|---|
-| live chat の取得に相乗り | なし | ファイルキャッシュがあると yt-dlp 自体を呼ばない |
-| チャプター取得に相乗り | なし | backfill が `is_hidden = FALSE` 限定 |
-| `POST /api/availability/backfill` | あり（既定は未調査のみ／`?recheck=1` で弱い判定も） | ─ |
-
-進捗と停止：`GET /api/availability/backfill/status` と
-`POST /api/availability/backfill/cancel`。
+> **当時の経路**（すべて PR #66 で削除済み）
+>
+> | 経路 | 追加リクエスト | 埋まらない場合 |
+> |---|---|---|
+> | live chat の取得に相乗り | なし | ファイルキャッシュがあると yt-dlp 自体を呼ばない |
+> | チャプター取得に相乗り | なし | backfill が `is_hidden = FALSE` 限定 |
+> | `POST /api/availability/backfill` | あり | ─ |
+>
+> 進捗と停止は `GET /api/availability/backfill/status` と
+> `POST /api/availability/backfill/cancel` で見ていた。
 **log では足りない** ── 直近 1000 件しか残らず、20 件ごとの進捗行が失敗行を押し流す。
 二重起動は弾く（同じ対象へ 2 つ走らせても yt-dlp が倍になるだけ）。
 

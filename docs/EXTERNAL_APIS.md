@@ -148,7 +148,7 @@
 > **会限か、所有者が埋め込みを切っているかは区別できない**。
 > 画面の文言も両方の可能性を書く（`STREAM_VISIBILITY.md`）。
 
-判別の材料は **yt-dlp の `availability`**。
+当時は判別の材料として **yt-dlp の `availability`** を調べた。
 `yt-dlp --skip-download --print "%(availability)s" <URL>`（cookie は `--cookies`）で：
 
 | 動画 | cookie なし | cookie あり | 状態 |
@@ -173,12 +173,13 @@
 読む側も 1 か所だけだった ── 画面が先に案内へ倒すのは会限のときだけで、
 それは `members_only` タグで判定できる（取りこぼし 0 件なので精度はむしろ上がる）。
 
-`streams` の 3 列は残っているが**誰も読まない**。判定材料としての位置づけは
-`docs/STREAM_VISIBILITY.md` を参照。
+`streams` の 3 列は残してある（消すと戻せないため）。行を読むときに SELECT・Scan は
+されるが、**判定には一切使わない**。当時の実測と設計は `docs/STREAM_VISIBILITY.md` を参照。
 
-**相乗りだけでは埋まらない**ので専用の backfill がある ── live chat はファイルキャッシュが
-あると yt-dlp の前に return し、章節 backfill は `is_hidden = FALSE` に限定されていて
-判定したい非表示配信を対象にしないため。
+> **当時の設計**：相乗りだけでは埋まらないので専用の backfill を置いていた ──
+> live chat はファイルキャッシュがあると yt-dlp の前に return し、章節 backfill は
+> `is_hidden = FALSE` に限定されていて判定したい非表示配信を対象にしないため。
+> 端点ごと削除済み。
 
 > ⚠️ **`availability` 単独では判定できない。** 本番の相乗り 2 経路は
 > `--ignore-no-formats-error` を付けており、そのとき**視聴できない動画でも
@@ -195,8 +196,10 @@ Holodex の `topic_id = "membersonly"` は候補の絞り込みに使えるが�
 その修正は「topic を正しく見る」ではなく **「実際に再生できるかを見る」** だった
 （`Holodex/src/components/watch/WatchLiveChat.vue` の `currentTime > 0`、および CHANGELOG）。
 
-→ **Holodex は候補抽出に、`availability` は判定に**、と役割を分ける（issue #3、実装済み）。
-秘匿そのものの軸は `members_only` タグ（issue #4 / #32、`STREAM_VISIBILITY.md`）。
+→ 当時の結論は「**Holodex は候補抽出に、`availability` は判定に**」だったが、
+実測で `availability` は Holodex の取りこぼしを 1 件も拾えず、2026-09-14 に外した（PR #66）。
+**検出も裁定も `members_only` タグと `restriction_override` が持つ**
+（issue #4 / #32、`STREAM_VISIBILITY.md`）。
 
 ## 5. iTunes Search / Lookup API（key 不要）
 

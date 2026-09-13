@@ -438,8 +438,6 @@ func (s *StreamService) toStreamResponse(stream models.Stream, tags []models.Str
 	}
 	resp.HolodexUploadUnknown = stream.HolodexUploadUnknown
 
-	// 生の再生可否は編集者だけに返す（判定の裏取りと backfill の進み具合を見るため）。
-
 	// Holodex の timeline データを解析して追加する（完全な Video JSON から songs を抽出）
 	if len(stream.HolodexData) > 0 {
 		// HolodexData には完全な holodex.Video オブジェクトが保存されている
