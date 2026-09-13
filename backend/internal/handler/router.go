@@ -50,7 +50,6 @@ type Router struct {
 	aiProviderRepo       *repository.AIProviderRepository
 	chatEndService       *service.ChatEndService
 	chapterService       *service.ChapterService
-	availabilityService  *service.AvailabilityService
 	artistService        *service.ArtistService
 	batchAnalyzeService  *service.BatchAnalyzeService
 	batchFillService     *service.BatchFillService
@@ -126,7 +125,6 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	commentService := service.NewCommentService(holodexService, streamRepo, filterKeywordRepo, aiService, normalizationService, chatEndService, songMatchService)
 	// 3 つ目の入力元。抽出は CommentService と共有し、yt-dlp は ChatEndService のものを借りる
 	chapterService := service.NewChapterService(streamRepo, commentService, normalizationService, chatEndService)
-	availabilityService := service.NewAvailabilityService(streamRepo, chatEndService)
 	// HolodexService も AnalyzeHolodexSongs で正規化・拍手 end を実行する（holodex_hash キャッシュ）
 	holodexService.SetAnalysisServices(normalizationService, chatEndService)
 	batchAnalyzeService := service.NewBatchAnalyzeService(commentService, streamRepo)
@@ -199,7 +197,6 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 		aiProviderRepo:       aiProviderRepo,
 		chatEndService:       chatEndService,
 		chapterService:       chapterService,
-		availabilityService:  availabilityService,
 		artistService:        artistService,
 		batchAnalyzeService:  batchAnalyzeService,
 		batchFillService:     batchFillService,
@@ -456,10 +453,6 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("POST /api/chapters/backfill", r.handleBackfillChapters)
 
 	// 再生可否（会限・削除済みの判定材料。issue #3）
-	r.mux.HandleFunc("POST /api/streams/{id}/availability", r.handleFetchAvailability)
-	r.mux.HandleFunc("POST /api/availability/backfill", r.handleBackfillAvailability)
-	r.mux.HandleFunc("POST /api/availability/backfill/cancel", r.handleCancelAvailabilityBackfill)
-	r.mux.HandleFunc("GET /api/availability/backfill/status", r.handleAvailabilityBackfillStatus)
 
 	// Filter keywords management
 	r.mux.HandleFunc("GET /api/filter-keywords", r.handleListFilterKeywords)
@@ -2916,72 +2909,6 @@ func (r *Router) handleBackfillChapters(w http.ResponseWriter, req *http.Request
 
 // ========== 再生可否 Handlers ==========
 
-// handleFetchAvailability は 1 配信の再生可否を調べ直す（同期。編集画面から押す）。
-func (r *Router) handleFetchAvailability(w http.ResponseWriter, req *http.Request) {
-	id := req.PathValue("id")
-	if id == "" {
-		respondError(w, http.StatusBadRequest, "配信IDは必須です")
-		return
-	}
-	a, saved, err := r.availabilityService.Fetch(id)
-	// 取得できなかったこと自体が結果なので、エラーでも保存済みの値を返す。
-	resp := map[string]interface{}{
-		"availability":      a.Availability,
-		"playable_in_embed": nil,
-	}
-	if a.PlayableInEmbed.Valid {
-		resp["playable_in_embed"] = a.PlayableInEmbed.Bool
-	}
-	// saved は「DB に記録できたか」。error があっても記録済みのことがある
-	// （動画が無いと確かめられた場合）。再実行が要るかはこちらで判断する。
-	resp["saved"] = saved
-	if err != nil {
-		resp["error"] = err.Error()
-	}
-	respondJSON(w, http.StatusOK, resp)
-}
-
-// handleCancelAvailabilityBackfill は実行中の backfill を止める。
-// **保証は「この応答のあと新しい 1 件は始まらない」**。既に始まっているものは
-// 最後まで走る（最大で並列数ぶん）。途中で殺すと yt-dlp の一時ファイルが残るため。
-func (r *Router) handleCancelAvailabilityBackfill(w http.ResponseWriter, req *http.Request) {
-	r.availabilityService.Cancel()
-	respondJSON(w, http.StatusOK, map[string]interface{}{
-		"message":  "停止を要求しました（これ以降は新しく始めません。実行中のものは終わるまで走ります）",
-		"progress": r.availabilityService.Progress(),
-	})
-}
-
-// handleAvailabilityBackfillStatus は進捗を返す。
-// **log では足りない** ── 直近 1000 件しか残らず、20 件ごとの進捗行が失敗行を押し流す。
-func (r *Router) handleAvailabilityBackfillStatus(w http.ResponseWriter, req *http.Request) {
-	respondJSON(w, http.StatusOK, r.availabilityService.Progress())
-}
-
-func (r *Router) handleBackfillAvailability(w http.ResponseWriter, req *http.Request) {
-	concurrency := 3
-	if c := req.URL.Query().Get("concurrency"); c != "" {
-		if v, err := strconv.Atoi(c); err == nil && v > 0 {
-			concurrency = v
-		}
-	}
-	// 並列数は service 側で丸められる。要求値ではなく**実際に使う値**を返す。
-	// recheck=1 で、`public` と記録済みの行も調べ直す。yt-dlp の public は
-	// 「反証が無かった」という結論なので、会限が public と記録されることがある。
-	recheck := req.URL.Query().Get("recheck") == "1"
-	n, effective, err := r.availabilityService.Backfill(concurrency, recheck)
-	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	respondJSON(w, http.StatusAccepted, map[string]interface{}{
-		"message":     "再生可否の取得を開始しました（バックグラウンド、ログ参照）",
-		"targets":     n,
-		"concurrency": effective,
-		"recheck":     recheck,
-	})
-}
-
 // ========== Filter Keywords Handlers ==========
 
 func (r *Router) handleListFilterKeywords(w http.ResponseWriter, req *http.Request) {
@@ -3815,13 +3742,7 @@ func requiredPermission(method, path string) (perm string, needsAuth bool) {
 	// "import" … 手動での取り込み（会限配信のため）。**書き込みだけでなく GET も
 	// ここで塞ぐ** ── 置いてある live chat の要約には配信の時間構造が出るし、
 	// そもそも会限配信の解析素材の存在自体を未ログインへ知らせる必要が無い。
-	if isStreamSubresource(path, "comments", "chapters", "holodex-songs", "availability", "import") {
-		return auth.PermContentEdit, true
-	}
-
-	// 再生可否の backfill も同じ理由で content:edit。全配信ぶんの yt-dlp を
-	// 運用者の cookie で起動するので、未ログインから叩ける状態にはできない。
-	if isRouteOrSubpath(path, "/api/availability/backfill") {
+	if isStreamSubresource(path, "comments", "chapters", "holodex-songs", "import") {
 		return auth.PermContentEdit, true
 	}
 

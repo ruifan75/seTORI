@@ -3,7 +3,6 @@ package service
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -342,9 +341,6 @@ func (s *ChatEndService) fetchLiveChat(videoID string) (string, chatOutcome, err
 		"--ignore-no-formats-error",
 		"-o", base + ".%(ext)s",
 	}
-	// ついでに再生可否を拾う（追加のリクエストは発生しない）。この実行は
-	// live chat をファイルへ書くので --no-simulate が要る（ytdlp.go の注意書き）。
-	args = append(args, availabilityArgs(true)...)
 	// cookie があれば渡す。YouTube に BOT 判定されている環境ではこれが無いと落ちる。
 	if cookiePath, cleanup := s.prepareCookies(); cookiePath != "" {
 		defer cleanup()
@@ -362,7 +358,6 @@ func (s *ChatEndService) fetchLiveChat(videoID string) (string, chatOutcome, err
 
 	// 再生可否は chat の取得に失敗していても拾えることがある（会限は
 	// 「chat は取れないが subscriber_only とは分かる」）ので、先に保存する。
-	s.saveAvailability(videoID, stdout.String())
 
 	// 警告だけで終了コードが非 0 になることがあるので、まずファイルの有無で判断する。
 	// **キャッシュと同じ検証を通す。** 存在だけを見ると、yt-dlp が途中まで書いて
@@ -392,7 +387,7 @@ func (s *ChatEndService) fetchLiveChat(videoID string) (string, chatOutcome, err
 	// を付けているので、レート制限や一時的な不可視は警告へ降格し、runErr は nil の
 	// ままファイルだけが無い状態になる。しかもレート制限の stderr は
 	// `Video unavailable` で始まるので、素朴に見ると「消えた動画」と読める
-	// （availability_service.go の isTransientFailure の注記）。
+	// （ytdlp.go の isTransientFailure の注記）。
 	// ここを chatNoReplay に落とすと、古い配信では結論として保存されてしまう。
 	if isTransientFailure(stderr.String()) {
 		return "", chatTransientError, fmt.Errorf("live chat を取得できませんでした（一時的な失敗）: %s",
@@ -421,27 +416,6 @@ func (s *ChatEndService) EstimateEnds(videoID string, starts []int) (map[int]int
 	}
 	ends, _ := s.DetectEnds(videoID, duration, starts)
 	return ends, nil
-}
-
-// saveAvailability は yt-dlp の --print 出力から再生可否を拾って保存する。
-// 取れなかったときは何も書かない（未調査のまま残す ── 「調べたが不明」を
-// 記録すると、次に cookie を入れたときの調べ直しが対象から漏れる）。
-func (s *ChatEndService) saveAvailability(videoID, stdout string) {
-	a := parseYtdlpAvailability(lastNonEmptyLine(stdout))
-	// **抽出が最後まで通ったときだけ保存する**（Resolved の注意書き）。この経路は
-	// --ignore-no-formats-error を付けているので、レート制限や削除でも終了コード 0 で
-	// availability=public が返る。ここで保存すると、一時的にレート制限へ当たった
-	// 公開配信が unavailable として恒久的に記録され、二度と調べ直されない。
-	if !a.Resolved() {
-		return
-	}
-	var avail sql.NullString
-	if a.Availability != "" {
-		avail = sql.NullString{String: a.Availability, Valid: true}
-	}
-	if err := s.streamRepo.SaveAvailability(videoID, avail, a.PlayableInEmbed); err != nil {
-		logger.Warnf("[chatend] %s の再生可否を保存できません: %v", videoID, err)
-	}
 }
 
 // ========== 手動での取り込み（会限配信のため） ==========
@@ -501,7 +475,7 @@ var ErrLiveChatUnreadable = errors.New("live chat replay として読めませ�
 //
 // **会限配信は本番から取れない。** cookie はデータセンター IP の BOT 判定を
 // 抜けるためのもので、視聴資格を与えるものではない（実測：cookie 無しでも
-// availability=subscriber_only は取れるが、replay の中身は取れない）。
+// 会限は replay の中身が取れない）。
 // メンバー資格のある編集者が手元で取ったものを持ち込む口がこれ。
 //
 // **検証してから置く。** 素通しでキャッシュへ書くと、壊れたファイルが

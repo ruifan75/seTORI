@@ -12,7 +12,7 @@ import type { InfoJsonImportResult, LiveChatImportResult } from '../api/types';
 //
 // cookie の役割を取り違えないこと：本番の cookie はデータセンター IP の BOT 判定を
 // 抜けるためのもので、視聴資格を与えるものではない（実測：cookie 無しでも
-// availability=subscriber_only は取れるが、replay の中身は取れない）。
+// 会限は replay の中身が取れない）。
 
 // yt-dlp が cookie を読める主なブラウザ。**Firefox を既定にする** ──
 // Chromium 系は OS によっては「ブラウザを終了していないと読めない」ので、

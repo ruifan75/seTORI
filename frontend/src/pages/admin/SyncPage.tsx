@@ -1,7 +1,7 @@
 import { Fragment, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { holodexApi, batchAnalyzeApi, batchFillApi, singerApi, availabilityApi, autoFillApi, nonSingingApi } from '../../api/client';
+import { holodexApi, batchAnalyzeApi, batchFillApi, singerApi, autoFillApi, nonSingingApi } from '../../api/client';
 import { useToast } from '../../components/ui/ToastContext';
 import { useAuthStore, hasPermission, PERM } from '../../store/auth';
 import { formatSeconds } from '../../components/usePerformanceTiming';
@@ -63,31 +63,6 @@ export default function SyncPage() {
   // 「入力元に無い」の内訳を開いている実行（一度に 1 つ）
   const [openGapRun, setOpenGapRun] = useState<string | null>(null);
 
-  // 再生可否の取得：実行中は 3 秒ごとに進捗をポーリング（一括分析と同じ形）
-  const [availConcurrency, setAvailConcurrency] = useState(2);
-  const [availRecheck, setAvailRecheck] = useState(false);
-  const { data: availStatus } = useQuery({
-    queryKey: ['availability-backfill-status'],
-    queryFn: availabilityApi.status,
-    refetchInterval: (q) => (q.state.data?.running ? 3000 : false),
-  });
-  const availStart = useMutation({
-    mutationFn: () => availabilityApi.backfill(availConcurrency, availRecheck),
-    onSuccess: (r) => showToast(`再生可否の取得を開始しました（対象 ${r.targets} 件）`, 'success'),
-    onError: (e: Error) => showToast(e.message, 'error'),
-    // **失敗しても取り直す。** 二重起動で弾かれたときは、手元の status が古い
-    // （running=false）まま polling も止まっているので、toast で「実行中」と言われても
-    // 進捗も停止ボタンも出ない。取り直せば running=true を拾って停止できる。
-    onSettled: () => queryClient.invalidateQueries({ queryKey: ['availability-backfill-status'] }),
-  });
-  const availCancel = useMutation({
-    mutationFn: availabilityApi.cancel,
-    onSuccess: () => {
-      showToast('停止を要求しました（実行中のものが終わり次第止まります）', 'success');
-      queryClient.invalidateQueries({ queryKey: ['availability-backfill-status'] });
-    },
-    onError: (e: Error) => showToast(e.message, 'error'),
-  });
 
   const { data: fillStatus } = useQuery({
     queryKey: ['batch-fill-status'],
@@ -446,123 +421,6 @@ export default function SyncPage() {
           </div>
         )}
       </div>
-
-      {/* 再生可否の取得（会限・削除済みの判定材料。issue #3） */}
-      <div className="bg-white rounded-lg shadow-sm border p-6">
-        <h2 className="text-xl font-bold text-gray-900 mb-2">再生可否の取得</h2>
-        <p className="text-gray-500 mb-4">
-          yt-dlp で <code className="text-xs bg-gray-100 px-1 rounded">availability</code> を調べ、
-          会限（メンバー限定）や削除済みの配信を判別します。会限だと分かった配信は、
-          プレイヤーを描く前に理由を出せるようになります。それ以外は判定を持っていても
-          プレイヤーを描き、実際に失敗したときに切り替えます（再生できるかは見る人の
-          所在地で変わるため）。
-        </p>
-        <p className="text-gray-500 mb-4 text-sm">
-          既定は<strong>未記録の配信だけ</strong>が対象なので、途中で止めても記録済みのぶんは残り、
-          そのまま続きから再開できます。
-          <br />
-          {/* recheck には checkpoint が無い。WHERE が
-              「未記録 OR (public かつ埋め込み可)」なので、記録済みでも毎回対象に戻る。
-              止めて再開すると先頭から掛け直すことになる。 */}
-          <span className="text-amber-800">
-            再調査（下のチェック）を使うときは続きから再開できません
-          </span>
-          ── 記録済みの弱い判定も毎回対象に戻るので、止めて再開すると先頭からやり直しになります。
-        </p>
-
-        {/* **実行中は触らせない。** backend が使う値は開始時に固定される一方、
-            status はそれを返さないので、ここの表示は「走っている条件」ではない
-            （再読み込みすると既定値に戻る）。編集できると現在の条件と読めてしまう。 */}
-        <div className="flex flex-wrap items-center gap-3 mb-4">
-          {availStatus?.running && (
-            <span className="w-full text-xs text-gray-500">
-              実行中は変更できません（下の値は次回の設定で、いま走っている条件とは限りません）
-            </span>
-          )}
-          <label className="flex items-center gap-2 text-sm">
-            並列
-            <input
-              type="number"
-              min={1}
-              max={8}
-              value={availConcurrency}
-              disabled={availStatus?.running}
-              onChange={(e) => setAvailConcurrency(Math.max(1, Math.min(8, Number(e.target.value) || 1)))}
-              className="w-16 px-2 py-1 border rounded disabled:bg-gray-100 disabled:text-gray-400"
-            />
-          </label>
-          <label className="flex items-center gap-2 text-sm cursor-pointer">
-            <input
-              type="checkbox"
-              checked={availRecheck}
-              disabled={availStatus?.running}
-              onChange={(e) => setAvailRecheck(e.target.checked)}
-              className="w-4 h-4"
-            />
-            調査済みの弱い判定も対象にする
-            <span className="text-xs text-gray-500">
-              （<code className="bg-gray-100 px-1 rounded">public</code> は「反証が無かった」という結論なので、会限を取りこぼしている可能性がある）
-            </span>
-          </label>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => availStart.mutate()}
-            disabled={availStatus?.running || availStart.isPending}
-            className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
-          >
-            {availStatus?.running ? '実行中…' : '取得を開始'}
-          </button>
-          {availStatus?.running && (
-            <button
-              type="button"
-              onClick={() => availCancel.mutate()}
-              disabled={availCancel.isPending}
-              className="px-4 py-2 border border-red-300 text-red-700 rounded-lg hover:bg-red-50 disabled:opacity-50"
-            >
-              停止
-            </button>
-          )}
-        </div>
-
-        {availStatus && availStatus.total > 0 && (
-          <div className="mt-4 space-y-2">
-            <div className="h-2 bg-gray-100 rounded overflow-hidden">
-              <div
-                className="h-full bg-indigo-500 transition-all"
-                style={{ width: `${Math.round((availStatus.done / availStatus.total) * 100)}%` }}
-              />
-            </div>
-            <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-gray-700">
-              <span>{availStatus.done} / {availStatus.total}</span>
-              <span className="text-green-700">記録 {availStatus.saved}</span>
-              {/* failed は「再試行が要る」件数。error の有無ではない（動画が消えていた場合は記録済み＝saved） */}
-              <span className={availStatus.failed > 0 ? 'text-amber-700 font-medium' : 'text-gray-500'}>
-                未記録 {availStatus.failed}
-              </span>
-              {availStatus.cancelled && <span className="text-gray-500">（停止しました）</span>}
-            </div>
-
-            {/* **最後のエラーを出すのが要点。** 1300 件が同じ理由で失敗しているとき、
-                log を見に行かないと気付けなかった（cookie 失効など）。 */}
-            {availStatus.last_error && (
-              <div className="text-xs bg-amber-50 border border-amber-200 text-amber-900 rounded p-2">
-                <div className="font-medium mb-0.5">最後のエラー</div>
-                <div className="break-all">{availStatus.last_error}</div>
-                {availStatus.failed >= 5 && (
-                  <div className="mt-1">
-                    同じ理由が続いている場合は、配信ごとの問題ではなく設定の問題かもしれません
-                    （管理→設定の YouTube cookie の失効など）。停止して確認してください。
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
 
       {/* 一括セットリスト作成 */}
       <div className="bg-white rounded-lg shadow p-6">

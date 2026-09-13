@@ -260,26 +260,10 @@ export interface Stream {
   chapter_count?: number;
   // 埋め込みプレイヤーで再生できるか。**詳細でしか返らない**（一覧・検索では undefined）。
   // undefined＝この応答は判定していない。従来どおり描いてよい
-  playability?: Playability;
   // 生の判定材料は content:edit のときだけ返る
-  availability?: string;
-  playable_in_embed?: boolean;
-  availability_checked_at?: string;
   created_at: string;
   updated_at: string;
 }
-
-// Playability は「この配信を埋め込みプレイヤーで再生できるか」。
-//
-// 会限の動画は YouTube が埋め込みを塞いでいて、メンバー資格があっても再生できない。
-// 必ず失敗するプレイヤーを描いてから onError: 150 で気付くより、最初から描かない。
-// unknown は「まだ調べていない」で、再生不可とは違う（描いてよい）。
-export type Playability =
-  | 'unknown'
-  | 'playable'
-  | 'members_only'
-  | 'embed_disabled'
-  | 'unavailable';
 
 // Chapter は配信者が付けた YouTube の目次。end は次の章節の開始なので、
 // 「その曲が終わった時刻」ではない（曲のあとの MC を含む）
@@ -294,18 +278,6 @@ export interface StreamListResponse {
   pagination: PaginationResponse;
 }
 
-// 再生可否の一括取得の進捗。**saved と failed の意味を取り違えないこと** ──
-// saved は「DB に記録できた」（「動画が無い」も含む。再試行不要）、
-// failed は「記録できなかった」＝再試行が要るもの。error の有無ではない。
-export interface AvailabilityBackfillStatus {
-  running: boolean;
-  total: number;
-  done: number;
-  saved: number;
-  failed: number;
-  cancelled: boolean;
-  last_error?: string;
-}
 
 export interface UpdateStreamRequest {
   title?: string;

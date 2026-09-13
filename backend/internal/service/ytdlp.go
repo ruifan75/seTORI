@@ -1,7 +1,6 @@
 package service
 
 import (
-	"database/sql"
 	"errors"
 	"io/fs"
 	"os"
@@ -129,96 +128,6 @@ func botCheckError(r *ytdlpRunner) error {
 	return errors.New("YouTube に BOT 判定されました: 管理→設定の「YouTube cookie」に cookies.txt を登録してください")
 }
 
-// ── 再生可否（availability）を既存の実行に相乗りさせる ───────────────────────
-//
-// 会限の歌枠にセットリストを作れるようにするための判定材料。詳細は issue #3。
-//
-// **`--print` は `--simulate` を含む。** live chat のように**ファイルを書く**実行に
-// そのまま足すと、yt-dlp は何も書かずに終わる（実測：追加しただけで
-// live_chat.json が作られなくなった）。落ちも警告も出ず、
-// 「この配信に live chat replay がありません」になるだけなので気付けない。
-// ファイルを書く実行には必ず `--no-simulate` を添えること。
-//
-// 出力は 1 行、タブ区切りで availability と playable_in_embed。取れない値は "NA"。
-const (
-	availabilityPrintTemplate = "%(availability)s\t%(playable_in_embed)s"
-	ytdlpFieldMissing         = "NA"
-)
-
-// ytdlpAvailability は yt-dlp が返した再生可否。どちらも「取れなかった」を持てる。
-type ytdlpAvailability struct {
-	Availability    string // public / subscriber_only / unlisted / premium_only …。空＝取れなかった
-	PlayableInEmbed sql.NullBool
-}
-
-// Resolved は**両方の値が揃ったか**。相乗り経路はこれが false なら保存しない。
-//
-// **片方だけでは足りない。両方が別々の入力から来ていて、片方だけ落ちうる。**
-//
-//	availability      … initial_data の badge から決まる（`_video.py` の `_extract_badges`）。
-//	                    initial_data は **fatal=False** で取りに行くので、
-//	                    一時的に失敗すると None になり、availability は NA になる
-//	playable_in_embed … player response から独立に取れる。上が落ちても True のまま
-//
-// つまり **cookie 有りの会限で initial_data だけ一時失敗すると `NA<TAB>True`** が
-// 終了コード 0 で返る。`playable_in_embed` だけを目印にしていると、これを信用して保存し、
-// `subscriber_only` が無いので `playable` と判定して**必ず失敗するプレイヤーを描く**。
-// しかも保存済みなので二度と調べ直さない。
-//
-// 逆に `--ignore-no-formats-error` 付きで動画が取れなかった場合は `public<TAB>NA` になる
-// （実測：視聴不可の hVfDBfreYNI）。落ちる側が入力ごとに違うので、両方を要求する。
-func (a ytdlpAvailability) Resolved() bool {
-	return a.Availability != "" && a.PlayableInEmbed.Valid
-}
-
-// availabilityArgs は再生可否を拾うための引数を返す。
-// writesFile が true の実行（live chat のダウンロードなど）には --no-simulate を添える。
-func availabilityArgs(writesFile bool) []string {
-	args := []string{"--print", availabilityPrintTemplate}
-	if writesFile {
-		args = append(args, "--no-simulate")
-	}
-	return args
-}
-
-// parseYtdlpAvailability は --print の 1 行を読む。
-//
-// **`--ignore-no-formats-error` が付いていると、視聴できない動画でも
-// availability が "public" で返る**（実測：削除済みの hVfDBfreYNI が
-// フラグ有りで public、無しで "Video unavailable" のエラー）。
-// 本番の両経路はこのフラグを常用しているので、availability 単独は信用できない。
-// 一方 playable_in_embed はそのとき "NA" になるため、
-// 「動画情報を最後まで取れたか」の判定はこちらで行う。
-func parseYtdlpAvailability(line string) ytdlpAvailability {
-	var a ytdlpAvailability
-	parts := strings.Split(strings.TrimSpace(line), "\t")
-	if len(parts) > 0 && parts[0] != ytdlpFieldMissing {
-		a.Availability = strings.TrimSpace(parts[0])
-	}
-	if len(parts) > 1 {
-		switch strings.TrimSpace(parts[1]) {
-		case "True":
-			a.PlayableInEmbed = sql.NullBool{Bool: true, Valid: true}
-		case "False":
-			a.PlayableInEmbed = sql.NullBool{Bool: false, Valid: true}
-		}
-	}
-	return a
-}
-
-// lastNonEmptyLine は stdout の最後の非空行を返す。
-// yt-dlp は --print を指定した順に 1 行ずつ出すので、availability を最後に
-// 足しておけば、他の --print（チャプター）や余分な出力と混ざらない。
-func lastNonEmptyLine(out string) string {
-	lines := strings.Split(out, "\n")
-	for i := len(lines) - 1; i >= 0; i-- {
-		if l := strings.TrimSpace(lines[i]); l != "" {
-			return l
-		}
-	}
-	return ""
-}
-
 // firstNonEmptyLine は stdout の最初の非空行を返す。
 func firstNonEmptyLine(out string) string {
 	for _, l := range strings.Split(out, "\n") {
@@ -227,4 +136,41 @@ func firstNonEmptyLine(out string) string {
 		}
 	}
 	return ""
+}
+
+// ---- 取得失敗の分類 ----
+//
+// availability を拾う仕組みは 2026-09-14 に外したが（会限の検出には 0 件しか
+// 寄与しておらず、判定は `members_only` タグが持つ）、この関数は live chat の
+// 取得が **「取れなかっただけ」か「本当に無いか」** を分けるのに要るので残す。
+
+// isTransientFailure は「今回はたまたま取れなかった」を見る。
+// **`chatNoReplay` より先に通すこと。** そうしないと、障害の最中に解析した配信が
+// 「チャットの無い配信」として確定してしまう（CLAUDE.md §6.5）。
+//
+// **レート制限は "Video unavailable" で始まる。** YouTube が返す reason が
+// `Video unavailable`、subreason が `This content isn't available, try again later` で、
+// yt-dlp はこれを連結してから rate-limited の案内を足す
+// （`extractor/youtube/_video.py`。wiki: Extractors#this-content-isnt-available-try-again-later）。
+// つまり **"Video unavailable" だけで消失と判定すると、レート制限に当たった公開配信を
+// 恒久的に unavailable として記録する**。backfill は 700 件超を並列で回すので、
+// これは起きにくい事故ではなく、起こしにいく事故になる。
+func isTransientFailure(stderr string) bool {
+	for _, marker := range []string{
+		"try again later",
+		"rate-limited",
+		"HTTP Error 429",
+		"Too Many Requests",
+		"Unable to download", // API ページ・webpage の取得失敗（通信障害）
+		"Unable to connect",  // proxy / DNS
+		"timed out",
+		"Temporary failure",
+		"captcha",            // captcha を要求されている＝この実行が通らないだけ
+		"Sign in to confirm", // BOT 判定（呼び出し側でも見ているが、ここでも落とす）
+	} {
+		if strings.Contains(stderr, marker) {
+			return true
+		}
+	}
+	return false
 }
