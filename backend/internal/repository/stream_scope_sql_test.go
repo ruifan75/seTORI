@@ -167,6 +167,15 @@ func TestStreamListsApplyFilterInBothQueries(t *testing.T) {
 			wantList:  "WHERE " + streamListFilter("streams", false),
 		},
 		{
+			// **includeHidden も通すこと。** false だけだと、引数を無視して
+			// 条件を書き固める改変が通る ── そのとき編集者向けの経路が
+			// 非表示配信を返さなくなる（実測で通った）。
+			name:      "FindAll/includeHidden",
+			call:      func(r *StreamRepository) { r.FindAll(20, 0, true, "", "") },
+			wantCount: "WHERE " + streamListFilter("streams", true),
+			wantList:  "WHERE " + streamListFilter("streams", true),
+		},
+		{
 			name:      "FindByTagID",
 			call:      func(r *StreamRepository) { r.FindByTagID("singing", 20, 0) },
 			wantCount: "WHERE sst.tag_id = $1 AND " + streamListFilter("s", false),
