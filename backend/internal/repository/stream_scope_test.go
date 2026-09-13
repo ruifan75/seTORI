@@ -11,53 +11,47 @@ import (
 // チャンネルの配信が混ざる。歌手ページは `stream_singers` を JOIN しているので
 // 参加者を外せば消えるのに、`/streams` とタグ別一覧は参加者を見ていなかったため
 // 残り続けた ── 直したのに直っていないように見える（2026-09-13）。
-func TestVisibleChannelExprUsesChannelVisibility(t *testing.T) {
-	got := VisibleChannelExpr("st")
-	for _, want := range []string{"stream_singers", "singers", "is_hidden = FALSE", "st.id"} {
-		if !strings.Contains(got, want) {
-			t.Errorf("判定に %q が無い: %q", want, got)
-		}
-	}
-	// **チャンネル側の旗を読むこと。** 配信の is_hidden で代用すると、
-	// 「チャンネルを表示にしたのに歌枠が出ない」を直すのにもう 1 か所触ることになる。
-	if !strings.Contains(got, "si.is_hidden = FALSE") {
-		t.Errorf("チャンネルの表示/非表示を見ていない: %q", got)
+//
+// **期待値と完全一致で見る。** 部分一致だと `EXISTS` → `NOT EXISTS`、末尾に
+// `OR TRUE` を足す、といった「呼び出しは在るが効いていない」改変が通る
+// ── 実際 3 回、部分一致を継ぎ足して塞ごうとして毎回別の穴が残った。
+func TestVisibleChannelExpr(t *testing.T) {
+	const want = "EXISTS (SELECT 1 FROM stream_singers ss" +
+		" JOIN singers si ON si.id = ss.singer_id" +
+		" WHERE ss.stream_id = st.id AND si.is_hidden = FALSE)"
+	if got := VisibleChannelExpr("st"); got != want {
+		t.Errorf("判定式が変わっている\n got: %q\nwant: %q", got, want)
 	}
 }
 
-// **件数と一覧は必ず対で濾す。** 一覧から落としても件数が合わなければ、
-// 何件伏せたかが残る（秘匿の件数と同じ話）。実際、最初の実装では
-// 文字列置換が件数の行に 2 回当たって**一覧のほうが素通り**していた。
+// **件数と一覧は同じ条件から作る。** 一覧から落としても件数が合わなければ、
+// 何件伏せたかが残る（秘匿の件数と同じ話）。条件を別々に書き下ろせる限り
+// 必ずずれるので、`streamListFilter` に集約して**書き下ろせなくして**ある。
 //
-// **分岐ごとに見る。** `FindAll` は includeHidden で 2 通りに分かれるので、
-// まとめて見ると「通常表示から外して includeHidden 側へ移す」改変を見逃す
-// ── そのとき件数は濾していて一覧だけ素通りになる。
-func TestStreamListsFilterCountAndRowsTogether(t *testing.T) {
-	src := readSourceFile(t, "stream_repository.go")
-
-	t.Run("FindAll は通常表示の件数と一覧だけを濾す", func(t *testing.T) {
-		body := funcBody(t, src, "func (r *StreamRepository) FindAll")
-		// includeHidden の分岐は 2 つある。1 つ目が件数、2 つ目が一覧。
-		countIf, countElse := ifElseBlocks(t, body, "includeHidden", 0)
-		listIf, listElse := ifElseBlocks(t, body, "includeHidden", 1)
-		if !strings.Contains(listElse, "streamListQuery(") {
-			t.Fatalf("2 つ目の分岐が一覧ではない: %q", listElse)
-		}
-
-		for name, part := range map[string]string{"件数": countElse, "一覧": listElse} {
-			assertAndedVisibleChannel(t, "通常表示の"+name, part)
-		}
-		for name, part := range map[string]string{"件数": countIf, "一覧": listIf} {
-			if strings.Contains(part, "VisibleChannelExpr(") {
-				t.Errorf("includeHidden 側の%sまで濾している（全部見せる分岐のはず）: %q", name, part)
-			}
+// ここも**完全一致**で見る。ソースを読んで「AND が在るか」を調べる形にしていた
+// ときは、`AND … = FALSE` のように前後の形だけ合わせた改変が通っていた。
+func TestStreamListFilter(t *testing.T) {
+	t.Run("公開は非表示とチャンネル範囲の両方で絞る", func(t *testing.T) {
+		want := "s.is_hidden = FALSE AND " + VisibleChannelExpr("s")
+		if got := streamListFilter("s", false); got != want {
+			t.Errorf("公開の条件が変わっている\n got: %q\nwant: %q", got, want)
 		}
 	})
 
-	t.Run("FindByTagID は件数と一覧の両方を濾す", func(t *testing.T) {
-		body := funcBody(t, src, "func (r *StreamRepository) FindByTagID")
-		countPart, listPart := splitAtStreamList(t, body, "FindByTagID")
-		assertAndedVisibleChannel(t, "件数", countPart)
-		assertAndedVisibleChannel(t, "一覧", listPart)
+	t.Run("編集者向けは両方とも外す", func(t *testing.T) {
+		if got := streamListFilter("s", true); got != "TRUE" {
+			t.Errorf("includeHidden で絞っている: %q", got)
+		}
+	})
+
+	// alias を渡すのは、配信一覧（streams）とタグ別（s）で別名を使うため。
+	// ここを固定しないと、片方で別のテーブルの列を見ても気付けない。
+	t.Run("alias が両方の条件に効く", func(t *testing.T) {
+		got := streamListFilter("zz", false)
+		for _, want := range []string{"zz.is_hidden = FALSE", "ss.stream_id = zz.id"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("alias が効いていない（%q が無い）: %q", want, got)
+			}
+		}
 	})
 }
