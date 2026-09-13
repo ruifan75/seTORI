@@ -157,14 +157,24 @@
 | 公開 | `public` | `public` | 正常 |
 | 削除・非公開 | `Video unavailable` | `Video unavailable` | 取得不可 |
 
-**実装済み**（PR #18）。`streams.availability` / `playable_in_embed` /
-`availability_checked_at` に保存し、導出した `playability` を配信詳細で返す。埋める経路は 3 つ：
+**2026-09-14 に外した**（PR #66）。仕組みは入っていたが、**会限の検出に 0 件しか
+寄与していなかった**：
 
-| 経路 | 追加プロセス |
+| | 件数 |
 |---|---|
-| live chat の取得に相乗り | なし（`--no-simulate` が要る。`DATA_COMPLETION.md`） |
-| チャプター取得に相乗り | なし |
-| `POST /api/availability/backfill` | あり。既定は未調査のみ、`?recheck=1` で弱い判定も。**非表示を除かない** |
+| `members_only` タグが付いている配信 | 86 |
+| Holodex の `topic_id` が捉えた | **86（全部）** |
+| `availability` だけが捉えた | **0** |
+| `availability` が `subscriber_only` と言った | 7 |
+
+86 件中 7 件しか認識できないのは、本番の 2 経路が `--ignore-no-formats-error` を
+付けており、視聴不可でも `public` が返るため（下の「実測」を参照）。
+
+読む側も 1 か所だけだった ── 画面が先に案内へ倒すのは会限のときだけで、
+それは `members_only` タグで判定できる（取りこぼし 0 件なので精度はむしろ上がる）。
+
+`streams` の 3 列は残っているが**誰も読まない**。判定材料としての位置づけは
+`docs/STREAM_VISIBILITY.md` を参照。
 
 **相乗りだけでは埋まらない**ので専用の backfill がある ── live chat はファイルキャッシュが
 あると yt-dlp の前に return し、章節 backfill は `is_hidden = FALSE` に限定されていて
@@ -258,8 +268,6 @@ DB セッション + `roles.permissions` に置き換わりました。判定は
 | `POST /api/streams/batch-analyze`（実行） | 上表の **comments 経路**を対象配信ぶん（章節・Holodex は回さない） | `content:edit` |
 | `POST /api/streams/batch-fill`（実行） | 上表を対象配信ぶん＋未決着表記の照合 AI | `content:edit` |
 | `GET /api/streams/batch-analyze/status`、`.../batch-fill/*` の状態・履歴 | **外部呼び出し無し**（メモリ／DB を読むだけ） | `content:edit` |
-| `POST /api/availability/backfill` | **yt-dlp を起動**。既定は未調査のみ、`?recheck=1` では調査済みの弱い判定（`public` かつ埋め込み可）も対象。非表示も含む | `content:edit` |
-| `POST /api/streams/{id}/availability` | yt-dlp を 1 回起動 | `content:edit` |
 | `POST /api/ai/backfill-readings` | AI プロバイダーの課金（曲名・アーティスト各 30 件） | `content:edit` |
 | `POST /api/songs/merge-candidates/scan` | AI プロバイダーの課金（登録曲を丸ごと見せる） | `content:edit` |
 | `POST /api/songs/merge-candidates/adjudicate` | AI プロバイダーの課金 | `content:edit` |

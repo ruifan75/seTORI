@@ -128,7 +128,7 @@ Holodex の分類もタイトルキーワード規則も自動判定であり、
 **検出と裁定を 1 つにすると人の判断が消える。** 会限は chapters / live chat /
 availability backfill から繰り返し取り直されるので、次の順で必ず戻ってしまう：
 
-1. `availability` が `subscriber_only` → 検出が立つ
+1. ~~`availability` が `subscriber_only` → 検出が立つ~~（PR #66 で廃止）
 2. 編集者が「公開してよい」と判断して外す
 3. 何かの取得で同じ動画をもう一度読む
 4. 自動の検出が **また立つ**
@@ -173,7 +173,7 @@ Go に双子は置かない ── 材料（所有者の方針）を SELECT し�
 | migration 052 / 053（既存行） | `availability = subscriber_only` / Holodex `topic_id = membersonly` / `members_only` タグ |
 | migration 057 / 058 | Holodex topic の対応漏れを補い、旧 `is_restricted` をタグへ写す |
 | 初回同期（新しい行） | Holodex `topic_id` / `members_only` タグ（`initialMembersOnlyCandidate` → `MarkMembersOnly`） |
-| yt-dlp を呼んだとき | `availability = subscriber_only`（`SaveAvailability` が同じ文でタグを付ける） |
+| ~~yt-dlp を呼んだとき~~ | ~~`availability = subscriber_only`~~（**PR #66 で廃止**。`SaveAvailability` ごと削除） |
 | **人** | 編集画面でタグを付ける／外す |
 
 **初回同期の判定が要る理由**：`availability` は yt-dlp を呼ぶまで埋まらないので、
@@ -394,6 +394,11 @@ PR #6 が解析結果でやったのと同じ考え方だが、通す場所は�
 （`subscriber_only`）と、チャンネル単位の同意フラグ。設計は issue #4。
 
 ### 再生可否（`availability` / `playable_in_embed`）
+
+> **2026-09-14 に取得をやめた（PR #66）。** 3 列は残っているが、書き込む経路も
+> 読む経路も無い。会限の検出に 0 件しか寄与しておらず（本番 86 件はすべて
+> Holodex の topic が捉えており、`availability` が捉えたのは同じ 86 件のうち 7 件だけ）、
+> 画面の会限判定は `members_only` タグへ移した。以下は**当時の設計の記録**。
 
 判定材料のうち、**yt-dlp 側は実装済み**（issue #3）。`streams` の 3 列で持つ。
 
