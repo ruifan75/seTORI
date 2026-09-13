@@ -110,7 +110,7 @@ PR #19（issue #4）で秘匿の軸が入り、**実効的に秘匿された配�
 `content:edit` にしか返らなくなった。会限の歌枠は migration 052/053 で旗が立っている。
 
 > ⚠️ **`is_hidden = true` は「秘匿」を意味しない。**
-> 秘匿の旗は availability / Holodex topic / `members_only` タグという**候補**から立てたもので、
+> 秘匿の旗は Holodex topic / `members_only` タグという**候補**から立てたもので、
 > 非表示の全体を覆う不変条件ではない。実測（1307 本）：
 >
 > | | 秘匿でない | 秘匿 |

@@ -92,7 +92,7 @@ export default function YoutubePlayer({ videoId, onReady, onError }: YoutubePlay
               }
               onReady?.(event.target);
             },
-            // 保存済みの playability は古くなるし、`public` は「反証が無かった」
+            // 保存済みの判定は古くなるし、外部から見た「公開」は「反証が無かった」
             // という弱い結論でしかない（docs/STREAM_VISIBILITY.md）。実際に
             // 再生できなかったという事実はここでしか分からないので、必ず拾う。
             onError: (event) => {

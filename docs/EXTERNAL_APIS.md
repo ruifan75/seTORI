@@ -148,7 +148,7 @@
 > **会限か、所有者が埋め込みを切っているかは区別できない**。
 > 画面の文言も両方の可能性を書く（`STREAM_VISIBILITY.md`）。
 
-判別の材料は **yt-dlp の `availability`**。
+当時は判別の材料として **yt-dlp の `availability`** を調べた。
 `yt-dlp --skip-download --print "%(availability)s" <URL>`（cookie は `--cookies`）で：
 
 | 動画 | cookie なし | cookie あり | 状態 |
@@ -157,18 +157,29 @@
 | 公開 | `public` | `public` | 正常 |
 | 削除・非公開 | `Video unavailable` | `Video unavailable` | 取得不可 |
 
-**実装済み**（PR #18）。`streams.availability` / `playable_in_embed` /
-`availability_checked_at` に保存し、導出した `playability` を配信詳細で返す。埋める経路は 3 つ：
+**2026-09-14 に外した**（PR #66）。仕組みは入っていたが、**会限の検出に 0 件しか
+寄与していなかった**：
 
-| 経路 | 追加プロセス |
+| | 件数 |
 |---|---|
-| live chat の取得に相乗り | なし（`--no-simulate` が要る。`DATA_COMPLETION.md`） |
-| チャプター取得に相乗り | なし |
-| `POST /api/availability/backfill` | あり。既定は未調査のみ、`?recheck=1` で弱い判定も。**非表示を除かない** |
+| `members_only` タグが付いている配信 | 86 |
+| Holodex の `topic_id` が捉えた | **86（全部）** |
+| `availability` だけが捉えた | **0** |
+| `availability` が `subscriber_only` と言った | 7 |
 
-**相乗りだけでは埋まらない**ので専用の backfill がある ── live chat はファイルキャッシュが
-あると yt-dlp の前に return し、章節 backfill は `is_hidden = FALSE` に限定されていて
-判定したい非表示配信を対象にしないため。
+86 件中 7 件しか認識できないのは、本番の 2 経路が `--ignore-no-formats-error` を
+付けており、視聴不可でも `public` が返るため（下の「実測」を参照）。
+
+読む側も 1 か所だけだった ── 画面が先に案内へ倒すのは会限のときだけで、
+それは `members_only` タグで判定できる（取りこぼし 0 件なので精度はむしろ上がる）。
+
+`streams` の 3 列は残してある（消すと戻せないため）。行を読むときに SELECT・Scan は
+されるが、**判定には一切使わない**。当時の実測と設計は `docs/STREAM_VISIBILITY.md` を参照。
+
+> **当時の設計**：相乗りだけでは埋まらないので専用の backfill を置いていた ──
+> live chat はファイルキャッシュがあると yt-dlp の前に return し、章節 backfill は
+> `is_hidden = FALSE` に限定されていて判定したい非表示配信を対象にしないため。
+> 端点ごと削除済み。
 
 > ⚠️ **`availability` 単独では判定できない。** 本番の相乗り 2 経路は
 > `--ignore-no-formats-error` を付けており、そのとき**視聴できない動画でも
@@ -185,8 +196,12 @@ Holodex の `topic_id = "membersonly"` は候補の絞り込みに使えるが�
 その修正は「topic を正しく見る」ではなく **「実際に再生できるかを見る」** だった
 （`Holodex/src/components/watch/WatchLiveChat.vue` の `currentTime > 0`、および CHANGELOG）。
 
-→ **Holodex は候補抽出に、`availability` は判定に**、と役割を分ける（issue #3、実装済み）。
-秘匿そのものの軸は `members_only` タグ（issue #4 / #32、`STREAM_VISIBILITY.md`）。
+→ 当時の結論は「**Holodex は候補抽出に、`availability` は判定に**」だったが、
+実測で `availability` は Holodex の取りこぼしを 1 件も拾えず、2026-09-14 に外した（PR #66）。
+判定は**3 段**（下ほど強い）── `members_only` タグ（検出）→
+`singers.members_only_policy`（チャンネル単位の方針）→ `restriction_override`
+（その配信だけの例外）。実装は `EffectiveRestrictedExpr` に 1 か所だけ置く
+（issue #4 / #32、`STREAM_VISIBILITY.md`）。
 
 ## 5. iTunes Search / Lookup API（key 不要）
 
@@ -258,8 +273,6 @@ DB セッション + `roles.permissions` に置き換わりました。判定は
 | `POST /api/streams/batch-analyze`（実行） | 上表の **comments 経路**を対象配信ぶん（章節・Holodex は回さない） | `content:edit` |
 | `POST /api/streams/batch-fill`（実行） | 上表を対象配信ぶん＋未決着表記の照合 AI | `content:edit` |
 | `GET /api/streams/batch-analyze/status`、`.../batch-fill/*` の状態・履歴 | **外部呼び出し無し**（メモリ／DB を読むだけ） | `content:edit` |
-| `POST /api/availability/backfill` | **yt-dlp を起動**。既定は未調査のみ、`?recheck=1` では調査済みの弱い判定（`public` かつ埋め込み可）も対象。非表示も含む | `content:edit` |
-| `POST /api/streams/{id}/availability` | yt-dlp を 1 回起動 | `content:edit` |
 | `POST /api/ai/backfill-readings` | AI プロバイダーの課金（曲名・アーティスト各 30 件） | `content:edit` |
 | `POST /api/songs/merge-candidates/scan` | AI プロバイダーの課金（登録曲を丸ごと見せる） | `content:edit` |
 | `POST /api/songs/merge-candidates/adjudicate` | AI プロバイダーの課金 | `content:edit` |

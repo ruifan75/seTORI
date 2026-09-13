@@ -67,19 +67,17 @@ for i := range songs {
 
 #### この実行に `--print` を足すときは `--no-simulate` が要る
 
-同じ呼び出しに相乗りして再生可否（`availability` / `playable_in_embed`）を拾っている
-（issue #3。追加のリクエストは発生しない）。そのとき **`--print` は `--simulate` を含む**
-ことに注意する ── ファイルを書く実行にそのまま足すと、yt-dlp は
-**何も書かずに終わる**。
+**`--print` は `--simulate` を含む。** ファイルを書く実行にそのまま足すと、
+yt-dlp は**何も書かずに終わる**。
+
+> かつては同じ呼び出しに相乗りして再生可否（`availability`）を拾っていたが、
+> **2026-09-14 に外した**（PR #66。会限の検出に 0 件しか寄与していなかった）。
+> この注意書きは残す ── `--print` を足したくなる場面は他にもあり、
+> 罠は相乗りの有無と関係なく成立するため。
 
 実測：`--print` を足しただけで `live_chat.json` が作られなくなった。
 落ちも警告も出ず、症状は「この配信に live chat replay がありません」だけなので、
-**原因に辿り着けない**。ファイルを書く実行には必ず `--no-simulate` を添えること
-（`availabilityArgs(true)`。チャプター取得は `--print` しかしないので不要）。
-
-拾った値の扱い（`--ignore-no-formats-error` の下では削除済みの動画でも
-`availability = public` が返ること、会限が `subscriber_only` かつ
-`playable_in_embed = true` を返すこと）は `docs/STREAM_VISIBILITY.md`。
+**原因に辿り着けない**。ファイルを書く実行には必ず `--no-simulate` を添えること。
 
 #### 取得に失敗するとき
 

@@ -124,7 +124,6 @@ func TestEncodedPathDoesNotBypassStreamAuthz(t *testing.T) {
 		"GET /api/streams/{id}/comments",
 		"GET /api/streams/{id}/chapters",
 		"GET /api/streams/{id}/holodex-songs",
-		"GET /api/streams/{id}/availability",
 	} {
 		p := pat
 		mux.HandleFunc(p, func(w http.ResponseWriter, r *http.Request) { reached = p })
@@ -137,7 +136,7 @@ func TestEncodedPathDoesNotBypassStreamAuthz(t *testing.T) {
 		"/api/streams/hVfDBfreYNI/co%6Dments",   //
 		"/api/streams/hVfDBfreYNI/%63hapters",   //
 		"/api/streams/.%2FhVfDBfreYNI/%68olodex-songs",
-		"/api/streams/hVfDBfreYNI/%61vailability",
+		"/api/streams/hVfDBfreYNI/%68olodex-songs",
 	} {
 		t.Run(path, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, path, nil)
@@ -173,7 +172,7 @@ func TestEscapedSlashDoesNotBypassStreamAuthz(t *testing.T) {
 		"/api/streams/.%2FhVfDBfreYNI/comments",
 		"/api/streams/%2E%2FhVfDBfreYNI/chapters",
 		"/api/streams/a%2Fb%2Fc/holodex-songs",
-		"/api/streams/..%2F..%2Fetc%2Fpasswd/availability",
+		"/api/streams/..%2F..%2Fetc%2Fpasswd/comments",
 	} {
 		t.Run(path, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, path, nil)

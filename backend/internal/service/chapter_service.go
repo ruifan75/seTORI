@@ -3,7 +3,6 @@ package service
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -272,11 +271,6 @@ func (s *ChapterService) fetchChapters(videoID string) ([]Chapter, error) {
 		"--ignore-no-formats-error",
 		"--print", "%(chapters)j",
 	}
-	// ついでに再生可否を拾う（追加のリクエストは発生しない）。**必ず章節より後ろに置く**
-	// ── yt-dlp は --print を指定した順に 1 行ずつ出すので、後ろに足せば
-	// 章節 JSON の行を動かさずに済む（読む側も最後の行だけを見る）。
-	// この実行はファイルを書かないので --no-simulate は要らない。
-	args = append(args, availabilityArgs(false)...)
 	if cookiePath, cleanup := s.runner().prepareCookies(); cookiePath != "" {
 		defer cleanup()
 		args = append(args, "--cookies", cookiePath)
@@ -304,9 +298,6 @@ func (s *ChapterService) fetchChapters(videoID string) ([]Chapter, error) {
 			return nil, fmt.Errorf("yt-dlp に失敗 (%v): %s", runErr, ytdlpErrorLine(stderr.String()))
 		}
 	}
-
-	// 再生可否は章節が無くても拾えるので、章節の判定より先に保存する。
-	s.saveAvailability(videoID, stdout.String())
 
 	out := firstNonEmptyLine(stdout.String())
 	if out == "" || out == "NA" || out == "null" {
@@ -403,24 +394,4 @@ func hashChapters(chapters []Chapter) string {
 	// コメントと同じく抽出規則の版を混ぜる（同じ ExtractSongs を通るので、
 	// 規則を変えたら章節のキャッシュも失効させないと古い結果が残る）
 	return hashBytes(append(raw, extractionRulesSalt()...))
-}
-
-// saveAvailability は yt-dlp の --print 出力から再生可否を拾って保存する
-// （ChatEndService と同じ約束：取れなかったときは未調査のまま残す）。
-func (s *ChapterService) saveAvailability(videoID, stdout string) {
-	a := parseYtdlpAvailability(lastNonEmptyLine(stdout))
-	// **抽出が最後まで通ったときだけ保存する**（Resolved の注意書き）。この経路は
-	// --ignore-no-formats-error を付けているので、レート制限や削除でも終了コード 0 で
-	// availability=public が返る。ここで保存すると、一時的にレート制限へ当たった
-	// 公開配信が unavailable として恒久的に記録され、二度と調べ直されない。
-	if !a.Resolved() {
-		return
-	}
-	var avail sql.NullString
-	if a.Availability != "" {
-		avail = sql.NullString{String: a.Availability, Valid: true}
-	}
-	if err := s.streamRepo.SaveAvailability(videoID, avail, a.PlayableInEmbed); err != nil {
-		logger.Warnf("[chapter] %s の再生可否を保存できません: %v", videoID, err)
-	}
 }

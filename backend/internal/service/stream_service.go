@@ -290,7 +290,6 @@ func (s *StreamService) GetByID(id string, isEditor bool, access repository.View
 	// 再生可否は**詳細でだけ**返す。閲覧者にも要る（プレイヤーを描くかの判断）が、
 	// 一覧・検索の SELECT はこの 3 列を読んでいないので、そこで値を組み立てると
 	// 全部 unknown という**別の事実の主張**になる（chapter_count を省略するのと同じ理由）。
-	streamResp.Playability = playabilityOf(*stream)
 
 	// 歌唱一覧を取得する
 	// **秘匿された配信の歌唱はここで落とす。** 詳細そのものは 200 のまま返す
@@ -438,18 +437,6 @@ func (s *StreamService) toStreamResponse(stream models.Stream, tags []models.Str
 		resp.HolodexUploadedAt = &uploaded
 	}
 	resp.HolodexUploadUnknown = stream.HolodexUploadUnknown
-
-	// 生の再生可否は編集者だけに返す（判定の裏取りと backfill の進み具合を見るため）。
-	if stream.Availability.Valid {
-		resp.Availability = &stream.Availability.String
-	}
-	if stream.PlayableInEmbed.Valid {
-		resp.PlayableInEmbed = &stream.PlayableInEmbed.Bool
-	}
-	if stream.AvailabilityCheckedAt.Valid {
-		checked := stream.AvailabilityCheckedAt.Time.Format(time.RFC3339)
-		resp.AvailabilityCheckedAt = &checked
-	}
 
 	// Holodex の timeline データを解析して追加する（完全な Video JSON から songs を抽出）
 	if len(stream.HolodexData) > 0 {
@@ -646,7 +633,7 @@ func (s *StreamService) Update(id string, req *dto.UpdateStreamRequest, isEditor
 	}
 
 	// 秘匿の切り替えは**人の裁定として override 列へ書く**。検出（members_only タグ）は
-	// 触らない ── 同じ列へ書くと、次の availability 取得で人の判断が消える。
+	// 触らない ── 同じ列へ書くと、次の同期の検出で人の判断が消える。
 	if req.IsRestricted != nil {
 		stream.RestrictionOverride = sql.NullBool{Bool: *req.IsRestricted, Valid: true}
 	}
@@ -711,59 +698,6 @@ func (s *StreamService) GetRandomPerformances(limit int, excludedSongIDs []strin
 		return nil, fmt.Errorf("get random performances: %w", err)
 	}
 	return s.ComposePerformanceList(perfs), nil
-}
-
-// playabilityOf は保存済みの再生可否を、画面が読める 1 つの値へまとめる。
-//
-// **これは「プレイヤーを描くかどうか」ではない。** 画面が先に案内へ倒すのは
-// `members_only` だけで、`unavailable` / `embed_disabled` はプレイヤーを描いてから
-// `onError` で切り替える（2026-09-05）。yt-dlp は東京の VPS で走るので、
-// その結論は見る人の所在地では正しくないことがあるため。
-// ここが返す値は編集者向けの情報でもあるので、**会限以外も引き続き導出する**。
-//
-// **availability だけでは決められない。** 本番の 2 経路は
-// `--ignore-no-formats-error` を付けて yt-dlp を呼んでおり、そのとき
-// 視聴できない動画でも availability は "public" で返る（実測：削除済みの
-// hVfDBfreYNI がフラグ有りで public、無しで "Video unavailable"）。
-// 動画情報を最後まで取れたかどうかは playable_in_embed の有無に出るので、
-// 両方を見る。
-//
-// **会限の判定を先に置くこと。** 実測（1GlkSFdnCcc、cookie 有り）では
-// 会限の配信が `subscriber_only` かつ **playable_in_embed = true** を返す。
-// yt-dlp は「埋め込み可」と言っているが、IFrame API は同じ動画で onError: 150 を返す。
-// playable_in_embed を先に見ると、会限が playable に分類されて
-// 必ず失敗するプレイヤーを描くことになる。
-func playabilityOf(stream models.Stream) string {
-	if !stream.AvailabilityCheckedAt.Valid {
-		return dto.PlayabilityUnknown
-	}
-	if stream.Availability.Valid && stream.Availability.String == "subscriber_only" {
-		return dto.PlayabilityMembersOnly
-	}
-	if !stream.PlayableInEmbed.Valid {
-		// 調べたのに埋め込み可否が取れなかった＝動画情報を最後まで取れていない。
-		return dto.PlayabilityUnavailable
-	}
-	if !stream.PlayableInEmbed.Bool {
-		return dto.PlayabilityEmbedDisabled
-	}
-	// ここに来たのは `public` かつ埋め込み可。**これは「反証が無かった」という結論で、
-	// 公開だと確かめた証拠ではない。** yt-dlp の `_availability` は 5 つの材料が
-	// 全部 non-None なら public を返すが、会限かどうかを決める badge が
-	// 取れなかった場合も（initial_data に contents はあるが
-	// videoPrimaryInfoRenderer が欠けた等）needs_subscription は False になり、
-	// 「揃った」と数えられる。つまり**会限が public と記録されうる**。
-	//
-	// 帰結は 2 か所で塞いである：
-	//   - 配信詳細は `YoutubePlayer` の onError を拾って案内へ切り替える
-	//     （実測のほうが新しい事実なので、保存済みの判定より優先する）
-	//   - `POST /api/availability/backfill?recheck=1` でこの判定の行を調べ直せる
-	//
-	// **`PlayerBar` の onError は別のプレイヤー実体**なので、配信詳細には効かない。
-	// ここを取り違えて「退避があるから安全」と考えないこと。
-	//
-	// 積極的な発見（subscriber_only / 埋め込み不可 / 取得不可）はこの弱さを持たない。
-	return dto.PlayabilityPlayable
 }
 
 // 会限セットリストの公開可否（チャンネル単位）。migration 056。

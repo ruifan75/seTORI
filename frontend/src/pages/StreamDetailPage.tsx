@@ -1263,7 +1263,12 @@ export default function StreamDetailPage() {
         // `embed_disabled`）は東京の VPS から見た結果でしかなく、所在地によっては
         // 再生できる。先に倒すとプレイヤーを描かないので `onError` も鳴らず、
         // 取り返せない（`UnplayableNotice` の NoticeKind を参照）。
-        : stream.playability === 'members_only'
+        // **会限だけは先に案内へ倒す**（所在地に依らず 150 で落ちるため）。
+        // 判定は `members_only` タグ ── 以前は yt-dlp の availability を見ていたが、
+        // 実測で本番の会限 86 本のうち availability が捉えたのは 7 本だけで、
+        // **タグが捉えていない会限は 1 本も無かった**。取得のために yt-dlp を
+        // 焚く価値が無いので 2026-09-14 に外した。
+        : stream.tags?.some((t) => t.id === 'members_only')
           ? 'members_only'
           : null;
 

@@ -284,47 +284,16 @@ type StreamResponse struct {
 	// CommentSongsAnalyzedAt は解析を最後に走らせた時刻。updated_at では代用できない
 	// （毎日回る Holodex 同期が全配信の updated_at を今日に押し上げる）。
 	CommentSongsAnalyzedAt *string `json:"comment_songs_analyzed_at,omitempty"`
-	// Playability は**閲覧者にも返す**（プレイヤーを描くかどうかの判断に要る）。
-	// 会限の動画は YouTube が埋め込みを塞いでいるので、描いてから onError: 150 で
-	// 失敗させるより最初から描かないほうがよい。値は dto.Playability* を参照。
-	//
-	// **詳細（GetByID）でだけ入る。** 一覧・検索の SELECT は元の 3 列を読んでいないので、
-	// そこで組み立てると全部 unknown になり、実態と食い違う主張をすることになる。
-	// 省略時は「この応答は判定していない」で、受け手は従来どおり描いてよい。
-	Playability string `json:"playability,omitempty"`
 	// HolodexUploadedAt は Holodex への**送信を試みた**時刻（PUT の前に記録するので
 	// 「送信済み」ではない）。**編集者だけ**に返す。
 	// 秘匿にしても向こうのコピーは残りうるので、そこに気付ける材料として要る。
 	HolodexUploadedAt *string `json:"holodex_uploaded_at,omitempty"`
 	// HolodexUploadUnknown は台帳の追跡開始より前から存在する配信。
 	// 台帳が空でも「送っていない」とは言えないことを画面へ伝える。**編集者だけ**。
-	HolodexUploadUnknown bool `json:"holodex_upload_unknown,omitempty"`
-	// 生の値は編集者だけに返す。判断材料であって閲覧者が使うものではない。
-	Availability          *string   `json:"availability,omitempty"`
-	PlayableInEmbed       *bool     `json:"playable_in_embed,omitempty"`
-	AvailabilityCheckedAt *string   `json:"availability_checked_at,omitempty"`
-	CreatedAt             time.Time `json:"created_at"`
-	UpdatedAt             time.Time `json:"updated_at"`
+	HolodexUploadUnknown bool      `json:"holodex_upload_unknown,omitempty"`
+	CreatedAt            time.Time `json:"created_at"`
+	UpdatedAt            time.Time `json:"updated_at"`
 }
-
-// Playability は「この配信を埋め込みプレイヤーで再生できるか」の判定結果。
-//
-// 生の availability / playable_in_embed から導く（両方を見る必要がある：
-// **`--ignore-no-formats-error` が付いた実行では、視聴できない動画でも
-// availability が public で返る**ので、availability 単独では信用できない）。
-const (
-	// PlayabilityUnknown … まだ調べていない。従来どおりプレイヤーを描く
-	// （調べていないことを「再生不可」と読み替えると全配信のプレイヤーが消える）。
-	PlayabilityUnknown = "unknown"
-	// PlayabilityPlayable … 埋め込み再生できる。
-	PlayabilityPlayable = "playable"
-	// PlayabilityMembersOnly … 会限。メンバー資格があっても埋め込みでは再生できない。
-	PlayabilityMembersOnly = "members_only"
-	// PlayabilityEmbedDisabled … 公開だが所有者が埋め込みを切っている（onError: 150 の別の原因）。
-	PlayabilityEmbedDisabled = "embed_disabled"
-	// PlayabilityUnavailable … 動画情報を取得できない（削除・非公開・権利で降ろされた）。
-	PlayabilityUnavailable = "unavailable"
-)
 
 // NonSingingCandidate は「非表示だが現行規則で曲が出た」配信（issue #42）。
 type NonSingingCandidate struct {
@@ -361,7 +330,7 @@ type UpdateStreamRequest struct {
 	IsProcessed    *bool    `json:"is_processed,omitempty"`
 	IsHidden       *bool    `json:"is_hidden,omitempty"`
 	// IsRestricted を false にするのが「中身を公開してよい」という人の判断。
-	// 自動では下がらない（SaveAvailability は立てるだけ）。
+	// 自動では下がらない。
 	IsRestricted *bool `json:"is_restricted,omitempty"`
 }
 
