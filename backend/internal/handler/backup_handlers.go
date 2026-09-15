@@ -19,6 +19,9 @@ func (r *Router) handleBackupStatus(w http.ResponseWriter, req *http.Request) {
 		"settings": r.backupService.GetSettings(),
 		"backups":  backups,
 		"gdrive":   r.backupService.DriveStatus(),
+		// Drive の世代整理が対象にする印。空なら整理しない（他環境のものを
+		// 消さないため）。**設定ではなく環境から来る**ので settings に混ぜない。
+		"instance": r.backupService.Instance(),
 	})
 }
 
