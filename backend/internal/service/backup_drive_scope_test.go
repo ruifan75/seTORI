@@ -192,3 +192,57 @@ func TestBackupSettingsCannotPersistInstance(t *testing.T) {
 		}
 	}
 }
+
+// **印に区切り文字を入れられないこと。**
+//
+// 区切りは `__` なので、印に `_` が入ると読み戻せない：
+// `production__canary` が作った `production__canary__setori_1.dump` は最初の `__`
+// で切ると `production` になり、**production の世代整理が別環境のファイルを消す**。
+// 末尾が `_` の `production_` も `production___setori_1.dump` → `production` で同じ。
+//
+// 区切りに使う文字を印の文字種から外すことで、この誤読を原理的に起こせなくする。
+func TestInstanceCannotContainSeparator(t *testing.T) {
+	for _, bad := range []string{
+		"production__canary", // 区切りをそのまま含む
+		"production_",        // 末尾の _ が区切りの一部になる
+		"_production",        // 先頭の _ も同じ
+		"pro duction",        // 名前に使えない文字
+		"",
+	} {
+		t.Run(bad, func(t *testing.T) {
+			t.Setenv("ENVIRONMENT", bad)
+			if got := backupInstance(); got != "" {
+				t.Errorf("backupInstance() = %q（印として使えない値を通した）", got)
+			}
+			// **付ける側でも弾く。** 呼び出し側頼みにすると、別の呼び出しが
+			// 足された瞬間に読み戻せない名前を作れる。
+			if got := driveObjectName(bad, "setori_1.dump"); got != "setori_1.dump" {
+				t.Errorf("driveObjectName(%q, …) = %q（読み戻せない名前を作った）", bad, got)
+			}
+		})
+	}
+
+	// 陽性対照：使える値では往復すること。
+	for _, ok := range []string{"production", "development", "staging-2", "prod.1"} {
+		obj := driveObjectName(ok, "setori_1.dump")
+		tag, tagged := driveObjectInstance(obj)
+		if !tagged || tag != ok {
+			t.Errorf("%q: 往復できない（%q, %v）", ok, tag, tagged)
+		}
+	}
+}
+
+// **別環境の印を持つファイルが、自分の整理で消えないこと**を名前の形から確かめる。
+// 上の誤読が起きると、この検査が落ちる。
+func TestPruneNeverTouchesOtherInstance(t *testing.T) {
+	files := []gdrive.File{
+		{ID: "mine1", Name: driveObjectName("production", "setori_1.dump")},
+		{ID: "mine2", Name: driveObjectName("production", "setori_2.dump")},
+		{ID: "other", Name: "production__canary__setori_3.dump"}, // 手で置かれた紛らわしい名前
+	}
+	for _, f := range drivePruneTargets(files, "production", 1) {
+		if f.ID == "other" {
+			t.Error("別環境の印を持つファイルを削除対象にした")
+		}
+	}
+}

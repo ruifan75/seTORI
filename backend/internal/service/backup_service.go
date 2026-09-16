@@ -279,7 +279,14 @@ func (s *BackupService) dumpToFile(name string) (string, error) {
 // 復元した瞬間に本番と同じ印を名乗ることになる ── 原因そのものを繰り返す。
 const driveInstanceSep = "__"
 
-var driveInstanceRe = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+// **`_` を許さない。** 区切りが `__` なので、印に `_` が入ると読み戻せなくなる：
+// `production__canary` が作った `production__canary__setori_1.dump` は最初の `__` で
+// 切ると `production` になり、**production の世代整理が別環境のファイルを消す**
+// （末尾が `_` の `production_` も `production___setori_2.dump` → `production` で同じ）。
+// 区切りに使う文字を印から外せば、この誤読は原理的に起きない。
+//
+// 使えない値は空扱い＝整理しない側へ倒れるので、弾いても消しすぎにはならない。
+var driveInstanceRe = regexp.MustCompile(`^[A-Za-z0-9.-]+$`)
 
 // backupInstance はこの環境の印を返す。**空なら整理しない**（後述）。
 func backupInstance() string {
@@ -293,7 +300,11 @@ func backupInstance() string {
 // driveObjectName は Drive 上の名前を作る。ローカルのファイル名は変えない
 // ── 復元とダウンロードが名前で引くので、既存の運用に触らないため。
 func driveObjectName(instance, name string) string {
-	if instance == "" {
+	// **ここでも検証する。** 呼び出し側（backupInstance）が弾く前提にすると、
+	// 別の呼び出しが足された瞬間に読み戻せない名前を作れてしまう。
+	// 印を付けないほうへ倒すと、そのファイルは「印なし」として整理対象から
+	// 外れるだけで済む（消しすぎにはならない）。
+	if !driveInstanceRe.MatchString(instance) {
 		return name
 	}
 	return instance + driveInstanceSep + name
@@ -311,6 +322,13 @@ func driveObjectInstance(objectName string) (string, bool) {
 	if !driveInstanceRe.MatchString(tag) {
 		return "", false
 	}
+	// **残りに区切りが出てきたら読まない。** 印の文字種から `_` を外したので
+	// 正規の経路ではこの形は作れないが、人が置いたファイルや将来の変更で
+	// `a__b__c.dump` のような名前が現れたとき、先頭だけ見て `a` のものだと
+	// 決めると**別のものを消しうる**。曖昧なら「印なし」＝触らない側へ倒す。
+	if strings.Contains(objectName[i+len(driveInstanceSep):], driveInstanceSep) {
+		return "", false
+	}
 	return tag, true
 }
 
@@ -321,6 +339,11 @@ func driveObjectInstance(objectName string) (string, bool) {
 // 本番の印を名乗るのは、この機能が防ごうとしているものそのもの。
 // 環境変数から毎回読むだけにして、**保存できる場所に置かない**。
 func (s *BackupService) Instance() string { return backupInstance() }
+
+// **「触らない」は自動の世代整理だけの保証。** 管理画面からの明示的な削除
+// （`DeleteDriveFile`）は、別の環境が作ったものにも印の無いものにも効く。
+// そちらは人が選んで押す操作なので止めない ── 混ざったフォルダを片付ける
+// 手段が無くなるほうが困る。
 
 // drivePruneTargets は Drive の一覧から**削除してよいもの**を選ぶ。
 //

@@ -290,19 +290,48 @@ func (c *Client) Upload(accessToken, folderID, name string, r io.Reader, size in
 	return &f, nil
 }
 
-// ListFiles は folderID 直下のファイル一覧（新しい順）を返す。
+// listFilesMaxPages は 1 回の一覧取得で辿るページ数の上限。
+//
+// **打ち切りはするが、黙って切らない。** 上限に当たったら err を返す ──
+// 途中までの一覧を返すと、呼び出し側（世代整理）が「自分のファイルはこれで全部」と
+// 誤解して、実際には残っている古いものを消さないまま終わる。
+const listFilesMaxPages = 20
+
+// ListFiles は folderID 直下のファイル一覧（新しい順）を返す。**全ページを辿る。**
+//
+// 1 ページ（100 件）だけだと、**フォルダを複数の環境で共有しているとき**に
+// 自分のファイルが範囲外へ押し出される。例えば本番と手元が交互に上げていて
+// 保持数が各 50 なら、各 51 件になっても先頭 100 件には各 50 件しか入らず、
+// 世代整理の対象が空になって永久に溜まる（issue #64 のレビューで判明）。
 func (c *Client) ListFiles(accessToken, folderID string) ([]File, error) {
 	q := fmt.Sprintf("'%s' in parents and trashed = false", folderID)
-	u := driveAPI + "/files?q=" + url.QueryEscape(q) +
-		"&fields=" + url.QueryEscape("files(id,name,size,createdTime,mimeType)") +
+	base := driveAPI + "/files?q=" + url.QueryEscape(q) +
+		"&fields=" + url.QueryEscape("nextPageToken,files(id,name,size,createdTime,mimeType)") +
 		"&orderBy=" + url.QueryEscape("createdTime desc") + "&pageSize=100"
-	var list struct {
-		Files []File `json:"files"`
+
+	var all []File
+	token := ""
+	for page := 0; ; page++ {
+		if page >= listFilesMaxPages {
+			return nil, fmt.Errorf("drive list files: %d ページを超えました（フォルダに溜まりすぎています）", listFilesMaxPages)
+		}
+		u := base
+		if token != "" {
+			u += "&pageToken=" + url.QueryEscape(token)
+		}
+		var list struct {
+			Files         []File `json:"files"`
+			NextPageToken string `json:"nextPageToken"`
+		}
+		if err := c.apiJSON(accessToken, http.MethodGet, u, nil, &list); err != nil {
+			return nil, err
+		}
+		all = append(all, list.Files...)
+		if list.NextPageToken == "" {
+			return all, nil
+		}
+		token = list.NextPageToken
 	}
-	if err := c.apiJSON(accessToken, http.MethodGet, u, nil, &list); err != nil {
-		return nil, err
-	}
-	return list.Files, nil
 }
 
 // DeleteFile はファイルを完全削除する。
