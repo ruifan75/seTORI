@@ -1171,6 +1171,10 @@ export interface BackupStatusResponse {
   settings: BackupSettings;
   backups: BackupFileInfo[];
   gdrive: DriveStatus;
+  // Drive の世代整理が対象にする印（`ENVIRONMENT`）。**設定ではなく環境から来る**
+  // ── app_settings に置くと pg_dump で手元へ複製され、復元した手元が本番を名乗る。
+  // 空なら整理しない（他環境のバックアップを消さないため）
+  instance?: string;
 }
 
 export interface BackupResult {

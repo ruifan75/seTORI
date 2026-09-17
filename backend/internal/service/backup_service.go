@@ -264,6 +264,131 @@ func (s *BackupService) dumpToFile(name string) (string, error) {
 	return path, nil
 }
 
+// ---- Drive 上の「どの環境が作ったか」 ----
+//
+// **同じフォルダを複数の環境が共有する。** `EnsureFolder` は名前で解決するので、
+// 同じ Google アカウントなら手元も本番も同じフォルダに行き着く。しかも
+// `drive_folder_id` と `drive_upload` は `app_settings` にあるので、本番を
+// pg_dump で手元へ復元すると**そのまま引き継がれる**（issue #64）。
+//
+// 世代整理は「新しい順に N 件残して残りを削除」なので、出所を見ないと
+// **手元のバックアップが本番のバックアップを消す**。実際 2026-09-13 に
+// 手元から 7 日ぶん上がっていた。
+//
+// **印は環境変数から取る。** `app_settings` に置くと pg_dump で複製され、
+// 復元した瞬間に本番と同じ印を名乗ることになる ── 原因そのものを繰り返す。
+const driveInstanceSep = "__"
+
+// **`_` を許さない。** 区切りが `__` なので、印に `_` が入ると読み戻せなくなる：
+// `production__canary` が作った `production__canary__setori_1.dump` は最初の `__` で
+// 切ると `production` になり、**production の世代整理が別環境のファイルを消す**
+// （末尾が `_` の `production_` も `production___setori_2.dump` → `production` で同じ）。
+// 区切りに使う文字を印から外せば、この誤読は原理的に起きない。
+//
+// 使えない値は空扱い＝整理しない側へ倒れるので、弾いても消しすぎにはならない。
+var driveInstanceRe = regexp.MustCompile(`^[A-Za-z0-9.-]+$`)
+
+// backupInstance はこの環境の印を返す。**空なら整理しない**（後述）。
+func backupInstance() string {
+	v := strings.TrimSpace(os.Getenv("ENVIRONMENT"))
+	if !driveInstanceRe.MatchString(v) {
+		return ""
+	}
+	return v
+}
+
+// driveObjectName は Drive 上の名前を作る。ローカルのファイル名は変えない
+// ── 復元とダウンロードが名前で引くので、既存の運用に触らないため。
+func driveObjectName(instance, name string) string {
+	// **ここでも検証する。** 呼び出し側（backupInstance）が弾く前提にすると、
+	// 別の呼び出しが足された瞬間に読み戻せない名前を作れてしまう。
+	// 印を付けないほうへ倒すと、そのファイルは「印なし」として整理対象から
+	// 外れるだけで済む（消しすぎにはならない）。
+	if !driveInstanceRe.MatchString(instance) {
+		return name
+	}
+	return instance + driveInstanceSep + name
+}
+
+// driveObjectInstance は Drive 上の名前から印を読む。
+// 第 2 戻り値は「印が付いているか」── **付いていないファイルは削除しない**。
+// 印を入れる前に上がったものが該当し、それが誰のものかは分からないため。
+func driveObjectInstance(objectName string) (string, bool) {
+	i := strings.Index(objectName, driveInstanceSep)
+	if i <= 0 {
+		return "", false
+	}
+	tag := objectName[:i]
+	if !driveInstanceRe.MatchString(tag) {
+		return "", false
+	}
+	rest := objectName[i+len(driveInstanceSep):]
+
+	// **区切りが重なっていたら読まない。** `production___setori_1.dump`（`_` が 3 つ）は
+	// 最初の `__` で切ると `production` になり、残り `_setori_1.dump` には `__` が
+	// 無いので下の検査を通ってしまう ── **旧実装の `production_` が作った名前が
+	// まさにこの形**で、production の世代整理がそれを消せた（レビューで実測）。
+	// 区切りの直後が `_` なら、どこで切るのが正しいか決められない。
+	if strings.HasPrefix(rest, "_") {
+		return "", false
+	}
+
+	// **残りに区切りが出てきたら読まない。** 印の文字種から `_` を外したので
+	// 正規の経路ではこの形は作れないが、人が置いたファイルや将来の変更で
+	// `a__b__c.dump` のような名前が現れたとき、先頭だけ見て `a` のものだと
+	// 決めると**別のものを消しうる**。曖昧なら「印なし」＝触らない側へ倒す。
+	if strings.Contains(rest, driveInstanceSep) {
+		return "", false
+	}
+	return tag, true
+}
+
+// Instance は Drive 上で「この環境が作った」と名乗る印を返す（画面表示用）。
+//
+// **`BackupSettings` に入れない。** あそこへ入れると `saveSettings` が
+// `app_settings` へ書き、pg_dump で手元へ複製される ── 復元した手元が
+// 本番の印を名乗るのは、この機能が防ごうとしているものそのもの。
+// 環境変数から毎回読むだけにして、**保存できる場所に置かない**。
+func (s *BackupService) Instance() string { return backupInstance() }
+
+// **「触らない」は自動の世代整理だけの保証。** 管理画面からの明示的な削除
+// （`DeleteDriveFile`）は、別の環境が作ったものにも印の無いものにも効く。
+// そちらは人が選んで押す操作なので止めない ── 混ざったフォルダを片付ける
+// 手段が無くなるほうが困る。
+
+// drivePruneTargets は Drive の一覧から**削除してよいもの**を選ぶ。
+//
+// **決定をここに閉じ込める。** 述語（`driveObjectInstance`）を個別に検査しても、
+// 呼び出し側で条件を落とせば守れない ── 選択そのものを値で検査できる形にする。
+//
+// files は createdTime の降順（新しい順）で渡すこと。
+func drivePruneTargets(files []gdrive.File, instance string, retention int) []gdrive.File {
+	if retention < 1 {
+		retention = 1
+	}
+
+	kept := 0
+	var targets []gdrive.File
+	for _, f := range files {
+		tag, tagged := driveObjectInstance(f.Name)
+		// **印の無いファイルと、他の環境のものは触らない。**
+		//
+		// この 1 行が安全性の全部。instance が空のときも、有印は `tag != ""` で、
+		// 無印は `!tagged` で落ちるので**結果は空になる** ── 別に早退を置くと
+		// 「そちらが守っている」と読めてしまうが、実際は守っていない（外しても
+		// 振る舞いが変わらないことを負のコントロールで確認済み）。
+		if !tagged || tag != instance {
+			continue
+		}
+		if kept < retention {
+			kept++
+			continue
+		}
+		targets = append(targets, f)
+	}
+	return targets
+}
+
 // uploadToDrive はバックアップファイルを Drive のバックアップフォルダへアップロードし、世代整理する。
 func (s *BackupService) uploadToDrive(settings *BackupSettings, path, name string) error {
 	token, err := s.getAccessToken()
@@ -293,7 +418,9 @@ func (s *BackupService) uploadToDrive(settings *BackupSettings, path, name strin
 	if err != nil {
 		return err
 	}
-	if _, err := s.drive.Upload(token, folderID, name, f, info.Size()); err != nil {
+	instance := backupInstance()
+	objectName := driveObjectName(instance, name)
+	if _, err := s.drive.Upload(token, folderID, objectName, f, info.Size()); err != nil {
 		// フォルダが削除済みの場合は作り直して 1 回だけ再試行
 		if strings.Contains(err.Error(), "File not found") || strings.Contains(err.Error(), "notFound") {
 			folder, ferr := s.drive.EnsureFolder(token, driveBackupFolderName)
@@ -307,7 +434,7 @@ func (s *BackupService) uploadToDrive(settings *BackupSettings, path, name strin
 			if _, err2 := f.Seek(0, io.SeekStart); err2 != nil {
 				return err2
 			}
-			if _, err2 := s.drive.Upload(token, folder.ID, name, f, info.Size()); err2 != nil {
+			if _, err2 := s.drive.Upload(token, folder.ID, objectName, f, info.Size()); err2 != nil {
 				return err2
 			}
 			folderID = folder.ID
@@ -322,14 +449,11 @@ func (s *BackupService) uploadToDrive(settings *BackupSettings, path, name strin
 		logger.Warnf("backup drive list for prune: %v", err)
 		return nil
 	}
-	retention := settings.RetentionDrive
-	if retention < 1 {
-		retention = 1
+	if instance == "" {
+		logger.Warnf("backup drive prune: ENVIRONMENT が空なので世代整理をしません（他環境のバックアップを消さないため）")
+		return nil
 	}
-	for i, file := range files { // createdTime desc 順
-		if i < retention {
-			continue
-		}
+	for _, file := range drivePruneTargets(files, instance, settings.RetentionDrive) {
 		if err := s.drive.DeleteFile(token, file.ID); err != nil {
 			logger.Warnf("backup drive prune delete %s: %v", file.Name, err)
 		} else {

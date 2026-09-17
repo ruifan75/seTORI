@@ -130,6 +130,26 @@ function GoogleDriveSection({ onRestoreRequest }: {
 
   const { data: status } = useQuery({ queryKey: ['backup-status'], queryFn: backupApi.status });
   const gdrive = status?.gdrive;
+  // 世代整理が対象にする印。**同じフォルダを複数の環境が共有しうる**ので
+  // （手元へ本番を復元すると連携設定ごと引き継がれる）、どれが自分のものかを出す。
+  const instance = status?.instance ?? '';
+  // 名前の先頭の印を読む。**バックエンドの driveObjectInstance と同じ規則にする。**
+  //
+  // ここが緩いと、バックエンドが整理対象から外しているファイルを画面が
+  // 「自分のもの」として出す ── 利用者は消えると思って待ち、実際は残り続ける。
+  // 規則は 3 つ（どれか外すと食い違う）:
+  //   1. 印に `_` を許さない（区切りが `__` なので読み戻せなくなる）
+  //   2. 区切りの直後が `_` なら読まない（`a___x.dump` はどこで切るか決められない）
+  //   3. 残りに区切りが出てきたら読まない（`a__b__c.dump` も同じ）
+  const fileInstance = (name: string): string | null => {
+    const i = name.indexOf('__');
+    if (i <= 0) return null;
+    const tag = name.slice(0, i);
+    if (!/^[A-Za-z0-9.-]+$/.test(tag)) return null;
+    const rest = name.slice(i + 2);
+    if (rest.startsWith('_') || rest.includes('__')) return null;
+    return tag;
+  };
 
   const [deviceAuth, setDeviceAuth] = useState<DriveDeviceAuth | null>(null);
   const pollTimer = useRef<number | null>(null);
@@ -280,7 +300,19 @@ function GoogleDriveSection({ onRestoreRequest }: {
             </button>
           </div>
 
-          <h3 className="text-sm font-semibold text-gray-700 mb-2">Drive 上のバックアップ</h3>
+          <div className="flex flex-wrap items-baseline gap-2 mb-2">
+            <h3 className="text-sm font-semibold text-gray-700">Drive 上のバックアップ</h3>
+            {instance ? (
+              <span className="text-xs text-gray-500">
+                この環境の印: <code className="bg-gray-100 px-1 rounded">{instance}</code>
+                <span className="ml-1">（世代整理はこの印が付いたものだけを対象にします）</span>
+              </span>
+            ) : (
+              <span className="text-xs text-amber-700">
+                ENVIRONMENT が未設定のため<strong>世代整理を行いません</strong>（他の環境のバックアップを消さないため）
+              </span>
+            )}
+          </div>
           {driveLoading ? (
             <p className="text-sm text-gray-400">読み込み中...</p>
           ) : driveError ? (
@@ -293,6 +325,22 @@ function GoogleDriveSection({ onRestoreRequest }: {
                 <div key={f.id} className="flex items-center gap-3 px-3 py-2 text-sm">
                   <CloudIcon className="w-4 h-4 text-gray-400 shrink-0" />
                   <span className="font-mono text-gray-800 truncate">{f.name}</span>
+                  {(() => {
+                    const tag = fileInstance(f.name);
+                    if (instance && tag === instance) return null;
+                    // **整理の対象外であることを出す。** 出さないと「保持数を超えているのに
+                    // 消えない」が理由の分からない挙動に見える。
+                    return (
+                      <span
+                        className="shrink-0 px-1.5 py-0.5 text-[11px] rounded bg-gray-100 text-gray-600"
+                        title={tag
+                          ? `別の環境（${tag}）が作ったものです。この環境の世代整理では消しません`
+                          : '印が付く前に上がったものです。どの環境のものか分からないので自動では消しません'}
+                      >
+                        {tag ?? '印なし'}
+                      </span>
+                    );
+                  })()}
                   <span className="text-gray-400 shrink-0">{f.size ? formatBytes(f.size) : ''}</span>
                   <span className="text-gray-400 shrink-0 hidden sm:inline">{formatDate(f.createdTime)}</span>
                   <span className="flex-1" />
