@@ -68,16 +68,16 @@ func (f *fakeDriveRT) RoundTrip(r *http.Request) (*http.Response, error) {
 	case r.Method == http.MethodGet && strings.Contains(r.URL.String(), "/files?"):
 		q, _ := url.ParseQuery(r.URL.RawQuery)
 		// 一覧の要求条件。**整理はこの経路から走る**ので、ここでも見る。
-		// 降順でないと「古いものを残して新しいものを消す」になり、
-		// フォルダを限定していないと**フォルダの外**へ DELETE が飛ぶ。
-		if o := q.Get("orderBy"); o != "createdTime desc" {
-			f.queryErr = "orderBy=" + o
-		}
-		if !strings.Contains(q.Get("q"), "'folder' in parents") || strings.Contains(q.Get("q"), "not in parents") {
-			f.queryErr = "q=" + q.Get("q")
-		}
-		if !strings.Contains(q.Get("fields"), "name") {
-			f.queryErr = "fields=" + q.Get("fields")
+		// **完全一致**で見るのは、部分一致だと `in parents or` や
+		// `originalFilename` のように「通るのに壊れている」形が作れるため。
+		for _, c := range []struct{ key, want string }{
+			{"q", "'folder' in parents and trashed = false"},
+			{"fields", "nextPageToken,files(id,name,size,createdTime,mimeType)"},
+			{"orderBy", "createdTime desc"},
+		} {
+			if got := q.Get(c.key); got != c.want {
+				f.queryErr = c.key + "=" + got
+			}
 		}
 		if q.Get("pageToken") != "" {
 			return body(map[string]any{"files": []gdrive.File{}}), nil

@@ -22,34 +22,21 @@ func assertListQuery(t *testing.T, r *http.Request, folderID string) {
 		t.Fatalf("query: %v", err)
 	}
 
-	// **フォルダの中だけを見ていること。** `in parents` を `not in parents` に
-	// するとフォルダの**外**のファイルが並び、世代整理がそれらへ DELETE を
-	// 発行しうる ── バックアップと無関係な利用者のファイルを消す。
-	if want := "'" + folderID + "' in parents"; !strings.Contains(q.Get("q"), want) {
-		t.Errorf("q がフォルダを限定していない: %q（%q を含むべき）", q.Get("q"), want)
+	// **完全一致で見る。** 「悪い形」を列挙して弾く方式では追いつかない ──
+	// `in parents and` を `in parents or` にする（フォルダ外も並ぶ）、
+	// `name` を `originalFilename` にする（`name` を部分文字列として含むので
+	// 素通りするのに、応答に名前が来なくなる）など、通る形がいくらでも作れる。
+	// 期待する文字列を丸ごと固定すれば、変えた人は必ずここを通る。
+	if want := "'" + folderID + "' in parents and trashed = false"; q.Get("q") != want {
+		t.Errorf("q = %q, want %q", q.Get("q"), want)
 	}
-	if strings.Contains(q.Get("q"), "not in parents") {
-		t.Errorf("q がフォルダの外を見ている: %q", q.Get("q"))
+	if want := "nextPageToken,files(id,name,size,createdTime,mimeType)"; q.Get("fields") != want {
+		t.Errorf("fields = %q, want %q", q.Get("fields"), want)
 	}
-
-	f := q.Get("fields")
-	// 次ページの情報を要求していないと、実 API は返さない＝ページングが止まる。
-	if !strings.Contains(f, "nextPageToken") {
-		t.Errorf("fields に nextPageToken が無い: %q", f)
-	}
-	// **読む列を全部要求していること。** 例えば `name` を落とすと実 API は
-	// 名前を返さず、印が読めなくなって**世代整理が静かに止まる**
-	// （全ファイルが「印なし」＝触らない扱いになる）。
-	for _, want := range []string{"id", "name", "createdTime"} {
-		if !strings.Contains(f, want) {
-			t.Errorf("fields に %q が無い: %q", want, f)
-		}
-	}
-
 	// **降順であること。** 昇順だと世代整理が「古いものを残して新しいものを消す」
 	// になり、最新のバックアップから失われる。
-	if o := q.Get("orderBy"); o != "createdTime desc" {
-		t.Errorf("orderBy = %q, want %q", o, "createdTime desc")
+	if want := "createdTime desc"; q.Get("orderBy") != want {
+		t.Errorf("orderBy = %q, want %q", q.Get("orderBy"), want)
 	}
 }
 

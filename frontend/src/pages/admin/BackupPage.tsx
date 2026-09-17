@@ -133,12 +133,22 @@ function GoogleDriveSection({ onRestoreRequest }: {
   // 世代整理が対象にする印。**同じフォルダを複数の環境が共有しうる**ので
   // （手元へ本番を復元すると連携設定ごと引き継がれる）、どれが自分のものかを出す。
   const instance = status?.instance ?? '';
-  // 名前の先頭の印を読む（バックエンドの driveObjectInstance と同じ規則）。
+  // 名前の先頭の印を読む。**バックエンドの driveObjectInstance と同じ規則にする。**
+  //
+  // ここが緩いと、バックエンドが整理対象から外しているファイルを画面が
+  // 「自分のもの」として出す ── 利用者は消えると思って待ち、実際は残り続ける。
+  // 規則は 3 つ（どれか外すと食い違う）:
+  //   1. 印に `_` を許さない（区切りが `__` なので読み戻せなくなる）
+  //   2. 区切りの直後が `_` なら読まない（`a___x.dump` はどこで切るか決められない）
+  //   3. 残りに区切りが出てきたら読まない（`a__b__c.dump` も同じ）
   const fileInstance = (name: string): string | null => {
     const i = name.indexOf('__');
     if (i <= 0) return null;
     const tag = name.slice(0, i);
-    return /^[A-Za-z0-9._-]+$/.test(tag) ? tag : null;
+    if (!/^[A-Za-z0-9.-]+$/.test(tag)) return null;
+    const rest = name.slice(i + 2);
+    if (rest.startsWith('_') || rest.includes('__')) return null;
+    return tag;
   };
 
   const [deviceAuth, setDeviceAuth] = useState<DriveDeviceAuth | null>(null);
