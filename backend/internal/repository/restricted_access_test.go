@@ -148,3 +148,83 @@ func TestRestrictedCountOnlyNarrowsTheTotal(t *testing.T) {
 		}
 	}
 }
+
+// `discoverClause` を**完全一致で固定する**。
+//
+// **`DiscoverableFor` のテストでは守れない。** 見た目は似ているが 2 つは
+// 別々の実装で、片方を変えてももう片方は変わらない（実測：`discoverClause` の
+// `" AND "` を `" OR "` にしても既存のテストは全部通った）。
+//
+// ここが緩いと、これを部品として使っている検査
+// （`promoted_scope_test.go` の期待値）も一緒に緩む ── **期待値に使う部品は、
+// それ自体がどこかで固定されていなければ意味が無い。**
+func TestDiscoverClauseExact(t *testing.T) {
+	// **`RestrictedView` は両軸とも外す**（CLAUDE.md §2。本番の会限 86 本のうち
+	// 78 本は is_hidden も立っているので、秘匿だけ外しても管理者から見えない）。
+	if got := RestrictedView.discoverClause(); got != "" {
+		t.Errorf("RestrictedView で濾している: %q", got)
+	}
+
+	want := " AND st.is_hidden = FALSE AND " + NotRestricted("st")
+	if got := PublicAccess.discoverClause(); got != want {
+		t.Errorf("PublicAccess の条件が変わっている\n got: %q\nwant: %q", got, want)
+	}
+
+	// **`AND` で繋がれていること。** `OR` にすると条件が無効になるのに、
+	// 部分一致の検査では気付けない。
+	if !strings.HasPrefix(PublicAccess.discoverClause(), " AND ") {
+		t.Errorf("AND で繋がれていない: %q", PublicAccess.discoverClause())
+	}
+}
+
+// 秘匿判定の式を、**実装の関数を一切呼ばずに**完全一致で固定する。
+//
+// **これが依存の根。** `NotRestricted` は
+// `EffectiveRestrictedExpr` → `MembersOnlyDetectedExpr` / `allOwnersAllowExpr`
+// と辿るので、どこか 1 つでも固定されていないと、そこを書き換えたときに
+// **それを部品に使っている検査の期待値も一緒に変わる**。
+// 実際、この 4 つはどれも書き換えても全テストが通っていた（レビューで実測）:
+//
+//	NotRestricted            末尾に OR TRUE      … 公開配信が左側だけで通り、
+//	                                              後続のチャンネル条件を迂回できる
+//	EffectiveRestrictedExpr  AND NOT → OR NOT
+//	MembersOnlyDetectedExpr  EXISTS → NOT EXISTS
+//	allOwnersAllowExpr       bool_and → bool_or  … 1 人でも allow なら公開になる
+//
+// **期待値を実装から作らないこと**が要点なので、ここは文字列を直に書く。
+// 式を変えるときはここも変わる ── それが狙い（変更が必ず目に入る）。
+func TestRestrictedExpressionsExact(t *testing.T) {
+	const membersOnly = "EXISTS (SELECT 1 FROM stream_stream_tags mt" +
+		" WHERE mt.stream_id = st.id AND mt.tag_id = 'members_only')"
+
+	// **`bool_and`** … 所有者が複数なら**1 人でも allow でなければ伏せる**
+	// （fail-closed）。`bool_or` にすると 1 人 allow で公開になる。
+	// **`COALESCE(…, FALSE)`** … 所有者が居ない／方針が無いときは「allow ではない」。
+	const allOwnersAllow = "COALESCE((SELECT bool_and(COALESCE(eg.members_only_policy, '') = 'allow')" +
+		" FROM stream_singers eo JOIN singers eg ON eg.id = eo.singer_id" +
+		" WHERE eo.stream_id = st.id AND eo.is_owner), FALSE)"
+
+	// **人の裁定（override）が自動判定に勝つ。** COALESCE の第 1 引数。
+	const effective = "COALESCE(st.restriction_override, " + membersOnly + " AND NOT " + allOwnersAllow + ")"
+
+	for _, c := range []struct {
+		name string
+		got  string
+		want string
+	}{
+		{"MembersOnlyDetectedExpr", MembersOnlyDetectedExpr("st"), membersOnly},
+		{"allOwnersAllowExpr", allOwnersAllowExpr("st"), allOwnersAllow},
+		{"EffectiveRestrictedExpr", EffectiveRestrictedExpr("st"), effective},
+		{"NotRestricted", NotRestricted("st"), "NOT " + effective},
+	} {
+		if c.got != c.want {
+			t.Errorf("%s が変わっている\n got: %s\nwant: %s", c.name, c.got, c.want)
+		}
+	}
+
+	// alias が全体に効くこと（片方だけ別名を見ていると、別のテーブルの列を
+	// 読んでも気付けない）。
+	if strings.Contains(NotRestricted("zz"), "st.") {
+		t.Errorf("alias が効いていない: %s", NotRestricted("zz"))
+	}
+}

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { invalidateChannelScopedQueries } from '../queryClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router-dom';
 import { singerApi } from '../api/client';
@@ -80,7 +81,7 @@ export default function SingersPage() {
     mutationFn: ({ id, isHidden }: { id: string; isHidden: boolean }) =>
       singerApi.setHidden(id, isHidden),
     onSuccess: (_, { isHidden }) => {
-      queryClient.invalidateQueries({ queryKey: ['singers'] });
+      invalidateChannelScopedQueries();
       showToast(
         isHidden ? 'チャンネルを一覧から非表示にしました' : 'チャンネルを一覧に表示しました',
         'success'

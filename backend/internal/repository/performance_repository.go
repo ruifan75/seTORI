@@ -935,6 +935,27 @@ func (a ViewerAccess) restrictClause() string {
 	return " AND " + NotRestricted("st")
 }
 
+// promotedClause は**こちらから押し出す面**（おすすめ・プリセット）の追加条件。
+//
+// 発見面の 2 軸（`discoverClause`）に加えて、**一覧に出していないチャンネルの
+// 歌唱を出さない**。#59 で `/streams` とタグ別一覧に入れた判定を、歌唱を
+// 押し出す側にも通す ── 入れないと、チャンネル一覧に出していないチャンネルの
+// 歌枠の曲が**ホームのいちばん上**に出る（実測：おすすめの母集合 5563 件に対し
+// 非表示チャンネルだけのものが 23 件、うち 14 曲は他に歌唱が無いので
+// **この経路でしか出てこない**）。
+//
+// **権限で緩めない。** `discoverClause` は `RestrictedView` で両軸とも外すが、
+// あれは「歌唱があるのに 0 件に見える」を管理者に対して起こさないため。
+// こちらは押し出す面なので、**管理者がここから資料を管理することは無い**
+// （散らばった配信を探すなら検索と曲一覧がある）。緩めると、管理者だけ
+// 違うおすすめを見ることになって利点が無い。
+//
+// **歌手ページには通さない。** 非表示チャンネルのページは未ログインでも
+// 開ける設計（CLAUDE.md §3）なので、通すと自分の配信が 0 件のページになる。
+func promotedClause() string {
+	return " AND " + VisibleChannelExpr("st")
+}
+
 // discoverClause は発見面の可視条件（**2 つの軸をまとめて**）。
 //
 //	is_hidden = FALSE   … 一覧の既定から外した配信（雑談・ゲーム等 約 700 本）
@@ -1000,6 +1021,22 @@ func (r *PerformanceRepository) queryPerformanceDetails(query string, args ...in
 	return performances, nil
 }
 
+// randomWhere はおすすめ（FindRandom）の WHERE 条件。
+//
+// **関数に切り出してあるのは、テストが「発行された WHERE 全体」を期待値と
+// 突き合わせられるようにするため。** 条件の存在と直前の `AND` だけを見る形では、
+// 後ろに `= FALSE` を足して判定を反転させる改変が通ってしまう（レビューで実証）。
+// `presetWhere` と同じ形。
+func randomWhere(access ViewerAccess) string {
+	return `
+		WHERE TRUE` + access.discoverClause() + promotedClause() + `
+		  AND NOT (p.song_id = ANY($2::uuid[]))
+		  AND NOT EXISTS (
+			SELECT 1 FROM stream_stream_tags sst
+			WHERE sst.stream_id = st.id AND sst.tag_id IN ('members_only', 'unarchived')
+		  )`
+}
+
 // FindRandom は曲単位で重複しないランダムな歌唱を返す。
 // 非表示に加え、再生できない可能性が高い メン限・アーカイブなし の配信も除外する。
 func (r *PerformanceRepository) FindRandom(limit int, excludedSongIDs []string, access ViewerAccess) ([]PerformanceWithDetails, error) {
@@ -1011,12 +1048,7 @@ func (r *PerformanceRepository) FindRandom(limit int, excludedSongIDs []string, 
 			SELECT DISTINCT ON (p.song_id) p.id
 			FROM performances p
 			JOIN streams st ON p.stream_id = st.id
-			WHERE TRUE` + access.discoverClause() + `
-			  AND NOT (p.song_id = ANY($2::uuid[]))
-			  AND NOT EXISTS (
-				SELECT 1 FROM stream_stream_tags sst
-				WHERE sst.stream_id = st.id AND sst.tag_id IN ('members_only', 'unarchived')
-			  )
+		` + randomWhere(access) + `
 			ORDER BY p.song_id, random()
 		)
 	` + perfDetailSelect + `
@@ -1047,7 +1079,7 @@ type PresetFilter struct {
 // **const ではなく関数**にしてある：秘匿の条件は読む側の立場で変わるため。
 func presetWhere(access ViewerAccess) string {
 	return `
-	WHERE TRUE` + access.discoverClause() + `
+	WHERE TRUE` + access.discoverClause() + promotedClause() + `
 	  AND NOT EXISTS (
 		SELECT 1 FROM stream_stream_tags hid
 		WHERE hid.stream_id = st.id AND hid.tag_id IN ('members_only', 'unarchived')

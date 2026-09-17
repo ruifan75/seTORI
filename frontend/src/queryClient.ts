@@ -94,3 +94,31 @@ export function applyViewerChange(nextKey: string | null) {
   void queryClient.resetQueries();
   for (const fn of viewerChangeListeners) fn();
 }
+
+/**
+ * チャンネルの表示／非表示を切り替えたあとに捨てるキャッシュ。
+ *
+ * **後端で濾しただけでは画面が変わらない。** PR #59 / #68 で、配信一覧・
+ * タグ別一覧・おすすめ・プリセットは「一覧に出しているチャンネルが参加者に
+ * 居るか」で絞るようになった。切り替えたらこれらは**中身が変わる**が、
+ * おすすめは `staleTime: Infinity` なので、ホームへ戻っても
+ * 非表示にしたチャンネルの曲が残る（レビューで実測）。
+ *
+ * **1 か所にまとめてあるのは、呼び出し側が 2 つあるため**
+ * （チャンネル一覧とチャンネル詳細）。片方だけ足すと、そちらから
+ * 切り替えたときだけ直らない、という追いにくい差になる。
+ *
+ * 新しく「チャンネルの表示に従う一覧」を足したら、ここにも足すこと。
+ */
+export function invalidateChannelScopedQueries() {
+  for (const key of [
+    ['singers'],
+    ['random-performances'],
+    ['presets'],
+    ['preset-items'],
+    ['streams'],
+    ['tag-streams'],
+  ]) {
+    void queryClient.invalidateQueries({ queryKey: key });
+  }
+}

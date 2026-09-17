@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { invalidateChannelScopedQueries } from '../queryClient';
 import RestrictedBadge from '../components/RestrictedBadge';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
@@ -158,7 +159,7 @@ export default function SingerDetailPage() {
     mutationFn: (isHidden: boolean) => singerApi.setHidden(id!, isHidden),
     onSuccess: (_, isHidden) => {
       queryClient.invalidateQueries({ queryKey: ['singer', id] });
-      queryClient.invalidateQueries({ queryKey: ['singers'] });
+      invalidateChannelScopedQueries();
       showToast(
         isHidden ? 'チャンネル一覧から非表示にしました' : 'チャンネル一覧に表示しました',
         'success'
