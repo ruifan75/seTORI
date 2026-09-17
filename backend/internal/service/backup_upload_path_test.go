@@ -31,7 +31,7 @@ type fakeDriveRT struct {
 	mu       sync.Mutex
 	calls    *driveCall
 	files    []gdrive.File
-	orderErr string // 一覧の要求が降順でなかったときに記録する
+	queryErr string // 一覧の要求条件がおかしかったときに記録する
 }
 
 func (f *fakeDriveRT) RoundTrip(r *http.Request) (*http.Response, error) {
@@ -67,10 +67,17 @@ func (f *fakeDriveRT) RoundTrip(r *http.Request) (*http.Response, error) {
 
 	case r.Method == http.MethodGet && strings.Contains(r.URL.String(), "/files?"):
 		q, _ := url.ParseQuery(r.URL.RawQuery)
-		// **降順で要求していること。** 昇順だと世代整理が「古いものを残して
-		// 新しいものを消す」になり、最新のバックアップから失われる。
+		// 一覧の要求条件。**整理はこの経路から走る**ので、ここでも見る。
+		// 降順でないと「古いものを残して新しいものを消す」になり、
+		// フォルダを限定していないと**フォルダの外**へ DELETE が飛ぶ。
 		if o := q.Get("orderBy"); o != "createdTime desc" {
-			f.orderErr = o
+			f.queryErr = "orderBy=" + o
+		}
+		if !strings.Contains(q.Get("q"), "'folder' in parents") || strings.Contains(q.Get("q"), "not in parents") {
+			f.queryErr = "q=" + q.Get("q")
+		}
+		if !strings.Contains(q.Get("fields"), "name") {
+			f.queryErr = "fields=" + q.Get("fields")
 		}
 		if q.Get("pageToken") != "" {
 			return body(map[string]any{"files": []gdrive.File{}}), nil
@@ -90,8 +97,8 @@ func newUploadHarness(t *testing.T, instance string, existing []gdrive.File) (*B
 	rt := &fakeDriveRT{calls: calls, files: existing}
 	client.SetTransport(rt)
 	t.Cleanup(func() {
-		if rt.orderErr != "" {
-			t.Errorf("一覧の要求が降順でない: orderBy=%q（新しいものから消える）", rt.orderErr)
+		if rt.queryErr != "" {
+			t.Errorf("一覧の要求条件がおかしい: %s", rt.queryErr)
 		}
 	})
 

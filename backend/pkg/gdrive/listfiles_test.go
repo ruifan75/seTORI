@@ -15,16 +15,37 @@ import (
 // `fields` から `nextPageToken` を外す（実 API が次ページを返さなくなる）／
 // `orderBy` の `desc` を外す（**新しいものから消す**順序になる）のどちらも
 // 素通りした（issue #64 のレビューで実証）。
-func assertListQuery(t *testing.T, r *http.Request) {
+func assertListQuery(t *testing.T, r *http.Request, folderID string) {
 	t.Helper()
 	q, err := url.ParseQuery(r.URL.RawQuery)
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}
+
+	// **フォルダの中だけを見ていること。** `in parents` を `not in parents` に
+	// するとフォルダの**外**のファイルが並び、世代整理がそれらへ DELETE を
+	// 発行しうる ── バックアップと無関係な利用者のファイルを消す。
+	if want := "'" + folderID + "' in parents"; !strings.Contains(q.Get("q"), want) {
+		t.Errorf("q がフォルダを限定していない: %q（%q を含むべき）", q.Get("q"), want)
+	}
+	if strings.Contains(q.Get("q"), "not in parents") {
+		t.Errorf("q がフォルダの外を見ている: %q", q.Get("q"))
+	}
+
+	f := q.Get("fields")
 	// 次ページの情報を要求していないと、実 API は返さない＝ページングが止まる。
-	if f := q.Get("fields"); !strings.Contains(f, "nextPageToken") {
+	if !strings.Contains(f, "nextPageToken") {
 		t.Errorf("fields に nextPageToken が無い: %q", f)
 	}
+	// **読む列を全部要求していること。** 例えば `name` を落とすと実 API は
+	// 名前を返さず、印が読めなくなって**世代整理が静かに止まる**
+	// （全ファイルが「印なし」＝触らない扱いになる）。
+	for _, want := range []string{"id", "name", "createdTime"} {
+		if !strings.Contains(f, want) {
+			t.Errorf("fields に %q が無い: %q", want, f)
+		}
+	}
+
 	// **降順であること。** 昇順だと世代整理が「古いものを残して新しいものを消す」
 	// になり、最新のバックアップから失われる。
 	if o := q.Get("orderBy"); o != "createdTime desc" {
@@ -53,7 +74,7 @@ func TestListFilesFollowsAllPages(t *testing.T) {
 	c := NewClient("id", "secret")
 	pages := 0
 	c.SetTransport(rtFunc(func(r *http.Request) (*http.Response, error) {
-		assertListQuery(t, r)
+		assertListQuery(t, r, "folder")
 		q, _ := url.ParseQuery(r.URL.RawQuery)
 		switch q.Get("pageToken") {
 		case "":
@@ -92,7 +113,7 @@ func TestListFilesFollowsAllPages(t *testing.T) {
 func TestListFilesFailsInsteadOfTruncating(t *testing.T) {
 	c := NewClient("id", "secret")
 	c.SetTransport(rtFunc(func(r *http.Request) (*http.Response, error) {
-		assertListQuery(t, r)
+		assertListQuery(t, r, "folder")
 		// 常に次のページがあると言い続ける。
 		return jsonResp(map[string]any{"files": []File{{ID: "x"}}, "nextPageToken": "next"}), nil
 	}))
