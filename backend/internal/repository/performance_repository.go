@@ -1021,6 +1021,22 @@ func (r *PerformanceRepository) queryPerformanceDetails(query string, args ...in
 	return performances, nil
 }
 
+// randomWhere はおすすめ（FindRandom）の WHERE 条件。
+//
+// **関数に切り出してあるのは、テストが「発行された WHERE 全体」を期待値と
+// 突き合わせられるようにするため。** 条件の存在と直前の `AND` だけを見る形では、
+// 後ろに `= FALSE` を足して判定を反転させる改変が通ってしまう（レビューで実証）。
+// `presetWhere` と同じ形。
+func randomWhere(access ViewerAccess) string {
+	return `
+		WHERE TRUE` + access.discoverClause() + promotedClause() + `
+		  AND NOT (p.song_id = ANY($2::uuid[]))
+		  AND NOT EXISTS (
+			SELECT 1 FROM stream_stream_tags sst
+			WHERE sst.stream_id = st.id AND sst.tag_id IN ('members_only', 'unarchived')
+		  )`
+}
+
 // FindRandom は曲単位で重複しないランダムな歌唱を返す。
 // 非表示に加え、再生できない可能性が高い メン限・アーカイブなし の配信も除外する。
 func (r *PerformanceRepository) FindRandom(limit int, excludedSongIDs []string, access ViewerAccess) ([]PerformanceWithDetails, error) {
@@ -1032,12 +1048,7 @@ func (r *PerformanceRepository) FindRandom(limit int, excludedSongIDs []string, 
 			SELECT DISTINCT ON (p.song_id) p.id
 			FROM performances p
 			JOIN streams st ON p.stream_id = st.id
-			WHERE TRUE` + access.discoverClause() + promotedClause() + `
-			  AND NOT (p.song_id = ANY($2::uuid[]))
-			  AND NOT EXISTS (
-				SELECT 1 FROM stream_stream_tags sst
-				WHERE sst.stream_id = st.id AND sst.tag_id IN ('members_only', 'unarchived')
-			  )
+		` + randomWhere(access) + `
 			ORDER BY p.song_id, random()
 		)
 	` + perfDetailSelect + `
