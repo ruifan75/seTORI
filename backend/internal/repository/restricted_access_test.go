@@ -148,3 +148,31 @@ func TestRestrictedCountOnlyNarrowsTheTotal(t *testing.T) {
 		}
 	}
 }
+
+// `discoverClause` を**完全一致で固定する**。
+//
+// **`DiscoverableFor` のテストでは守れない。** 見た目は似ているが 2 つは
+// 別々の実装で、片方を変えてももう片方は変わらない（実測：`discoverClause` の
+// `" AND "` を `" OR "` にしても既存のテストは全部通った）。
+//
+// ここが緩いと、これを部品として使っている検査
+// （`promoted_scope_test.go` の期待値）も一緒に緩む ── **期待値に使う部品は、
+// それ自体がどこかで固定されていなければ意味が無い。**
+func TestDiscoverClauseExact(t *testing.T) {
+	// **`RestrictedView` は両軸とも外す**（CLAUDE.md §2。本番の会限 86 本のうち
+	// 78 本は is_hidden も立っているので、秘匿だけ外しても管理者から見えない）。
+	if got := RestrictedView.discoverClause(); got != "" {
+		t.Errorf("RestrictedView で濾している: %q", got)
+	}
+
+	want := " AND st.is_hidden = FALSE AND " + NotRestricted("st")
+	if got := PublicAccess.discoverClause(); got != want {
+		t.Errorf("PublicAccess の条件が変わっている\n got: %q\nwant: %q", got, want)
+	}
+
+	// **`AND` で繋がれていること。** `OR` にすると条件が無効になるのに、
+	// 部分一致の検査では気付けない。
+	if !strings.HasPrefix(PublicAccess.discoverClause(), " AND ") {
+		t.Errorf("AND で繋がれていない: %q", PublicAccess.discoverClause())
+	}
+}
