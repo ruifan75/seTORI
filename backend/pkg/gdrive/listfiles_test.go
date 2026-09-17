@@ -9,6 +9,29 @@ import (
 	"testing"
 )
 
+// assertListQuery は**要求した条件**を検査する。
+//
+// 偽の応答だけを見ると、要求の側を壊しても通ってしまう ── 実際、
+// `fields` から `nextPageToken` を外す（実 API が次ページを返さなくなる）／
+// `orderBy` の `desc` を外す（**新しいものから消す**順序になる）のどちらも
+// 素通りした（issue #64 のレビューで実証）。
+func assertListQuery(t *testing.T, r *http.Request) {
+	t.Helper()
+	q, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	// 次ページの情報を要求していないと、実 API は返さない＝ページングが止まる。
+	if f := q.Get("fields"); !strings.Contains(f, "nextPageToken") {
+		t.Errorf("fields に nextPageToken が無い: %q", f)
+	}
+	// **降順であること。** 昇順だと世代整理が「古いものを残して新しいものを消す」
+	// になり、最新のバックアップから失われる。
+	if o := q.Get("orderBy"); o != "createdTime desc" {
+		t.Errorf("orderBy = %q, want %q", o, "createdTime desc")
+	}
+}
+
 // rtFunc は RoundTripper をその場で作るための小道具。
 type rtFunc func(*http.Request) (*http.Response, error)
 
@@ -30,6 +53,7 @@ func TestListFilesFollowsAllPages(t *testing.T) {
 	c := NewClient("id", "secret")
 	pages := 0
 	c.SetTransport(rtFunc(func(r *http.Request) (*http.Response, error) {
+		assertListQuery(t, r)
 		q, _ := url.ParseQuery(r.URL.RawQuery)
 		switch q.Get("pageToken") {
 		case "":
@@ -67,7 +91,8 @@ func TestListFilesFollowsAllPages(t *testing.T) {
 // これで全部」と誤解して古いものを消さないまま終わる。
 func TestListFilesFailsInsteadOfTruncating(t *testing.T) {
 	c := NewClient("id", "secret")
-	c.SetTransport(rtFunc(func(*http.Request) (*http.Response, error) {
+	c.SetTransport(rtFunc(func(r *http.Request) (*http.Response, error) {
+		assertListQuery(t, r)
 		// 常に次のページがあると言い続ける。
 		return jsonResp(map[string]any{"files": []File{{ID: "x"}}, "nextPageToken": "next"}), nil
 	}))

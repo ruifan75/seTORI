@@ -322,11 +322,22 @@ func driveObjectInstance(objectName string) (string, bool) {
 	if !driveInstanceRe.MatchString(tag) {
 		return "", false
 	}
+	rest := objectName[i+len(driveInstanceSep):]
+
+	// **区切りが重なっていたら読まない。** `production___setori_1.dump`（`_` が 3 つ）は
+	// 最初の `__` で切ると `production` になり、残り `_setori_1.dump` には `__` が
+	// 無いので下の検査を通ってしまう ── **旧実装の `production_` が作った名前が
+	// まさにこの形**で、production の世代整理がそれを消せた（レビューで実測）。
+	// 区切りの直後が `_` なら、どこで切るのが正しいか決められない。
+	if strings.HasPrefix(rest, "_") {
+		return "", false
+	}
+
 	// **残りに区切りが出てきたら読まない。** 印の文字種から `_` を外したので
 	// 正規の経路ではこの形は作れないが、人が置いたファイルや将来の変更で
 	// `a__b__c.dump` のような名前が現れたとき、先頭だけ見て `a` のものだと
 	// 決めると**別のものを消しうる**。曖昧なら「印なし」＝触らない側へ倒す。
-	if strings.Contains(objectName[i+len(driveInstanceSep):], driveInstanceSep) {
+	if strings.Contains(rest, driveInstanceSep) {
 		return "", false
 	}
 	return tag, true

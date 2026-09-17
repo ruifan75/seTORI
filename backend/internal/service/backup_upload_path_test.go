@@ -28,9 +28,10 @@ type driveCall struct {
 }
 
 type fakeDriveRT struct {
-	mu    sync.Mutex
-	calls *driveCall
-	files []gdrive.File
+	mu       sync.Mutex
+	calls    *driveCall
+	files    []gdrive.File
+	orderErr string // 一覧の要求が降順でなかったときに記録する
 }
 
 func (f *fakeDriveRT) RoundTrip(r *http.Request) (*http.Response, error) {
@@ -66,6 +67,11 @@ func (f *fakeDriveRT) RoundTrip(r *http.Request) (*http.Response, error) {
 
 	case r.Method == http.MethodGet && strings.Contains(r.URL.String(), "/files?"):
 		q, _ := url.ParseQuery(r.URL.RawQuery)
+		// **降順で要求していること。** 昇順だと世代整理が「古いものを残して
+		// 新しいものを消す」になり、最新のバックアップから失われる。
+		if o := q.Get("orderBy"); o != "createdTime desc" {
+			f.orderErr = o
+		}
 		if q.Get("pageToken") != "" {
 			return body(map[string]any{"files": []gdrive.File{}}), nil
 		}
@@ -81,7 +87,13 @@ func newUploadHarness(t *testing.T, instance string, existing []gdrive.File) (*B
 
 	calls := &driveCall{}
 	client := gdrive.NewClient("id", "secret")
-	client.SetTransport(&fakeDriveRT{calls: calls, files: existing})
+	rt := &fakeDriveRT{calls: calls, files: existing}
+	client.SetTransport(rt)
+	t.Cleanup(func() {
+		if rt.orderErr != "" {
+			t.Errorf("一覧の要求が降順でない: orderBy=%q（新しいものから消える）", rt.orderErr)
+		}
+	})
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "setori_new.dump")

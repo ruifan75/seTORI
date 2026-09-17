@@ -246,3 +246,35 @@ func TestPruneNeverTouchesOtherInstance(t *testing.T) {
 		}
 	}
 }
+
+// **区切りが重なった既存ファイルを、自分のものと決めないこと。**
+//
+// 旧実装は印に `_` を許していたので、`production_` が
+// `production___setori_1.dump`（`_` が 3 つ）を作れた。最初の `__` で切ると
+// `production` になり、残り `_setori_1.dump` に `__` は無いので
+// 「曖昧でない」と読める ── **production の世代整理がそれを消せた**
+// （レビューで実測）。既に Drive にあるファイルが該当するので、
+// 生成側を直しただけでは足りない。
+func TestAmbiguousSeparatorIsNotRead(t *testing.T) {
+	for _, name := range []string{
+		"production___setori_1.dump",  // 旧 production_ が作った形
+		"production____setori_2.dump", // さらに重なった形
+		"production__canary__setori_3.dump",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if tag, ok := driveObjectInstance(name); ok {
+				t.Errorf("曖昧な名前を %q のものと判定した", tag)
+			}
+			// 整理の対象にも入らないこと（判定を経由しているかまで見る）。
+			files := []gdrive.File{
+				{ID: "mine", Name: "production__setori_9.dump"},
+				{ID: "ambiguous", Name: name},
+			}
+			for _, f := range drivePruneTargets(files, "production", 0) {
+				if f.ID == "ambiguous" {
+					t.Error("曖昧な名前のファイルを削除対象にした")
+				}
+			}
+		})
+	}
+}
