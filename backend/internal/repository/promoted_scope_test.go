@@ -19,47 +19,95 @@ func TestPromotedClauseUsesChannelVisibility(t *testing.T) {
 	}
 }
 
-// **発行された WHERE 全体を期待値と突き合わせる。**
+// innerWhere は SQL から WHERE 句を取り出す。**CTE の中にあるものも拾う。**
 //
-// 条件の存在と直前の `AND` だけを見る形では、次のどれも素通りする
-// （レビューで実証された）:
+// `whereClause`（stream_scope_sql_test.go）は最外層しか見ないが、ここで見たい
+// WHERE は `WITH … AS ( … )` の内側にある。開始位置の括弧の深さを覚えておき、
+// **その深さで `ORDER BY` が来るか、深さが下がった時点**で終端とする。
+func innerWhere(t *testing.T, sqlText string) string {
+	t.Helper()
+	norm := strings.Join(strings.Fields(sqlText), " ")
+	upper := strings.ToUpper(norm)
+
+	start, startDepth, depth := -1, 0, 0
+	for i := 0; i < len(norm); i++ {
+		switch norm[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+		}
+		if start < 0 && strings.HasPrefix(upper[i:], "WHERE ") && (i == 0 || norm[i-1] == ' ') {
+			start, startDepth = i, depth
+			continue
+		}
+		if start < 0 {
+			continue
+		}
+		// 開始と同じ深さで ORDER BY が来たら終わり。
+		if depth == startDepth && strings.HasPrefix(upper[i:], " ORDER BY ") {
+			return strings.TrimSpace(norm[start:i])
+		}
+		// 深さが下がった＝この WHERE を含む括弧が閉じた。
+		if depth < startDepth {
+			return strings.TrimSpace(norm[start:i])
+		}
+	}
+	if start < 0 {
+		return ""
+	}
+	return strings.TrimSpace(norm[start:])
+}
+
+// **発行された WHERE を、実装から独立した期待値と完全一致で突き合わせる。**
 //
-//   - 呼び出し側で条件の後ろに `= FALSE` を足す … 判定が反転する
-//   - `CountByPreset` だけ条件を除去          … 件数と一覧が食い違う
-//   - `RestrictedView` のときだけ除去          … 「権限で緩めない」が崩れる
+// ここに至るまでに 2 回失敗している:
 //
-// **4 経路 × 2 権限**を対象にし、条件を組み立てている関数（`randomWhere` /
-// `presetWhere`）の出力と丸ごと比べる。期待値をテストに書き写さないので、
-// 実装を変えた人は必ずこの関数を通る。
+//  1. 条件の存在と直前の `AND` だけを見る → 後ろに `= FALSE` を足す改変が通る
+//  2. 条件を組み立てる関数（`randomWhere` / `presetWhere`）の出力と比べる →
+//     **その関数を書き換えると期待値も一緒に変わる**ので、中身の改変が通る。
+//     しかも部分一致なので、呼び出し側で末尾に `OR TRUE` を足す改変も通る
+//
+// そこで期待値は**この関数の中で組み立て**、**終端まで完全一致**させる。
+// 使ってよいのは別のテストで固定されている部品だけ（`VisibleChannelExpr` は
+// `TestVisibleChannelExpr`、秘匿の 2 軸は `TestDiscoverableForDropsFilterOnlyForRestrictedView`)。
 func TestPromotedSurfacesApplyChannelScope(t *testing.T) {
 	norm := func(s string) string { return strings.Join(strings.Fields(s), " ") }
+	scope := func(a ViewerAccess) string {
+		return "WHERE TRUE" + a.discoverClause() + " AND " + VisibleChannelExpr("st")
+	}
+	// **メン限・アーカイブなしを除く条件は押し出す面で共通。**
+	excludeHidden := func(alias string) string {
+		return " AND NOT EXISTS ( SELECT 1 FROM stream_stream_tags " + alias +
+			" WHERE " + alias + ".stream_id = st.id AND " + alias +
+			".tag_id IN ('members_only', 'unarchived') )"
+	}
+
+	wantRandom := func(a ViewerAccess) string {
+		return scope(a) + " AND NOT (p.song_id = ANY($2::uuid[]))" + excludeHidden("sst")
+	}
+	wantPreset := func(a ViewerAccess) string {
+		return scope(a) + excludeHidden("hid") +
+			" AND ($1 = '' OR EXISTS ( SELECT 1 FROM performance_singers fs" +
+			" WHERE fs.performance_id = p.id AND fs.singer_id = $1 ))" +
+			" AND (cardinality($2::text[]) = 0 OR EXISTS ( SELECT 1 FROM stream_stream_tags inc" +
+			" WHERE inc.stream_id = st.id AND inc.tag_id = ANY($2::text[]) ))" +
+			" AND NOT EXISTS ( SELECT 1 FROM stream_stream_tags exc" +
+			" WHERE exc.stream_id = st.id AND exc.tag_id = ANY($3::text[]) )" +
+			" AND (NOT $4 OR ( SELECT count(*) FROM performance_singers ms" +
+			" WHERE ms.performance_id = p.id ) > 1)"
+	}
 
 	paths := []struct {
 		name string
 		call func(*PerformanceRepository, ViewerAccess)
 		want func(ViewerAccess) string
 	}{
-		{
-			name: "おすすめ（FindRandom）",
-			call: func(r *PerformanceRepository, a ViewerAccess) { r.FindRandom(10, nil, a) },
-			want: randomWhere,
-		},
-		{
-			name: "プリセット（FindByPreset）",
-			call: func(r *PerformanceRepository, a ViewerAccess) { r.FindByPreset(PresetFilter{}, 10, a) },
-			want: presetWhere,
-		},
-		{
-			name: "プリセットの ID（FindIDsByPreset）",
-			call: func(r *PerformanceRepository, a ViewerAccess) { r.FindIDsByPreset(PresetFilter{}, 10, a) },
-			want: presetWhere,
-		},
-		{
-			// **件数も通すこと。** 一覧から落として件数に残ると、何件伏せたかが残る。
-			name: "プリセットの件数（CountByPreset）",
-			call: func(r *PerformanceRepository, a ViewerAccess) { r.CountByPreset(PresetFilter{}, a) },
-			want: presetWhere,
-		},
+		{"おすすめ（FindRandom）", func(r *PerformanceRepository, a ViewerAccess) { r.FindRandom(10, nil, a) }, wantRandom},
+		{"プリセット（FindByPreset）", func(r *PerformanceRepository, a ViewerAccess) { r.FindByPreset(PresetFilter{}, 10, a) }, wantPreset},
+		{"プリセットの ID（FindIDsByPreset）", func(r *PerformanceRepository, a ViewerAccess) { r.FindIDsByPreset(PresetFilter{}, 10, a) }, wantPreset},
+		// **件数も通すこと。** 一覧から落として件数に残ると、何件伏せたかが残る。
+		{"プリセットの件数（CountByPreset）", func(r *PerformanceRepository, a ViewerAccess) { r.CountByPreset(PresetFilter{}, a) }, wantPreset},
 	}
 
 	// **両方の権限で見る。** 片方だけだと「RestrictedView のときだけ条件を外す」
@@ -70,32 +118,15 @@ func TestPromotedSurfacesApplyChannelScope(t *testing.T) {
 				db, rec := newRecordingDB(t)
 				p.call(NewPerformanceRepository(db), access)
 
-				// **条件の文字列が丸ごと現れること**を見る。
-				// 断片の有無ではなく全体なので、後ろに `= FALSE` を足す／
-				// 一部を書き換える、といった改変は一致しなくなる。
-				// （WHERE は CTE の内側にあることが多く、最外層を取る
-				// `whereClause` では届かないので contains で見る）
 				want := norm(p.want(access))
-				// **実装の関数に依存しない斡定。** 上の want は条件を組み立てている
-				// 関数から作るので、**その関数を書き換えると期待値も一緒に変わり**、
-				// 中身の改変を検出できない（実際 `= FALSE` を足す改変と
-				// `RestrictedView` だけ外す改変がそれで通った）。
-				// そこで、判定が**完全な合取項として**現れることを直接見る ──
-				// 前後が ` AND ` なら、後ろに比較を足したり丸ごと外したりできない。
-				conjunct := norm(" AND " + VisibleChannelExpr("st") + " AND ")
-
 				found := false
 				for _, q := range rec.all() {
 					if !strings.Contains(q, "FROM performances p") {
 						continue // 歌手・タグの付随クエリは対象外
 					}
 					found = true
-					got := norm(q)
-					if !strings.Contains(got, conjunct) {
-						t.Errorf("チャンネルの判定が合取項として入っていない\nwant 部分列: %s\n got: %s", conjunct, got)
-					}
-					if !strings.Contains(got, want) {
-						t.Errorf("条件が期待どおりに入っていない\nwant: %s\n got: %s", want, got)
+					if got := innerWhere(t, q); got != want {
+						t.Errorf("WHERE が期待と違う\n got: %s\nwant: %s", got, want)
 					}
 				}
 				if !found {
