@@ -14,6 +14,11 @@ import (
 	"github.com/ruifan75/setori/pkg/songmatch"
 )
 
+// batchCommentAnalyzer は一括が使うコメント分析の入口。競合後の読み直しも同じ入口を通す。
+type batchCommentAnalyzer interface {
+	AnalyzeCommentsForBatch(string, bool) (*dto.AnalyzeCommentsResponse, error)
+}
+
 // BatchFillService は範囲を指定してセットリストを自動で埋めるジョブ（singleton）。
 //
 // 一括プレ分析（BatchAnalyzeService）とは性質が違う。あちらは
@@ -29,7 +34,7 @@ type BatchFillService struct {
 	streamRepo     *repository.StreamRepository
 	perfRepo       *repository.PerformanceRepository
 	runRepo        *repository.BatchFillRepository
-	commentService *CommentService
+	commentService batchCommentAnalyzer
 	holodexService *HolodexService
 	chapterService *ChapterService
 	normalization  *NormalizationService
@@ -95,7 +100,7 @@ func NewBatchFillService(
 	streamRepo *repository.StreamRepository,
 	perfRepo *repository.PerformanceRepository,
 	runRepo *repository.BatchFillRepository,
-	commentService *CommentService,
+	commentService batchCommentAnalyzer,
 	holodexService *HolodexService,
 	chapterService *ChapterService,
 	normalization *NormalizationService,
@@ -351,7 +356,10 @@ func (s *BatchFillService) run(runID uuid.UUID, mode string, singerIDs []string,
 	for _, stream := range streams {
 		if s.isCancelled() {
 			// 読み込みの途中で止めても、飛ばした配信と件数は履歴に残す。
-			s.saveProgress(runID, len(streams), 0, 0, 0, 0)
+			if err := s.saveProgress(runID, len(streams), 0, 0, 0, 0); err != nil {
+				s.finish(runID, "failed", "中止時の進捗の保存に失敗しました: "+err.Error())
+				return
+			}
 			s.finish(runID, "cancelled", "キャンセルされました")
 			return
 		}
@@ -424,7 +432,10 @@ func (s *BatchFillService) run(runID uuid.UUID, mode string, singerIDs []string,
 	// **最後に必ず 1 回保存する。** 上のループは第 3 段に進んだ配信があるときしか
 	// 回らないので、対象が全部飛ばされた・全部 0 曲だった実行では一度も保存されず、
 	// 履歴が `streams_total = 0` のまま「完了」になっていた（issue #7）。
-	s.saveProgress(runID, len(streams), created, review, gaps, asked)
+	if err := s.saveProgress(runID, len(streams), created, review, gaps, asked); err != nil {
+		s.finish(runID, "failed", "進捗の保存に失敗しました: "+err.Error())
+		return
+	}
 
 	status, msg := "done", fmt.Sprintf("%d 曲を作成、%d 曲を審査へ", created, review)
 	if gaps > 0 {
@@ -485,15 +496,23 @@ func (s *BatchFillService) loadRows(streamID string) ([]*fillRow, bool) {
 			return nil, false
 		}
 		resp = retry
-	case err != nil:
-		logger.Warnf("[batch-fill] コメント分析に失敗 (%s): %v", streamID, err)
+	case errors.Is(err, ErrNoStoredComments):
+		// コメントが無いことが確認できたので、他の入力元で続行する。
 		resp = nil
+	case err != nil:
+		logger.Warnf("[batch-fill] コメント分析に失敗 (%s): %v。この配信は今回は扱いません", streamID, err)
+		return nil, false
 	}
 	// **見送りは「コメントが無い」ではない。** live chat がまだ取得できないので
 	// 結論を出さなかった状態で、上の ErrCommentRawChanged と同じ危険がある ──
 	// 空のまま先へ進むと、Holodex に曲が無ければチャプターへ落ち、曲があっても
 	// コメント固有の差分を丸ごと落とす。**この配信ごと今回は扱わない。**
 	// 初回と読み直しの両方を見る（読み直しでも見送りになりうる）。
+	if resp != nil && resp.Warning != "" {
+		// 劣化結果から歌唱を作らず、復旧後に同じ入力を読み直す。
+		logger.Warnf("[batch-fill] コメント分析が劣化 (%s): %s。この配信は今回は扱いません", streamID, resp.Warning)
+		return nil, false
+	}
 	if resp != nil && resp.Deferred {
 		logger.Infof("[batch-fill] live chat 待ちのため見送り (%s)。この配信は今回は扱いません", streamID)
 		return nil, false
@@ -873,12 +892,14 @@ func (s *BatchFillService) update(f func(*dto.BatchFillStatus)) {
 }
 
 // saveProgress は実行の進捗を履歴へ書く。処理済み件数と飛ばした配信は
-// メモリ上の状態から取る（第 1 段で数えたもの）。
-func (s *BatchFillService) saveProgress(runID uuid.UUID, total, created, review, gaps, asked int) {
+// メモリ上の状態から取る（第 1 段で数えたもの）。最後の保存に失敗した実行は完了にしない。
+func (s *BatchFillService) saveProgress(runID uuid.UUID, total, created, review, gaps, asked int) error {
 	st := s.Status()
 	if err := s.runRepo.UpdateProgress(runID, total, st.Done, created, review, gaps, asked, st.SkippedIDs); err != nil {
 		logger.Warnf("[batch-fill] 進捗の保存に失敗: %v", err)
+		return err
 	}
+	return nil
 }
 
 func (s *BatchFillService) finish(runID uuid.UUID, status, message string) {

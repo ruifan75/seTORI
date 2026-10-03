@@ -3,7 +3,7 @@ import { isAxiosError } from 'axios';
 // apiErrorMessage はバックエンドが返した具体的な文言を取り出す（無ければ fallback）。
 export function apiErrorMessage(error: unknown, fallback: string): string {
   if (isAxiosError<{ message?: string; error?: string }>(error)) {
-    return error.response?.data?.message || error.response?.data?.error || fallback;
+    return error.response?.data?.message || error.response?.data?.error || error.message || fallback;
   }
   return error instanceof Error && error.message ? error.message : fallback;
 }
