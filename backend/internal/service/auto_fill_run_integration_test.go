@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/ruifan75/setori/internal/repository"
 )
 
@@ -15,7 +17,8 @@ type collabTransport func(*http.Request) (*http.Response, error)
 
 func (f collabTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
-// 実行中に設定を反転しても、取り直しと StartReserved が開始時の同じ値を使うこと。
+// 実行中に設定を反転しても、取り直しとワーカーが開始時の範囲を使うこと。
+// 素材がある客串の全行が、歌手未指定の審査へ保存されるところまで確認する。
 func TestAutoFillRunUsesOneCollabSnapshot(t *testing.T) {
 	for _, collabs := range []bool{false, true} {
 		t.Run(fmt.Sprint(collabs), func(t *testing.T) {
@@ -34,7 +37,28 @@ func TestAutoFillRunUsesOneCollabSnapshot(t *testing.T) {
 			singerRepo := repository.NewSingerRepository(db)
 			h := NewHolodexService("test", "", "", streamRepo, singerRepo, "")
 			comments := &CommentService{streamRepo: streamRepo, holodexService: h}
-			batch := &BatchFillService{streamRepo: streamRepo, runRepo: repository.NewBatchFillRepository(db)}
+			songRepo := repository.NewSongRepository(db)
+			itunesRepo := repository.NewSongItunesRepository(db)
+			match := NewSongMatchService(repository.NewSongMatchRepository(db), songRepo, itunesRepo, repository.NewAliasRepository(db))
+			norm := NewNormalizationService(nil, itunesRepo, match)
+			perfRepo := repository.NewPerformanceRepository(db)
+			perf := NewPerformanceService(perfRepo, songRepo, itunesRepo, repository.NewArtistRepository(db), streamRepo, match)
+			suggestions := NewSuggestionService(repository.NewSuggestionRepository(db), settings, nil, nil, perf, match)
+			h.SetAnalysisServices(norm, nil)
+			batch := NewBatchFillService(streamRepo, perfRepo, repository.NewBatchFillRepository(db), comments, h, nil, norm, perf, suggestions)
+			// 照合・明示 end・原曲歌手が揃った 2 曲。客串でなければ自動作成できる入力にする。
+			songIDs := []uuid.UUID{uuid.New(), uuid.New()}
+			for i, id := range songIDs {
+				if _, err := db.Exec(`INSERT INTO songs(id,name,original_artist) VALUES($1,$2,'artist')`, id, fmt.Sprintf("song%d", i)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := match.RebuildKeys(); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.Exec(`UPDATE streams SET holodex_hash='fixture', holodex_data='{"songs":[{"name":"song0","original_artist":"artist","start":10,"end":100},{"name":"song1","original_artist":"artist","start":200,"end":300}]}', holodex_songs_hash='fixture', holodex_songs_normalized='[{"name":"song0","original_artist":"artist","start_seconds":10,"end_seconds":100},{"name":"song1","original_artist":"artist","start_seconds":200,"end_seconds":300}]' WHERE id='guest123456'`); err != nil {
+				t.Fatal(err)
+			}
 			svc := NewAutoFillService(settings, singerRepo, streamRepo, h, comments, batch)
 			if _, err := svc.UpdateSettings(false, 6, 30, collabs); err != nil {
 				t.Fatal(err)
@@ -82,6 +106,50 @@ func TestAutoFillRunUsesOneCollabSnapshot(t *testing.T) {
 			}
 			if res.Failures != 0 || res.Refreshed != want || commentsFetched != want || res.FillRunID == "" || st.IncludeCollabs != collabs {
 				t.Fatalf("開始時の範囲が伝わっていない: res=%+v status=%+v fetched=%d", res, st, commentsFetched)
+			}
+			// Status の旗だけではワーカーへの引き渡しを守れない。実際に積まれた提案と歌唱を見る。
+			if st.Total != want || st.Done != want || st.Created != 0 || st.Review != 2*want {
+				t.Fatalf("客串の作成結果: %+v", st)
+			}
+			var performances int
+			if err := db.QueryRow(`SELECT COUNT(*) FROM performances WHERE stream_id='guest123456'`).Scan(&performances); err != nil {
+				t.Fatal(err)
+			}
+			if performances != 0 {
+				t.Fatalf("客串に歌唱を自動作成した: %d", performances)
+			}
+			rows, err := db.Query(`SELECT payload FROM edit_suggestions ORDER BY (payload->>'start_seconds')::int`)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer rows.Close()
+			count := 0
+			for rows.Next() {
+				var raw []byte
+				if err := rows.Scan(&raw); err != nil {
+					t.Fatal(err)
+				}
+				var payload struct {
+					StreamID      string   `json:"stream_id"`
+					SongID        string   `json:"song_id"`
+					SingerIDs     []string `json:"singer_ids"`
+					ReviewReasons []string `json:"review_reasons"`
+					Start         int      `json:"start_seconds"`
+				}
+				if err := json.Unmarshal(raw, &payload); err != nil {
+					t.Fatal(err)
+				}
+				if count >= 2 || payload.StreamID != "guest123456" || payload.SongID != songIDs[count].String() || len(payload.SingerIDs) != 0 || len(payload.ReviewReasons) != 1 || payload.ReviewReasons[0] != "multi_singer" || payload.Start != []int{10, 200}[count] {
+					t.Fatalf("審査の内容: %s", raw)
+				}
+				count++
+			}
+			if err := rows.Err(); err != nil {
+				t.Fatal(err)
+			}
+			rows.Close()
+			if count != 2*want {
+				t.Fatalf("審査件数: %d want %d", count, 2*want)
 			}
 			if svc.GetSettings().IncludeCollabs == collabs {
 				t.Fatal("実行途中の設定変更が発生していない")
