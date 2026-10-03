@@ -120,10 +120,11 @@ func (s *SingerService) GetGrouped(includeHidden, includeOperational bool) (*dto
 
 	resp := &dto.SingerGroupListResponse{Groups: groups, Total: len(singers) + len(hiddenSingers)}
 	if includeHidden {
-		resp.Hidden = make([]dto.SingerResponse, len(hiddenSingers))
+		hiddenResponses := make([]dto.SingerResponse, len(hiddenSingers))
 		for i, singer := range hiddenSingers {
-			resp.Hidden[i] = s.toSingerResponseFor(singer, includeOperational, counts)
+			hiddenResponses[i] = s.toSingerResponseFor(singer, includeOperational, counts)
 		}
+		resp.Hidden = &hiddenResponses
 	}
 	return resp, nil
 }

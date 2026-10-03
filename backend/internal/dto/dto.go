@@ -177,7 +177,8 @@ type SingerGroupListResponse struct {
 	Groups []SingerGroupResponse `json:"groups"`
 	// Hidden は非表示チャンネルを名前順で（content:edit のときだけ。issue #65）。
 	// 事務所の組へ混ぜないのは、組のほとんどが非表示だけになって表示中が埋もれるため。
-	Hidden []SingerResponse `json:"hidden,omitempty"`
+	// nil は閲覧者向けの省略。編集者には 0 件でも [] を返すので件数を表示できる。
+	Hidden *[]SingerResponse `json:"hidden,omitempty"`
 	// Total は Groups と Hidden の合計。
 	Total int `json:"total"`
 }
