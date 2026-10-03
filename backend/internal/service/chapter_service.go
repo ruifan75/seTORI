@@ -275,7 +275,6 @@ func (s *ChapterService) Backfill(concurrency int, run *TaskRun) {
 func (s *ChapterService) fetchChapters(videoID string) ([]Chapter, error) {
 	args := []string{
 		"--skip-download",
-		"--no-warnings",
 		"--socket-timeout", "30",
 		// 映像フォーマットは 1 つも要らない。これが無いと、フォーマット一覧が空だった
 		// ときに yt-dlp は「Requested format is not available」で止まる（本番の
@@ -313,12 +312,7 @@ func (s *ChapterService) fetchChapters(videoID string) ([]Chapter, error) {
 
 	out := firstNonEmptyLine(stdout.String())
 	if out == "" || out == "NA" || out == "null" {
-		// --ignore-no-formats-error で警告に降格した取得失敗を「章節なし」にしない。
-		// 空配列を保存すると次の backfill から外れ、取得失敗が成功として固定される。
-		if isTransientFailure(stderr.String()) {
-			return nil, fmt.Errorf("チャプターを取得できませんでした（一時的な失敗）: %s", ytdlpErrorLine(stderr.String()))
-		}
-		return []Chapter{}, nil // 章節の無い動画。これも結果なので空配列で保存する
+		return emptyChapterResult(stderr.String())
 	}
 
 	var raw []struct {
@@ -338,8 +332,20 @@ func (s *ChapterService) fetchChapters(videoID string) ([]Chapter, error) {
 		}
 		chapters = append(chapters, Chapter{Start: int(c.Start), End: int(c.End), Title: title})
 	}
+	if len(chapters) == 0 {
+		return emptyChapterResult(stderr.String())
+	}
 	sort.Slice(chapters, func(i, j int) bool { return chapters[i].Start < chapters[j].Start })
 	return chapters, nil
+}
+
+// 警告を消さず、空出力・NA・null・空配列を同じ基準で判定する。
+// 有効な章節が得られた場合は、補助取得の警告だけでは捨てない。
+func emptyChapterResult(stderr string) ([]Chapter, error) {
+	if isTransientFailure(stderr) {
+		return nil, fmt.Errorf("チャプターを取得できませんでした（一時的な失敗）: %s", ytdlpErrorLine(stderr))
+	}
+	return []Chapter{}, nil
 }
 
 // chaptersAsText は章節を 1 通のコメントに組み直す。

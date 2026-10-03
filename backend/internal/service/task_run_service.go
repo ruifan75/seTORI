@@ -140,14 +140,14 @@ func (t *TaskRun) record(apply func()) {
 
 // flush は進捗を DB へ書く。**毎件は書かない**（2 秒に 1 回まで）── 並行 3 本の
 // backfill が 1 件ごとに UPDATE すると、それだけで 1 vCPU の本番機の DB を叩き続ける。
-// 件数の最終値は Finish が必ず書く。
-func (t *TaskRun) flush(force bool) {
+// Finish は最終値の保存を試み、失敗した場合は実行を failed として記録する。
+func (t *TaskRun) flush(force bool) error {
 	t.flushMu.Lock()
 	defer t.flushMu.Unlock()
 	t.mu.Lock()
 	if !force && time.Since(t.lastFlush) < 2*time.Second {
 		t.mu.Unlock()
-		return
+		return nil
 	}
 	t.lastFlush = time.Now()
 	total, done, ok, sk, ng := t.total, t.done, t.succeeded, t.skipped, t.failed
@@ -156,7 +156,9 @@ func (t *TaskRun) flush(force bool) {
 
 	if err := t.svc.repo.Progress(t.ID, total, done, ok, sk, ng, failures); err != nil {
 		logger.Warnf("[task] %s の進捗の保存に失敗: %v", t.kind, err)
+		return err
 	}
+	return nil
 }
 
 // FailedCount は今までの失敗の件数（完了の文言を作るため）。
@@ -180,7 +182,10 @@ func (t *TaskRun) Finish(status, message string) {
 	}
 	t.mu.Unlock()
 
-	t.flush(true)
+	if err := t.flush(true); err != nil {
+		status = "failed"
+		message = "進捗の保存に失敗しました: " + err.Error()
+	}
 	if err := t.svc.repo.Finish(t.ID, status, message); err != nil {
 		logger.Warnf("[task] %s の終了の記録に失敗: %v", t.kind, err)
 	}
