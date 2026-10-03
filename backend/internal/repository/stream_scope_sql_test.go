@@ -56,23 +56,46 @@ func (s *recordingStmt) Exec([]driver.Value) (driver.Result, error) {
 }
 
 // 件数は 1 行返さないと呼び出し側が早退して一覧の SQL が出てこない。
+//
+// 列の数は SELECT 句の `COUNT(` の数に合わせる（総数と内訳を 1 本で数える
+// `SELECT COUNT(*), COUNT(*) FILTER (…)` のような形があるため。1 列で返すと
+// Scan が落ちて、その後ろの一覧の SQL が発行されない）。
 func (s *recordingStmt) Query([]driver.Value) (driver.Rows, error) {
 	if strings.Contains(s.query, "COUNT(*)") {
-		return &oneIntRow{}, nil
+		head := s.query
+		if i := strings.Index(head, " FROM "); i >= 0 {
+			head = head[:i]
+		}
+		return &oneIntRow{cols: strings.Count(head, "COUNT(")}, nil
 	}
 	return &noRows{}, nil
 }
 
-type oneIntRow struct{ done bool }
+type oneIntRow struct {
+	cols int
+	done bool
+}
 
-func (r *oneIntRow) Columns() []string { return []string{"count"} }
-func (r *oneIntRow) Close() error      { return nil }
+func (r *oneIntRow) Columns() []string {
+	n := r.cols
+	if n < 1 {
+		n = 1
+	}
+	out := make([]string, n)
+	for i := range out {
+		out[i] = fmt.Sprintf("count%d", i)
+	}
+	return out
+}
+func (r *oneIntRow) Close() error { return nil }
 func (r *oneIntRow) Next(dest []driver.Value) error {
 	if r.done {
 		return io.EOF
 	}
 	r.done = true
-	dest[0] = int64(0)
+	for i := range dest {
+		dest[i] = int64(0)
+	}
 	return nil
 }
 

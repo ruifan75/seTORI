@@ -41,7 +41,7 @@ func NewSingerService(
 func (s *SingerService) GetAll(page, limit int, sort, dir string, includeHidden, includeOperational bool) (*dto.SingerListResponse, error) {
 	offset := (page - 1) * limit
 
-	singers, total, err := s.singerRepo.FindAll(limit, offset, sort, dir, includeHidden)
+	singers, total, hidden, err := s.singerRepo.FindAll(limit, offset, sort, dir, includeHidden)
 	if err != nil {
 		return nil, fmt.Errorf("get singers: %w", err)
 	}
@@ -58,7 +58,7 @@ func (s *SingerService) GetAll(page, limit int, sort, dir string, includeHidden,
 
 	totalPages := (total + limit - 1) / limit
 
-	return &dto.SingerListResponse{
+	resp := &dto.SingerListResponse{
 		Singers: singerResponses,
 		Pagination: dto.PaginationResponse{
 			Page:       page,
@@ -66,15 +66,27 @@ func (s *SingerService) GetAll(page, limit int, sort, dir string, includeHidden,
 			Total:      total,
 			TotalPages: totalPages,
 		},
-	}, nil
+	}
+	if includeHidden {
+		resp.HiddenTotal = &hidden
+	}
+	return resp, nil
 }
 
 // GetGrouped は事務所別のチャンネル一覧を返す（ページングなし）。
 // 所属なしのチャンネルは最後の「所属なし」グループにまとめる。
 func (s *SingerService) GetGrouped(includeHidden, includeOperational bool) (*dto.SingerGroupListResponse, error) {
-	singers, err := s.singerRepo.FindAllGrouped(includeHidden)
+	singers, err := s.singerRepo.FindAllGrouped()
 	if err != nil {
 		return nil, fmt.Errorf("get singers grouped: %w", err)
+	}
+	// 非表示は事務所の組へ混ぜず、別の区として名前順で返す（issue #65）。
+	// **権限が無ければ引かない** ── viewer には非表示の行がそもそも届かないこと。
+	var hiddenSingers []models.Singer
+	if includeHidden {
+		if hiddenSingers, err = s.singerRepo.FindHiddenByName(); err != nil {
+			return nil, fmt.Errorf("get hidden singers: %w", err)
+		}
 	}
 
 	counts, err := s.membersOnlyCounts(includeOperational)
@@ -106,7 +118,14 @@ func (s *SingerService) GetGrouped(includeHidden, includeOperational bool) (*dto
 		last.Singers = append(last.Singers, s.toSingerResponseFor(singer, includeOperational, counts))
 	}
 
-	return &dto.SingerGroupListResponse{Groups: groups, Total: len(singers)}, nil
+	resp := &dto.SingerGroupListResponse{Groups: groups, Total: len(singers) + len(hiddenSingers)}
+	if includeHidden {
+		resp.Hidden = make([]dto.SingerResponse, len(hiddenSingers))
+		for i, singer := range hiddenSingers {
+			resp.Hidden[i] = s.toSingerResponseFor(singer, includeOperational, counts)
+		}
+	}
+	return resp, nil
 }
 
 // SetOrganizationOverride は Holodex の分類を手動で上書きする（空文字で解除）。

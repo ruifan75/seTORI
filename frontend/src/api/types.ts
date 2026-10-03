@@ -172,6 +172,8 @@ export interface UpdateOrganizationRequest {
 export interface SingerListResponse {
   singers: Singer[];
   pagination: PaginationResponse;
+  /** 非表示チャンネルの総数（content:edit で非表示を含めたときだけ）。並びは表示中が先 */
+  hidden_total?: number;
 }
 
 // 事務所別のチャンネル一覧。organization が空文字の組は「所属なし」。
@@ -182,7 +184,11 @@ export interface SingerGroup {
 }
 
 export interface SingerGroupListResponse {
+  /** 表示中のチャンネルを事務所ごとに */
   groups: SingerGroup[];
+  /** 非表示チャンネルを名前順で（content:edit のときだけ。事務所の組には混ぜない） */
+  hidden?: Singer[];
+  /** groups と hidden の合計 */
   total: number;
 }
 
