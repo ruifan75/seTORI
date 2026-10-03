@@ -24,6 +24,7 @@ import RawCommentsPanel from '../components/RawCommentsPanel';
 import SourceSongList from '../components/SourceSongList';
 import ArtistLinks from '../components/ArtistLinks';
 import { extractRawCommentTimestamps } from '../utils/rawCommentTimestamps';
+import { analysisFailureMessage } from '../utils/apiError';
 
 
 // 編集可能な配信情報
@@ -647,7 +648,7 @@ export default function StreamDetailPage() {
       const mergeMsg = mergedCount > 0 ? `（${mergedCount}曲の重複を統合）` : '';
       showToast(`Holodexから${merged.length}曲を読み込みました${mergeMsg}`, 'success');
     } catch (error) {
-      showToast('Holodex分析に失敗しました', 'error');
+      showToast(analysisFailureMessage('Holodex分析', error), 'error');
       console.error('Holodex analysis failed:', error);
     } finally {
       setHolodexAnalyzeLoading(false);
@@ -680,7 +681,7 @@ export default function StreamDetailPage() {
       const mergeMsg = mergedCount > 0 ? `（${mergedCount}曲の重複を統合）` : '';
       showToast(`コメントから${merged.length}曲を読み込みました${mergeMsg}`, 'success');
     } catch (error) {
-      showToast('コメント分析に失敗しました', 'error');
+      showToast(analysisFailureMessage('コメント分析', error), 'error');
       console.error('Comment analysis failed:', error);
     } finally {
       setCommentAnalyzeLoading(false);
@@ -716,7 +717,7 @@ export default function StreamDetailPage() {
         showToast(`チャプターから${merged.length}曲を読み込みました`, 'success');
       }
     } catch (error) {
-      showToast('チャプター分析に失敗しました', 'error');
+      showToast(analysisFailureMessage('チャプター分析', error), 'error');
       console.error('Chapter analysis failed:', error);
     } finally {
       setChapterAnalyzeLoading(false);

@@ -1425,6 +1425,8 @@ export interface BatchFillRun {
   songs_review: number;
   /** 「DB にあるが入力元に無い」と分かった既存の歌唱の件数（force 実行のみ） */
   songs_gap: number;
+  /** 入力元を確定できずに飛ばした配信（live chat 待ち・分析中のコメント差し替えなど。issue #7） */
+  skipped_stream_ids: string[];
   ai_asked: number;
   message: string;
   started_at: string;

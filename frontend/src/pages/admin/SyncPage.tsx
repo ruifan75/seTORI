@@ -62,6 +62,7 @@ export default function SyncPage() {
   const [fillIncludeCollabs, setFillIncludeCollabs] = useState(false);
   // 「入力元に無い」の内訳を開いている実行（一度に 1 つ）
   const [openGapRun, setOpenGapRun] = useState<string | null>(null);
+  const [openSkippedRun, setOpenSkippedRun] = useState<string | null>(null);
 
 
   const { data: fillStatus } = useQuery({
@@ -514,6 +515,10 @@ export default function SyncPage() {
               <span className="text-gray-600">
                 作成 {fillStatus.created} ／ 審査 {fillStatus.review}
                 {fillStatus.ai_asked > 0 && ` ／ AI ${fillStatus.ai_asked} 行`}
+                {/* 「扱った」に数えない配信。done/total だけだと飛ばしたことが見えない */}
+                {(fillStatus.skipped ?? 0) > 0 && (
+                  <span className="text-amber-700"> ／ 飛ばした {fillStatus.skipped}</span>
+                )}
               </span>
             </div>
           </div>
@@ -531,6 +536,9 @@ export default function SyncPage() {
                   <th className="py-2 pr-3">審査</th>
                   <th className="py-2 pr-3" title="DB にあるが、今回の入力元には出てこなかった歌唱">
                     入力元に無い
+                  </th>
+                  <th className="py-2 pr-3" title="入力元を確定できずに今回は扱わなかった配信（live chat 待ちなど）。次の実行で拾う">
+                    飛ばした
                   </th>
                   <th className="py-2 pr-3">状態</th>
                   <th className="py-2"></th>
@@ -573,6 +581,19 @@ export default function SyncPage() {
                           <span className="text-gray-300">—</span>
                         )}
                       </td>
+                      <td className="py-2 pr-3">
+                        {(run.skipped_stream_ids?.length ?? 0) > 0 ? (
+                          <button
+                            onClick={() => setOpenSkippedRun(openSkippedRun === run.id ? null : run.id)}
+                            className="text-amber-700 underline hover:text-amber-900"
+                            title="飛ばした配信を一覧する"
+                          >
+                            {run.skipped_stream_ids.length}
+                          </button>
+                        ) : (
+                          <span className="text-gray-300">—</span>
+                        )}
+                      </td>
                       <td className="py-2 pr-3 text-gray-500" title={run.message}>
                         {{ running: '実行中', done: '完了', cancelled: '中止', failed: '失敗', reverted: '撤回済み' }[run.status]}
                       </td>
@@ -591,8 +612,23 @@ export default function SyncPage() {
                     </tr>
                     {openGapRun === run.id && (
                       <tr className="border-b last:border-0">
-                        <td colSpan={7} className="py-2 pr-3 bg-gray-50">
+                        <td colSpan={8} className="py-2 pr-3 bg-gray-50">
                           <GapList runId={run.id} />
+                        </td>
+                      </tr>
+                    )}
+                    {openSkippedRun === run.id && (
+                      <tr className="border-b last:border-0">
+                        <td colSpan={8} className="py-2 pr-3 bg-gray-50">
+                          <ul className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
+                            {run.skipped_stream_ids.map((sid) => (
+                              <li key={sid}>
+                                <Link to={`/streams/${sid}`} className="text-indigo-600 hover:underline">
+                                  {sid}
+                                </Link>
+                              </li>
+                            ))}
+                          </ul>
                         </td>
                       </tr>
                     )}

@@ -350,6 +350,8 @@ func (s *BatchFillService) run(runID uuid.UUID, mode string, singerIDs []string,
 
 	for _, stream := range streams {
 		if s.isCancelled() {
+			// 読み込みの途中で止めても、飛ばした配信と件数は履歴に残す。
+			s.saveProgress(runID, len(streams), 0, 0, 0, 0)
 			s.finish(runID, "cancelled", "キャンセルされました")
 			return
 		}
@@ -417,14 +419,19 @@ func (s *BatchFillService) run(runID uuid.UUID, mode string, singerIDs []string,
 			st.Gaps = gaps
 			st.AIAsked = asked
 		})
-		if err := s.runRepo.UpdateProgress(runID, len(streams), s.Status().Done, created, review, gaps, asked); err != nil {
-			logger.Warnf("[batch-fill] 進捗の保存に失敗: %v", err)
-		}
+		s.saveProgress(runID, len(streams), created, review, gaps, asked)
 	}
+	// **最後に必ず 1 回保存する。** 上のループは第 3 段に進んだ配信があるときしか
+	// 回らないので、対象が全部飛ばされた・全部 0 曲だった実行では一度も保存されず、
+	// 履歴が `streams_total = 0` のまま「完了」になっていた（issue #7）。
+	s.saveProgress(runID, len(streams), created, review, gaps, asked)
 
 	status, msg := "done", fmt.Sprintf("%d 曲を作成、%d 曲を審査へ", created, review)
 	if gaps > 0 {
 		msg += fmt.Sprintf("（入力元に無い既存 %d 曲）", gaps)
+	}
+	if skipped := len(s.Status().SkippedIDs); skipped > 0 {
+		msg += fmt.Sprintf("（入力元を確定できず飛ばした配信 %d）", skipped)
 	}
 	if s.isCancelled() {
 		status, msg = "cancelled", "キャンセルされました（途中まで反映済み）"
@@ -863,6 +870,15 @@ func (s *BatchFillService) update(f func(*dto.BatchFillStatus)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	f(&s.status)
+}
+
+// saveProgress は実行の進捗を履歴へ書く。処理済み件数と飛ばした配信は
+// メモリ上の状態から取る（第 1 段で数えたもの）。
+func (s *BatchFillService) saveProgress(runID uuid.UUID, total, created, review, gaps, asked int) {
+	st := s.Status()
+	if err := s.runRepo.UpdateProgress(runID, total, st.Done, created, review, gaps, asked, st.SkippedIDs); err != nil {
+		logger.Warnf("[batch-fill] 進捗の保存に失敗: %v", err)
+	}
 }
 
 func (s *BatchFillService) finish(runID uuid.UUID, status, message string) {
