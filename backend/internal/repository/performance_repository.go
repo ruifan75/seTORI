@@ -229,14 +229,14 @@ func (r *PerformanceRepository) FindBySongID(songID uuid.UUID, limit, offset int
 		SELECT COUNT(*)
 		FROM performances p
 		JOIN streams st ON p.stream_id = st.id
-		WHERE p.song_id = $1 AND TRUE`+access.discoverClause()+`
+		WHERE p.song_id = $1 AND `+ListedFor("st", access)+`
 	`, songID).Scan(&total)
 	if err != nil {
 		return nil, 0, fmt.Errorf("count performances: %w", err)
 	}
 
 	performances, err := r.queryPerformanceDetails(perfDetailSelect+`
-		WHERE p.song_id = $1 AND TRUE`+access.discoverClause()+`
+		WHERE p.song_id = $1 AND `+ListedFor("st", access)+`
 		ORDER BY st.stream_date DESC
 		LIMIT $2 OFFSET $3`, songID, limit, offset)
 	if err != nil {
@@ -253,7 +253,7 @@ func (r *PerformanceRepository) FindByTagID(tagID string, limit, offset int, acc
 		FROM performances p
 		JOIN streams st ON p.stream_id = st.id
 		JOIN performance_performance_tags ppt ON ppt.performance_id = p.id
-		WHERE ppt.tag_id = $1 AND TRUE`+access.discoverClause()+`
+		WHERE ppt.tag_id = $1 AND `+ListedFor("st", access)+`
 	`, tagID).Scan(&total)
 	if err != nil {
 		return nil, 0, fmt.Errorf("count performances by tag: %w", err)
@@ -261,7 +261,7 @@ func (r *PerformanceRepository) FindByTagID(tagID string, limit, offset int, acc
 
 	performances, err := r.queryPerformanceDetails(perfDetailSelect+`
 		JOIN performance_performance_tags ppt ON ppt.performance_id = p.id
-		WHERE ppt.tag_id = $1 AND TRUE`+access.discoverClause()+`
+		WHERE ppt.tag_id = $1 AND `+ListedFor("st", access)+`
 		ORDER BY st.stream_date DESC, p.order_index ASC
 		LIMIT $2 OFFSET $3`, tagID, limit, offset)
 	if err != nil {
@@ -915,6 +915,38 @@ func DiscoverableFor(alias string, access ViewerAccess) string {
 		return "TRUE"
 	}
 	return alias + ".is_hidden = FALSE AND " + NotRestricted(alias)
+}
+
+// ListedFor は発見面のうち、**チャンネルの表示にも従う**場所の条件
+// （`DiscoverableFor` ＋ 一覧に出しているチャンネルが参加者に居るか）。
+//
+// **使う場所**：曲ページの歌唱履歴と件数、曲一覧の歌唱数（ホームの「人気の楽曲」も
+// ここ）、タグ別の歌唱と件数、アーティストページの歌唱数（#61）。
+// 通さないと「歌唱 1 件」と出るのに開くと一覧に出していないチャンネルの配信、
+// という形になる ── `/streams`（#59）とおすすめ（#68）では既に出さないので、
+// 曲ページからだけ辿れる配信が残る。
+//
+// **`DiscoverableFor` 自体には混ぜない。** 混ぜると次の場所まで絞られる：
+//
+//   - 歌手ページ … 非表示チャンネルのページは未ログインでも開ける設計
+//     （CLAUDE.md §3）なので、自分の配信が 0 件のページになる
+//   - 統合候補の件数 … 統合の向きを件数で決めるので、非表示チャンネルの歌唱しか
+//     無い曲が 0 件に見えると、残すべきほうを消す方向へ誘導する
+//     （`mergeCandidateSelect` が秘匿で同じ理由を書いている）
+//
+// 配信検索（`SearchStreams`）も通さない。あちらは非表示の配信も意図的に含める
+// （CLAUDE.md §2）ので、`is_hidden` と同じ性質のこの軸だけ濾すのは筋が通らない。
+//
+// **`RestrictedView` では外す**（`DiscoverableFor` と同じ）。チャンネルの表示は
+// `is_hidden` と同じ「一覧の既定から外す」軸で、認可境界ではない。管理者に
+// 「歌唱があるのに 0 件に見える」を起こさないために両軸を外しているのと同じ理由。
+// 押し出す面（`promotedClause`）が権限で緩めないのは、そこから資料を管理する
+// ことが無いからで、こちらは資料を辿る面なので事情が違う。
+func ListedFor(alias string, access ViewerAccess) string {
+	if access == RestrictedView {
+		return "TRUE"
+	}
+	return DiscoverableFor(alias, access) + " AND " + VisibleChannelExpr(alias)
 }
 
 // restrictClause は WHERE / JOIN の条件へ足す文字列を返す。
