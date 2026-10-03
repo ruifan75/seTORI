@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -21,10 +22,15 @@ func NewStreamRepository(db *sql.DB) *StreamRepository {
 }
 
 // FindAll はすべての歌枠を取得する（ページング対応、既定では非表示を除外）。
-func (r *StreamRepository) FindAll(limit, offset int, includeHidden bool, sort, dir string) ([]models.Stream, int, error) {
+//
+// tags は配信タグでの絞り込み（**全部を持つ**＝AND。issue #63）。空なら絞らない。
+// 重複はここで除く（`NormalizeStreamTagFilter`）── 同じ ID が 2 つあると件数の照合が
+// 合わなくなり 1 件も返らないので、呼び出し側に任せない。
+func (r *StreamRepository) FindAll(limit, offset int, includeHidden bool, sort, dir string, tags []string) ([]models.Stream, int, error) {
+	tags = NormalizeStreamTagFilter(tags)
 	var total int
-	countQuery := "SELECT COUNT(*) FROM streams WHERE " + streamListFilter("streams", includeHidden)
-	err := r.db.QueryRow(countQuery).Scan(&total)
+	countQuery := "SELECT COUNT(*) FROM streams WHERE " + streamListWhere("streams", includeHidden, "$1")
+	err := r.db.QueryRow(countQuery, pq.Array(tags)).Scan(&total)
 	if err != nil {
 		return nil, 0, fmt.Errorf("count streams: %w", err)
 	}
@@ -36,11 +42,11 @@ func (r *StreamRepository) FindAll(limit, offset int, includeHidden bool, sort, 
 	}
 
 	query := streamListQuery("streams", `
-		WHERE `+streamListFilter("streams", includeHidden)+`
+		WHERE `+streamListWhere("streams", includeHidden, "$1")+`
 		ORDER BY `+order+`
-		LIMIT $1 OFFSET $2`)
+		LIMIT $2 OFFSET $3`)
 
-	rows, err := r.db.Query(query, limit, offset)
+	rows, err := r.db.Query(query, pq.Array(tags), limit, offset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("query streams: %w", err)
 	}
@@ -86,6 +92,78 @@ func streamListFilter(alias string, includeHidden bool) string {
 		return "TRUE"
 	}
 	return alias + ".is_hidden = FALSE AND " + VisibleChannelExpr(alias)
+}
+
+// streamListWhere は配信一覧（`/streams`）の WHERE 条件。**件数・一覧・タグの件数で
+// 必ず共有する**（`streamListFilter` と同じ理由。別々に書くと画面の合計と合わない）。
+//
+// tagParam は text[] のプレースホルダ（"$1" など）。番号はクエリごとに違うので
+// 呼び出し側が渡す。
+func streamListWhere(alias string, includeHidden bool, tagParam string) string {
+	return streamListFilter(alias, includeHidden) + " AND " + streamTagsAllExpr(alias, tagParam)
+}
+
+// streamTagsAllExpr は「指定した配信タグを**全部**持つ」（AND。issue #63）。
+//
+// AND にしたのは「絞り込み」という語に合うため（`3d` + `collaboration` は AND が自然）。
+// 空配列なら真になる（持っている数 0 ＝ 指定の数 0）ので、絞らないときも
+// 同じ SQL のまま通る ── 分岐させると件数と一覧で $N の番号がずれる。
+func streamTagsAllExpr(alias, tagParam string) string {
+	return "(SELECT COUNT(DISTINCT tf.tag_id) FROM stream_stream_tags tf" +
+		" WHERE tf.stream_id = " + alias + ".id AND tf.tag_id = ANY(" + tagParam + "::text[]))" +
+		" = cardinality(" + tagParam + "::text[])"
+}
+
+// NormalizeStreamTagFilter は絞り込みのタグを整える（空白を除き、空と重複を落とす）。
+//
+// **重複は必ず落とす。** `streamTagsAllExpr` は「持っている種類の数 = 指定の数」で
+// 判定するので、同じ ID が 2 つあると永久に一致せず、1 件も返らない。
+// 上限は 20（タグの語彙は 20 未満。それ以上は打ち間違いか悪用）。
+func NormalizeStreamTagFilter(raw []string) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, t := range raw {
+		t = strings.TrimSpace(t)
+		if t == "" || seen[t] {
+			continue
+		}
+		seen[t] = true
+		out = append(out, t)
+		if len(out) == 20 {
+			break
+		}
+	}
+	return out
+}
+
+// CountByTagForList は配信一覧の母集合（＋選んだタグでの絞り込み）の中で、
+// 配信タグごとの件数を返す（issue #63）。チップに「あと何件に絞れるか」を出すため。
+//
+// **母集合は一覧と同じ式から作る**（`streamListWhere`）。別に書き下ろすと、
+// チップの数字と一覧の件数が合わない。
+func (r *StreamRepository) CountByTagForList(tags []string) (map[string]int, error) {
+	tags = NormalizeStreamTagFilter(tags)
+	rows, err := r.db.Query(`
+		SELECT st.tag_id, COUNT(*)
+		FROM stream_stream_tags st
+		JOIN streams ON streams.id = st.stream_id
+		WHERE `+streamListWhere("streams", false, "$1")+`
+		GROUP BY st.tag_id`, pq.Array(tags))
+	if err != nil {
+		return nil, fmt.Errorf("count streams by tag: %w", err)
+	}
+	defer rows.Close()
+
+	counts := map[string]int{}
+	for rows.Next() {
+		var id string
+		var n int
+		if err := rows.Scan(&id, &n); err != nil {
+			return nil, fmt.Errorf("scan stream tag count: %w", err)
+		}
+		counts[id] = n
+	}
+	return counts, rows.Err()
 }
 
 // VisibleChannelExpr は「この配信が、一覧に出しているチャンネルのものか」を返す SQL 式。

@@ -344,7 +344,7 @@ export default function SingerDetailPage() {
 
         {syncMutation.isSuccess && (
           <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg text-green-700 text-sm">
-            同期完了: {syncMutation.data.synced_count} 件の歌枠を同期しました
+            同期完了: {syncMutation.data.synced_count} 件の配信を同期しました
           </div>
         )}
       </div>
@@ -431,7 +431,7 @@ export default function SingerDetailPage() {
                 : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
             }`}
           >
-            歌枠一覧
+            配信一覧
           </button>
           <button
             onClick={() => setActiveTab('performances')}

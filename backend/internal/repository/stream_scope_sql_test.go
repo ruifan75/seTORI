@@ -161,19 +161,21 @@ func TestStreamListsApplyFilterInBothQueries(t *testing.T) {
 		wantCount, wantList string
 	}{
 		{
+			// タグの絞り込み（issue #63）も件数と一覧の両方に同じ式で入る。
+			// 部品は別のテストで文字どおり固定してある（`TestStreamTagsAllExprExact`）。
 			name:      "FindAll",
-			call:      func(r *StreamRepository) { r.FindAll(20, 0, false, "", "") },
-			wantCount: "WHERE " + streamListFilter("streams", false),
-			wantList:  "WHERE " + streamListFilter("streams", false),
+			call:      func(r *StreamRepository) { r.FindAll(20, 0, false, "", "", nil) },
+			wantCount: "WHERE " + streamListFilter("streams", false) + " AND " + streamTagsAllExpr("streams", "$1"),
+			wantList:  "WHERE " + streamListFilter("streams", false) + " AND " + streamTagsAllExpr("streams", "$1"),
 		},
 		{
 			// **includeHidden も通すこと。** false だけだと、引数を無視して
 			// 条件を書き固める改変が通る ── そのとき編集者向けの経路が
 			// 非表示配信を返さなくなる（実測で通った）。
 			name:      "FindAll/includeHidden",
-			call:      func(r *StreamRepository) { r.FindAll(20, 0, true, "", "") },
-			wantCount: "WHERE " + streamListFilter("streams", true),
-			wantList:  "WHERE " + streamListFilter("streams", true),
+			call:      func(r *StreamRepository) { r.FindAll(20, 0, true, "", "", nil) },
+			wantCount: "WHERE " + streamListFilter("streams", true) + " AND " + streamTagsAllExpr("streams", "$1"),
+			wantList:  "WHERE " + streamListFilter("streams", true) + " AND " + streamTagsAllExpr("streams", "$1"),
 		},
 		{
 			name:      "FindByTagID",
