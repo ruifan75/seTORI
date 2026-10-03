@@ -1361,8 +1361,8 @@ func (r *StreamRepository) MarkProcessedIfHiddenAndEmpty(streamID string) (bool,
 // 配信はこの実行の中で複数回取りに行くこともあるが、
 // **飛ばして取りこぼすよりは安い**という判断。
 //
-// singerIDs が空なら全チャンネル。**所有者で絞る**（ゲスト参加しただけの
-// 他人の配信まで対象にしない。FindStreamsForFill と同じ）。
+// singerIDs が空なら全チャンネル。既定は所有者だけで絞り、includeCollabs が
+// true のときは参加者まで含む（FindStreamsForFill と同じ）。
 // justSynced はこの実行の同期で入ってきた配信。**それだけでは除外しない** ──
 // 同期のコメント取得は失敗してもログだけで、その配信は「新規」として返る。
 // 「新規だから取得済み」と決めつけると、取得に失敗した配信を黙って飛ばすことになる。
