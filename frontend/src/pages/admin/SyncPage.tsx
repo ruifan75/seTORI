@@ -1,7 +1,7 @@
 import { Fragment, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { holodexApi, batchAnalyzeApi, batchFillApi, singerApi, autoFillApi, nonSingingApi } from '../../api/client';
+import { holodexApi, batchAnalyzeApi, batchFillApi, singerApi, autoFillApi, nonSingingApi, restrictionReviewApi, streamApi } from '../../api/client';
 import { useToast } from '../../components/ui/ToastContext';
 import { useAuthStore, hasPermission, PERM } from '../../store/auth';
 import { formatSeconds } from '../../components/usePerformanceTiming';
@@ -160,6 +160,7 @@ export default function SyncPage() {
       <AutoFillTargets />
       <AutoFillSchedule />
       <NonSingingCandidates />
+      <RestrictionReview />
 
       {/* Sync by Channel */}
       <div className="bg-white rounded-lg shadow-sm border p-6">
@@ -909,6 +910,95 @@ function AutoFillSchedule() {
   );
 }
 
+
+// RestrictionReview は「公開してよいと裁定したあとで会限として検出された」配信（issue #26）。
+//
+// 人の裁定は自動判定に勝つので、配信者が後から会限へ変えても公開のまま、
+// 何の知らせも無かった。**自動で伏せ直さない**（裁定の意味が無くなる）──
+// 食い違いを並べて人に決めさせる。配信を開かなくても気付けるよう、ここに置く。
+//
+// どちらのボタンも裁定を書き直す。書き直した時点の判定が控えられるので一覧から消え、
+// 「公開のまま」を選んだものは、以後また判定が変わるまで出てこない。
+function RestrictionReview() {
+  const queryClient = useQueryClient();
+  const { showToast } = useToast();
+  const canEdit = hasPermission(useAuthStore((st) => st.user), PERM.CONTENT_EDIT);
+  const authStatus = useAuthStore((st) => st.status);
+
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['restriction-review', canEdit],
+    queryFn: () => restrictionReviewApi.list(100),
+    enabled: canEdit && authStatus !== 'loading',
+  });
+
+  const decide = useMutation({
+    mutationFn: ({ id, restricted }: { id: string; restricted: boolean }) =>
+      streamApi.update(id, { is_restricted: restricted }),
+    onSuccess: (_data, { id, restricted }) => {
+      queryClient.invalidateQueries({ queryKey: ['restriction-review'] });
+      queryClient.invalidateQueries({ queryKey: ['stream', id] });
+      showToast(restricted ? '非公開にしました' : '公開のままにしました（確認済み）', 'success');
+    },
+    onError: (err: Error) => showToast(err.message, 'error'),
+  });
+
+  if (!canEdit) return null;
+  const items = data?.items ?? [];
+  // 該当が無いときは場所を取らない（ほとんどの時間は 0 件のはず）。
+  // 取得の失敗は 0 件と区別して出す。
+  if (!isLoading && !isError && items.length === 0) return null;
+
+  return (
+    <div className="bg-white rounded-lg shadow-sm border border-red-200 p-6">
+      <h2 className="text-xl font-bold text-gray-900 mb-2">公開の裁定を見直す配信</h2>
+      <p className="text-gray-500 mb-4 text-sm">
+        「公開してよい」と裁定したあとで<strong>会限として検出された</strong>配信です。
+        配信者が後から会限へ変えた可能性があります。裁定は自動判定より優先されるので、
+        このままだとセットリストは<strong>公開のまま</strong>です。
+      </p>
+      {isLoading ? (
+        <p className="text-gray-400 text-sm">読み込み中...</p>
+      ) : isError ? (
+        <p className="text-red-600 text-sm">取得に失敗しました（該当が無いという意味ではありません）。</p>
+      ) : (
+        <ul className="divide-y border rounded-lg">
+          {items.map((item) => (
+            <li key={item.id} className="flex items-center justify-between gap-3 px-4 py-2">
+              <div className="min-w-0">
+                <Link to={`/streams/${item.id}`} className="text-indigo-600 hover:underline truncate block">
+                  {item.title}
+                </Link>
+                <div className="text-xs text-gray-400 flex flex-wrap items-center gap-2">
+                  <span>{new Date(item.stream_date).toLocaleDateString('ja-JP')}</span>
+                  {/* 控えが無い＝この仕組みより前の裁定。会限と知っていて公開したのかもしれない */}
+                  {item.basis_unknown && <span>裁定の時点の判定は不明（以前の裁定）</span>}
+                </div>
+              </div>
+              <div className="flex shrink-0 gap-2 text-xs">
+                <button
+                  type="button"
+                  disabled={decide.isPending}
+                  onClick={() => decide.mutate({ id: item.id, restricted: true })}
+                  className="px-2 py-1 rounded bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+                >
+                  非公開にする
+                </button>
+                <button
+                  type="button"
+                  disabled={decide.isPending}
+                  onClick={() => decide.mutate({ id: item.id, restricted: false })}
+                  className="px-2 py-1 rounded border text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                >
+                  公開のまま
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 // NonSingingCandidates は「非表示だが現行規則で曲が出た」配信の一覧。
 //

@@ -828,8 +828,39 @@ const (
 // 同意は fail-closed で扱う ── 「誰か 1 人が allow なら公開」は、
 // データ異常や共同配信で意図せず公開する方向へ倒れる。
 func EffectiveRestrictedExpr(alias string) string {
-	return "COALESCE(" + alias + ".restriction_override, " +
-		MembersOnlyDetectedExpr(alias) + " AND NOT " + allOwnersAllowExpr(alias) + ")"
+	return "COALESCE(" + alias + ".restriction_override, " + AutoRestrictedExpr(alias) + ")"
+}
+
+// AutoRestrictedExpr は人の裁定を除いた**自動判定**（会限として検出され、かつ
+// 所有者全員が公開を許可しているわけではない）。`EffectiveRestrictedExpr` の
+// COALESCE の第 2 引数そのもので、裁定の時点の値を控えるときにも使う
+// （`SetRestrictionOverride`）。**ここを分けて書かないこと** ── 実効値と控えが
+// 別の式から作られると、控えと比べる食い違いの判定が意味を失う。
+//
+// 括弧で包まないのは `EffectiveRestrictedExpr` の文字列を変えないため
+// （`TestRestrictedExpressionsExact` が文字どおり固定している）。
+// 中に OR を含まないので、AND で繋ぐ側で優先順位がずれることは無い。
+func AutoRestrictedExpr(alias string) string {
+	return MembersOnlyDetectedExpr(alias) + " AND NOT " + allOwnersAllowExpr(alias)
+}
+
+// RestrictionNeedsReviewExpr は「公開してよいと裁定したあとで、自動判定が
+// 伏せる側へ変わった」配信（issue #26）。
+//
+//	restriction_override = FALSE          … 人が「公開してよい」と決めた
+//	AND 自動判定が今は伏せる               … 会限として検出され、方針も allow ではない
+//	AND 裁定の時点では伏せる判定ではなかった（または分からない）
+//
+// **3 つ目が要る。** 会限と分かったうえで「この配信だけは公開してよい」と
+// 決めたものは正当な例外で、毎回警告すると警告そのものが読まれなくなる。
+// 分からない（NULL＝この仕組みより前の裁定）は**出す側へ倒す** ── 確認すれば
+// 控えが入って消えるが、出さなければ誰も気付かない。
+//
+// 逆向き（伏せると決めたあと自動判定が公開へ変わった）は出さない。
+// 伏せたままなのは安全側なので、知らせる理由が無い。
+func RestrictionNeedsReviewExpr(alias string) string {
+	return alias + ".restriction_override = FALSE AND " + AutoRestrictedExpr(alias) +
+		" AND " + alias + ".restriction_override_auto IS DISTINCT FROM TRUE"
 }
 
 // MembersOnlyDetectedExpr は「その配信が会限か」の**検出**。

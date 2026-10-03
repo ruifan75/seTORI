@@ -396,6 +396,7 @@ func (r *Router) setupRoutes() {
 	// 自動処理（定期実行）。設定・手動実行とも content:edit。
 	// 見直しが要る配信（非表示だが現行規則で曲が出た）。content:edit。
 	r.mux.HandleFunc("GET /api/non-singing-candidates", r.handleListNonSingingCandidates)
+	r.mux.HandleFunc("GET /api/restriction-review", r.handleListRestrictionReview)
 	r.mux.HandleFunc("POST /api/non-singing-candidates/{id}/dismiss", r.handleDismissNonSingingCandidate)
 	r.mux.HandleFunc("DELETE /api/non-singing-candidates/{id}/dismiss", r.handleRestoreNonSingingCandidate)
 
@@ -2062,6 +2063,24 @@ func (r *Router) handleListNonSingingCandidates(w http.ResponseWriter, req *http
 	// dismissed=true は「歌回ではないと判断した」一覧（取り消すため）。
 	dismissed := req.URL.Query().Get("dismissed") == "true"
 	result, err := r.streamService.ListNonSingingCandidates(limit, dismissed)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, result)
+}
+
+// handleListRestrictionReview は「公開してよいと裁定したあとで会限として検出された」
+// 配信の一覧（content:edit、issue #26）。解決は既存の PUT /api/streams/{id} の
+// is_restricted で行う ── 裁定を書き直すと、その時点の判定が控えられて一覧から消える。
+func (r *Router) handleListRestrictionReview(w http.ResponseWriter, req *http.Request) {
+	limit := 100
+	if v := req.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 500 {
+			limit = n
+		}
+	}
+	result, err := r.streamService.ListRestrictionReview(limit)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -3749,6 +3768,13 @@ func requiredPermission(method, path string) (perm string, needsAuth bool) {
 	// 見直しが要る配信の一覧も content:edit。**GET は既定で公開に落ちる**ので、
 	// 書かないと「非表示にしている配信の題名」が未ログインから読める。
 	if isRouteOrSubpath(path, "/api/non-singing-candidates") {
+		return auth.PermContentEdit, true
+	}
+
+	// 裁定の見直しが要る配信（issue #26）も同じ。**GET は既定で公開に落ちる**ので、
+	// 書かないと「公開してよいと裁定した会限配信」の一覧が未ログインから読める
+	// ── 配信者にまだ確かめていないものを外から拾える一覧になる。
+	if isRouteOrSubpath(path, "/api/restriction-review") {
 		return auth.PermContentEdit, true
 	}
 

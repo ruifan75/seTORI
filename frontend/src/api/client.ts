@@ -2,6 +2,7 @@ import axios from 'axios';
 import type {
   AutoFillSettings,
   NonSingingCandidate,
+  RestrictionReviewItem,
   AutoFillRunResult,
   SongListResponse,
   Song,
@@ -414,6 +415,16 @@ export const nonSingingApi = {
 
   restore: async (id: string): Promise<void> => {
     await api.delete(`/api/non-singing-candidates/${id}/dismiss`);
+  },
+};
+
+// ========== 秘匿の裁定の見直し API（issue #26） ==========
+// 「公開してよい」と裁定したあとで会限として検出された配信。解決は
+// streamApi.update の is_restricted ── 裁定を書き直すとその時点の判定が控えられ、一覧から消える。
+export const restrictionReviewApi = {
+  list: async (limit = 100): Promise<{ items: RestrictionReviewItem[]; total: number }> => {
+    const { data } = await api.get('/api/restriction-review', { params: { limit } });
+    return data;
   },
 };
 
