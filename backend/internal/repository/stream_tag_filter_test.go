@@ -6,20 +6,19 @@ import (
 	"testing"
 )
 
-// タグの絞り込みの式を**実装を呼ばずに**固定する（上の一覧のテストはこれを部品に使う）。
-//
-// AND の判定は「指定したタグのうち持っている種類の数 = 指定の数」。`DISTINCT` を外すと
-// 同じタグの行が 2 つある配信で数が合わなくなり、`=` を `>=` にすると…同じだが、
-// `>= 1`（どれか 1 つ＝OR）へ変える改変はここで止まる。
+// 式を独立した期待値と完全一致で固定し、AND の判定と相関を持たない形を確認する。
 func TestStreamTagsAllExprExact(t *testing.T) {
-	want := "(SELECT COUNT(DISTINCT tf.tag_id) FROM stream_stream_tags tf" +
-		" WHERE tf.stream_id = s.id AND tf.tag_id = ANY($1::text[]))" +
-		" = cardinality($1::text[])"
+	want := "(cardinality($1::text[]) = 0 OR s.id IN (" +
+		"SELECT tf.stream_id FROM stream_stream_tags tf WHERE tf.tag_id = ANY($1::text[])" +
+		" GROUP BY tf.stream_id HAVING COUNT(DISTINCT tf.tag_id) = cardinality($1::text[])))"
 	if got := streamTagsAllExpr("s", "$1"); got != want {
 		t.Errorf("式が変わっている\n got: %s\nwant: %s", got, want)
 	}
-	if strings.Contains(streamTagsAllExpr("zz", "$3"), "$1") || strings.Contains(streamTagsAllExpr("zz", "$3"), "s.id") {
-		t.Errorf("alias / プレースホルダが効いていない: %s", streamTagsAllExpr("zz", "$3"))
+	wantOther := "(cardinality($3::text[]) = 0 OR zz.id IN (" +
+		"SELECT tf.stream_id FROM stream_stream_tags tf WHERE tf.tag_id = ANY($3::text[])" +
+		" GROUP BY tf.stream_id HAVING COUNT(DISTINCT tf.tag_id) = cardinality($3::text[])))"
+	if got := streamTagsAllExpr("zz", "$3"); got != wantOther {
+		t.Errorf("alias / パラメータ: %s", got)
 	}
 }
 
@@ -36,8 +35,8 @@ func TestNormalizeStreamTagFilter(t *testing.T) {
 	for i := range many {
 		many[i] = string(rune('a' + i))
 	}
-	if got := NormalizeStreamTagFilter(many); len(got) != 20 {
-		t.Errorf("上限 20 を超えている: %d", len(got))
+	if got := NormalizeStreamTagFilter(many); len(got) != 30 {
+		t.Errorf("正規化が条件を切り捨てた: %d", len(got))
 	}
 }
 

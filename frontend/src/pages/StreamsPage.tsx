@@ -74,7 +74,7 @@ export default function StreamsPage() {
       <h1 className="text-3xl font-bold text-gray-900">配信一覧</h1>
 
       {/* 配信タグで絞る。複数選ぶと**全部を持つ**配信だけ（AND） */}
-      {chips.length > 0 && (
+      {(chips.length > 0 || selectedTags.length > 0) && (
         <div className="flex flex-wrap items-center gap-2">
           {chips.map((t) => {
             const on = selectedTags.includes(t.id);

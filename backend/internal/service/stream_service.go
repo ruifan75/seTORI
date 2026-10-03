@@ -212,7 +212,6 @@ func (s *StreamService) GetPerformancesByTag(tagID string, page, limit int, acce
 	}, nil
 }
 
-// GetByID は歌枠の詳細（セットリストを含む）を取得する。
 // CountTagsForList は配信一覧で選べるタグごとの件数を返す（issue #63）。
 // 選んだタグで絞った中での件数なので、チップに「押すと何件になるか」を出せる。
 func (s *StreamService) CountTagsForList(tags []string) (map[string]int, error) {

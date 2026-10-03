@@ -13,6 +13,9 @@ import (
 	"github.com/ruifan75/setori/pkg/util"
 )
 
+// ErrTooManyStreamTags は AND 条件を切り捨てず、要求を拒否するためのエラー。
+var ErrTooManyStreamTags = errors.New("配信タグは20個まで指定できます")
+
 type StreamRepository struct {
 	db *sql.DB
 }
@@ -21,13 +24,16 @@ func NewStreamRepository(db *sql.DB) *StreamRepository {
 	return &StreamRepository{db: db}
 }
 
-// FindAll はすべての歌枠を取得する（ページング対応、既定では非表示を除外）。
+// FindAll はすべての配信を取得する（ページング対応、既定では非表示を除外）。
 //
 // tags は配信タグでの絞り込み（**全部を持つ**＝AND。issue #63）。空なら絞らない。
 // 重複はここで除く（`NormalizeStreamTagFilter`）── 同じ ID が 2 つあると件数の照合が
 // 合わなくなり 1 件も返らないので、呼び出し側に任せない。
 func (r *StreamRepository) FindAll(limit, offset int, includeHidden bool, sort, dir string, tags []string) ([]models.Stream, int, error) {
 	tags = NormalizeStreamTagFilter(tags)
+	if len(tags) > 20 {
+		return nil, 0, ErrTooManyStreamTags
+	}
 	var total int
 	countQuery := "SELECT COUNT(*) FROM streams WHERE " + streamListWhere("streams", includeHidden, "$1")
 	err := r.db.QueryRow(countQuery, pq.Array(tags)).Scan(&total)
@@ -103,22 +109,21 @@ func streamListWhere(alias string, includeHidden bool, tagParam string) string {
 	return streamListFilter(alias, includeHidden) + " AND " + streamTagsAllExpr(alias, tagParam)
 }
 
-// streamTagsAllExpr は「指定した配信タグを**全部**持つ」（AND。issue #63）。
-//
-// AND にしたのは「絞り込み」という語に合うため（`3d` + `collaboration` は AND が自然）。
-// 空配列なら真になる（持っている数 0 ＝ 指定の数 0）ので、絞らないときも
-// 同じ SQL のまま通る ── 分岐させると件数と一覧で $N の番号がずれる。
+// streamTagsAllExpr は指定タグをすべて持つ配信をまとめて求める（AND）。
+// 配信ごとの相関 COUNT はタグ件数の JOIN でも繰り返され、1 万配信・2 タグで
+// 推定 cost が 10 万を超えた。GROUP BY の結果を一度作り、IN で照合する。
+// 空配列は TRUE にし、タグがない配信も含める。
 func streamTagsAllExpr(alias, tagParam string) string {
-	return "(SELECT COUNT(DISTINCT tf.tag_id) FROM stream_stream_tags tf" +
-		" WHERE tf.stream_id = " + alias + ".id AND tf.tag_id = ANY(" + tagParam + "::text[]))" +
-		" = cardinality(" + tagParam + "::text[])"
+	return "(cardinality(" + tagParam + "::text[]) = 0 OR " + alias + ".id IN (" +
+		"SELECT tf.stream_id FROM stream_stream_tags tf WHERE tf.tag_id = ANY(" + tagParam + "::text[])" +
+		" GROUP BY tf.stream_id HAVING COUNT(DISTINCT tf.tag_id) = cardinality(" + tagParam + "::text[])))"
 }
 
 // NormalizeStreamTagFilter は絞り込みのタグを整える（空白を除き、空と重複を落とす）。
 //
 // **重複は必ず落とす。** `streamTagsAllExpr` は「持っている種類の数 = 指定の数」で
 // 判定するので、同じ ID が 2 つあると永久に一致せず、1 件も返らない。
-// 上限は 20（タグの語彙は 20 未満。それ以上は打ち間違いか悪用）。
+// 条件を黙って捨てると AND が広がるため、上限の検査は正規化後に別途行う。
 func NormalizeStreamTagFilter(raw []string) []string {
 	seen := map[string]bool{}
 	out := []string{}
@@ -129,9 +134,6 @@ func NormalizeStreamTagFilter(raw []string) []string {
 		}
 		seen[t] = true
 		out = append(out, t)
-		if len(out) == 20 {
-			break
-		}
 	}
 	return out
 }
@@ -143,6 +145,9 @@ func NormalizeStreamTagFilter(raw []string) []string {
 // チップの数字と一覧の件数が合わない。
 func (r *StreamRepository) CountByTagForList(tags []string) (map[string]int, error) {
 	tags = NormalizeStreamTagFilter(tags)
+	if len(tags) > 20 {
+		return nil, ErrTooManyStreamTags
+	}
 	rows, err := r.db.Query(`
 		SELECT st.tag_id, COUNT(*)
 		FROM stream_stream_tags st
@@ -437,7 +442,7 @@ func (r *StreamRepository) FindByDateRange(start, end time.Time) ([]models.Strea
 // GetTags は歌枠に付いたすべてのタグを取得する。
 func (r *StreamRepository) GetTags(streamID string) ([]models.StreamTag, error) {
 	query := `
-		SELECT st.id, st.display_name, st.color, st.created_at
+		SELECT st.id, st.display_name, COALESCE(st.color, ''), st.created_at
 		FROM stream_tags st
 		JOIN stream_stream_tags sst ON st.id = sst.tag_id
 		WHERE sst.stream_id = $1`
@@ -469,7 +474,7 @@ func (r *StreamRepository) GetTagsForStreams(streamIDs []string) (map[string][]m
 	}
 
 	query := `
-		SELECT sst.stream_id, st.id, st.display_name, st.color, st.created_at
+		SELECT sst.stream_id, st.id, st.display_name, COALESCE(st.color, ''), st.created_at
 		FROM stream_tags st
 		JOIN stream_stream_tags sst ON st.id = sst.tag_id
 		WHERE sst.stream_id = ANY($1)`

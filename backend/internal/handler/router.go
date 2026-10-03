@@ -1860,6 +1860,10 @@ func (r *Router) handleListStreams(w http.ResponseWriter, req *http.Request) {
 
 	// tag は複数指定できる（tag=singing&tag=3d）。**全部を持つ配信**に絞る（AND）。
 	result, err := r.streamService.GetAll(page, limit, sort, dir, req.URL.Query()["tag"], userHasPermission(req, auth.PermContentEdit))
+	if errors.Is(err, repository.ErrTooManyStreamTags) {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1872,6 +1876,10 @@ func (r *Router) handleListStreams(w http.ResponseWriter, req *http.Request) {
 // **公開**：配信一覧そのものが未ログインで見られるので、その内訳を伏せる理由が無い。
 func (r *Router) handleStreamTagCounts(w http.ResponseWriter, req *http.Request) {
 	counts, err := r.streamService.CountTagsForList(req.URL.Query()["tag"])
+	if errors.Is(err, repository.ErrTooManyStreamTags) {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
