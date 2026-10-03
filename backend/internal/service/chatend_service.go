@@ -71,9 +71,13 @@ func (s *ChatEndService) AnalyzeStream(videoID string) (AnalyzeResult, error) {
 	}
 
 	// この経路は拍手 end の付与そのものが目的で、到達できなければ 0 件になるだけ。
-	// 抽出結果のキャッシュは触らないので、到達可否で分岐する必要は無い。
-	songs, filled, changed, outcome := s.DetectEndsForSongs(videoID, duration, songs)
+	// 一時的な取得失敗は具体的な原因を呼び出し元へ返し、実行記録に残す。
+	loaded := s.Probe(videoID)
+	songs, filled, changed, outcome := s.DetectEndsForSongsLoaded(loaded, videoID, duration, songs)
 	res = AnalyzeResult{Total: len(songs), Filled: filled, Changed: changed, Outcome: outcome}
+	if outcome == chatTransientError {
+		return res, loaded.err
+	}
 	// 既に end があった曲でも ChatEnd / EndDiff は保存する。値そのものは変えないが、
 	// コメントの end と拍手の end がずれている曲を UI で拾えるようにするため
 	// （filled だけを保存条件にしていた頃は、この差分が毎回捨てられていた）。
@@ -121,11 +125,11 @@ func usableLiveChatFile(path, videoID, label string) bool {
 // 取得と検証をここ 1 か所にまとめてあるのは、**呼び出し側が「取れたか」だけを見て
 // 先へ進めないようにする**ため。サイズは有効性の根拠にならない ── 十分に長くても
 // 中身が replay でなければ、パーサは全行を読み飛ばして「0 件・エラー無し」を返す。
-func (s *ChatEndService) loadChat(videoID string) ([]chatend.Event, chatOutcome) {
+func (s *ChatEndService) loadChat(videoID string) ([]chatend.Event, chatOutcome, error) {
 	chatPath, outcome, err := s.fetchLiveChat(videoID)
 	if err != nil {
 		logger.Warnf("[chatend] %s: live chat を利用できません: %v", videoID, err)
-		return nil, outcome
+		return nil, outcome, err
 	}
 
 	// **使えないファイルは必ず消す。** 消さずに transient を返すと、次回も同じ
@@ -137,13 +141,13 @@ func (s *ChatEndService) loadChat(videoID string) ([]chatend.Event, chatOutcome)
 	case err != nil:
 		logger.Warnf("[chatend] %s: live chat の解析に失敗。キャッシュを消して取り直します: %v", videoID, err)
 		_ = os.Remove(chatPath)
-		return nil, chatTransientError
+		return nil, chatTransientError, err
 	case !recognized:
 		logger.Warnf("[chatend] %s: live chat replay として読めませんでした。キャッシュを消して取り直します", videoID)
 		_ = os.Remove(chatPath)
-		return nil, chatTransientError
+		return nil, chatTransientError, ErrLiveChatUnreadable
 	}
-	return events, chatOK
+	return events, chatOK, nil
 }
 
 // Probe は live chat が使えるかだけを確かめる（曲目が要らない段階で呼ぶ）。
@@ -154,8 +158,8 @@ func (s *ChatEndService) loadChat(videoID string) ([]chatend.Event, chatOutcome)
 //
 // 成功時はファイルがディスクに載るので、後段の DetectEnds は再取得しない。
 func (s *ChatEndService) Probe(videoID string) ChatLoad {
-	events, outcome := s.loadChat(videoID)
-	return ChatLoad{events: events, outcome: outcome, loaded: true}
+	events, outcome, err := s.loadChat(videoID)
+	return ChatLoad{events: events, outcome: outcome, err: err, loaded: true}
 }
 
 // ChatLoad は取得・検証済みの live chat。**先行確認の結果を後段へ渡すためのもの。**
@@ -164,6 +168,7 @@ func (s *ChatEndService) Probe(videoID string) ChatLoad {
 type ChatLoad struct {
 	events  []chatend.Event
 	outcome chatOutcome
+	err     error // ログが消えても backfill の実行記録に原因を残す
 	loaded  bool
 }
 

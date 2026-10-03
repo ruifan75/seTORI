@@ -114,6 +114,9 @@ func TestTaskRunCapsFailureList(t *testing.T) {
 	if len(failures) != maxTaskFailures {
 		t.Errorf("失敗の記録が %d 件（上限 %d）", len(failures), maxTaskFailures)
 	}
+	if failures[0].Target != "v50" || failures[len(failures)-1].Target != fmt.Sprintf("v%d", maxTaskFailures+49) {
+		t.Errorf("直近の失敗ではない: first=%s last=%s", failures[0].Target, failures[len(failures)-1].Target)
+	}
 	if got := fmt.Sprint(progress[5]); got != fmt.Sprint(maxTaskFailures+50) {
 		t.Errorf("失敗の件数 = %s, want %d", got, maxTaskFailures+50)
 	}
@@ -159,6 +162,7 @@ type taskDriver struct {
 	mu         sync.Mutex
 	calls      []taskCall
 	failInsert bool
+	beforeExec func(string, []driver.Value)
 }
 
 func (d *taskDriver) Open(string) (driver.Conn, error) { return &taskConn{d: d}, nil }
@@ -197,6 +201,9 @@ func (s *taskStmt) Close() error  { return nil }
 func (s *taskStmt) NumInput() int { return -1 }
 func (s *taskStmt) Exec(args []driver.Value) (driver.Result, error) {
 	norm := strings.Join(strings.Fields(s.q), " ")
+	if s.d.beforeExec != nil {
+		s.d.beforeExec(norm, args)
+	}
 	s.d.mu.Lock()
 	fail := s.d.failInsert && strings.HasPrefix(norm, "INSERT INTO task_runs")
 	s.d.calls = append(s.d.calls, taskCall{query: norm, args: args})
@@ -230,4 +237,42 @@ func newTaskDB(t *testing.T) (*sql.DB, *taskDriver) {
 func nilDB(t *testing.T) *sql.DB {
 	db, _ := newTaskDB(t)
 	return db
+}
+
+// 遅い UPDATE が新しい snapshot を上書きしないこと。DB に着く順を意図的に逆転させる。
+func TestTaskProgressDoesNotRegress(t *testing.T) {
+	db, d := newTaskDB(t)
+	svc := NewTaskRunService(repository.NewTaskRunRepository(db))
+	run, err := svc.Start(TaskChapterBackfill, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entered, release := make(chan struct{}), make(chan struct{})
+	d.beforeExec = func(q string, args []driver.Value) {
+		if strings.HasPrefix(q, "UPDATE task_runs SET total") && args[2] == int64(1) {
+			close(entered)
+			<-release
+		}
+	}
+	run.mu.Lock()
+	run.total, run.done = 2, 1
+	run.mu.Unlock()
+	first := make(chan struct{})
+	go func() { run.flush(true); close(first) }()
+	<-entered
+	run.mu.Lock()
+	run.done = 2
+	run.mu.Unlock()
+	second := make(chan struct{})
+	go func() { run.flush(true); close(second) }()
+	select {
+	case <-second:
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	<-first
+	<-second
+	if got := d.lastExec("UPDATE task_runs SET total")[2]; got != int64(2) {
+		t.Fatalf("古い UPDATE が進捗を巻き戻した: done=%v, want 2", got)
+	}
 }

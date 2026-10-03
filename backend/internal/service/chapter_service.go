@@ -313,6 +313,11 @@ func (s *ChapterService) fetchChapters(videoID string) ([]Chapter, error) {
 
 	out := firstNonEmptyLine(stdout.String())
 	if out == "" || out == "NA" || out == "null" {
+		// --ignore-no-formats-error で警告に降格した取得失敗を「章節なし」にしない。
+		// 空配列を保存すると次の backfill から外れ、取得失敗が成功として固定される。
+		if isTransientFailure(stderr.String()) {
+			return nil, fmt.Errorf("チャプターを取得できませんでした（一時的な失敗）: %s", ytdlpErrorLine(stderr.String()))
+		}
 		return []Chapter{}, nil // 章節の無い動画。これも結果なので空配列で保存する
 	}
 

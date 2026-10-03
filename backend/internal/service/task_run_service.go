@@ -92,6 +92,7 @@ type TaskRun struct {
 	ID   uuid.UUID
 	kind string
 
+	flushMu   sync.Mutex // snapshot と UPDATE の順序を揃える
 	mu        sync.Mutex
 	total     int
 	done      int
@@ -121,8 +122,10 @@ func (t *TaskRun) Skip() { t.record(func() { t.skipped++ }) }
 func (t *TaskRun) Fail(target, reason string) {
 	t.record(func() {
 		t.failed++
-		if len(t.failures) < maxTaskFailures {
-			t.failures = append(t.failures, repository.TaskFailure{Target: target, Reason: reason})
+		t.failures = append(t.failures, repository.TaskFailure{Target: target, Reason: reason})
+		if len(t.failures) > maxTaskFailures {
+			copy(t.failures, t.failures[1:])
+			t.failures = t.failures[:maxTaskFailures]
 		}
 	})
 }
@@ -139,6 +142,8 @@ func (t *TaskRun) record(apply func()) {
 // backfill が 1 件ごとに UPDATE すると、それだけで 1 vCPU の本番機の DB を叩き続ける。
 // 件数の最終値は Finish が必ず書く。
 func (t *TaskRun) flush(force bool) {
+	t.flushMu.Lock()
+	defer t.flushMu.Unlock()
 	t.mu.Lock()
 	if !force && time.Since(t.lastFlush) < 2*time.Second {
 		t.mu.Unlock()
