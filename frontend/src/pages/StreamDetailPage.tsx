@@ -1894,7 +1894,7 @@ export default function StreamDetailPage() {
           </div>
 
           <div className="border-t py-3 px-0 shrink-0">
-            {/* YouTube の進捗バーと左右端を揃える（デスクトップ UI は左側の余白が少し広い）。 */}
+            {/* 時間帯バーはカード幅に置く。映像は高さ上限に合わせて幅が狭くなる場合がある。 */}
             <div className="space-y-1 px-3 sm:pl-9 sm:pr-8">
               <div className="relative h-3 bg-gray-100 rounded-none">
                 {setoriTimeline.map((item) => (
