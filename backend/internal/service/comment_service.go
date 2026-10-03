@@ -604,10 +604,12 @@ func extractionRulesSalt() []byte {
 // コメントが無効・0 件の動画では外部取得が正常に空を返すので、その後の分析が
 // 「保存済みの入力が無い」になっても**失敗ではない**（調べた結果、何も無い）。
 func (s *CommentService) RefreshCommentRaw(videoID string) (int, error) {
-	comments, err := s.holodexService.GetVideoComments(videoID)
+	res, err := s.holodexService.fetchVideoComments(videoID)
 	if err != nil {
 		return 0, fmt.Errorf("fetch comments: %w", err)
 	}
+	comments := res.Comments
+	s.recordCommentAvailability(videoID, res)
 	rawJSON, err := json.Marshal(comments)
 	if err != nil {
 		return 0, fmt.Errorf("marshal comments: %w", err)
@@ -628,6 +630,31 @@ func (s *CommentService) RefreshCommentRaw(videoID string) (int, error) {
 	}
 	logger.Infof("[comment] refreshed %d raw comments for %s", len(comments), videoID)
 	return len(comments), nil
+}
+
+// recordCommentAvailability は「YouTube がコメントは取れないと明言したか」を記録する
+// （issue #56）。自動処理の取り直しはこれを見て間隔を空ける。
+//
+//   - 明言され、かつ Holodex にも 0 件 → 記録する（連続回数を進める）
+//   - YouTube が正常に応答した、またはどこかからコメントが取れた → 消す
+//   - それ以外（YouTube の一時的な失敗・未設定で 0 件）→ **何もしない**。
+//     分からないことを「取れない」とも「取れる」とも記録しない
+//
+// 記録の失敗は取り直しそのものを止めない（警告だけ）。最悪でも従来どおり毎回取りに行く。
+func (s *CommentService) recordCommentAvailability(videoID string, res videoCommentsResult) {
+	switch {
+	case res.YouTubeUnavailable && len(res.Comments) == 0:
+		count, err := s.streamRepo.MarkCommentsUnavailable(videoID)
+		if err != nil {
+			logger.Warnf("[comment] %s: 取得不能の記録に失敗: %v", videoID, err)
+			return
+		}
+		logger.Infof("[comment] %s: YouTube がコメントは取れないと返した（連続 %d 回目）。自動の取り直しは間隔を空けます", videoID, count)
+	case res.YouTubeOK || len(res.Comments) > 0:
+		if err := s.streamRepo.ClearCommentsUnavailable(videoID); err != nil {
+			logger.Warnf("[comment] %s: 取得不能の記録の解除に失敗: %v", videoID, err)
+		}
+	}
 }
 
 // SyncYouTubeCommentRaw は YouTube Data API から明示的にコメントを取り直す。

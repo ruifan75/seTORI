@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -757,18 +758,41 @@ func (s *HolodexService) LoadHolodexSongs(videoID string) (*dto.LoadHolodexSongs
 // GetVideoComments は動画の公開コメントを取得する（コメント分析用）。
 // YouTube を正とし、未設定・リクエスト失敗・コメントなしの場合に Holodex を試す。
 func (s *HolodexService) GetVideoComments(videoID string) ([]string, error) {
+	res, err := s.fetchVideoComments(videoID)
+	return res.Comments, err
+}
+
+// videoCommentsResult はコメント取得の結果と、**YouTube が何と言ったか**。
+//
+// GetVideoComments は Holodex へ落とすので、戻り値の件数だけでは
+// 「YouTube がコメント欄は無いと明言した」と「YouTube が一時的に落ちた」の区別が
+// 消える（issue #56：404 の配信を毎時取り直し続けていた）。取り直しの間隔を
+// 決めるのにその区別が要るので、ここで落とさずに返す。
+type videoCommentsResult struct {
+	Comments []string
+	// YouTubeOK は YouTube が正常に応答した（0 件を含む）。コメント欄があると分かる。
+	YouTubeOK bool
+	// YouTubeUnavailable は YouTube が「取れない」と明言した（youtube.ErrCommentsUnavailable）。
+	// YouTubeOK とは両立しない。どちらも false なら、YouTube については何も分からない
+	// （未設定・一時的な失敗）。
+	YouTubeUnavailable bool
+}
+
+func (s *HolodexService) fetchVideoComments(videoID string) (videoCommentsResult, error) {
+	var res videoCommentsResult
 	var youtubeErr error
-	youtubeSucceeded := false
 	if s.youtubeClient != nil && s.youtubeClient.IsConfigured() {
 		comments, err := s.GetYouTubeVideoComments(videoID)
 		if err == nil {
-			youtubeSucceeded = true
+			res.YouTubeOK = true
 			if len(comments) > 0 {
-				return comments, nil
+				res.Comments = comments
+				return res, nil
 			}
 			logger.Infof("[youtube] no comments returned for %s; trying Holodex fallback", videoID)
 		} else {
 			youtubeErr = err
+			res.YouTubeUnavailable = errors.Is(err, youtube.ErrCommentsUnavailable)
 			logger.Warnf("[youtube] comment fetch failed for %s: %v; trying Holodex fallback", videoID, err)
 		}
 	}
@@ -776,13 +800,14 @@ func (s *HolodexService) GetVideoComments(videoID string) ([]string, error) {
 	video, err := s.client.GetVideo(videoID)
 	if err != nil {
 		// YouTube が正常に空結果を返したなら、Holodex の障害を全体の失敗にはしない。
-		if youtubeSucceeded {
-			return []string{}, nil
+		if res.YouTubeOK {
+			res.Comments = []string{}
+			return res, nil
 		}
 		if youtubeErr != nil {
-			return nil, fmt.Errorf("get comments from YouTube: %v; get video from Holodex: %w", youtubeErr, err)
+			return res, fmt.Errorf("get comments from YouTube: %v; get video from Holodex: %w", youtubeErr, err)
 		}
-		return nil, fmt.Errorf("get video: %w", err)
+		return res, fmt.Errorf("get video: %w", err)
 	}
 
 	comments := make([]string, len(video.Comments))
@@ -791,7 +816,8 @@ func (s *HolodexService) GetVideoComments(videoID string) ([]string, error) {
 	}
 	logger.Infof("[holodex] fetched %d comments for %s", len(comments), videoID)
 
-	return comments, nil
+	res.Comments = comments
+	return res, nil
 }
 
 // GetYouTubeVideoComments は Holodex に fallback せず、YouTube Data API だけから
