@@ -221,15 +221,19 @@ func (s *ChapterService) analyzeChapters(videoID string, force, adjudicate bool)
 
 // Backfill はチャプターをまだ取得していない配信を順に取りに行く（同時実行数に上限あり）。
 // 一括セットリスト作成の前に流しておくためのもの。
-func (s *ChapterService) Backfill(concurrency int) {
+//
+// 結果は run（task_runs）へ 1 件ずつ記録する（issue #22）。
+func (s *ChapterService) Backfill(concurrency int, run *TaskRun) {
 	ids, err := s.streamRepo.FindIDsWithoutChapterRaw()
 	if err != nil {
 		logger.Warnf("[chapter] backfill: list streams failed: %v", err)
+		run.Finish("failed", "対象の取得に失敗しました: "+err.Error())
 		return
 	}
 	if concurrency < 1 {
 		concurrency = 1
 	}
+	run.SetTotal(len(ids))
 	logger.Infof("[chapter] backfill を開始: %d 件 (concurrency=%d)", len(ids), concurrency)
 
 	sem := make(chan struct{}, concurrency)
@@ -242,10 +246,17 @@ func (s *ChapterService) Backfill(concurrency int) {
 			defer wg.Done()
 			defer func() { <-sem }()
 			chapters, err := s.RefreshChapters(id)
-			if err != nil {
+			switch {
+			case err != nil:
 				logger.Warnf("[chapter] backfill %s: %v", id, err)
-			} else if len(chapters) > 0 {
+				run.Fail(id, err.Error())
+			case len(chapters) > 0:
 				atomic.AddInt64(&withChapters, 1)
+				run.Succeed()
+			default:
+				// 取得できたが章節が無い。**失敗ではない**（`chapter_raw = []` として
+				// 記録済みで、次から対象に入らない）。成功に数える。
+				run.Succeed()
 			}
 			if n := atomic.AddInt64(&done, 1); n%10 == 0 || int(n) == len(ids) {
 				logger.Infof("[chapter] backfill の進捗: %d/%d", n, len(ids))
@@ -253,7 +264,8 @@ func (s *ChapterService) Backfill(concurrency int) {
 		}(id)
 	}
 	wg.Wait()
-	logger.Infof("[chapter] backfill が完了: %d 件中 %d 件にチャプターあり", len(ids), atomic.LoadInt64(&withChapters))
+	run.Finish("done", fmt.Sprintf("%d 件中 成功 %d（うちチャプターあり %d）・失敗 %d",
+		len(ids), len(ids)-run.FailedCount(), atomic.LoadInt64(&withChapters), run.FailedCount()))
 }
 
 // fetchChapters は yt-dlp に章節だけを出力させる。

@@ -489,6 +489,26 @@ export interface AnalyzeCommentsResponse {
 
 // 未処理配信の一括プレ分析ジョブの進捗
 /** 自動処理（定期実行）の設定。**content:edit のみ**。 */
+/** 背景処理の実行 1 回（issue #22）。**content:edit のみ** */
+export interface TaskRun {
+  id: string;
+  kind: 'chat_end_backfill' | 'chapter_backfill' | string;
+  status: 'running' | 'done' | 'failed' | 'interrupted';
+  total: number;
+  done: number;
+  succeeded: number;
+  /** 失敗ではないが今回は結論を出さなかった（replay がまだ無い等） */
+  skipped: number;
+  failed: number;
+  params: Record<string, unknown>;
+  /** 失敗した対象と理由（直近の一部） */
+  failures: { target: string; reason: string }[];
+  message: string;
+  started_by_name?: string;
+  started_at: string;
+  finished_at?: string;
+}
+
 /** 「非表示だが現行規則で曲が出た」配信（issue #42）。**content:edit のみ**。 */
 export interface NonSingingCandidate {
   id: string;

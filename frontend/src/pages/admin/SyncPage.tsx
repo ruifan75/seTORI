@@ -1,7 +1,7 @@
 import { Fragment, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { holodexApi, batchAnalyzeApi, batchFillApi, singerApi, autoFillApi, nonSingingApi } from '../../api/client';
+import { holodexApi, batchAnalyzeApi, batchFillApi, singerApi, autoFillApi, nonSingingApi, taskApi } from '../../api/client';
 import { useToast } from '../../components/ui/ToastContext';
 import { useAuthStore, hasPermission, PERM } from '../../store/auth';
 import { formatSeconds } from '../../components/usePerformanceTiming';
@@ -160,6 +160,7 @@ export default function SyncPage() {
       <AutoFillTargets />
       <AutoFillSchedule />
       <NonSingingCandidates />
+      <BackgroundTasks />
 
       {/* Sync by Channel */}
       <div className="bg-white rounded-lg shadow-sm border p-6">
@@ -909,6 +910,136 @@ function AutoFillSchedule() {
   );
 }
 
+
+// BackgroundTasks は yt-dlp を起動する backfill の実行と記録（issue #22）。
+//
+// 以前は curl で叩いて投げっぱなし、進捗も失敗も log だけだった。log はメモリ上の
+// 直近 1000 件なので、長い実行は自分の進捗行で失敗行を押し流す。ここでは実行ごとに
+// 成功・見送り・失敗を分けて出し、**失敗の理由を後から引ける**ようにする
+// （cookie を直して再実行すべきかの判断材料）。
+const TASK_LABELS: Record<string, string> = {
+  chapter_backfill: 'チャプターの取得',
+  chat_end_backfill: '拍手 end の埋め直し',
+};
+
+function BackgroundTasks() {
+  const queryClient = useQueryClient();
+  const { showToast } = useToast();
+  const canEdit = hasPermission(useAuthStore((st) => st.user), PERM.CONTENT_EDIT);
+  const authStatus = useAuthStore((st) => st.status);
+  const [openTask, setOpenTask] = useState<string | null>(null);
+
+  const { data: tasks, isError } = useQuery({
+    queryKey: ['tasks', canEdit],
+    queryFn: () => taskApi.list(10),
+    enabled: canEdit && authStatus !== 'loading',
+    // 走っている間だけ追う
+    refetchInterval: (q) => (q.state.data?.some((t) => t.status === 'running') ? 3000 : false),
+  });
+
+  const start = useMutation({
+    mutationFn: (kind: 'chapter' | 'chat_end') =>
+      kind === 'chapter' ? taskApi.startChapterBackfill(3) : taskApi.startChatEndBackfill(3),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      showToast('開始しました', 'success');
+    },
+    // 409（同じ処理が実行中）もバックエンドの文言をそのまま出す
+    onError: (err: Error) => showToast(err.message, 'error'),
+  });
+
+  if (!canEdit) return null;
+
+  return (
+    <div className="bg-white rounded-lg shadow-sm border p-6">
+      <h2 className="text-xl font-bold text-gray-900 mb-2">背景処理</h2>
+      <p className="text-gray-500 mb-4 text-sm">
+        yt-dlp を使う一括取得です。どちらも時間がかかり、YouTube に BOT 判定されると全件失敗します
+        （そのときは管理→設定で cookies.txt を更新してから再実行）。一括セットリスト作成は
+        yt-dlp を呼ばないので、チャプターを入力元に使うなら<strong>先にここで取得</strong>しておきます。
+      </p>
+      <div className="flex flex-wrap gap-2 mb-4">
+        <button
+          onClick={() => start.mutate('chapter')}
+          disabled={start.isPending}
+          title="チャプターを未取得の配信について、yt-dlp で目次を取得します"
+          className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:border-indigo-300 disabled:opacity-50"
+        >
+          チャプターを取得
+        </button>
+        <button
+          onClick={() => start.mutate('chat_end')}
+          disabled={start.isPending}
+          title="解析済みの配信について、live chat の拍手から曲の終了時刻を埋め直します"
+          className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:border-indigo-300 disabled:opacity-50"
+        >
+          拍手 end を埋め直す
+        </button>
+      </div>
+
+      {isError ? (
+        <p className="text-red-600 text-sm">記録の取得に失敗しました。</p>
+      ) : (tasks?.length ?? 0) === 0 ? (
+        <p className="text-gray-400 text-sm">まだ実行の記録がありません。</p>
+      ) : (
+        <ul className="divide-y border rounded-lg text-sm">
+          {tasks!.map((t) => (
+            <li key={t.id} className="px-4 py-2">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <span className="font-medium text-gray-800">{TASK_LABELS[t.kind] ?? t.kind}</span>
+                <span className="text-gray-500">
+                  {new Date(t.started_at).toLocaleString('ja-JP', {
+                    month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
+                  })}
+                  {t.started_by_name && ` ${t.started_by_name}`}
+                </span>
+                <span
+                  className={
+                    t.status === 'running'
+                      ? 'text-indigo-700'
+                      : t.status === 'done'
+                        ? 'text-gray-600'
+                        : 'text-red-600'
+                  }
+                >
+                  {{ running: '実行中', done: '完了', failed: '失敗', interrupted: '中断' }[t.status] ?? t.status}
+                </span>
+                <span className="text-gray-600">
+                  {t.done}/{t.total}（成功 {t.succeeded}・見送り {t.skipped}・
+                  <span className={t.failed > 0 ? 'text-red-600' : ''}>失敗 {t.failed}</span>）
+                </span>
+                {t.failures.length > 0 && (
+                  <button
+                    onClick={() => setOpenTask(openTask === t.id ? null : t.id)}
+                    className="text-red-600 underline hover:text-red-800"
+                  >
+                    失敗の理由
+                  </button>
+                )}
+              </div>
+              {t.message && t.status !== 'running' && <div className="text-xs text-gray-400 mt-0.5">{t.message}</div>}
+              {openTask === t.id && (
+                <ul className="mt-2 space-y-0.5 text-xs bg-gray-50 rounded p-2 max-h-60 overflow-y-auto">
+                  {t.failures.map((f, i) => (
+                    <li key={i} className="flex gap-2">
+                      <Link to={`/streams/${f.target}`} className="text-indigo-600 hover:underline shrink-0">
+                        {f.target}
+                      </Link>
+                      <span className="text-gray-600 break-all">{f.reason}</span>
+                    </li>
+                  ))}
+                  {t.failed > t.failures.length && (
+                    <li className="text-gray-400">ほか {t.failed - t.failures.length} 件（記録は直近の {t.failures.length} 件まで）</li>
+                  )}
+                </ul>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 // NonSingingCandidates は「非表示だが現行規則で曲が出た」配信の一覧。
 //

@@ -2,6 +2,7 @@ import axios from 'axios';
 import type {
   AutoFillSettings,
   NonSingingCandidate,
+  TaskRun,
   AutoFillRunResult,
   SongListResponse,
   Song,
@@ -414,6 +415,25 @@ export const nonSingingApi = {
 
   restore: async (id: string): Promise<void> => {
     await api.delete(`/api/non-singing-candidates/${id}/dismiss`);
+  },
+};
+
+// ========== 背景処理 API（issue #22） ==========
+// yt-dlp を起動する backfill。以前は投げっぱなしで log にしか出なかったので、
+// 実行ごとの進捗と失敗の理由を task_runs に残して読めるようにした。
+export const taskApi = {
+  list: async (limit = 10): Promise<TaskRun[]> => {
+    const { data } = await api.get('/api/tasks', { params: { limit } });
+    return data.tasks ?? [];
+  },
+  // 同じ種類が走っていれば 409（同じ配信へ yt-dlp を二重に起動しないため）
+  startChapterBackfill: async (concurrency = 3): Promise<{ task_id: string }> => {
+    const { data } = await api.post('/api/chapters/backfill', null, { params: { concurrency } });
+    return data;
+  },
+  startChatEndBackfill: async (concurrency = 3): Promise<{ task_id: string }> => {
+    const { data } = await api.post('/api/chat-ends/backfill', null, { params: { concurrency } });
+    return data;
   },
 };
 
