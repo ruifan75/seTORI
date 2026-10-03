@@ -61,6 +61,27 @@ func sectionIDs(t *testing.T, raw json.RawMessage) []string {
 	return ids
 }
 
+// セクションと件数だけでなく、画面がカードの分類・切替に使う旗まで読む。
+func sectionHiddenFlags(t *testing.T, raw json.RawMessage, want map[string]bool) {
+	t.Helper()
+	var rows []struct {
+		ID       string `json:"id"`
+		IsHidden *bool  `json:"is_hidden"`
+	}
+	if err := json.Unmarshal(raw, &rows); err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != len(want) {
+		t.Fatalf("行数: %d want %d", len(rows), len(want))
+	}
+	for _, row := range rows {
+		hidden, ok := want[row.ID]
+		if !ok || row.IsHidden == nil || *row.IsHidden != hidden {
+			t.Fatalf("表示旗: id=%s is_hidden=%v want=%v", row.ID, row.IsHidden, hidden)
+		}
+	}
+}
+
 // handler の権限判定、実際の SELECT/Scan、JSON の省略までを確認する。
 func TestSingerSectionsRespectViewerAndEditor(t *testing.T) {
 	db := reviewTestDB(t)
@@ -79,6 +100,8 @@ func TestSingerSectionsRespectViewerAndEditor(t *testing.T) {
 		if len(groups) != 2 || groups[0].Organization != "review_a" || groups[1].Organization != "review_b" || !reflect.DeepEqual(sectionIDs(t, groups[0].Singers), []string{"visible_i"}) || !reflect.DeepEqual(sectionIDs(t, groups[1].Singers), []string{"visible_a"}) {
 			t.Fatalf("表示中の事務所区分: %s", grouped["groups"])
 		}
+		sectionHiddenFlags(t, groups[0].Singers, map[string]bool{"visible_i": false})
+		sectionHiddenFlags(t, groups[1].Singers, map[string]bool{"visible_a": false})
 		total := 2
 		if canEdit {
 			total = 5
@@ -89,6 +112,7 @@ func TestSingerSectionsRespectViewerAndEditor(t *testing.T) {
 			t.Fatalf("総数=%d want=%d", actualTotal, total)
 		}
 		if canEdit {
+			sectionHiddenFlags(t, grouped["hidden"], map[string]bool{"hidden_a": true, "hidden_u": true, "hidden_e": true})
 			if !reflect.DeepEqual(sectionIDs(t, grouped["hidden"]), []string{"hidden_a", "hidden_u", "hidden_e"}) {
 				t.Fatalf("非表示の名前順: %s", grouped["hidden"])
 			}
@@ -103,6 +127,11 @@ func TestSingerSectionsRespectViewerAndEditor(t *testing.T) {
 		if !reflect.DeepEqual(sectionIDs(t, list["singers"]), want) {
 			t.Fatalf("権限別の一覧: %s", list["singers"])
 		}
+		flags := map[string]bool{"visible_a": false, "visible_i": false}
+		if canEdit {
+			flags["hidden_a"], flags["hidden_u"], flags["hidden_e"] = true, true, true
+		}
+		sectionHiddenFlags(t, list["singers"], flags)
 		if canEdit {
 			var n int
 			if err := json.Unmarshal(list["hidden_total"], &n); err != nil || n != 3 {
