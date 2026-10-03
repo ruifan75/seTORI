@@ -2070,7 +2070,7 @@ func (r *Router) handleListNonSingingCandidates(w http.ResponseWriter, req *http
 	respondJSON(w, http.StatusOK, result)
 }
 
-// handleListRestrictionReview は「公開してよいと裁定したあとで会限として検出された」
+// handleListRestrictionReview は公開の裁定と現在の会限判定が食い違う
 // 配信の一覧（content:edit、issue #26）。解決は既存の PUT /api/streams/{id} の
 // is_restricted で行う ── 裁定を書き直すと、その時点の判定が控えられて一覧から消える。
 func (r *Router) handleListRestrictionReview(w http.ResponseWriter, req *http.Request) {

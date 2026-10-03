@@ -296,8 +296,8 @@ type StreamResponse struct {
 	// それだけでは「チャンネルの方針で公開」と「この配信だけ公開と裁定」が区別できない。
 	// **編集者だけ**（運用の状態）。
 	RestrictionOverride *bool `json:"restriction_override,omitempty"`
-	// RestrictionNeedsReview は「公開してよいと裁定したあとで、自動判定が伏せる側へ
-	// 変わった」配信（issue #26）。**編集者だけ**。
+	// RestrictionNeedsReview は公開の裁定と現在の自動判定が食い違い、確認が必要な
+	// 配信（issue #26）。控えが無い旧裁定も含む。**編集者だけ**。
 	RestrictionNeedsReview bool      `json:"restriction_needs_review,omitempty"`
 	CreatedAt              time.Time `json:"created_at"`
 	UpdatedAt              time.Time `json:"updated_at"`
@@ -315,7 +315,7 @@ type NonSingingCandidate struct {
 	Tags       []string `json:"tags"`
 }
 
-// RestrictionReviewItem は「公開してよいと裁定したあとで会限として検出された」配信（issue #26）。
+// RestrictionReviewItem は公開の裁定と現在の会限判定が食い違う配信（issue #26）。
 type RestrictionReviewItem struct {
 	ID         string `json:"id"`
 	Title      string `json:"title"`

@@ -1276,8 +1276,8 @@ type RestrictionReviewRow struct {
 	BasisUnknown bool
 }
 
-// FindRestrictionReview は「公開してよいと裁定したあとで、自動判定が伏せる側へ
-// 変わった」配信を新しい順に返す（issue #26）。条件は `RestrictionNeedsReviewExpr`
+// FindRestrictionReview は公開の裁定と現在の自動判定が食い違う配信を新しい順に返す
+// （issue #26）。控えが無い旧裁定も含む。条件は `RestrictionNeedsReviewExpr`
 // だけ ── 配信詳細の警告と同じ式なので、一覧に出るものと詳細で警告が出るものが
 // ずれない。
 //

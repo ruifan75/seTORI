@@ -419,7 +419,7 @@ export const nonSingingApi = {
 };
 
 // ========== 秘匿の裁定の見直し API（issue #26） ==========
-// 「公開してよい」と裁定したあとで会限として検出された配信。解決は
+// 公開の裁定と現在の会限判定が食い違う配信（旧裁定も含む）。解決は
 // streamApi.update の is_restricted ── 裁定を書き直すとその時点の判定が控えられ、一覧から消える。
 export const restrictionReviewApi = {
   list: async (limit = 100): Promise<{ items: RestrictionReviewItem[]; total: number }> => {

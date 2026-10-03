@@ -844,10 +844,10 @@ func AutoRestrictedExpr(alias string) string {
 	return MembersOnlyDetectedExpr(alias) + " AND NOT " + allOwnersAllowExpr(alias)
 }
 
-// RestrictionNeedsReviewExpr は「公開してよいと裁定したあとで、自動判定が
-// 伏せる側へ変わった」配信（issue #26）。
+// RestrictionNeedsReviewExpr は公開の裁定と現在の自動判定が食い違い、
+// 確認が必要な配信（issue #26）。控えが NULL の旧裁定では前後関係は不明。
 //
-//	restriction_override = FALSE          … 人が「公開してよい」と決めた
+//	restriction_override IS FALSE        … 人が「公開してよい」と決めた
 //	AND 自動判定が今は伏せる               … 会限として検出され、方針も allow ではない
 //	AND 裁定の時点では伏せる判定ではなかった（または分からない）
 //
@@ -858,8 +858,10 @@ func AutoRestrictedExpr(alias string) string {
 //
 // 逆向き（伏せると決めたあと自動判定が公開へ変わった）は出さない。
 // 伏せたままなのは安全側なので、知らせる理由が無い。
+// IS FALSE は未裁定（NULL）を FALSE にする。= FALSE だと式全体が NULL に
+// なりうるため、FindByID で bool に Scan できない。
 func RestrictionNeedsReviewExpr(alias string) string {
-	return alias + ".restriction_override = FALSE AND " + AutoRestrictedExpr(alias) +
+	return alias + ".restriction_override IS FALSE AND " + AutoRestrictedExpr(alias) +
 		" AND " + alias + ".restriction_override_auto IS DISTINCT FROM TRUE"
 }
 

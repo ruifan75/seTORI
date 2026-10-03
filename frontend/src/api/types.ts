@@ -253,7 +253,7 @@ export interface Stream {
   // 人の裁定（true＝伏せる / false＝公開してよい）。未裁定なら無い。**content:edit のときだけ**。
   // is_restricted は実効値なので、それだけでは「チャンネルの方針で公開」と区別できない
   restriction_override?: boolean;
-  // 「公開してよい」と裁定したあとで会限として検出された（issue #26）。**content:edit のときだけ**
+  // 公開の裁定と現在の会限判定が食い違う（旧裁定も含む、issue #26）。**content:edit のときだけ**
   restriction_needs_review?: boolean;
   holodex_timeline_songs?: SongSuggestion[];  // Holodex タイムライン データ
   comment_timeline_songs?: CommentSong[];     // コメント解析済みタイムライン（分析キャッシュ）
@@ -494,7 +494,7 @@ export interface AnalyzeCommentsResponse {
 
 // 未処理配信の一括プレ分析ジョブの進捗
 /** 自動処理（定期実行）の設定。**content:edit のみ**。 */
-/** 「公開してよい」と裁定したあとで会限として検出された配信（issue #26）。**content:edit のみ**。 */
+/** 公開の裁定と現在の会限判定が食い違う配信（旧裁定も含む、issue #26）。**content:edit のみ**。 */
 export interface RestrictionReviewItem {
   id: string;
   title: string;

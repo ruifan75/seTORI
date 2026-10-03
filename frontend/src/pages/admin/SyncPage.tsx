@@ -122,6 +122,7 @@ export default function SyncPage() {
     }),
     onSuccess: (data) => {
       const message = data.message || `同期完了: ${data.synced_count}件 (新規: ${data.new_streams.length}, 更新: ${data.updated.length})`;
+      queryClient.invalidateQueries({ queryKey: ['restriction-review'] });
       showToast(message, 'success');
     },
     onError: (err: Error) => {
@@ -132,6 +133,7 @@ export default function SyncPage() {
   const syncVideoMutation = useMutation({
     mutationFn: () => holodexApi.syncVideo(videoId),
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['restriction-review'] });
       showToast('動画の同期が完了しました', 'success');
     },
     onError: (err: Error) => {
@@ -911,14 +913,15 @@ function AutoFillSchedule() {
 }
 
 
-// RestrictionReview は「公開してよいと裁定したあとで会限として検出された」配信（issue #26）。
+// RestrictionReview は公開の裁定と現在の会限判定が食い違う配信（issue #26）。
+// 控えが無い旧裁定も含むため、検出と裁定の前後関係は断定しない。
 //
 // 人の裁定は自動判定に勝つので、配信者が後から会限へ変えても公開のまま、
 // 何の知らせも無かった。**自動で伏せ直さない**（裁定の意味が無くなる）──
 // 食い違いを並べて人に決めさせる。配信を開かなくても気付けるよう、ここに置く。
 //
 // どちらのボタンも裁定を書き直す。書き直した時点の判定が控えられるので一覧から消え、
-// 「公開のまま」を選んだものは、以後また判定が変わるまで出てこない。
+// 「公開のまま」を選んだときは、現在の自動判定を確認済みとして控える。
 function RestrictionReview() {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
@@ -952,8 +955,8 @@ function RestrictionReview() {
     <div className="bg-white rounded-lg shadow-sm border border-red-200 p-6">
       <h2 className="text-xl font-bold text-gray-900 mb-2">公開の裁定を見直す配信</h2>
       <p className="text-gray-500 mb-4 text-sm">
-        「公開してよい」と裁定したあとで<strong>会限として検出された</strong>配信です。
-        配信者が後から会限へ変えた可能性があります。裁定は自動判定より優先されるので、
+        「公開してよい」という裁定が残る一方で、現在は<strong>会限として検出されている</strong>配信です。
+        裁定時点の判定が不明な以前の裁定も含みます。裁定は自動判定より優先されるので、
         このままだとセットリストは<strong>公開のまま</strong>です。
       </p>
       {isLoading ? (

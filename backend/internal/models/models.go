@@ -140,8 +140,8 @@ type Stream struct {
 	// FindByID だけだったので一覧系は常に「方針なし」として振る舞っていた）。
 	// 計算式は repository.EffectiveRestrictedExpr の 1 か所だけ。
 	IsRestrictedEffective bool `json:"-"`
-	// RestrictionNeedsReview は「公開してよいと裁定したあとで、自動判定が伏せる側へ
-	// 変わった」か（issue #26）。これも SELECT で計算する派生値で、式は
+	// RestrictionNeedsReview は公開の裁定と現在の自動判定が食い違い、確認が必要か
+	// （issue #26）。控えが無い旧裁定も含む。SELECT で計算する派生値で、式は
 	// repository.RestrictionNeedsReviewExpr の 1 か所だけ。**FindByID でのみ読む。**
 	RestrictionNeedsReview bool `json:"-"`
 	// HolodexUploadedAt は seTORI → Holodex への**送信を試みた**時刻（外部コピーの台帳）。

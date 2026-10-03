@@ -31,7 +31,7 @@ func TestRestrictionReviewExpressionsExact(t *testing.T) {
 		// `IS DISTINCT FROM TRUE` は NULL（この仕組みより前の裁定）を**出す側**へ倒す。
 		// `= FALSE` にすると NULL が落ち、既存の裁定が 1 件も警告されない。
 		{"RestrictionNeedsReviewExpr", RestrictionNeedsReviewExpr("st"),
-			"st.restriction_override = FALSE AND " + auto + " AND st.restriction_override_auto IS DISTINCT FROM TRUE"},
+			"st.restriction_override IS FALSE AND " + auto + " AND st.restriction_override_auto IS DISTINCT FROM TRUE"},
 	} {
 		if c.got != c.want {
 			t.Errorf("%s が変わっている\n got: %s\nwant: %s", c.name, c.got, c.want)
@@ -97,7 +97,7 @@ func TestFindRestrictionReviewUsesReviewExpr(t *testing.T) {
 	if len(issued) != 1 {
 		t.Fatalf("1 本のはずが %d 本: %q", len(issued), issued)
 	}
-	want := "WHERE st.restriction_override = FALSE AND " +
+	want := "WHERE st.restriction_override IS FALSE AND " +
 		"EXISTS (SELECT 1 FROM stream_stream_tags mt WHERE mt.stream_id = st.id AND mt.tag_id = 'members_only')" +
 		" AND NOT COALESCE((SELECT bool_and(COALESCE(eg.members_only_policy, '') = 'allow')" +
 		" FROM stream_singers eo JOIN singers eg ON eg.id = eo.singer_id" +
@@ -108,7 +108,8 @@ func TestFindRestrictionReviewUsesReviewExpr(t *testing.T) {
 	}
 }
 
-// 詳細の取得が、警告の判定を**同じ式で**計算して読んでいること。
+// 詳細の SELECT に警告の判定があること。Scan 後の値は
+// TestFindByIDRestrictionValues / TestFindByIDRestrictionReviewPostgres で検査する。
 func TestFindByIDSelectsNeedsReview(t *testing.T) {
 	db, rec := newRecordingDB(t)
 	NewStreamRepository(db).FindByID("abc")
