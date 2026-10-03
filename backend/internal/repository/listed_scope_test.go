@@ -289,3 +289,38 @@ func TestChannelScopeStaysOffWhereItWouldMislead(t *testing.T) {
 		}
 	}
 }
+
+// WHERE だけでは、歌唱とは別の配信にチャンネル判定を適用していても通る。
+// GetPerformanceCounts の発行 SQL 全体を固定し、JOIN の関連先も検査する。
+func TestGetPerformanceCountsQueryExact(t *testing.T) {
+	const publicWhere = "p.song_id = ANY($1::uuid[]) AND st.is_hidden = FALSE AND NOT COALESCE(st.restriction_override, " +
+		"EXISTS (SELECT 1 FROM stream_stream_tags mt WHERE mt.stream_id = st.id AND mt.tag_id = 'members_only')" +
+		" AND NOT COALESCE((SELECT bool_and(COALESCE(eg.members_only_policy, '') = 'allow')" +
+		" FROM stream_singers eo JOIN singers eg ON eg.id = eo.singer_id" +
+		" WHERE eo.stream_id = st.id AND eo.is_owner), FALSE))" +
+		" AND EXISTS (SELECT 1 FROM stream_singers ss JOIN singers si ON si.id = ss.singer_id" +
+		" WHERE ss.stream_id = st.id AND si.is_hidden = FALSE)"
+	for _, tc := range []struct {
+		name   string
+		access ViewerAccess
+		where  string
+	}{
+		{"public", PublicAccess, publicWhere},
+		{"restricted-view", RestrictedView, "p.song_id = ANY($1::uuid[]) AND TRUE"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, rec := newRecordingDB(t)
+			if _, err := NewSongRepository(db).GetPerformanceCounts([]uuid.UUID{uuid.MustParse("00000000-0000-0000-0000-000000000001")}, tc.access); err != nil {
+				t.Fatal(err)
+			}
+			issued := rec.all()
+			if len(issued) != 1 {
+				t.Fatalf("queries = %d, want 1", len(issued))
+			}
+			want := "SELECT p.song_id, COUNT(*) FROM performances p JOIN streams st ON p.stream_id = st.id WHERE " + tc.where + " GROUP BY p.song_id"
+			if got := strings.Join(strings.Fields(issued[0]), " "); got != want {
+				t.Errorf("歌唱数の SQL が変わっている\n got: %s\nwant: %s", got, want)
+			}
+		})
+	}
+}
