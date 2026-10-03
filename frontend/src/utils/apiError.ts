@@ -11,7 +11,7 @@ export function apiErrorMessage(error: unknown, fallback: string): string {
 // analysisFailureMessage は入力元の読み込み（Holodex / コメント / チャプター）の失敗を
 // 利用者向けの文言にする（issue #7）。
 //
-// **409 は「もう一度押せば通る」と言う。** 分析中に同期がコメントを差し替えると、
+// **409 は最新の入力での再実行を案内する。** 分析中に同期がコメントを差し替えると、
 // バックエンドは古い入力から作った結果を捨てて 409 を返す（`ErrCommentRawChanged`）。
 // 以前は理由を捨てて「失敗しました」とだけ出していたので、壊れたのか、
 // やり直せばよいのかが伝わらなかった。
