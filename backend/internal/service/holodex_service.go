@@ -757,6 +757,8 @@ func (s *HolodexService) LoadHolodexSongs(videoID string) (*dto.LoadHolodexSongs
 
 // GetVideoComments は動画の公開コメントを取得する（コメント分析用）。
 // YouTube を正とし、未設定・リクエスト失敗・コメントなしの場合に Holodex を試す。
+// 取得だけを行う。取得不能の記録を更新する呼び出し元は fetchVideoComments の
+// 結果を使い、recordCommentRecovery に取得元の状態も渡す。
 func (s *HolodexService) GetVideoComments(videoID string) ([]string, error) {
 	res, err := s.fetchVideoComments(videoID)
 	return res.Comments, err
@@ -776,6 +778,19 @@ type videoCommentsResult struct {
 	// YouTubeOK とは両立しない。どちらも false なら、YouTube については何も分からない
 	// （未設定・一時的な失敗）。
 	YouTubeUnavailable bool
+}
+
+// recordCommentRecovery は新たな取得でコメント欄の復旧を確認したら、待機の記録を消す。
+// YouTube の正常応答（0 件を含む）か、取得元によらず非空のコメントがある場合だけ。
+// 一時的な失敗・未設定と空の Holodex 結果では、復旧したか分からないので書かない。
+// 保存済みコメントの読み取りや dry-run からは呼ばない。
+func recordCommentRecovery(repo *repository.StreamRepository, videoID string, res videoCommentsResult) {
+	if !res.YouTubeOK && len(res.Comments) == 0 {
+		return
+	}
+	if err := repo.ClearCommentsUnavailable(videoID); err != nil {
+		logger.Warnf("[comment] %s: 取得不能の記録の解除に失敗: %v", videoID, err)
+	}
 }
 
 func (s *HolodexService) fetchVideoComments(videoID string) (videoCommentsResult, error) {
@@ -839,12 +854,14 @@ func (s *HolodexService) GetYouTubeVideoComments(videoID string) ([]string, erro
 // AI 抽出／正規化／拍手 end 検出は同期時には実行しない（大量同期で AI/yt-dlp に負荷を集中させないため）。
 // 編集ページで手動分析を実行したときだけ処理してキャッシュする（CommentService.AnalyzeComments を参照）。
 func (s *HolodexService) loadAndSaveComments(videoID string) {
-	comments, err := s.GetVideoComments(videoID)
+	res, err := s.fetchVideoComments(videoID)
 	if err != nil {
 		logger.Warnf("get comments error (video: %s): %v", videoID, err)
 		return
 	}
 
+	comments := res.Comments
+	recordCommentRecovery(s.streamRepo, videoID, res)
 	commentRawJSON, err := json.Marshal(comments)
 	if err != nil {
 		logger.Warnf("marshal comment raw error (video: %s): %v", videoID, err)

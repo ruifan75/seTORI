@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/ruifan75/setori/internal/repository"
 	"github.com/ruifan75/setori/pkg/holodex"
@@ -123,8 +124,9 @@ func (f stubTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 }
 
 type availDriver struct {
-	mu      sync.Mutex
-	queries []string
+	mu        sync.Mutex
+	queries   []string
+	storedRaw []byte
 }
 
 func (d *availDriver) Open(string) (driver.Conn, error) { return &availConn{d: d}, nil }
@@ -140,12 +142,15 @@ func (c *availConn) Prepare(q string) (driver.Stmt, error) {
 	c.d.mu.Lock()
 	c.d.queries = append(c.d.queries, q)
 	c.d.mu.Unlock()
-	return &availStmt{q: q}, nil
+	return &availStmt{q: q, d: c.d}, nil
 }
 func (c *availConn) Close() error              { return nil }
 func (c *availConn) Begin() (driver.Tx, error) { return nil, io.ErrUnexpectedEOF }
 
-type availStmt struct{ q string }
+type availStmt struct {
+	q string
+	d *availDriver
+}
 
 func (s *availStmt) Close() error  { return nil }
 func (s *availStmt) NumInput() int { return -1 }
@@ -153,24 +158,44 @@ func (s *availStmt) Exec([]driver.Value) (driver.Result, error) {
 	return driver.RowsAffected(1), nil
 }
 
-// RETURNING の 1 列（連続回数）だけ返す。それ以外は空。
+// 連続回数と、保存経路が先に読む配信を返す。空の comment_raw なら遠隔取得へ進む。
 func (s *availStmt) Query([]driver.Value) (driver.Rows, error) {
 	if strings.Contains(s.q, "RETURNING comment_unavailable_count") {
-		return &availRows{}, nil
+		return &availRows{values: []driver.Value{int64(1)}}, nil
+	}
+	if strings.Contains(s.q, "FROM streams WHERE id = $1") {
+		now := time.Now()
+		var raw driver.Value
+		if len(s.d.storedRaw) > 0 {
+			raw = s.d.storedRaw
+		}
+		return &availRows{values: []driver.Value{
+			"abc", "t", now, nil, nil, nil, nil, raw, nil, nil, nil, nil,
+			false, false, nil, nil, false, nil, nil, nil, now, now, false,
+		}}, nil
 	}
 	return &availRows{done: true}, nil
 }
 
-type availRows struct{ done bool }
+type availRows struct {
+	values []driver.Value
+	done   bool
+}
 
-func (r *availRows) Columns() []string { return []string{"c"} }
-func (r *availRows) Close() error      { return nil }
+func (r *availRows) Columns() []string {
+	out := make([]string, len(r.values))
+	for i := range out {
+		out[i] = fmt.Sprintf("c%d", i)
+	}
+	return out
+}
+func (r *availRows) Close() error { return nil }
 func (r *availRows) Next(dest []driver.Value) error {
 	if r.done {
 		return io.EOF
 	}
 	r.done = true
-	dest[0] = int64(1)
+	copy(dest, r.values)
 	return nil
 }
 
@@ -188,4 +213,145 @@ func newAvailDB(t *testing.T) (*sql.DB, *availDriver) {
 	}
 	t.Cleanup(func() { db.Close() })
 	return db, d
+}
+
+// 記録時刻・連続回数・対象 ID を含む UPDATE 全体を、実装を呼ばずに固定する。
+// 時刻更新だけを消すと backoff が効かないが、以前の部分一致検査では通っていた。
+const markCommentUnavailableSQL = "UPDATE streams SET comment_unavailable_at = NOW(), comment_unavailable_count = comment_unavailable_count + 1 WHERE id = $1 RETURNING comment_unavailable_count"
+const clearCommentUnavailableSQL = "UPDATE streams SET comment_unavailable_at = NULL, comment_unavailable_count = 0 WHERE id = $1 AND (comment_unavailable_at IS NOT NULL OR comment_unavailable_count <> 0)"
+
+func TestCommentAvailabilityWritesExact(t *testing.T) {
+	for _, tc := range []struct {
+		name, want string
+		call       func(*repository.StreamRepository) error
+	}{
+		{"mark-with-current-time", markCommentUnavailableSQL, func(r *repository.StreamRepository) error {
+			count, err := r.MarkCommentsUnavailable("abc")
+			if err == nil && count != 1 {
+				return fmt.Errorf("count=%d, want 1", count)
+			}
+			return err
+		}},
+		{"clear-time-and-count", clearCommentUnavailableSQL, func(r *repository.StreamRepository) error {
+			return r.ClearCommentsUnavailable("abc")
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, rec := newAvailDB(t)
+			if err := tc.call(repository.NewStreamRepository(db)); err != nil {
+				t.Fatal(err)
+			}
+			issued := rec.all()
+			if len(issued) != 1 {
+				t.Fatalf("queries=%d, want 1", len(issued))
+			}
+			if got := strings.Join(strings.Fields(issued[0]), " "); got != tc.want {
+				t.Errorf("取得不能の記録 SQL が変わっている\n got: %s\nwant: %s", got, tc.want)
+			}
+		})
+	}
+}
+
+// 新たに遠隔取得する保存経路は 5 つ。取得結果から復旧が分かったときは
+// 全経路で解除し、分からない空結果では解除しない。dry-run は記録を書かない。
+func TestCommentRecoveryAllFetchPaths(t *testing.T) {
+	const ytComment = `{"items":[{"snippet":{"topLevelComment":{"snippet":{"textOriginal":"0:10 曲"}}}}]}`
+	const hdComment = `{"id":"abc","comments":[{"message":"0:10 曲"}]}`
+	for _, path := range []string{"refresh", "youtube-sync", "holodex-sync", "analysis-fetch", "raw-comments", "dry-run"} {
+		for _, tc := range []struct {
+			name                                  string
+			ytStatus                              int
+			ytBody                                string
+			hdStatus                              int
+			hdBody                                string
+			recovered, youtubeOK, markUnavailable bool
+		}{
+			{"youtube-normal-empty", 200, `{"items":[]}`, 200, `{"id":"abc","comments":[]}`, true, true, false},
+			{"youtube-has-comments", 200, ytComment, 200, `{"id":"abc","comments":[]}`, true, true, false},
+			{"unavailable-but-holodex-has-comments", 404, `{}`, 200, hdComment, true, false, false},
+			{"temporary-youtube-error-empty-fallback", 500, `{}`, 200, `{"id":"abc","comments":[]}`, false, false, false},
+			{"temporary-youtube-error-nonempty-fallback", 500, `{}`, 200, hdComment, true, false, false},
+			{"quota-error-empty-fallback", 403, `{"error":{"errors":[{"reason":"quotaExceeded"}]}}`, 200, `{"id":"abc","comments":[]}`, false, false, false},
+			{"unavailable-empty-fallback", 404, `{}`, 200, `{"id":"abc","comments":[]}`, false, false, true},
+			{"normal-youtube-empty-holodex-error", 200, `{"items":[]}`, 500, `{}`, true, true, false},
+			{"unavailable-holodex-error", 404, `{}`, 500, `{}`, false, false, false},
+			{"youtube-unconfigured-empty-fallback", 0, ``, 200, `{"id":"abc","comments":[]}`, false, false, false},
+		} {
+			t.Run(path+"/"+tc.name, func(t *testing.T) {
+				calls := 0
+				key := "test-key"
+				if tc.ytStatus == 0 {
+					key = ""
+				}
+				yt := youtube.NewClient(key)
+				yt.SetTransport(stubTransport(func(*http.Request) (int, string) { calls++; return tc.ytStatus, tc.ytBody }))
+				hd := holodex.NewClient("test-key")
+				hd.SetTransport(stubTransport(func(*http.Request) (int, string) { calls++; return tc.hdStatus, tc.hdBody }))
+				db, rec := newAvailDB(t)
+				repo := repository.NewStreamRepository(db)
+				hs := &HolodexService{client: hd, youtubeClient: yt, streamRepo: repo}
+				cs := &CommentService{holodexService: hs, streamRepo: repo}
+				switch path {
+				case "refresh":
+					cs.RefreshCommentRaw("abc")
+				case "youtube-sync":
+					cs.SyncYouTubeCommentRaw("abc")
+				case "holodex-sync":
+					hs.loadAndSaveComments("abc")
+				case "analysis-fetch":
+					cs.getComments("abc", nil, false, false)
+				case "raw-comments":
+					cs.GetRawComments("abc")
+				case "dry-run":
+					cs.getComments("abc", nil, true, false)
+				}
+				if calls == 0 && !(path == "youtube-sync" && tc.ytStatus == 0) {
+					t.Fatal("遠隔取得に到達していない")
+				}
+				wantClear := tc.recovered && path != "dry-run"
+				if path == "youtube-sync" {
+					wantClear = tc.youtubeOK
+				}
+				wantMark := tc.markUnavailable && path == "refresh"
+				var availabilitySQL []string
+				for _, q := range rec.all() {
+					if strings.Contains(q, "comment_unavailable_") {
+						availabilitySQL = append(availabilitySQL, strings.Join(strings.Fields(q), " "))
+					}
+				}
+				var want []string
+				if wantClear {
+					want = []string{clearCommentUnavailableSQL}
+				}
+				if wantMark {
+					want = []string{markCommentUnavailableSQL}
+				}
+				if len(availabilitySQL) != len(want) || (len(want) > 0 && availabilitySQL[0] != want[0]) {
+					t.Errorf("availability SQL=%q, want %q", availabilitySQL, want)
+				}
+				if path == "dry-run" && len(rec.all()) != 0 {
+					t.Errorf("dry-run が DB を更新している: %q", rec.all())
+				}
+			})
+		}
+	}
+}
+
+// 保存済みコメントを読むだけでは、遠隔側の復旧を確認したことにならない。
+func TestCachedCommentsLeaveAvailabilityAlone(t *testing.T) {
+	db, rec := newAvailDB(t)
+	rec.storedRaw = []byte(`["0:10 保存済み"]`)
+	svc := &CommentService{streamRepo: repository.NewStreamRepository(db)}
+	got, err := svc.GetRawComments("abc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != "0:10 保存済み" {
+		t.Fatalf("comments=%q", got)
+	}
+	for _, q := range rec.all() {
+		if strings.Contains(q, "UPDATE") {
+			t.Errorf("キャッシュの読み取りで更新している: %s", q)
+		}
+	}
 }

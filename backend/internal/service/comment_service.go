@@ -614,7 +614,8 @@ func (s *CommentService) RefreshCommentRaw(videoID string) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("marshal comments: %w", err)
 	}
-	// **Holodex fallback つきなので「0 件」と「取れなかった」を区別できない。**
+	// YouTube の状態は待機の記録に使うが、Holodex fallback の空結果だけでは
+	// 保存済みコメントを消してよいとは決められない。
 	// 空で非空を潰さないのは SaveCommentRaw（SQL）が見る。
 	written, err := s.streamRepo.SaveCommentRaw(videoID, util.SanitizeJSONB(rawJSON), repository.KeepExistingOnEmpty)
 	if err != nil {
@@ -650,10 +651,8 @@ func (s *CommentService) recordCommentAvailability(videoID string, res videoComm
 			return
 		}
 		logger.Infof("[comment] %s: YouTube がコメントは取れないと返した（連続 %d 回目）。自動の取り直しは間隔を空けます", videoID, count)
-	case res.YouTubeOK || len(res.Comments) > 0:
-		if err := s.streamRepo.ClearCommentsUnavailable(videoID); err != nil {
-			logger.Warnf("[comment] %s: 取得不能の記録の解除に失敗: %v", videoID, err)
-		}
+	default:
+		recordCommentRecovery(s.streamRepo, videoID, res)
 	}
 }
 
@@ -672,6 +671,7 @@ func (s *CommentService) SyncYouTubeCommentRaw(videoID string) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("fetch comments from YouTube: %w", err)
 	}
+	recordCommentRecovery(s.streamRepo, videoID, videoCommentsResult{Comments: comments, YouTubeOK: true})
 	rawJSON, err := json.Marshal(comments)
 	if err != nil {
 		return 0, fmt.Errorf("marshal YouTube comments: %w", err)
@@ -889,7 +889,7 @@ func (s *CommentService) parseComments(comments []string) (songs []comment.Parse
 }
 
 // getComments は DB から空でない元コメントを読み込み、なければ YouTube/Holodex から取得して保存する。
-// saveRaw=false のとき、遠隔から取り直したコメントを DB に書かない（dry-run 用）。
+// dryRun=true のとき、遠隔から取り直しても comment_raw と取得不能の記録を書き換えない。
 func (s *CommentService) getComments(videoID string, stream *models.Stream, dryRun, noRemote bool) ([]string, error) {
 	if stream != nil && len(stream.CommentRaw) > 0 {
 		var comments []string
@@ -908,9 +908,13 @@ func (s *CommentService) getComments(videoID string, stream *models.Stream, dryR
 		return nil, ErrNoStoredComments
 	}
 
-	comments, err := s.holodexService.GetVideoComments(videoID)
+	res, err := s.holodexService.fetchVideoComments(videoID)
 	if err != nil {
 		return nil, fmt.Errorf("get comments: %w", err)
+	}
+	comments := res.Comments
+	if !dryRun {
+		recordCommentRecovery(s.streamRepo, videoID, res)
 	}
 	if raw, marshalErr := json.Marshal(comments); marshalErr == nil && !dryRun {
 		if _, saveErr := s.streamRepo.SaveCommentRaw(videoID, util.SanitizeJSONB(raw), repository.KeepExistingOnEmpty); saveErr != nil {
@@ -936,10 +940,12 @@ func (s *CommentService) GetRawComments(videoID string) ([]string, error) {
 		// 壊れたキャッシュと空配列は無視して取り直す
 	}
 
-	comments, err := s.holodexService.GetVideoComments(videoID)
+	res, err := s.holodexService.fetchVideoComments(videoID)
 	if err != nil {
 		return nil, err
 	}
+	comments := res.Comments
+	recordCommentRecovery(s.streamRepo, videoID, res)
 	if raw, err := json.Marshal(comments); err == nil {
 		if _, saveErr := s.streamRepo.SaveCommentRaw(videoID, util.SanitizeJSONB(raw), repository.KeepExistingOnEmpty); saveErr != nil {
 			logger.Warnf("save comment raw error (video: %s): %v", videoID, saveErr)
