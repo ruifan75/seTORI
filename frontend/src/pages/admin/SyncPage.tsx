@@ -769,8 +769,13 @@ function AutoFillSchedule() {
   const [refreshDays, setRefreshDays] = useState<number | null>(null);
 
   const save = useMutation({
-    mutationFn: (next: { enabled: boolean; interval: number; refreshDays: number }) =>
-      autoFillApi.updateSettings(next.enabled, next.interval, next.refreshDays),
+    mutationFn: (next: { enabled: boolean; interval: number; refreshDays: number; includeCollabs: boolean }) =>
+      autoFillApi.updateSettings({
+        enabled: next.enabled,
+        interval_hours: next.interval,
+        refresh_days: next.refreshDays,
+        include_collabs: next.includeCollabs,
+      }),
     onSuccess: (data) => {
       queryClient.setQueryData(['autoFillSettings', canEdit], data);
       // **サーバーが丸めた値を画面へ戻す。** ローカル state を残すと、
@@ -802,6 +807,8 @@ function AutoFillSchedule() {
 
   const effInterval = interval ?? settings?.interval_hours ?? 6;
   const effRefresh = refreshDays ?? settings?.refresh_days ?? 30;
+  // 客串の旗は即時保存（有効の旗と同じ）なので、ローカル state を持たない。
+  const effCollabs = settings?.include_collabs ?? false;
 
   return (
     <div className="bg-white rounded-lg shadow-sm border p-6">
@@ -827,12 +834,38 @@ function AutoFillSchedule() {
                 type="checkbox"
                 checked={settings?.enabled ?? false}
                 onChange={(e) =>
-                  save.mutate({ enabled: e.target.checked, interval: effInterval, refreshDays: effRefresh })
+                  save.mutate({
+                    enabled: e.target.checked,
+                    interval: effInterval,
+                    refreshDays: effRefresh,
+                    includeCollabs: effCollabs,
+                  })
                 }
                 disabled={save.isPending}
                 className="w-4 h-4 rounded border-gray-300"
               />
               定期実行を有効にする
+            </label>
+
+            <label
+              className="flex items-center gap-2 text-sm"
+              title="登録チャンネルがゲスト参加しただけの配信も対象にします。歌手が複数なので、歌単は全部審査へ回ります"
+            >
+              <input
+                type="checkbox"
+                checked={effCollabs}
+                onChange={(e) =>
+                  save.mutate({
+                    enabled: settings?.enabled ?? false,
+                    interval: effInterval,
+                    refreshDays: effRefresh,
+                    includeCollabs: e.target.checked,
+                  })
+                }
+                disabled={save.isPending}
+                className="w-4 h-4 rounded border-gray-300"
+              />
+              参加した配信（客串）も対象にする
             </label>
 
             <label className="flex items-center gap-2 text-sm">
@@ -863,7 +896,12 @@ function AutoFillSchedule() {
 
             <button
               onClick={() =>
-                save.mutate({ enabled: settings?.enabled ?? false, interval: effInterval, refreshDays: effRefresh })
+                save.mutate({
+                  enabled: settings?.enabled ?? false,
+                  interval: effInterval,
+                  refreshDays: effRefresh,
+                  includeCollabs: effCollabs,
+                })
               }
               disabled={save.isPending}
               className="px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
@@ -886,6 +924,14 @@ function AutoFillSchedule() {
           <p className="text-xs text-gray-400 mt-3">
             間隔を短くすると、配信直後で live chat がまだ取得できない配信を何度も処理し直します。
           </p>
+          {/* 客串は歌手が複数居るので、一括作成は誰が歌ったかを決めず全行を審査へ回す。
+              mention されただけの告知・企画枠も入るが、審査で落とせる */}
+          {effCollabs && (
+            <p className="text-xs text-gray-400 mt-1">
+              客串の配信は歌手が複数居るため、作った歌単は全部審査へ回ります。
+              mention されただけの告知や企画枠も対象に入るので、審査で落としてください。
+            </p>
+          )}
 
           {settings?.last_skipped_at && (
             <p className="text-sm text-amber-700 mt-3">

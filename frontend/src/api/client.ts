@@ -426,18 +426,16 @@ export const autoFillApi = {
     return data;
   },
 
-  updateSettings: async (
-    enabled: boolean,
-    intervalHours: number,
-    refreshDays: number,
-  ): Promise<AutoFillSettings> => {
-    // 3 項目とも送る。バックエンドは欠けていると 400 を返す
-    // （`{}` が黙って自動処理を止めるのを防ぐため）。
-    const { data } = await api.put('/api/auto-fill/settings', {
-      enabled,
-      interval_hours: intervalHours,
-      refresh_days: refreshDays,
-    });
+  // 4 項目とも送る。バックエンドは欠けていると 400 を返す
+  // （`{}` が黙って自動処理を止めるのを防ぐため）。真偽値が 2 つあるので
+  // 位置引数にせず名前で渡す（取り違えると客串の旗と有効の旗が入れ替わる）。
+  updateSettings: async (next: {
+    enabled: boolean;
+    interval_hours: number;
+    refresh_days: number;
+    include_collabs: boolean;
+  }): Promise<AutoFillSettings> => {
+    const { data } = await api.put('/api/auto-fill/settings', next);
     return data;
   },
 
