@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // 発行された SQL を記録するだけの driver。
@@ -20,8 +21,9 @@ import (
 //
 // **実際に呼んで、出てきた SQL を見る**のが両方を避ける唯一の形。
 type recordingDriver struct {
-	mu      sync.Mutex
-	queries []string
+	mu       sync.Mutex
+	queries  []string
+	bindings [][]driver.Value
 }
 
 func (d *recordingDriver) Open(string) (driver.Conn, error) { return &recordingConn{d: d}, nil }
@@ -42,12 +44,15 @@ type recordingConn struct{ d *recordingDriver }
 
 func (c *recordingConn) Prepare(q string) (driver.Stmt, error) {
 	c.d.record(q)
-	return &recordingStmt{query: q}, nil
+	return &recordingStmt{query: q, d: c.d}, nil
 }
 func (c *recordingConn) Close() error              { return nil }
 func (c *recordingConn) Begin() (driver.Tx, error) { return nil, io.ErrUnexpectedEOF }
 
-type recordingStmt struct{ query string }
+type recordingStmt struct {
+	query string
+	d     *recordingDriver
+}
 
 func (s *recordingStmt) Close() error  { return nil }
 func (s *recordingStmt) NumInput() int { return -1 }
@@ -56,7 +61,13 @@ func (s *recordingStmt) Exec([]driver.Value) (driver.Result, error) {
 }
 
 // 件数は 1 行返さないと呼び出し側が早退して一覧の SQL が出てこない。
-func (s *recordingStmt) Query([]driver.Value) (driver.Rows, error) {
+func (s *recordingStmt) Query(args []driver.Value) (driver.Rows, error) {
+	s.d.mu.Lock()
+	s.d.bindings = append(s.d.bindings, append([]driver.Value(nil), args...))
+	s.d.mu.Unlock()
+	if strings.Contains(s.query, "RETURNING st.updated_at") {
+		return &streamRestrictionValueRows{values: []driver.Value{time.Now()}}, nil
+	}
 	if strings.Contains(s.query, "COUNT(*)") {
 		return &oneIntRow{}, nil
 	}

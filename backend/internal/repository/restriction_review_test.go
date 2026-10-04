@@ -1,6 +1,9 @@
 package repository
 
 import (
+	"database/sql/driver"
+	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -48,23 +51,33 @@ func TestRestrictionReviewExpressionsExact(t *testing.T) {
 // 控えを呼び出し側から渡す形にすると、読んでから書くまでの間に同期がタグを
 // 付けたとき古い判定を控える。SQL の中で計算していることを、発行された文で確かめる。
 func TestSetRestrictionOverrideRecordsBasis(t *testing.T) {
-	db, rec := newRecordingDB(t)
-	NewStreamRepository(db).SetRestrictionOverride("abc", false)
+	for _, decision := range []bool{false, true} {
+		t.Run(fmt.Sprintf("decision-%t", decision), func(t *testing.T) {
+			db, rec := newRecordingDB(t)
+			if err := NewStreamRepository(db).SetRestrictionOverride("abc", decision); err != nil {
+				t.Fatal(err)
+			}
 
-	const auto = "EXISTS (SELECT 1 FROM stream_stream_tags mt" +
-		" WHERE mt.stream_id = st.id AND mt.tag_id = 'members_only')" +
-		" AND NOT COALESCE((SELECT bool_and(COALESCE(eg.members_only_policy, '') = 'allow')" +
-		" FROM stream_singers eo JOIN singers eg ON eg.id = eo.singer_id" +
-		" WHERE eo.stream_id = st.id AND eo.is_owner), FALSE)"
-	want := "UPDATE streams AS st SET restriction_override = $2, restriction_override_auto = (" + auto +
-		"), updated_at = NOW() WHERE st.id = $1 RETURNING st.updated_at"
+			const auto = "EXISTS (SELECT 1 FROM stream_stream_tags mt" +
+				" WHERE mt.stream_id = st.id AND mt.tag_id = 'members_only')" +
+				" AND NOT COALESCE((SELECT bool_and(COALESCE(eg.members_only_policy, '') = 'allow')" +
+				" FROM stream_singers eo JOIN singers eg ON eg.id = eo.singer_id" +
+				" WHERE eo.stream_id = st.id AND eo.is_owner), FALSE)"
+			want := "UPDATE streams AS st SET restriction_override = $2, restriction_override_auto = (" + auto +
+				"), updated_at = NOW() WHERE st.id = $1 RETURNING st.updated_at"
 
-	issued := rec.all()
-	if len(issued) != 1 {
-		t.Fatalf("1 本のはずが %d 本: %q", len(issued), issued)
-	}
-	if got := strings.Join(strings.Fields(issued[0]), " "); got != want {
-		t.Errorf("裁定の UPDATE が期待と違う\n got: %s\nwant: %s", got, want)
+			issued := rec.all()
+			if len(issued) != 1 {
+				t.Fatalf("1 本のはずが %d 本: %q", len(issued), issued)
+			}
+			if got := strings.Join(strings.Fields(issued[0]), " "); got != want {
+				t.Errorf("裁定の UPDATE が期待と違う\n got: %s\nwant: %s", got, want)
+			}
+
+			if len(rec.bindings) != 1 || !reflect.DeepEqual(rec.bindings[0], []driver.Value{"abc", decision}) {
+				t.Fatalf("裁定の引数=%v want=[abc %t]", rec.bindings, decision)
+			}
+		})
 	}
 }
 
