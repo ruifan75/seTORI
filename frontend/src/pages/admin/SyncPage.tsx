@@ -437,13 +437,13 @@ export default function SyncPage() {
         </p>
 
         <div className="flex flex-wrap items-end gap-3 mb-4">
-          <label className="text-sm">
+          <label className="text-sm max-sm:w-full max-sm:min-w-0">
             <span className="block text-gray-700 mb-1">対象</span>
             <select
               value={fillMode}
               onChange={(e) => setFillMode(e.target.value)}
               disabled={fillStatus?.running}
-              className="border border-gray-300 rounded-lg px-3 py-2"
+              className="border border-gray-300 rounded-lg px-3 py-2 max-sm:w-full"
             >
               {/* 「処理済みを除く」を書かないと、force との違いが
                   「歌唱の有無だけ」に見えて、なぜ対象に出てこないのか分からなくなる */}
@@ -451,7 +451,7 @@ export default function SyncPage() {
               <option value="force">入力元を持つ配信すべて（処理済みも含む・違う分は審査へ）</option>
             </select>
           </label>
-          <label className="text-sm">
+          <label className="text-sm max-sm:w-full max-sm:min-w-0">
             <span className="block text-gray-700 mb-1">
               チャンネル
               <span className="ml-1 text-xs text-gray-400">（Ctrl / ⌘ で複数選択・未選択なら全部）</span>
@@ -464,7 +464,7 @@ export default function SyncPage() {
                 setFillSingerIds(Array.from(e.target.selectedOptions, (o) => o.value))
               }
               disabled={fillStatus?.running}
-              className="border border-gray-300 rounded-lg px-3 py-2 min-w-56"
+              className="border border-gray-300 rounded-lg px-3 py-2 min-w-56 max-sm:min-w-0 max-sm:w-full"
             >
               {singers.map((sg) => (
                 <option key={sg.id} value={sg.id}>{sg.name}</option>
@@ -1049,11 +1049,11 @@ function BackgroundTasks() {
       <h2 className="text-xl font-bold text-gray-900 mb-2">背景処理</h2>
       <div className="mb-4 space-y-2">
         <p className="text-sm text-gray-600">同期後の準備：所有する表示中・未処理の配信の章節を取得し、コメントを取り直してプレ分析します。会限・秘匿の配信は対象外です。各取得・解析前に状態を確認します。歌唱の保存は編集画面で確認して行います。</p>
-        <label className="text-sm">対象チャンネル <select value={prepareSinger} onChange={(e) => setPrepareSinger(e.target.value)} className="border rounded px-2 py-1">
+        <label className="text-sm max-sm:block">対象チャンネル <select value={prepareSinger} onChange={(e) => setPrepareSinger(e.target.value)} className="border rounded px-2 py-1 max-sm:block max-sm:w-full">
           <option value="">チャンネルを選択</option>
           {prepareSingers?.singers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select></label>
-        <button onClick={() => prepare.mutate()} disabled={!prepareSinger || prepare.isPending} className="ml-2 px-3 py-1.5 bg-indigo-600 text-white rounded disabled:opacity-50">同期後の準備を開始</button>
+        <button onClick={() => prepare.mutate()} disabled={!prepareSinger || prepare.isPending} className="ml-2 max-sm:ml-0 px-3 py-1.5 bg-indigo-600 text-white rounded disabled:opacity-50">同期後の準備を開始</button>
       </div>
       <p className="text-gray-500 mb-4 text-sm">
         yt-dlp を使う一括取得です。どちらも時間がかかり、YouTube に BOT 判定されると全件失敗します
@@ -1198,9 +1198,9 @@ function RestrictionReview() {
       ) : (
         <ul className="divide-y border rounded-lg">
           {items.map((item) => (
-            <li key={item.id} className="flex items-center justify-between gap-3 px-4 py-2">
-              <div className="min-w-0">
-                <Link to={`/streams/${item.id}`} className="text-indigo-600 hover:underline truncate block">
+            <li key={item.id} className="flex items-center justify-between gap-3 px-4 py-2 max-sm:flex-col max-sm:items-start">
+              <div className="min-w-0 max-sm:w-full">
+                <Link to={`/streams/${item.id}`} className="text-indigo-600 hover:underline truncate block max-sm:whitespace-normal max-sm:break-words">
                   {item.title}
                 </Link>
                 <div className="text-xs text-gray-400 flex flex-wrap items-center gap-2">
