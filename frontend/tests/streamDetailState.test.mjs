@@ -9,6 +9,7 @@ import ts from 'typescript';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const require = createRequire(import.meta.url);
+const { QueryObserver } = require('@tanstack/react-query');
 const secret = '合成の秘匿曲';
 const id = 'abcdefghijk';
 const song = { name: secret, original_artist: '合成アーティスト', start: 60, end: 240,
@@ -17,9 +18,9 @@ const editable = { id: 'editable', name: secret, nameReading: '', artist: '合�
   start: 60, end: 240, singerIds: [], tags: [], customTags: [], matchedSongId: null,
   artUrl: null, itunesId: null, trackDuration: null, originalName: secret, originalArtist: '合成アーティスト' };
 const deferred = () => {
-  let resolve;
-  const promise = new Promise((done) => { resolve = done; });
-  return { promise, resolve };
+  let resolve, reject;
+  const promise = new Promise((done, fail) => { resolve = done; reject = fail; });
+  return { promise, resolve, reject };
 };
 const tick = () => new Promise((done) => setImmediate(done));
 
@@ -101,7 +102,11 @@ function harness({ canEdit = true, authStatus = 'authenticated', songs = [] } = 
   const viewer = load(join(root, 'src/queryClient.ts'));
   viewer.applyViewerChange('viewer|content:edit,restricted:view');
   const invalidate = viewer.queryClient.invalidateQueries.bind(viewer.queryClient);
-  viewer.queryClient.invalidateQueries = (options) => { calls.push(['invalidate', [...options.queryKey]]); return invalidate(options); };
+  // 引数なしの全 query への操作も実 API に通す。計測側の TypeError を負の対照にしない。
+  viewer.queryClient.invalidateQueries = (options) => {
+    calls.push(['invalidate', options?.queryKey ? [...options.queryKey] : null]);
+    return invalidate(options);
+  };
   const { useStreamDetail } = load(join(root, 'src/pages/stream-detail/useStreamDetail.ts'));
   const model = useStreamDetail();
   const cleanups = effects.map((fn) => fn()).filter((fn) => typeof fn === 'function');
@@ -147,6 +152,43 @@ test('利用者・同じ人の権限が変わると編集コピー・ポップ�
     } finally { h.close(); }
   }
 });
+
+test('ページを離れたあとは利用者変更の購読を解除する', () => {
+  const h = harness({ songs: [editable] });
+  try {
+    h.close();
+    h.writes.length = 0;
+    h.viewer.applyViewerChange(null);
+    assert.deepEqual(h.writes, [], '解除したページの state を更新した');
+  } finally { h.close(); }
+});
+
+for (const next of [null, 'another|content:edit', 'viewer|content:edit']) {
+  test(`権限変更時は購読中の query の中身も消して取り直す: ${next}`, async () => {
+    const h = harness(), refresh = deferred();
+    const key = ['stream', id, true];
+    const publicStream = { id, performances: [] };
+    let fetches = 0;
+    h.viewer.queryClient.setQueryData(key, { id, performances: [{ song_name: secret }] });
+    const observer = new QueryObserver(h.viewer.queryClient, {
+      queryKey: key, queryFn: () => { fetches++; return refresh.promise; }, staleTime: Infinity, retry: false,
+    });
+    const unsubscribe = observer.subscribe(() => {});
+    try {
+      assert.equal(observer.getCurrentResult().data.performances[0].song_name, secret);
+      assert.equal(fetches, 0);
+      h.viewer.applyViewerChange(next);
+      assert.equal(observer.getCurrentResult().data, undefined, '購読中の query に秘匿曲が残った');
+      assert.equal(observer.getCurrentResult().isFetching, true, '購読中の query を取り直さない');
+      assert.equal(fetches, 1);
+      refresh.resolve(publicStream); await tick();
+      assert.deepEqual(observer.getCurrentResult().data, publicStream, '新しい視界の応答を表示しない');
+    } finally {
+      refresh.resolve(publicStream);
+      unsubscribe(); h.close();
+    }
+  });
+}
 
 for (const [method, api, key, response] of [
   ['loadFromHolodex', 'holodexApi', 'analyzeSongs', [song]],
@@ -219,19 +261,57 @@ for (const stage of ['normalize', 'itunes']) test(`AI 正規化: ${stage} 待ち
   } finally { h.close(); }
 });
 
-test('保存時は別名義の開始→セットリスト保存。権限変更後は次の別名義を送らない', async () => {
-  const h = harness({ songs: [1, 2].map((i) => ({ ...editable, artistAlias: { canonical: '合成', alias: `${secret}${i}` }, aliasChecked: true })) });
-  const first = deferred(), writes = [];
-  h.apis.artistApi.proposeAlias = (canonical, alias) => { writes.push(['alias', canonical, alias]); return first.promise; };
-  h.apis.performanceApi.create = async (target, body) => { writes.push(['create', target, JSON.parse(JSON.stringify(body))]); return { created_count: 2 }; };
+for (const outcome of ['applied', 'proposed', 'failed']) for (const changed of [false, true]) {
+  test(`保存時の別名義: ${outcome}/${changed ? '権限変更' : '同じ視界'} の応答・通知`, async () => {
+    const h = harness({ songs: [1, 2].map((i) => ({ ...editable, artistAlias: { canonical: '合成', alias: `${secret}${i}` }, aliasChecked: true })) });
+    const first = deferred(), writes = [];
+    h.apis.artistApi.proposeAlias = (canonical, alias) => {
+      writes.push(['alias', canonical, alias]);
+      if (writes.filter((w) => w[0] === 'alias').length === 1) return first.promise;
+      return outcome === 'failed' ? Promise.reject(new Error(`別名義のエラー: ${alias}`))
+        : Promise.resolve({ applied: outcome === 'applied' });
+    };
+    h.apis.performanceApi.create = async (target, body) => { writes.push(['create', target, JSON.parse(JSON.stringify(body))]); return { created_count: 2 }; };
+    try {
+      await h.model.handleConfirm(); await tick();
+      assert.deepEqual(writes.map((w) => w[0]), ['alias', 'create']);
+      assert.equal(writes[1][1], id);
+      assert.deepEqual(writes[1][2].performances.map((p) => [p.name, p.start_seconds, p.end_seconds]), [[secret, 60, 240], [secret, 60, 240]]);
+      if (changed) h.viewer.applyViewerChange('viewer|content:edit');
+      const after = h.toasts.length;
+      if (outcome === 'failed') first.reject(new Error(`別名義のエラー: ${secret}1`));
+      else first.resolve({ applied: outcome === 'applied' });
+      await tick();
+      if (changed) {
+        assert.equal(writes.length, 2, '次の視界で別名義を送った');
+        assert.deepEqual(h.toasts.slice(after), [], '権限変更後に前の視界の通知を表示した');
+      } else {
+        assert.deepEqual(writes.map((w) => w[0]), ['alias', 'create', 'alias']);
+        const expected = outcome === 'failed'
+          ? [1, 2].map((i) => [`別名義の登録に失敗しました（${secret}${i}）`, 'error'])
+          : [[`2件の別名義を${outcome === 'applied' ? '登録' : '提案として登録'}しました`, outcome === 'applied' ? 'success' : 'info']];
+        assert.deepEqual(h.toasts.slice(after), expected, '陽性対照の通知が変わった');
+      }
+    } finally { h.close(); }
+  });
+}
+
+for (const applied of [false, true]) test(`最後の別名義の応答後にも照合する: applied=${applied}`, async () => {
+  // 1 件だけにして、次のループ先頭の照合では止まらない経路を通す。
+  const h = harness({ songs: [{ ...editable, artistAlias: { canonical: '合成', alias: secret }, aliasChecked: true }] });
+  const last = deferred(), requests = [];
+  h.apis.artistApi.proposeAlias = (canonical, alias) => {
+    requests.push(['alias', canonical, alias]);
+    return last.promise;
+  };
+  h.apis.performanceApi.create = async () => { requests.push(['create']); return { created_count: 1 }; };
   try {
     await h.model.handleConfirm(); await tick();
-    assert.deepEqual(writes.map((w) => w[0]), ['alias', 'create']);
-    assert.equal(writes[1][1], id);
-    assert.deepEqual(writes[1][2].performances.map((p) => [p.name, p.start_seconds, p.end_seconds]), [[secret, 60, 240], [secret, 60, 240]]);
-    h.viewer.applyViewerChange(null);
-    first.resolve({ applied: true }); await tick();
-    assert.equal(writes.length, 2, '次の利用者で別名義を送った');
+    assert.deepEqual(requests, [['alias', '合成', secret], ['create']]);
+    h.viewer.applyViewerChange('viewer|content:edit');
+    const after = h.toasts.length;
+    last.resolve({ applied }); await tick();
+    assert.deepEqual(h.toasts.slice(after), [], '権限変更後に前の視界の通知を表示した');
   } finally { h.close(); }
 });
 
