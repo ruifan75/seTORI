@@ -1,4 +1,5 @@
-import { Fragment, useState } from 'react';
+import { invalidateTaskResults, TASK_LABELS, TASK_PHASE_LABELS } from '../../utils/taskResults';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { holodexApi, batchAnalyzeApi, batchFillApi, singerApi, autoFillApi, nonSingingApi, restrictionReviewApi, streamApi, taskApi } from '../../api/client';
@@ -1009,23 +1010,18 @@ function AutoFillSchedule() {
 }
 
 
-// BackgroundTasks は yt-dlp を起動する backfill の実行と記録（issue #22）。
+// BackgroundTasks は backfill・準備・AI 整備の実行記録（issue #22）。
 //
 // 以前は curl で叩いて投げっぱなし、進捗も失敗も log だけだった。log はメモリ上の
 // 直近 1000 件なので、長い実行は自分の進捗行で失敗行を押し流す。ここでは実行ごとに
 // 成功・見送り・失敗を分けて出し、**失敗の理由を後から引ける**ようにする
 // （cookie を直して再実行すべきかの判断材料）。
-const TASK_LABELS: Record<string, string> = {
-  chapter_backfill: 'チャプターの取得',
-  stream_prepare: '同期後の準備',
-  chat_end_backfill: '拍手 end の埋め直し',
-};
-
 function BackgroundTasks() {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const canEdit = hasPermission(useAuthStore((st) => st.user), PERM.CONTENT_EDIT);
   const authStatus = useAuthStore((st) => st.status);
+  const completedTasks = useRef(new Set<string>());
   const [openTask, setOpenTask] = useState<string | null>(null);
   const [prepareSinger, setPrepareSinger] = useState('');
   const { data: prepareSingers } = useQuery({ queryKey: ['singers-for-prepare'], queryFn: () => singerApi.list(1, 300, 'name', 'asc', true), enabled: canEdit });
@@ -1044,6 +1040,14 @@ function BackgroundTasks() {
     refetchInterval: (q) => (q.state.data?.some((t) => t.status === 'running') ? 3000 : false),
   });
 
+  useEffect(() => {
+    for (const task of tasks ?? []) {
+      if (task.status === 'running' || completedTasks.current.has(task.id)) continue;
+      completedTasks.current.add(task.id);
+      invalidateTaskResults(queryClient, task);
+    }
+  }, [tasks, queryClient]);
+
   const start = useMutation({
     mutationFn: (kind: 'chapter' | 'chat_end') =>
       kind === 'chapter' ? taskApi.startChapterBackfill(3) : taskApi.startChatEndBackfill(3),
@@ -1058,7 +1062,7 @@ function BackgroundTasks() {
   if (!canEdit) return null;
 
   return (
-    <div className="bg-white rounded-lg shadow-sm border p-6">
+    <div id="background-tasks" className="bg-white rounded-lg shadow-sm border p-6">
       <h2 className="text-xl font-bold text-gray-900 mb-2">背景処理</h2>
       <div className="mb-4 space-y-2">
         <p className="text-sm text-gray-600">同期後の準備：所有する表示中・未処理の配信の章節を取得し、コメントを取り直してプレ分析します。会限・秘匿の配信は対象外です。各取得・解析前に状態を確認します。歌唱の保存は編集画面で確認して行います。</p>
@@ -1123,7 +1127,7 @@ function BackgroundTasks() {
                   {t.done}/{t.total}（成功 {t.succeeded}・見送り {t.skipped}・
                   <span className={t.failed > 0 ? 'text-red-600' : ''}>失敗 {t.failed}</span>）
                 </span>
-                {t.phase && <span>{t.phase === 'chapters' ? '章節取得' : 'プレ分析'}{typeof t.params.singer_id === 'string' && ` / ${t.params.singer_id}`}</span>}
+                {t.phase && <span>{TASK_PHASE_LABELS[t.phase] ?? t.phase}{typeof t.params?.singer_id === 'string' && ` / ${t.params.singer_id}`}</span>}
                 {t.status === 'running' && t.kind === 'stream_prepare' && <button onClick={() => cancel.mutate(t.id)} disabled={cancel.isPending} className="underline">停止</button>}
                 {t.failures.length > 0 && (
                   <button
@@ -1139,9 +1143,9 @@ function BackgroundTasks() {
                 <ul className="mt-2 space-y-0.5 text-xs bg-gray-50 rounded p-2 max-h-60 overflow-y-auto">
                   {t.failures.map((f, i) => (
                     <li key={i} className="flex gap-2">
-                      <Link to={`/streams/${f.target}`} className="text-indigo-600 hover:underline shrink-0">
-                        {f.target}
-                      </Link>
+                      {['chapter_backfill', 'chat_end_backfill', 'stream_prepare'].includes(t.kind) ? (
+                        <Link to={`/streams/${f.target}`} className="text-indigo-600 hover:underline shrink-0">{f.target}</Link>
+                      ) : <span className="break-all text-gray-700">{f.target}</span>}
                       <span className="text-gray-600 break-all">{f.reason}</span>
                     </li>
                   ))}

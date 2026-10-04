@@ -17,10 +17,10 @@ import (
 type ArtistService struct {
 	artistRepo *repository.ArtistRepository
 	songRepo   *repository.SongRepository
-	aiService  *AIService
+	aiService  ai.Chatter
 }
 
-func NewArtistService(artistRepo *repository.ArtistRepository, songRepo *repository.SongRepository, aiService *AIService) *ArtistService {
+func NewArtistService(artistRepo *repository.ArtistRepository, songRepo *repository.SongRepository, aiService ai.Chatter) *ArtistService {
 	return &ArtistService{artistRepo: artistRepo, songRepo: songRepo, aiService: aiService}
 }
 
@@ -298,65 +298,71 @@ func (s *ArtistService) backfillBatch(kind string, names []string) (map[int]stri
 
 const readingBatchSize = 30
 
-// BackfillReadings は読みが未整備なアーティスト・楽曲の読み仮名を AI で補完する。
-// 1回の呼び出しで各対象を最大 batchLimit 件処理し、残数を返す（ボタン連打で続きを処理できる）。
-func (s *ArtistService) BackfillReadings() (*dto.BackfillReadingsResponse, error) {
-	resp := &dto.BackfillReadingsResponse{}
-
-	// アーティスト
+// BackfillReadings は各対象最大30件の読みを補完し、各行の成功・見送り・失敗を記録する。
+// 実行枠と task_runs の作成は呼び出し側が、対象取得・AI 呼び出しより前に済ませる。
+func (s *ArtistService) BackfillReadings(run *TaskRun) (string, error) {
 	artists, err := s.artistRepo.ListMissingReadings(readingBatchSize)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	if len(artists) > 0 {
-		names := make([]string, len(artists))
-		for i, a := range artists {
-			names[i] = a.Name
-		}
-		readings, err := s.backfillBatch("アーティスト名", names)
-		if err != nil {
-			logger.Warnf("artist readings backfill failed: %v", err)
-			resp.Warning = fmt.Sprintf("アーティスト読み補完に失敗: %v", err)
-		} else {
-			for i, a := range artists {
-				if reading, ok := readings[i]; ok {
-					if err := s.artistRepo.UpdateReadingPropagate(a.ID, reading); err == nil {
-						resp.ArtistsUpdated++
-					}
-				}
-			}
-		}
-	}
-
-	// 楽曲名
 	songs, err := s.songRepo.ListMissingNameReadings(readingBatchSize)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	if len(songs) > 0 {
-		names := make([]string, len(songs))
-		for i, sg := range songs {
-			names[i] = sg.Name
-		}
-		readings, err := s.backfillBatch("曲名", names)
-		if err != nil {
-			logger.Warnf("song readings backfill failed: %v", err)
-			if resp.Warning == "" {
-				resp.Warning = fmt.Sprintf("曲名読み補完に失敗: %v", err)
-			}
-		} else {
-			for i, sg := range songs {
-				if reading, ok := readings[i]; ok {
-					if err := s.songRepo.UpdateNameReading(sg.ID, reading); err == nil {
-						resp.SongsUpdated++
-					}
-				}
-			}
-		}
+	run.SetTotal(len(artists) + len(songs))
+	artistItems := make([]readingBackfillItem, len(artists))
+	for i, a := range artists {
+		artistItems[i] = readingBackfillItem{a.ID, a.Name}
 	}
+	songItems := make([]readingBackfillItem, len(songs))
+	for i, song := range songs {
+		songItems[i] = readingBackfillItem{song.ID, song.Name}
+	}
+	if err := run.SetPhase("artists"); err != nil {
+		return "", err
+	}
+	artistsUpdated := s.backfillReadingItems(run, "アーティスト名", "artist", artistItems, s.artistRepo.UpdateReadingPropagate)
+	if err := run.SetPhase("songs"); err != nil {
+		return "", err
+	}
+	songsUpdated := s.backfillReadingItems(run, "曲名", "song", songItems, s.songRepo.UpdateNameReading)
+	return fmt.Sprintf("読み補完: アーティスト %d 件・曲名 %d 件（失敗 %d 件）", artistsUpdated, songsUpdated, run.FailedCount()), nil
+}
 
-	logger.Infof("readings backfill: artists=%d songs=%d", resp.ArtistsUpdated, resp.SongsUpdated)
-	return resp, nil
+type readingBackfillItem struct {
+	id   uuid.UUID
+	name string
+}
+
+func (s *ArtistService) backfillReadingItems(run *TaskRun, label, kind string, items []readingBackfillItem, save func(uuid.UUID, string) error) int {
+	if len(items) == 0 {
+		return 0
+	}
+	names := make([]string, len(items))
+	for i, item := range items {
+		names[i] = item.name
+	}
+	readings, err := s.backfillBatch(label, names)
+	updated := 0
+	for i, item := range items {
+		target := kind + ":" + item.id.String()
+		if err != nil {
+			run.Fail(target, label+"の AI 補完に失敗: "+err.Error())
+			continue
+		}
+		reading, ok := readings[i]
+		if !ok {
+			run.Skip()
+			continue
+		}
+		if err := save(item.id, reading); err != nil {
+			run.Fail(target, "読みの保存に失敗: "+err.Error())
+			continue
+		}
+		run.Succeed()
+		updated++
+	}
+	return updated
 }
 
 // FindByName は表示名でアーティストを引く。見つからなければ nil。

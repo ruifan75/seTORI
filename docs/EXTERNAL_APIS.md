@@ -119,8 +119,15 @@
      **AI 経路には除外キーワードの辞書を渡さない**（`FilterScopeForPath`。
      AI が既に `is_song` を判断しているため。regex 経路だけ辞書を使う）。
   3. **読み仮名の補完**：`POST /api/ai/backfill-readings`（曲名・アーティスト各 30 件）。
+     背景処理 `readings_backfill` の開始応答は `202` と `task_id`。行ごとに保存成功・
+     見送り（読みの提案なし／低信頼）・失敗（AI／保存）を記録する。
   4. **重複楽曲の走査・判定**：`POST /api/songs/merge-candidates/scan`（登録曲を丸ごと見せる）、
-     `POST /api/songs/merge-candidates/adjudicate`。
+     `scan` は曲名キー走査と AI 走査を背景処理 `duplicate_scan` にまとめ、`202` と
+     `task_id` を返す。`POST /api/songs/merge-candidates/adjudicate` は同期のまま。
+     上の2種は同種の二重起動を `409` で断り、進捗・失敗理由は `/api/tasks` に残す。
+     AI 呼び出し・保存の一部失敗があれば実行は `failed`。読み仮名・重複候補の画面と
+     管理→Holodex 同期の「背景処理」で確認でき、終了時に対象の一覧を取り直す。
+     開始・実行記録の閲覧とも `content:edit`（従来と同じ）。
 - **⚠️ リスク**：トークン課金。公開環境であなたの key を使うと、1 ユーザーで請求を爆発させたりクォータを消費し尽くす可能性があります。key 未設定時は AI ステップがフォールトトレラント（生データ / 純粋正規表現結果を返却）。
 - **ガードレール**：grouped では AI が曲名も返すため、`pkg/comment` 側で
   「元コメントに現れない文字列を作らせない」検証を通す。落ちたら 2 段階、

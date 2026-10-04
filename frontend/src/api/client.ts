@@ -62,7 +62,7 @@ import type {
   Artist,
   ArtistListResponse,
   ArtistDetailResponse,
-  BackfillReadingsResponse,
+  TaskStartResponse,
   ReadingsExport,
   ImportReadingsResult,
   ReadingsStats,
@@ -225,8 +225,8 @@ export const songApi = {
     return data;
   },
 
-  // 既存データを走査して同名の組を候補に積む（取り込み前からある重複を拾う）
-  scanDuplicates: async (): Promise<{ added: number; message: string }> => {
+  // 曲名キー・AI の重複走査を背景処理として開始（202、結果は task_runs）
+  scanDuplicates: async (): Promise<TaskStartResponse> => {
     const { data } = await api.post('/api/songs/merge-candidates/scan');
     return data;
   },
@@ -430,9 +430,13 @@ export const nonSingingApi = {
 };
 
 // ========== 背景処理 API（issue #22） ==========
-// yt-dlp を起動する backfill。以前は投げっぱなしで log にしか出なかったので、
+// backfill・準備・AI 整備の開始と記録。時間のかかる処理について、
 // 実行ごとの進捗と失敗の理由を task_runs に残して読めるようにした。
 export const taskApi = {
+  get: async (id: string): Promise<TaskRun> => {
+    const { data } = await api.get(`/api/tasks/${id}`);
+    return data;
+  },
   prepare: async (singerId: string): Promise<{ task_id: string }> => {
     const { data } = await api.post('/api/streams/prepare', null, { params: { singer_id: singerId } });
     return data;
@@ -1014,8 +1018,8 @@ export const artistApi = {
     return data;
   },
 
-  // 読み仮名の AI 補完（1回で各対象最大30件、連打で続き）
-  backfillReadings: async (): Promise<BackfillReadingsResponse> => {
+  // 読み仮名の AI 補完を開始（各対象最大30件、結果は task_runs）
+  backfillReadings: async (): Promise<TaskStartResponse> => {
     const { data } = await api.post('/api/ai/backfill-readings');
     return data;
   },

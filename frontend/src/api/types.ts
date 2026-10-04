@@ -512,7 +512,7 @@ export interface TaskRun {
   /** 失敗ではないが今回は結論を出さなかった（replay がまだ無い等） */
   skipped: number;
   failed: number;
-  params: Record<string, unknown>;
+  params: Record<string, unknown> | null;
   /** 失敗した対象と理由（直近の一部） */
   failures: { target: string; reason: string }[];
   message: string;
@@ -736,10 +736,10 @@ export interface ArtistDetailResponse {
   pagination: PaginationResponse;
 }
 
-export interface BackfillReadingsResponse {
-  artists_updated: number;
-  songs_updated: number;
-  warning?: string;
+/** 背景処理の開始応答。結果は task_runs に記録される。 */
+export interface TaskStartResponse {
+  task_id: string;
+  message: string;
 }
 
 // 読みのエクスポート / インポート

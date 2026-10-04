@@ -1,3 +1,5 @@
+import { useTaskProgress } from '../../hooks/useTaskProgress';
+import TaskProgress from '../../components/TaskProgress';
 import { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { artistApi, readingApi } from '../../api/client';
@@ -20,6 +22,8 @@ import { useToast } from '../../components/ui/ToastContext';
 export default function ReadingsPage() {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
+  const [taskId, setTaskId] = useState<string | null>(null);
+  const progress = useTaskProgress('readings_backfill', taskId);
   const fileRef = useRef<HTMLInputElement>(null);
   const [importResult, setImportResult] = useState<ImportReadingsResult | null>(null);
 
@@ -39,9 +43,9 @@ export default function ReadingsPage() {
   const backfillMutation = useMutation({
     mutationFn: () => artistApi.backfillReadings(),
     onSuccess: (r) => {
-      const msg = `読み補完: アーティスト${r.artists_updated}件・曲名${r.songs_updated}件`;
-      showToast(r.warning ? `${msg}（${r.warning}）` : msg, r.warning ? 'error' : 'success');
-      invalidate();
+      setTaskId(r.task_id);
+      showToast(r.message, 'info');
+      void queryClient.invalidateQueries({ queryKey: ['tasks'] });
     },
     onError: (err: Error) => showToast(`補完エラー: ${err.message}`, 'error'),
   });
@@ -147,11 +151,12 @@ export default function ReadingsPage() {
         </p>
         <button
           onClick={() => backfillMutation.mutate()}
-          disabled={backfillMutation.isPending}
+          disabled={backfillMutation.isPending || progress.isRunning}
           className="px-4 py-2 text-sm bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50"
         >
-          {backfillMutation.isPending ? 'AI補完中...' : '読みをAIで補完'}
+          {backfillMutation.isPending || progress.isRunning ? 'AI補完中...' : '読みをAIで補完'}
         </button>
+        <TaskProgress task={progress.data} isError={progress.isError} waiting={!!taskId} />
       </div>
 
       {/* 手段2：外部 AI に投げるための書き出し / 取り込み */}

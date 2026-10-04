@@ -1,3 +1,5 @@
+import { useTaskProgress } from '../../hooks/useTaskProgress';
+import TaskProgress from '../../components/TaskProgress';
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
@@ -188,6 +190,8 @@ function VerdictBanner({ c }: { c: MergeCandidate }) {
 export default function MergeCandidatesPage() {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
+  const [taskId, setTaskId] = useState<string | null>(null);
+  const progress = useTaskProgress('duplicate_scan', taskId);
 
   const { data, isLoading } = useQuery({
     queryKey: ['song-merge-candidates'],
@@ -202,8 +206,9 @@ export default function MergeCandidatesPage() {
   const scanMutation = useMutation({
     mutationFn: songApi.scanDuplicates,
     onSuccess: (r) => {
-      showToast(r.message, 'success');
-      invalidate();
+      setTaskId(r.task_id);
+      showToast(r.message, 'info');
+      void queryClient.invalidateQueries({ queryKey: ['tasks'] });
     },
     onError: (e: Error) => showToast(`走査に失敗しました: ${e.message}`, 'error'),
   });
@@ -268,14 +273,17 @@ export default function MergeCandidatesPage() {
         「別の曲」で却下してください。却下した組は再び出てきません。
       </p>
 
+      <div className="mb-4">
+        <TaskProgress task={progress.data} isError={progress.isError} waiting={!!taskId} />
+      </div>
       <div className="mb-6 flex flex-wrap items-center gap-2">
         <button
           onClick={() => scanMutation.mutate()}
-          disabled={scanMutation.isPending}
+          disabled={scanMutation.isPending || progress.isRunning}
           className="rounded border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50 disabled:opacity-50"
           title="既存データを走査して同じ曲名の組を探す"
         >
-          {scanMutation.isPending ? '走査中…' : '既存データを走査'}
+          {scanMutation.isPending || progress.isRunning ? '走査中…' : '既存データを走査'}
         </button>
         <button
           onClick={() => adjudicateMutation.mutate()}

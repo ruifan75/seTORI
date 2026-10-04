@@ -205,15 +205,19 @@ type dupScanPair struct {
 // 統合は実行しない。候補として積み、AI の理由を verdict として添えるだけ。
 // 同名の組には「統合すべき」「編曲違いで分けるべき」「そもそも別の曲」が混在し、
 // その線引きは編集方針なので人が決める。
-func (s *SongMatchService) ScanDuplicatesWithAI(aiClient ai.Chatter) (int, error) {
+func (s *SongMatchService) ScanDuplicatesWithAI(aiClient ai.Chatter, run *TaskRun) (int, error) {
 	if aiClient == nil {
-		return 0, fmt.Errorf("AI プロバイダーが設定されていません")
+		err := fmt.Errorf("AI プロバイダーが設定されていません")
+		run.Fail("AI 走査", err.Error())
+		return 0, err
 	}
 	songs, err := s.matchRepo.ListAllForScan()
 	if err != nil {
+		run.Fail("AI 走査の対象取得", err.Error())
 		return 0, err
 	}
 	if len(songs) < 2 {
+		run.Skip()
 		return 0, nil
 	}
 
@@ -226,32 +230,63 @@ func (s *SongMatchService) ScanDuplicatesWithAI(aiClient ai.Chatter) (int, error
 
 	resp, err := aiClient.SimpleChat(dupScanSystemPrompt, sb.String())
 	if err != nil {
+		run.Fail("AI 走査", err.Error())
 		return 0, fmt.Errorf("AI 呼び出しに失敗しました: %w", err)
 	}
 	var pairs []dupScanPair
 	if err := json.Unmarshal([]byte(ai.CleanJSONResponse(resp)), &pairs); err != nil {
 		logger.Warnf("[dup] 全件走査の応答を解析できません: %v (resp=%.200s)", err, resp)
-		return 0, fmt.Errorf("AI の応答を解析できませんでした")
+		run.Fail("AI 走査", "AI の応答を解析できませんでした: "+err.Error())
+		return 0, fmt.Errorf("AI の応答を解析できませんでした: %w", err)
 	}
 
+	// 曲名キー走査が1件、AI が返した組はそれぞれ1件。候補なしでも走査完了を1件残す。
+	if len(pairs) == 0 {
+		run.Succeed()
+		return 0, nil
+	}
+	run.SetTotal(1 + len(pairs))
 	added := 0
 	for _, p := range pairs {
 		if p.A < 0 || p.A >= len(songs) || p.B < 0 || p.B >= len(songs) || p.A == p.B {
+			run.Fail("AI 走査", fmt.Sprintf("無効な候補の曲番号: %d / %d", p.A, p.B))
 			continue
 		}
 		a, b := songs[p.A], songs[p.B]
 		ok, err := s.matchRepo.RecordScanCandidate(a.ID, b.ID, 0.0, "ai_scan")
 		if err != nil {
 			logger.Warnf("[dup] 候補の記録に失敗: %v", err)
+			run.Fail(a.ID.String()+" / "+b.ID.String(), "候補の保存に失敗: "+err.Error())
 			continue
 		}
 		if !ok {
+			run.Skip()
 			continue // 既にある組（却下済みを含む）は蒸し返さない
 		}
+		run.Succeed()
 		added++
 		logger.Infof("[dup] AI が重複を検出: %q / %q ↔ %q / %q（%s）",
 			a.Name, a.OriginalArtist, b.Name, b.OriginalArtist, p.Why)
 	}
 	logger.Infof("[dup] 全件走査で %d 組を追加しました", added)
 	return added, nil
+}
+
+// BackfillDuplicateCandidates は曲名キーと AI の両方を、同じ実行として走査する。
+func (s *SongMatchService) BackfillDuplicateCandidates(aiClient ai.Chatter, run *TaskRun) (string, error) {
+	run.SetTotal(2)
+	if err := run.SetPhase("titles"); err != nil {
+		return "", err
+	}
+	byKey, err := s.ScanDuplicates()
+	if err != nil {
+		run.Fail("曲名キー走査", err.Error())
+		return "", err
+	}
+	run.Succeed()
+	if err := run.SetPhase("ai_scan"); err != nil {
+		return "", err
+	}
+	byAI, err := s.ScanDuplicatesWithAI(aiClient, run)
+	return fmt.Sprintf("%d 件の重複候補を追加しました（曲名キー %d / AI %d、失敗 %d 件）", byKey+byAI, byKey, byAI, run.FailedCount()), err
 }
