@@ -1341,6 +1341,48 @@ func (r *StreamRepository) MarkProcessedIfHiddenAndEmpty(streamID string) (bool,
 	return n > 0, nil
 }
 
+// CommentRefreshBackoffExpr は「YouTube がコメントは取れないと明言してから、
+// まだ間隔が空いていない」配信（issue #56）。取り直しの対象から外すのに使う。
+//
+// 間隔は連続回数に応じて 1 日 → 2 日 → 4 日 → 以後 7 日（`LEAST` で頭打ち）。
+// **恒久とは決めない** ── 配信者があとでコメント欄を開くことはある。
+//
+// **COALESCE を外さないこと。** 一度も記録が無い配信は comment_unavailable_at が
+// NULL で、比較も NULL になる。`NOT NULL` は NULL なので WHERE で行が消える
+// ── **記録の無い（＝普通の）配信が全部取り直しの対象から外れる**。
+func CommentRefreshBackoffExpr(alias string) string {
+	return "COALESCE(" + alias + ".comment_unavailable_at > NOW() - LEAST(power(2, GREATEST(" +
+		alias + ".comment_unavailable_count, 1) - 1), 7) * INTERVAL '1 day', FALSE)"
+}
+
+// MarkCommentsUnavailable は「YouTube がコメントは取れないと明言した」を記録する
+// （連続回数を 1 つ進める）。
+func (r *StreamRepository) MarkCommentsUnavailable(id string) (int, error) {
+	var count int
+	err := r.db.QueryRow(`
+		UPDATE streams
+		SET comment_unavailable_at = NOW(), comment_unavailable_count = comment_unavailable_count + 1
+		WHERE id = $1
+		RETURNING comment_unavailable_count`, id).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("mark comments unavailable: %w", err)
+	}
+	return count, nil
+}
+
+// ClearCommentsUnavailable は記録を消す（コメント欄があると分かったとき）。
+// 記録の無い配信には書かない（取り直しのたびに全行へ UPDATE を走らせない）。
+func (r *StreamRepository) ClearCommentsUnavailable(id string) error {
+	_, err := r.db.Exec(`
+		UPDATE streams
+		SET comment_unavailable_at = NULL, comment_unavailable_count = 0
+		WHERE id = $1 AND (comment_unavailable_at IS NOT NULL OR comment_unavailable_count <> 0)`, id)
+	if err != nil {
+		return fmt.Errorf("clear comments unavailable: %w", err)
+	}
+	return nil
+}
+
 // FindStreamsNeedingCommentRefresh はコメントを取り直す価値がある配信の ID を返す。
 //
 // **歌単は配信が終わったあとに貼られることが多い。** 同期は新規のときしか
@@ -1396,7 +1438,8 @@ func (r *StreamRepository) FindStreamsNeedingCommentRefresh(singerIDs []string, 
 		  -- 自動処理が奪う。RefreshCommentRaw 側にも「0 件で既存を消さない」歯止めを
 		  -- 置いたが、**取りに行かないのが本筋**（PR #43 が一括の対象から会限を
 		  -- 外したのと同じ）。
-		  AND NOT ` + MembersOnlyDetectedExpr("s")
+		  AND NOT ` + MembersOnlyDetectedExpr("s") + `
+		  AND NOT ` + CommentRefreshBackoffExpr("s")
 	args := []any{days}
 	if len(singerIDs) > 0 {
 		query += `
