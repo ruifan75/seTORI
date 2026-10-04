@@ -67,7 +67,18 @@ export default function SyncPage() {
 
   const { data: fillStatus } = useQuery({
     queryKey: ['batch-fill-status'],
-    queryFn: batchFillApi.status,
+    queryFn: async () => {
+      const status = await batchFillApi.status();
+      // 完了で両方のポーリングが止まる前に、見送り ID を含む最終履歴を取り直す。
+      // 短い実行では running=true を観測しないこともあるので、遷移だけで判定しない。
+      if (!status.running) {
+        // 初回の履歴取得中は invalidate だけではその取得が再利用される。
+        // 完了前の応答を採用しないよう、止めてから最終履歴を取り直す。
+        await queryClient.cancelQueries({ queryKey: ['batch-fill-runs'] });
+        void queryClient.invalidateQueries({ queryKey: ['batch-fill-runs'] });
+      }
+      return status;
+    },
     refetchInterval: (q) => (q.state.data?.running ? 3000 : false),
   });
   const { data: fillRuns } = useQuery({
@@ -86,6 +97,7 @@ export default function SyncPage() {
   const cancelFillMutation = useMutation({
     mutationFn: batchFillApi.cancel,
     onSuccess: () => showToast('停止を要求しました', 'info'),
+    onError: (err: Error) => showToast(`停止できません: ${err.message}`, 'error'),
   });
   const revertFillMutation = useMutation({
     mutationFn: (runId: string) => batchFillApi.revert(runId),
@@ -114,6 +126,7 @@ export default function SyncPage() {
   const cancelBatchMutation = useMutation({
     mutationFn: batchAnalyzeApi.cancel,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['batch-analyze-status'] }),
+    onError: (err: Error) => showToast(`停止できません: ${err.message}`, 'error'),
   });
 
   const syncChannelMutation = useMutation({
