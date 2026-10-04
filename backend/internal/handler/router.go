@@ -1930,8 +1930,8 @@ func (r *Router) handleGetStream(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// 解析結果（各タイムライン）は編集画面だけが読む中間生成物、
-	// 秘匿された配信の歌唱は公開可否が未確認のもの。どちらも編集者にだけ載せる。
+	// 解析結果（各タイムライン）は content:edit、秘匿配信では restricted:view も要る。
+	// 歌唱は編集権限ではなく viewerAccess の視界で濾す。配信の存在・題名は公開。
 	result, err := r.streamService.GetByID(id, userHasPermission(req, auth.PermContentEdit), viewerAccess(req))
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
