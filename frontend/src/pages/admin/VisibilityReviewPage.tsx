@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { nonSingingApi, visibilityReviewApi } from '../../api/client';
 import { useToast } from '../../components/ui/ToastContext';
+import { invalidateStreamVisibilityQueries } from '../../utils/streamVisibilityCache';
 
 export default function VisibilityReviewPage() {
   const [dismissed, setDismissed] = useState(false);
@@ -16,8 +17,8 @@ export default function VisibilityReviewPage() {
   const error = (err: Error) => showToast(err.message, 'error');
   const invalidate = () => { qc.invalidateQueries({ queryKey: ['visibility-review'] }); qc.invalidateQueries({ queryKey: ['visibility-runs'] }); qc.invalidateQueries({ queryKey: ['non-singing-candidates'] }); };
   const check = useMutation({ mutationFn: () => visibilityReviewApi.preview(selected), onSuccess: (data) => { setPreview(data); invalidate(); }, onError: error });
-  const apply = useMutation({ mutationFn: () => visibilityReviewApi.apply(preview!.run_id), onSuccess: (data) => { showToast(`${data.changed}件を表示に戻しました`, 'success'); setSelected([]); setPreview(null); invalidate(); }, onError: (err: Error) => { setPreview(null); invalidate(); error(err); } });
-  const revert = useMutation({ mutationFn: visibilityReviewApi.revert, onSuccess: (data) => { showToast(`${data.reverted}件を非表示に戻しました。後の変更・削除で見送ったもの: ${data.skipped}件`, 'info'); invalidate(); }, onError: error });
+  const apply = useMutation({ mutationFn: () => visibilityReviewApi.apply(preview!.run_id), onSuccess: (data) => { showToast(`${data.changed}件を表示に戻しました`, 'success'); setSelected([]); setPreview(null); invalidate(); invalidateStreamVisibilityQueries(qc); }, onError: (err: Error) => { setPreview(null); invalidate(); error(err); } });
+  const revert = useMutation({ mutationFn: visibilityReviewApi.revert, onSuccess: (data) => { showToast(`${data.reverted}件を非表示に戻しました。後の変更・削除で見送ったもの: ${data.skipped}件`, 'info'); invalidate(); invalidateStreamVisibilityQueries(qc); }, onError: error });
   const judgment = useMutation({ mutationFn: (id: string) => dismissed ? nonSingingApi.restore(id) : nonSingingApi.dismiss(id), onSuccess: () => { setSelected([]); setPreview(null); invalidate(); }, onError: error });
   const busy = check.isPending || apply.isPending || judgment.isPending;
   const candidates = list.data?.candidates ?? [];
