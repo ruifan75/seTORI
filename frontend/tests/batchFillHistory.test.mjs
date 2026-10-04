@@ -12,6 +12,16 @@ const running = { running: true, total: 1, done: 0, skipped: 0 };
 
 // 実ページが登録した status の取得関数を実行する。React hooks と API だけを差し替え、
 // 履歴は実 QueryClient / QueryObserver を使って再取得から表示用のキャッシュまで通す。
+function loadTs(path) {
+  const module = { exports: {} };
+  const file = new URL(path, import.meta.url);
+  const code = ts.transpileModule(readFileSync(file, 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  vm.runInNewContext(code, { module, exports: module.exports, require }, { filename: file.pathname });
+  return module.exports;
+}
+
 function statusQuery(client, fetchStatus, { mutations = [], toasts = [], cancelFill, cancelAnalyze } = {}) {
   const options = [];
   const module = { exports: {} };
@@ -27,6 +37,8 @@ function statusQuery(client, fetchStatus, { mutations = [], toasts = [], cancelF
     '../../components/ui/ToastContext': { useToast: () => ({ showToast(message, type) { toasts.push({ message, type }); } }) },
     '../../store/auth': { useAuthStore: () => null, hasPermission: () => false, PERM: {} },
     '../../components/usePerformanceTiming': { formatSeconds: () => '' },
+    // 型だけの import は消えるので、実体の小さな util はそのまま変換して読む
+    '../../utils/taskResults': loadTs('../src/utils/taskResults.ts'),
   };
   const file = new URL('../src/pages/admin/SyncPage.tsx', import.meta.url);
   const code = ts.transpileModule(readFileSync(file, 'utf8'), {

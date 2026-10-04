@@ -330,7 +330,7 @@
   },
   {
     "pattern": "POST /api/songs/merge-candidates/scan",
-    "handler": "handleScanDuplicates",
+    "handler": "handleStartDuplicateScan",
     "permission": "content:edit",
     "login": true,
     "analysis": false
@@ -428,7 +428,7 @@
   },
   {
     "pattern": "POST /api/ai/backfill-readings",
-    "handler": "handleBackfillReadings",
+    "handler": "handleStartReadingsBackfill",
     "permission": "content:edit",
     "login": true,
     "analysis": false

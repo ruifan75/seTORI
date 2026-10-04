@@ -68,7 +68,7 @@ type Router struct {
 	oauthService      *service.OAuthService
 	settingsService   *service.SettingsService
 	songMatchService  *service.SongMatchService
-	aiService         *service.AIService
+	aiService         ai.Chatter
 	orgService        *service.OrganizationService
 	activityService   *service.ActivityService
 	clientIPResolver  *clientIPResolver
@@ -318,7 +318,7 @@ func (r *Router) setupRoutes() {
 	// 照合が外れて新曲になったものの統合候補（黙って重複が増えるのを防ぐ受け皿）
 	r.mux.HandleFunc("GET /api/songs/merge-candidates", r.handleListMergeCandidates)
 	r.mux.HandleFunc("POST /api/songs/merge-candidates/{id}/dismiss", r.handleDismissMergeCandidate)
-	r.mux.HandleFunc("POST /api/songs/merge-candidates/scan", r.handleScanDuplicates)
+	r.mux.HandleFunc("POST /api/songs/merge-candidates/scan", r.handleStartDuplicateScan)
 	r.mux.HandleFunc("POST /api/songs/merge-candidates/adjudicate", r.handleAdjudicateDuplicates)
 	r.mux.HandleFunc("GET /api/songs/{id}/merge-candidates", r.handleGetSongMergeCandidates)
 	// 「この表記はこの曲ではない」という否決の見直し（見えないと誤判定を直せない）
@@ -339,7 +339,7 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("GET /api/artists/{id}", r.handleGetArtist)
 	r.mux.HandleFunc("PUT /api/artists/{id}", r.handleUpdateArtist)
 	r.mux.HandleFunc("POST /api/artists/{id}/merge", r.handleMergeArtist)
-	r.mux.HandleFunc("POST /api/ai/backfill-readings", r.handleBackfillReadings)
+	r.mux.HandleFunc("POST /api/ai/backfill-readings", r.handleStartReadingsBackfill)
 	// 読みデータのエクスポート/インポート（外部 AI で読みを作成する運用向け）
 	r.mux.HandleFunc("GET /api/readings/stats", r.handleReadingsStats)
 	r.mux.HandleFunc("GET /api/readings/export", r.handleExportReadings)
@@ -1081,14 +1081,14 @@ func (r *Router) handleMergeArtist(w http.ResponseWriter, req *http.Request) {
 	respondJSON(w, http.StatusOK, result)
 }
 
-// handleBackfillReadings は読み仮名の AI 補完を実行する（1回で各対象最大30件処理）。
-func (r *Router) handleBackfillReadings(w http.ResponseWriter, req *http.Request) {
-	result, err := r.artistService.BackfillReadings()
-	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+// handleStartReadingsBackfill は読み補完の実行を記録し、開始だけを返す（content:edit）。
+func (r *Router) handleStartReadingsBackfill(w http.ResponseWriter, req *http.Request) {
+	run, ok := r.startTask(w, req, service.TaskReadingsBackfill, map[string]int{"batch_size": 30})
+	if !ok {
 		return
 	}
-	respondJSON(w, http.StatusOK, result)
+	go run.Execute(func() (string, error) { return r.artistService.BackfillReadings(run) })
+	respondJSON(w, http.StatusAccepted, map[string]any{"task_id": run.ID, "message": "読み補完を開始しました"})
 }
 
 // handleReadingsStats は読みの整備状況（未整備の残件数）を返す。
@@ -3810,6 +3810,11 @@ func requiredPermission(method, path string) (perm string, needsAuth bool) {
 		return "", false
 	case "/api/auth/logout", "/api/auth/me":
 		return "", true
+	}
+
+	// AI 整備の開始も実行記録と同じ content:edit（同期だった頃と権限は同じ）。
+	if method == http.MethodPost && (path == "/api/ai/backfill-readings" || path == "/api/songs/merge-candidates/scan") {
+		return auth.PermContentEdit, true
 	}
 
 	// 管理画面の整備状況・入力の解釈規則・照合の否決。GET も編集者に限る。

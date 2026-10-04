@@ -880,13 +880,6 @@ type MergeArtistRequest struct {
 	TargetArtistID string `json:"target_artist_id"`
 }
 
-// BackfillReadingsResponse 読み仮名 AI 補完の結果
-type BackfillReadingsResponse struct {
-	ArtistsUpdated int    `json:"artists_updated"`
-	SongsUpdated   int    `json:"songs_updated"`
-	Warning        string `json:"warning,omitempty"`
-}
-
 // ========== 読みのエクスポート / インポート ==========
 
 // ReadingItem はエクスポート/インポート1件（アーティスト or 楽曲の読み）。
