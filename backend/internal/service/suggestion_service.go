@@ -1004,6 +1004,30 @@ func (s *SuggestionService) Merge(req *dto.MergeSuggestionsRequest, reviewer *mo
 		return nil, ErrTargetNotFound
 	}
 
+	// 統合する提案も審査担当の視界で読む。内部参照だと、秘匿された提案の
+	// after_data を採用／不採用件数から探れてしまう。対象違いや不正な ID は
+	// 適用前に断り、他の対象の提案を処理済みにしない。
+	selected := make([]*models.EditSuggestion, 0, len(req.IDs))
+	for _, raw := range req.IDs {
+		id, err := uuid.Parse(raw)
+		if err != nil {
+			return nil, invalid("無効な提案ID: %s", raw)
+		}
+		sug, err := s.repo.FindByIDForViewer(id, actorAccess(SuggestionActor{User: reviewer}))
+		if err != nil {
+			return nil, err
+		}
+		if sug == nil {
+			return nil, ErrSuggestionNotFound
+		}
+		if sug.TargetType != req.TargetType || sug.TargetID != targetID {
+			return nil, invalid("選択した提案の対象が一致しません")
+		}
+		if sug.Status != "approved" && sug.Status != "rejected" {
+			selected = append(selected, sug)
+		}
+	}
+
 	// 現在値と同じ項目は送っても意味がないので落とす（全部同じなら何もしない）
 	apply := map[string]string{}
 	for k, v := range req.Fields {
@@ -1029,19 +1053,7 @@ func (s *SuggestionService) Merge(req *dto.MergeSuggestionsRequest, reviewer *mo
 
 	resp := &dto.MergeSuggestionsResponse{Applied: apply}
 	note := strings.TrimSpace(req.Note)
-	for _, raw := range req.IDs {
-		id, err := uuid.Parse(raw)
-		if err != nil {
-			return nil, invalid("無効な提案ID: %s", raw)
-		}
-		sug, err := s.repo.FindByID(id)
-		if err != nil {
-			return nil, err
-		}
-		if sug == nil || sug.Status == "approved" || sug.Status == "rejected" {
-			continue // 取得の合間に処理済みになったものは触らない
-		}
-
+	for _, sug := range selected {
 		changed, err := changedFieldsOf(sug)
 		if err != nil {
 			return nil, err
@@ -1062,7 +1074,7 @@ func (s *SuggestionService) Merge(req *dto.MergeSuggestionsRequest, reviewer *mo
 		if note != "" {
 			reviewNote += "：" + note
 		}
-		if err := s.repo.UpdateStatus(id, status, reviewerID(reviewer), reviewNote); err != nil {
+		if err := s.repo.UpdateStatus(sug.ID, status, reviewerID(reviewer), reviewNote); err != nil {
 			return nil, err
 		}
 		if adopted {

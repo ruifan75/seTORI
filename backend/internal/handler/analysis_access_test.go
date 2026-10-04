@@ -133,8 +133,8 @@ func TestAnalysisAccessUsesEffectiveRestriction(t *testing.T) {
 		status, calls      int
 	}{
 		{name: "表示でも秘匿", restricted: true, permissions: []string{"content:edit"}, status: 403, calls: 1},
-		{name: "非表示でも公開", hidden: true, permissions: []string{"content:edit"}, status: 204, calls: 1},
-		{name: "公開の陽性対照", permissions: []string{"content:edit"}, status: 204, calls: 1},
+		{name: "非表示でも公開", hidden: true, permissions: []string{"content:edit"}, status: 204, calls: 2},
+		{name: "公開の陽性対照", permissions: []string{"content:edit"}, status: 204, calls: 2},
 		{name: "秘匿を閲覧できる編集者", restricted: true, permissions: []string{"content:edit", "restricted:view"}, status: 204},
 		{name: "system admin", restricted: true, permissions: []string{"*"}, status: 204},
 		{name: "照会失敗で先へ進まない", permissions: []string{"content:edit"}, queryErr: errors.New("DB unavailable"), status: 500, calls: 1},
@@ -150,6 +150,74 @@ func TestAnalysisAccessUsesEffectiveRestriction(t *testing.T) {
 			r.withAnalysisAccess(func(w http.ResponseWriter, _ *http.Request) { reached = true; w.WriteHeader(204) })(w, req)
 			if w.Code != tc.status || reached != (tc.status == 204) {
 				t.Fatalf("status=%d reached=%t body=%s", w.Code, reached, w.Body.String())
+			}
+		})
+	}
+}
+
+// 処理中の公開可否の変更を偽 DB の二段階の応答で再現する。
+// callback は取得・解析の代役。入口の拒否は callback より先、再確認は
+// 本文・ヘッダー・ステータスが利用者へ届くより先でなければならない。
+func TestAnalysisAccessRechecksBeforeResponse(t *testing.T) {
+	for _, tc := range []struct {
+		name                  string
+		initiallyRestricted   bool
+		finallyRestricted     bool
+		initiallyMissing      bool
+		finallyMissing        bool
+		finalQueryErr         error
+		permissions           []string
+		status, queries, work int
+	}{
+		{name: "取得前に拒否", initiallyRestricted: true, permissions: []string{"content:edit"}, status: 403, queries: 1},
+		{name: "未登録の配信では取得しない", initiallyMissing: true, permissions: []string{"content:edit"}, status: 404, queries: 1},
+		{name: "処理中に秘匿へ変更", finallyRestricted: true, permissions: []string{"content:edit"}, status: 403, queries: 2, work: 1},
+		{name: "処理中に配信を削除", finallyMissing: true, permissions: []string{"content:edit"}, status: 404, queries: 2, work: 1},
+		{name: "応答前の照会失敗", finalQueryErr: errors.New("final check unavailable"), permissions: []string{"content:edit"}, status: 500, queries: 2, work: 1},
+		{name: "公開の結果を返す", permissions: []string{"content:edit"}, status: 201, queries: 2, work: 1},
+		{name: "restricted:view の結果を返す", initiallyRestricted: true, finallyRestricted: true, permissions: []string{"content:edit", "restricted:view"}, status: 201, work: 1},
+		{name: "管理者の結果を返す", initiallyRestricted: true, finallyRestricted: true, permissions: []string{"*"}, status: 201, work: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const id = "hVfDBfreYNI"
+			c := &auditSQLConnector{steps: []auditSQLConnector{
+				{query: auditWantStreamQuery(), args: []driver.Value{id}, columns: 24, rows: [][]driver.Value{auditStreamRow(id, false, tc.initiallyRestricted)}},
+				{query: auditWantStreamQuery(), args: []driver.Value{id}, columns: 24, rows: [][]driver.Value{auditStreamRow(id, false, tc.finallyRestricted)}, queryErr: tc.finalQueryErr},
+			}}
+			if tc.initiallyMissing {
+				c.steps[0].rows = nil
+			}
+			if tc.finallyMissing {
+				c.steps[1].rows = nil
+			}
+			r := &Router{db: auditTestDB(t, c, tc.queries)}
+			req := withUser(httptest.NewRequest("POST", "/api/streams/"+id+"/comments/analyze", nil), &models.User{Permissions: tc.permissions})
+			req.SetPathValue("id", id)
+			w := httptest.NewRecorder()
+			work := 0
+			r.withAnalysisAccess(func(out http.ResponseWriter, _ *http.Request) {
+				work++
+				out.Header().Set("X-Analysis-Result", "private-metadata")
+				respondJSON(out, 201, map[string]string{"song": "private-result"})
+				if tc.queries > 0 && (w.Body.Len() != 0 || w.Header().Get("X-Analysis-Result") != "") {
+					t.Error("analysis response reached the client before final check")
+				}
+			})(w, req)
+			if w.Code != tc.status || work != tc.work {
+				t.Fatalf("status=%d work=%d body=%s", w.Code, work, w.Body.String())
+			}
+			if tc.status == 201 {
+				if w.Body.String() != "{\"song\":\"private-result\"}\n" || w.Header().Get("X-Analysis-Result") != "private-metadata" || w.Header().Get("Content-Type") != "application/json" {
+					t.Fatalf("positive response headers=%v body=%s", w.Header(), w.Body.String())
+				}
+			} else {
+				var body map[string]string
+				if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+					t.Fatal(err)
+				}
+				if len(body) != 1 || body["error"] == "" || w.Header().Get("X-Analysis-Result") != "" {
+					t.Fatalf("denial includes result: headers=%v body=%v", w.Header(), body)
+				}
 			}
 		})
 	}

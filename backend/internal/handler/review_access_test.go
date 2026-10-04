@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ruifan75/setori/internal/dto"
 	"github.com/ruifan75/setori/internal/models"
 	"github.com/ruifan75/setori/internal/repository"
 	"github.com/ruifan75/setori/internal/service"
@@ -87,8 +88,15 @@ func TestNonSingingCandidatesPassViewerAccess(t *testing.T) {
 				req := withUser(httptest.NewRequest("GET", fmt.Sprintf("/api/non-singing-candidates?dismissed=%t", dismissed), nil), &models.User{Permissions: perms})
 				w := httptest.NewRecorder()
 				r.handleListNonSingingCandidates(w, req)
-				if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"song_count":2`) {
+				if w.Code != http.StatusOK {
 					t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+				}
+				var response dto.NonSingingCandidateList
+				if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+					t.Fatal(err)
+				}
+				if response.Total != 1 || len(response.Candidates) != 1 || response.Candidates[0].ID != "public00001" || response.Candidates[0].SongCount != 2 {
+					t.Fatalf("response=%+v", response)
 				}
 			})
 		}

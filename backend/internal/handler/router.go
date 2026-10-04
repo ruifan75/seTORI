@@ -2708,8 +2708,8 @@ func (r *Router) handleUpdatePerformance(w http.ResponseWriter, req *http.Reques
 // 権限は `content:edit` なので、`restricted:view` を持たない編集者も通る。
 // **公開配信の編集は妨げず、秘匿配信のときだけ止める**（403）。
 //
-// 配信が見つからないときは通す ── 存在しない ID を秘匿と区別しない
-// （その後の扱いは各サービスの契約に従う。コメント取得は外部取得に進むこともある）。
+// 配信が無いと公開可否も確認できない。DB 行が削除されてもファイルキャッシュや
+// 実行中の解析結果は残るので、restricted:view の無い要求を公開へ倒さない。
 func (r *Router) requireAnalysisAccess(w http.ResponseWriter, req *http.Request, videoID string) bool {
 	if viewerAccess(req) == repository.RestrictedView {
 		return true
@@ -2719,7 +2719,11 @@ func (r *Router) requireAnalysisAccess(w http.ResponseWriter, req *http.Request,
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return false
 	}
-	if stream != nil && stream.IsRestrictedEffective {
+	if stream == nil {
+		respondError(w, http.StatusNotFound, "配信が登録されていません")
+		return false
+	}
+	if stream.IsRestrictedEffective {
 		respondError(w, http.StatusForbidden,
 			"この配信は公開可否が未確認のため、解析素材を表示できません")
 		return false

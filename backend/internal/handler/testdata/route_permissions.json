@@ -1356,5 +1356,54 @@
     "permission": "",
     "login": false,
     "analysis": false
+  },
+  {
+    "pattern": "POST /api/streams/prepare",
+    "handler": "handlePrepareStreams",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/tasks/{id}/cancel",
+    "handler": "handleCancelPreparation",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/visibility-review",
+    "handler": "handleVisibilityCandidates",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/visibility-review/preview",
+    "handler": "handleVisibilityPreview",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/visibility-review/runs/{id}/apply",
+    "handler": "handleVisibilityApply",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/visibility-review/runs/{id}/revert",
+    "handler": "handleVisibilityRevert",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/visibility-review/runs",
+    "handler": "handleVisibilityRuns",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
   }
 ]
