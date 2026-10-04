@@ -43,7 +43,7 @@ export default function SyncPage() {
   const { showToast } = useToast();
   const queryClient = useQueryClient();
 
-  // チャンネル選択用の歌手一覧（名前順）。
+  // 選択用のチャンネル一覧（名前順）。
   // 一覧で非表示にしたチャンネルも同期対象には出す（隠したいのは一覧の場所だけで、
   // 配信の取り込みまで止めたいわけではないため）。
   const { data: singerList } = useQuery({
@@ -889,7 +889,7 @@ function AutoFillSchedule() {
 
             <label
               className="flex items-center gap-2 text-sm"
-              title="登録チャンネルがゲスト参加しただけの配信も対象にします。歌手が複数なので、歌単は全部審査へ回ります"
+              title="登録チャンネルがゲスト参加しただけの配信も対象にします。参加チャンネルが複数なので、歌単は全部審査へ回ります"
             >
               <input
                 type="checkbox"
@@ -964,11 +964,11 @@ function AutoFillSchedule() {
           <p className="text-xs text-gray-400 mt-3">
             間隔を短くすると、配信直後で live chat がまだ取得できない配信を何度も処理し直します。
           </p>
-          {/* 客串は歌手が複数居るので、一括作成は誰が歌ったかを決めず全行を審査へ回す。
+          {/* 客串は参加チャンネルが複数あるので、一括作成は誰が歌ったかを決めず全行を審査へ回す。
               mention されただけの告知・企画枠も入るが、審査で落とせる */}
           {effCollabs && (
             <p className="text-xs text-gray-400 mt-1">
-              客串の配信は歌手が複数居るため、作った歌単は全部審査へ回ります。
+              客串の配信は参加チャンネルが複数あるため、作った歌単は全部審査へ回ります。
               mention されただけの告知や企画枠も対象に入るので、審査で落としてください。
             </p>
           )}
