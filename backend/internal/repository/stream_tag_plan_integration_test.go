@@ -14,7 +14,7 @@ func TestStreamTagFilterPlans(t *testing.T) {
  INSERT INTO stream_channels(stream_id,channel_id,is_owner) SELECT id,'plan',true FROM streams;
  INSERT INTO stream_stream_tags(stream_id,tag_id) SELECT id,'singing' FROM streams;
  INSERT INTO stream_stream_tags(stream_id,tag_id) SELECT id,'3d' FROM streams WHERE substring(id from 6)::int % 2=0;
- ANALYZE streams; ANALYZE stream_channels; ANALYZE singers; ANALYZE stream_stream_tags;`); err != nil {
+ ANALYZE streams; ANALYZE stream_channels; ANALYZE channels; ANALYZE stream_stream_tags;`); err != nil {
 		t.Fatal(err)
 	}
 	for _, tags := range [][]string{{}, {"singing"}, {"singing", "3d"}} {
