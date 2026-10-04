@@ -195,24 +195,13 @@ func (r *PerformanceRepository) FindByStreamID(streamID string, access ViewerAcc
 			return nil, fmt.Errorf("scan performance: %w", err)
 		}
 
-		// タグを取得する
-		tags, err := r.GetTags(p.ID)
-		if err != nil {
-			return nil, err
-		}
-		p.Tags = tags
-
-		// 歌手を取得する
-		singers, err := r.GetSingers(p.ID)
-		if err != nil {
-			return nil, err
-		}
-		p.Singers = singers
-
 		performances = append(performances, p)
 	}
 
 	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := r.attachTagsAndSingers(performances); err != nil {
 		return nil, err
 	}
 	if err := r.attachArtistReferences(performances); err != nil {
@@ -750,24 +739,13 @@ func (r *PerformanceRepository) FindBySingerID(singerID string, limit, offset in
 			return nil, 0, fmt.Errorf("scan performance: %w", err)
 		}
 
-		// タグを取得する
-		tags, err := r.GetTags(p.ID)
-		if err != nil {
-			return nil, 0, err
-		}
-		p.Tags = tags
-
-		// 歌手を取得する
-		singers, err := r.GetSingers(p.ID)
-		if err != nil {
-			return nil, 0, err
-		}
-		p.Singers = singers
-
 		performances = append(performances, p)
 	}
 
 	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	if err := r.attachTagsAndSingers(performances); err != nil {
 		return nil, 0, err
 	}
 	if err := r.attachArtistReferences(performances); err != nil {
@@ -1213,7 +1191,7 @@ func (r *PerformanceRepository) FindByPreset(f PresetFilter, limit int, access V
 }
 
 // FindIDsByPreset は FindByPreset と同じ並びの歌唱 ID だけを返す（プレイリストへのコピー用）。
-// 明細を組み立てると歌手・タグを 1 件ずつ引くことになるので、ID で足りる経路は分けている。
+// 明細には歌手・タグ・原曲アーティストの一括取得も要るので、ID で足りる経路は分けている。
 func (r *PerformanceRepository) FindIDsByPreset(f PresetFilter, limit int, access ViewerAccess) ([]uuid.UUID, error) {
 	query := presetLatestPerSong(access) + `
 		SELECT p.id

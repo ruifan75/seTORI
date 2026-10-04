@@ -559,32 +559,6 @@ func (r *SingerRepository) Search(query string, limit int) ([]models.Singer, err
 	return singers, nil
 }
 
-// FindByOrganization は事務所別に歌手を取得する。
-func (r *SingerRepository) FindByOrganization(org string) ([]models.Singer, error) {
-	query := `
-		SELECT ` + singerColumns + `
-		` + singerFrom + `
-		WHERE ` + effectiveOrg + ` = $1
-		ORDER BY s.name ASC`
-
-	rows, err := r.db.Query(query, org)
-	if err != nil {
-		return nil, fmt.Errorf("query singers by org: %w", err)
-	}
-	defer rows.Close()
-
-	var singers []models.Singer
-	for rows.Next() {
-		s, err := scanSinger(rows)
-		if err != nil {
-			return nil, fmt.Errorf("scan singer: %w", err)
-		}
-		singers = append(singers, s)
-	}
-
-	return singers, nil
-}
-
 func normalizeSingerMetadataSource(source string) string {
 	if source == "" {
 		return "holodex"

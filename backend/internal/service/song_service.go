@@ -397,21 +397,6 @@ func (s *SongService) MergeSongs(sourceSongID, targetSongID uuid.UUID) error {
 	return nil
 }
 
-// SearchSimilar は類似楽曲を検索する（AI 正規化候補用）。
-func (s *SongService) SearchSimilar(name string, limit int, access repository.ViewerAccess) ([]dto.SongResponse, error) {
-	songs, err := s.songRepo.SearchSimilar(name, limit)
-	if err != nil {
-		return nil, fmt.Errorf("search similar: %w", err)
-	}
-
-	responses := make([]dto.SongResponse, len(songs))
-	for i, song := range songs {
-		count, _ := s.songRepo.GetPerformanceCount(song.ID, access)
-		responses[i] = s.toSongResponse(song, count)
-	}
-	return responses, nil
-}
-
 // toSongResponse は Model を DTO に変換する（単件取得時に iTunes 関連を都度取得）。
 func (s *SongService) toSongResponse(song models.Song, count int) dto.SongResponse {
 	var itunesRecords []models.SongITunes
