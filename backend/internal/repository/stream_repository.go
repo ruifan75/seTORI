@@ -720,9 +720,15 @@ func (r *StreamRepository) FindStreamsForBatch(mode, singerID string, hidden *bo
 }
 
 // SearchStreams は配信元・参加者・ボーカル・タグを AND で組み合わせて検索する。
-// StreamTagIDs / PerformanceTagIDs の各配列内も AND 条件。
+// 各配列内も AND 条件。一致する配信IDを条件ごとに集計してから交差させる。
 // 検索は明示的な操作なので、非表示の配信も対象に含める。
 func (r *StreamRepository) SearchStreams(filters models.StreamSearchFilters, limit, offset int, access ViewerAccess) ([]models.Stream, int, error) {
+	// 歌唱の検索に使える配信を先に確定し、2つの集計で共有する。
+	// MATERIALIZED で秘匿判定を歌唱行ごと・条件ごとに再評価させない。
+	prefix := ""
+	if len(filters.VocalistIDs) > 0 || len(filters.PerformanceTagIDs) > 0 {
+		prefix = "WITH searchable_performance_streams AS MATERIALIZED (SELECT st.id FROM streams st WHERE " + NotRestrictedFor("st", access) + ")\n"
+	}
 	where := "WHERE TRUE"
 	args := []any{}
 	i := 1
@@ -737,7 +743,7 @@ func (r *StreamRepository) SearchStreams(filters models.StreamSearchFilters, lim
 		i++
 	}
 	if len(filters.ParticipantIDs) > 0 {
-		where += fmt.Sprintf(" AND (SELECT COUNT(DISTINCT ss.singer_id) FROM stream_singers ss WHERE ss.stream_id = s.id AND ss.singer_id = ANY($%d)) = %d", i, len(filters.ParticipantIDs))
+		where += fmt.Sprintf(" AND s.id IN (SELECT ss.stream_id FROM stream_singers ss WHERE ss.singer_id = ANY($%d) GROUP BY ss.stream_id HAVING COUNT(DISTINCT ss.singer_id) = %d)", i, len(filters.ParticipantIDs))
 		args = append(args, pq.Array(filters.ParticipantIDs))
 		i++
 	}
@@ -745,27 +751,27 @@ func (r *StreamRepository) SearchStreams(filters models.StreamSearchFilters, lim
 	// 秘匿された配信は突き合わせの対象から外す。配信のタイトルは公開してよいが、
 	// 「この配信でこの人が歌った」は伏せている中身の一部。
 	if len(filters.VocalistIDs) > 0 {
-		where += fmt.Sprintf(" AND (SELECT COUNT(DISTINCT ps.singer_id) FROM performances p JOIN performance_singers ps ON ps.performance_id = p.id JOIN streams st ON st.id = p.stream_id WHERE p.stream_id = s.id AND "+NotRestrictedFor("st", access)+" AND ps.singer_id = ANY($%d)) = %d", i, len(filters.VocalistIDs))
+		where += fmt.Sprintf(" AND s.id IN (SELECT p.stream_id FROM performances p JOIN performance_singers ps ON ps.performance_id = p.id JOIN searchable_performance_streams st ON st.id = p.stream_id WHERE ps.singer_id = ANY($%d) GROUP BY p.stream_id HAVING COUNT(DISTINCT ps.singer_id) = %d)", i, len(filters.VocalistIDs))
 		args = append(args, pq.Array(filters.VocalistIDs))
 		i++
 	}
 	if len(filters.StreamTagIDs) > 0 {
-		where += fmt.Sprintf(" AND (SELECT COUNT(DISTINCT sst.tag_id) FROM stream_stream_tags sst WHERE sst.stream_id = s.id AND sst.tag_id = ANY($%d)) = %d", i, len(filters.StreamTagIDs))
+		where += fmt.Sprintf(" AND s.id IN (SELECT sst.stream_id FROM stream_stream_tags sst WHERE sst.tag_id = ANY($%d) GROUP BY sst.stream_id HAVING COUNT(DISTINCT sst.tag_id) = %d)", i, len(filters.StreamTagIDs))
 		args = append(args, pq.Array(filters.StreamTagIDs))
 		i++
 	}
 	if len(filters.PerformanceTagIDs) > 0 {
-		where += fmt.Sprintf(" AND (SELECT COUNT(DISTINCT ppt.tag_id) FROM performances p JOIN performance_performance_tags ppt ON ppt.performance_id = p.id JOIN streams st ON st.id = p.stream_id WHERE p.stream_id = s.id AND "+NotRestrictedFor("st", access)+" AND ppt.tag_id = ANY($%d)) = %d", i, len(filters.PerformanceTagIDs))
+		where += fmt.Sprintf(" AND s.id IN (SELECT p.stream_id FROM performances p JOIN performance_performance_tags ppt ON ppt.performance_id = p.id JOIN searchable_performance_streams st ON st.id = p.stream_id WHERE ppt.tag_id = ANY($%d) GROUP BY p.stream_id HAVING COUNT(DISTINCT ppt.tag_id) = %d)", i, len(filters.PerformanceTagIDs))
 		args = append(args, pq.Array(filters.PerformanceTagIDs))
 		i++
 	}
 
 	var total int
-	if err := r.db.QueryRow("SELECT COUNT(*) FROM streams s "+where, args...).Scan(&total); err != nil {
+	if err := r.db.QueryRow(prefix+"SELECT COUNT(*) FROM streams s "+where, args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count searched streams: %w", err)
 	}
 
-	query := fmt.Sprintf(streamListQuery("s", `
+	query := prefix + fmt.Sprintf(streamListQuery("s", `
 		%s
 		ORDER BY s.stream_date DESC
 		LIMIT $%d OFFSET $%d`), where, i, i+1)
