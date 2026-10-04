@@ -61,3 +61,27 @@ func TestParseBatchAnalyzeRequest(t *testing.T) {
 		})
 	}
 }
+
+// **上限の境界**（issue #7）。上限は切り捨てではなく拒否 ── 切ると、正しい object が
+// ちょうど上限で終わり、その後ろに別の JSON 値が続く body を先頭だけで受理してしまう。
+//
+// 長さは空白で埋めて作る（JSON として有効なまま、ちょうどの長さにできる）。
+func TestParseBatchAnalyzeRequestSizeBoundary(t *testing.T) {
+	const obj = `{"mode":"unprocessed"}`
+	pad := func(n int) string { return obj + strings.Repeat(" ", n-len(obj)) }
+
+	if _, err := parseBatchAnalyzeRequest(strings.NewReader(pad(maxBatchRequestBytes))); err != nil {
+		t.Errorf("ちょうど上限で拒否している: %v", err)
+	}
+	if _, err := parseBatchAnalyzeRequest(strings.NewReader(pad(maxBatchRequestBytes + 1))); err == nil ||
+		!strings.Contains(err.Error(), "大きすぎます") {
+		t.Errorf("上限 + 1 byte を受理している（err=%v）", err)
+	}
+
+	// 上限ちょうどで終わる object の後ろに別の値。切り捨てる実装だと先頭の object だけが
+	// 読まれて通る（以前手元で 65551 byte の body で確かめた形）。
+	trailing := pad(maxBatchRequestBytes) + `{"mode":"force"}`
+	if _, err := parseBatchAnalyzeRequest(strings.NewReader(trailing)); err == nil {
+		t.Error("上限ちょうどの object ＋後続値を受理している（切り捨てになっている）")
+	}
+}

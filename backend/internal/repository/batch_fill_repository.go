@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 // BatchFillRepository は一括セットリスト作成の実行記録を扱う。
@@ -32,12 +33,15 @@ type BatchFillRun struct {
 	SongsReview  int       `json:"songs_review"`
 	// SongsGap は「DB にあるが入力元に無い」歌唱の件数（force 実行のみ）。
 	// 提案としては積まないので、ここが唯一の入口になる。
-	SongsGap      int        `json:"songs_gap"`
-	AIAsked       int        `json:"ai_asked"`
-	Message       string     `json:"message"`
-	StartedAt     time.Time  `json:"started_at"`
-	FinishedAt    *time.Time `json:"finished_at,omitempty"`
-	StartedByName *string    `json:"started_by_name,omitempty"`
+	SongsGap int `json:"songs_gap"`
+	// SkippedStreamIDs は入力元を確定できずに飛ばした配信（issue #7）。
+	// 件数だけでは「どれを手で見ればよいか」が辿れないので ID を返す。
+	SkippedStreamIDs []string   `json:"skipped_stream_ids"`
+	AIAsked          int        `json:"ai_asked"`
+	Message          string     `json:"message"`
+	StartedAt        time.Time  `json:"started_at"`
+	FinishedAt       *time.Time `json:"finished_at,omitempty"`
+	StartedByName    *string    `json:"started_by_name,omitempty"`
 }
 
 // BatchFillGap は「DB にあるが入力元に無い」歌唱 1 件（表示用に曲名と時間を添えて返す）。
@@ -70,12 +74,15 @@ func (r *BatchFillRepository) CreateRun(mode string, singerID *string, startedBy
 }
 
 // UpdateProgress は進捗を書く（実行中に何度も呼ばれる）。
-func (r *BatchFillRepository) UpdateProgress(id uuid.UUID, total, done, created, review, gap, aiAsked int) error {
+func (r *BatchFillRepository) UpdateProgress(id uuid.UUID, total, done, created, review, gap, aiAsked int, skipped []string) error {
+	if skipped == nil {
+		skipped = []string{} // NOT NULL の列へ NULL を書かない
+	}
 	_, err := r.db.Exec(`
 		UPDATE batch_fill_runs
 		SET streams_total = $2, streams_done = $3, songs_created = $4, songs_review = $5,
-		    songs_gap = $6, ai_asked = $7
-		WHERE id = $1`, id, total, done, created, review, gap, aiAsked)
+		    songs_gap = $6, ai_asked = $7, skipped_stream_ids = $8
+		WHERE id = $1`, id, total, done, created, review, gap, aiAsked, pq.Array(skipped))
 	if err != nil {
 		return fmt.Errorf("update batch fill progress: %w", err)
 	}
@@ -182,7 +189,7 @@ func (r *BatchFillRepository) ListRuns(limit int) ([]BatchFillRun, error) {
 	}
 	rows, err := r.db.Query(`
 		SELECT b.id, b.mode, b.singer_id, b.status, b.streams_total, b.streams_done,
-		       b.songs_created, b.songs_review, b.songs_gap, b.ai_asked, b.message,
+		       b.songs_created, b.songs_review, b.songs_gap, b.skipped_stream_ids, b.ai_asked, b.message,
 		       b.started_at, b.finished_at, u.username
 		FROM batch_fill_runs b
 		LEFT JOIN users u ON u.id = b.started_by
@@ -196,7 +203,7 @@ func (r *BatchFillRepository) ListRuns(limit int) ([]BatchFillRun, error) {
 	for rows.Next() {
 		var b BatchFillRun
 		if err := rows.Scan(&b.ID, &b.Mode, &b.SingerID, &b.Status, &b.StreamsTotal, &b.StreamsDone,
-			&b.SongsCreated, &b.SongsReview, &b.SongsGap, &b.AIAsked, &b.Message,
+			&b.SongsCreated, &b.SongsReview, &b.SongsGap, (*pq.StringArray)(&b.SkippedStreamIDs), &b.AIAsked, &b.Message,
 			&b.StartedAt, &b.FinishedAt, &b.StartedByName); err != nil {
 			return nil, fmt.Errorf("scan batch fill run: %w", err)
 		}

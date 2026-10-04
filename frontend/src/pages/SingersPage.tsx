@@ -24,6 +24,9 @@ export default function SingersPage() {
   const dir: SortDir = searchParams.get('dir') === 'desc' ? 'desc' : 'asc';
   const canEdit = hasPermission(useAuthStore((s) => s.user), PERM.CONTENT_EDIT);
   const [showAddModal, setShowAddModal] = useState(false);
+  // 非表示の区は既定で畳む（issue #65）。手元で 152 件中 151 件が非表示で、
+  // 開いたままだと表示中の数件が埋もれる。
+  const [showHidden, setShowHidden] = useState(false);
   const [channelInput, setChannelInput] = useState('');
 
   // 非表示チャンネルは閲覧者には出さない。権限があるときだけ一覧に含めて印を付ける。
@@ -43,6 +46,9 @@ export default function SingersPage() {
 
   const isLoading = view === 'group' ? groupedQuery.isLoading : listQuery.isLoading;
   const total = view === 'group' ? groupedQuery.data?.total : listQuery.data?.pagination.total;
+  // 非表示の件数（権限が無ければ undefined ── そもそも届かない）
+  const hiddenTotal =
+    view === 'group' ? groupedQuery.data?.hidden?.length : listQuery.data?.hidden_total;
 
   const buildParams = (next: { view?: ViewMode; page?: number; sort?: string; dir?: SortDir }) => {
     const params: Record<string, string> = {};
@@ -152,7 +158,15 @@ export default function SingersPage() {
           ) : (
             <>
               <div className="flex items-center justify-between gap-3 flex-wrap">
-                <div className="text-sm text-gray-500">{total}件のチャンネル</div>
+                <div className="text-sm text-gray-500">
+                  {total}件のチャンネル
+                  {/* 何件隠れているかを画面から分かるようにする（以前は総数しか出なかった） */}
+                  {hiddenTotal !== undefined && total !== undefined && (
+                    <span className="ml-1">
+                      （表示中 {total - hiddenTotal} ／ 非表示 {hiddenTotal}）
+                    </span>
+                  )}
+                </div>
                 <div className="flex items-center gap-3">
                   {view === 'list' && (
                     <SortControl
@@ -191,6 +205,11 @@ export default function SingersPage() {
 
               {view === 'group' ? (
                 <div className="space-y-8">
+                  {hiddenTotal !== undefined && (
+                    <h2 className="text-xl font-bold text-gray-900">
+                      表示中 <span className="text-base font-normal text-gray-500">{(total ?? 0) - hiddenTotal}</span>
+                    </h2>
+                  )}
                   {groupedQuery.data?.groups.map((group) => (
                     <section key={group.organization || '__none__'} className="space-y-3">
                       <div className="flex items-baseline gap-2 border-b border-gray-200 pb-2">
@@ -204,12 +223,54 @@ export default function SingersPage() {
                       </div>
                     </section>
                   ))}
+                  {/* 非表示の区：名前順の通し。事務所で組むと、畳んだ中がまた十数段になる */}
+                  {(groupedQuery.data?.hidden?.length ?? 0) > 0 && (
+                    <section className="space-y-3">
+                      <button
+                        onClick={() => setShowHidden((v) => !v)}
+                        className="flex items-baseline gap-2 text-xl font-bold text-gray-900 hover:text-indigo-700"
+                        aria-expanded={showHidden}
+                      >
+                        <span>{showHidden ? '▾' : '▸'}</span>
+                        非表示
+                        <span className="text-base font-normal text-gray-500">{groupedQuery.data!.hidden!.length}</span>
+                      </button>
+                      {showHidden && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                          {groupedQuery.data!.hidden!.map(renderCard)}
+                        </div>
+                      )}
+                    </section>
+                  )}
                 </div>
               ) : (
                 <>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {listQuery.data?.singers.map(renderCard)}
-                  </div>
+                  {/* 並びは表示中が先（バックエンドが is_hidden を第 1 キーにしている）。
+                      ページの中で非表示に切り替わる位置に見出しを入れる */}
+                  {(() => {
+                    const singers = listQuery.data?.singers ?? [];
+                    const visible = singers.filter((s) => !s.is_hidden);
+                    const hidden = singers.filter((s) => s.is_hidden);
+                    return (
+                      <>
+                        {visible.length > 0 && (
+                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            {visible.map(renderCard)}
+                          </div>
+                        )}
+                        {hidden.length > 0 && (
+                          <>
+                            <h2 className="text-lg font-semibold text-gray-900 border-b border-gray-200 pb-2">
+                              非表示 <span className="text-sm font-normal text-gray-500">{hiddenTotal}</span>
+                            </h2>
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                              {hidden.map(renderCard)}
+                            </div>
+                          </>
+                        )}
+                      </>
+                    );
+                  })()}
 
                   {listQuery.data && (
                     <Pagination

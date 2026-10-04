@@ -225,7 +225,8 @@ func scanStreamRow(row interface{ Scan(...any) error }) (models.Stream, error) {
 func (r *StreamRepository) FindByID(id string) (*models.Stream, error) {
 	query := `
 		SELECT id, title, stream_date, duration_seconds, thumbnail_url, holodex_data, holodex_hash, comment_raw, comment_songs, comment_songs_analyzed_at, chapter_raw, chapter_songs, is_processed, is_hidden, restriction_override, holodex_uploaded_at, holodex_upload_unknown, availability, playable_in_embed, availability_checked_at, created_at, updated_at,
-		       ` + EffectiveRestrictedExpr("streams") + ` AS is_restricted_effective
+		       ` + EffectiveRestrictedExpr("streams") + ` AS is_restricted_effective,
+		       ` + RestrictionNeedsReviewExpr("streams") + ` AS restriction_needs_review
 		FROM streams WHERE id = $1`
 
 	var s models.Stream
@@ -233,7 +234,8 @@ func (r *StreamRepository) FindByID(id string) (*models.Stream, error) {
 		&s.ID, &s.Title, &s.StreamDate, &s.DurationSeconds,
 		&s.ThumbnailURL, &s.HolodexData, &s.HolodexHash, &s.CommentRaw, &s.CommentSongs, &s.CommentSongsAnalyzedAt,
 		&s.ChapterRaw, &s.ChapterSongs, &s.IsProcessed, &s.IsHidden, &s.RestrictionOverride, &s.HolodexUploadedAt, &s.HolodexUploadUnknown,
-		&s.Availability, &s.PlayableInEmbed, &s.AvailabilityCheckedAt, &s.CreatedAt, &s.UpdatedAt, &s.IsRestrictedEffective)
+		&s.Availability, &s.PlayableInEmbed, &s.AvailabilityCheckedAt, &s.CreatedAt, &s.UpdatedAt, &s.IsRestrictedEffective,
+		&s.RestrictionNeedsReview)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -261,19 +263,49 @@ func (r *StreamRepository) Create(s *models.Stream) error {
 
 // UpdateMetadata は利用者が編集できる metadata フィールドだけを更新し、大きな JSONB（holodex_data / comment_*）には触れない。
 // 通常の情報更新で問題を含む可能性のある JSONB データを書き戻さないため。
-// restrictionOverride は人の裁定（NULL＝未裁定）。**検出の members_only タグは書かない** ──
-// 人が触った事実と、検出が言っていることは別の列に残す。
-func (r *StreamRepository) UpdateMetadata(id string, title string, streamDate time.Time, isProcessed, isHidden bool, restrictionOverride sql.NullBool) error {
+//
+// **秘匿の裁定（restriction_override）はここでは書かない**（`SetRestrictionOverride`）。
+// 裁定は自動判定の控えと対で書く必要があり、題名の編集のたびに書き戻すと
+// 控えが取り直されて、食い違いの警告が理由なく消える（issue #26）。
+func (r *StreamRepository) UpdateMetadata(id string, title string, streamDate time.Time, isProcessed, isHidden bool) error {
 	query := `
 		UPDATE streams
-		SET title = $2, stream_date = $3, is_processed = $4, is_hidden = $5, restriction_override = $6, updated_at = NOW()
+		SET title = $2, stream_date = $3, is_processed = $4, is_hidden = $5, updated_at = NOW()
 		WHERE id = $1
 		RETURNING updated_at`
 
 	var updatedAt time.Time
-	err := r.db.QueryRow(query, id, title, streamDate, isProcessed, isHidden, restrictionOverride).Scan(&updatedAt)
+	err := r.db.QueryRow(query, id, title, streamDate, isProcessed, isHidden).Scan(&updatedAt)
 	if err != nil {
 		return fmt.Errorf("update stream metadata: %w", err)
+	}
+	return nil
+}
+
+// SetRestrictionOverride は人の裁定を書き、**その時点の自動判定を控える**（issue #26）。
+//
+// 控えは SQL の中で計算する ── 呼び出し側が読んだ値を渡すと、読んでから書くまでの
+// 間に同期がタグを付けたとき、古い判定を控えてしまう（「安全条件は書くときに置く」）。
+// 自動判定の式は実効値と同じ `AutoRestrictedExpr` を使う。別に書くと、控えと
+// 現在値を比べる `RestrictionNeedsReviewExpr` が意味を失う。
+//
+// **タグと参加者を書いたあとに呼ぶこと。** 同じ要求で members_only を外して
+// 「公開してよい」にした場合、控えるべきは外したあとの判定（＝伏せない）で、
+// その後に同期がタグを付け直したら警告を出したい。先に呼ぶと外す前の判定
+// （＝伏せる）を控えるので、付け直しても「知っていて公開した」ことになる。
+//
+// 更新 0 件（配信が無い）は sql.ErrNoRows として返す。
+func (r *StreamRepository) SetRestrictionOverride(id string, restricted bool) error {
+	query := `
+		UPDATE streams AS st
+		SET restriction_override = $2, restriction_override_auto = (` + AutoRestrictedExpr("st") + `), updated_at = NOW()
+		WHERE st.id = $1
+		RETURNING st.updated_at`
+
+	var updatedAt time.Time
+	err := r.db.QueryRow(query, id, restricted).Scan(&updatedAt)
+	if err != nil {
+		return fmt.Errorf("set restriction override: %w", err)
 	}
 	return nil
 }
@@ -1318,6 +1350,45 @@ type NonSingingCandidate struct {
 	Tags       []string
 }
 
+// RestrictionReviewRow は裁定の見直しが要る配信（issue #26）。
+type RestrictionReviewRow struct {
+	ID         string
+	Title      string
+	StreamDate time.Time
+	// BasisUnknown は裁定の時点の判定が控えられていない（この仕組みより前の裁定）。
+	BasisUnknown bool
+}
+
+// FindRestrictionReview は公開の裁定と現在の自動判定が食い違う配信を新しい順に返す
+// （issue #26）。控えが無い旧裁定も含む。条件は `RestrictionNeedsReviewExpr`
+// だけ ── 配信詳細の警告と同じ式なので、一覧に出るものと詳細で警告が出るものが
+// ずれない。
+//
+// **非表示の配信も含める。** 会限の配信は多くが非表示だが（本番 86 本中 78 本）、
+// 非表示は発見面から外すだけで、歌唱は直接の経路から読める（CLAUDE.md §2）。
+func (r *StreamRepository) FindRestrictionReview(limit int) ([]RestrictionReviewRow, error) {
+	rows, err := r.db.Query(`
+		SELECT st.id, st.title, st.stream_date, st.restriction_override_auto IS NULL
+		FROM streams st
+		WHERE `+RestrictionNeedsReviewExpr("st")+`
+		ORDER BY st.stream_date DESC, st.id
+		LIMIT $1`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("find restriction review: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]RestrictionReviewRow, 0)
+	for rows.Next() {
+		var row RestrictionReviewRow
+		if err := rows.Scan(&row.ID, &row.Title, &row.StreamDate, &row.BasisUnknown); err != nil {
+			return nil, fmt.Errorf("scan restriction review: %w", err)
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
 // FindNonSingingCandidates は見直しが要る配信を返す。
 //
 // **差分は保存しない。** 毎回計算する ── 抽出規則が変われば候補も変わるべきで、
@@ -1424,6 +1495,48 @@ func (r *StreamRepository) MarkProcessedIfHiddenAndEmpty(streamID string) (bool,
 	return n > 0, nil
 }
 
+// CommentRefreshBackoffExpr は「YouTube がコメントは取れないと明言してから、
+// まだ間隔が空いていない」配信（issue #56）。取り直しの対象から外すのに使う。
+//
+// 間隔は連続回数に応じて 1 日 → 2 日 → 4 日 → 以後 7 日（`LEAST` で頭打ち）。
+// **恒久とは決めない** ── 配信者があとでコメント欄を開くことはある。
+//
+// **COALESCE を外さないこと。** 一度も記録が無い配信は comment_unavailable_at が
+// NULL で、比較も NULL になる。`NOT NULL` は NULL なので WHERE で行が消える
+// ── **記録の無い（＝普通の）配信が全部取り直しの対象から外れる**。
+func CommentRefreshBackoffExpr(alias string) string {
+	return "COALESCE(" + alias + ".comment_unavailable_at > NOW() - LEAST(power(2, GREATEST(" +
+		alias + ".comment_unavailable_count, 1) - 1), 7) * INTERVAL '1 day', FALSE)"
+}
+
+// MarkCommentsUnavailable は「YouTube がコメントは取れないと明言した」を記録する
+// （連続回数を 1 つ進める）。
+func (r *StreamRepository) MarkCommentsUnavailable(id string) (int, error) {
+	var count int
+	err := r.db.QueryRow(`
+		UPDATE streams
+		SET comment_unavailable_at = NOW(), comment_unavailable_count = comment_unavailable_count + 1
+		WHERE id = $1
+		RETURNING comment_unavailable_count`, id).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("mark comments unavailable: %w", err)
+	}
+	return count, nil
+}
+
+// ClearCommentsUnavailable は記録を消す（コメント欄があると分かったとき）。
+// 記録の無い配信には書かない（取り直しのたびに全行へ UPDATE を走らせない）。
+func (r *StreamRepository) ClearCommentsUnavailable(id string) error {
+	_, err := r.db.Exec(`
+		UPDATE streams
+		SET comment_unavailable_at = NULL, comment_unavailable_count = 0
+		WHERE id = $1 AND (comment_unavailable_at IS NOT NULL OR comment_unavailable_count <> 0)`, id)
+	if err != nil {
+		return fmt.Errorf("clear comments unavailable: %w", err)
+	}
+	return nil
+}
+
 // FindStreamsNeedingCommentRefresh はコメントを取り直す価値がある配信の ID を返す。
 //
 // **歌単は配信が終わったあとに貼られることが多い。** 同期は新規のときしか
@@ -1444,13 +1557,13 @@ func (r *StreamRepository) MarkProcessedIfHiddenAndEmpty(streamID string) (bool,
 // 配信はこの実行の中で複数回取りに行くこともあるが、
 // **飛ばして取りこぼすよりは安い**という判断。
 //
-// singerIDs が空なら全チャンネル。**所有者で絞る**（ゲスト参加しただけの
-// 他人の配信まで対象にしない。FindStreamsForFill と同じ）。
+// singerIDs が空なら全チャンネル。既定は所有者だけで絞り、includeCollabs が
+// true のときは参加者まで含む（FindStreamsForFill と同じ）。
 // justSynced はこの実行の同期で入ってきた配信。**それだけでは除外しない** ──
 // 同期のコメント取得は失敗してもログだけで、その配信は「新規」として返る。
 // 「新規だから取得済み」と決めつけると、取得に失敗した配信を黙って飛ばすことになる。
 // **実際にコメントが入っているものだけ**を除外する（＝取得できた証拠がある）。
-func (r *StreamRepository) FindStreamsNeedingCommentRefresh(singerIDs []string, days int, justSynced []string) ([]string, error) {
+func (r *StreamRepository) FindStreamsNeedingCommentRefresh(singerIDs []string, days int, justSynced []string, includeCollabs bool) ([]string, error) {
 	if days < 1 {
 		days = 30
 	}
@@ -1479,12 +1592,20 @@ func (r *StreamRepository) FindStreamsNeedingCommentRefresh(singerIDs []string, 
 		  -- 自動処理が奪う。RefreshCommentRaw 側にも「0 件で既存を消さない」歯止めを
 		  -- 置いたが、**取りに行かないのが本筋**（PR #43 が一括の対象から会限を
 		  -- 外したのと同じ）。
-		  AND NOT ` + MembersOnlyDetectedExpr("s")
+		  AND NOT ` + MembersOnlyDetectedExpr("s") + `
+		  AND NOT ` + CommentRefreshBackoffExpr("s")
 	args := []any{days}
 	if len(singerIDs) > 0 {
+		// **既定は所有者だけ。** includeCollabs で参加しただけの配信（客串）まで広げる
+		// （issue #60）。一括作成（FindStreamsForFill）と同じ値を渡すこと ──
+		// 片方だけ広げると、取り直していない入力を一括が見続ける。
+		ownerOnly := " AND ss.is_owner"
+		if includeCollabs {
+			ownerOnly = ""
+		}
 		query += `
 		  AND EXISTS (SELECT 1 FROM stream_singers ss
-		              WHERE ss.stream_id = s.id AND ss.is_owner AND ss.singer_id = ANY($2))`
+		              WHERE ss.stream_id = s.id` + ownerOnly + ` AND ss.singer_id = ANY($2))`
 		args = append(args, pq.Array(singerIDs))
 	}
 	if len(justSynced) > 0 {

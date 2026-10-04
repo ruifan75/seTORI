@@ -50,6 +50,7 @@ type Router struct {
 	aiProviderRepo       *repository.AIProviderRepository
 	chatEndService       *service.ChatEndService
 	chapterService       *service.ChapterService
+	taskRunService       *service.TaskRunService
 	artistService        *service.ArtistService
 	batchAnalyzeService  *service.BatchAnalyzeService
 	batchFillService     *service.BatchFillService
@@ -197,6 +198,7 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 		aiProviderRepo:       aiProviderRepo,
 		chatEndService:       chatEndService,
 		chapterService:       chapterService,
+		taskRunService:       service.NewTaskRunService(repository.NewTaskRunRepository(db)),
 		artistService:        artistService,
 		batchAnalyzeService:  batchAnalyzeService,
 		batchFillService:     batchFillService,
@@ -237,6 +239,11 @@ func (r *Router) BackupService() *service.BackupService {
 }
 
 // SongMatchService は main.go での照合キー再構築に使う。
+// TaskRunService は起動時の片付け（前のプロセスが残した running）に使う。
+func (r *Router) TaskRunService() *service.TaskRunService {
+	return r.taskRunService
+}
+
 func (r *Router) SongMatchService() *service.SongMatchService {
 	return r.songMatchService
 }
@@ -397,6 +404,7 @@ func (r *Router) setupRoutes() {
 	// 自動処理（定期実行）。設定・手動実行とも content:edit。
 	// 見直しが要る配信（非表示だが現行規則で曲が出た）。content:edit。
 	r.mux.HandleFunc("GET /api/non-singing-candidates", r.handleListNonSingingCandidates)
+	r.mux.HandleFunc("GET /api/restriction-review", r.handleListRestrictionReview)
 	r.mux.HandleFunc("POST /api/non-singing-candidates/{id}/dismiss", r.handleDismissNonSingingCandidate)
 	r.mux.HandleFunc("DELETE /api/non-singing-candidates/{id}/dismiss", r.handleRestoreNonSingingCandidate)
 
@@ -446,6 +454,8 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("DELETE /api/streams/{id}/import/live-chat", r.handleDeleteImportedLiveChat)
 	r.mux.HandleFunc("POST /api/streams/{id}/chat-end-estimate", r.handleEstimateChatEnds)
 	r.mux.HandleFunc("POST /api/chat-ends/backfill", r.handleBackfillChatEnds)
+	r.mux.HandleFunc("GET /api/tasks", r.handleListTasks)
+	r.mux.HandleFunc("GET /api/tasks/{id}", r.handleGetTask)
 
 	// チャプター分析（配信者が付けた目次を 3 つ目の入力元にする）
 	r.mux.HandleFunc("GET /api/streams/{id}/chapters", r.handleGetChapters)
@@ -2090,6 +2100,24 @@ func (r *Router) handleListNonSingingCandidates(w http.ResponseWriter, req *http
 	respondJSON(w, http.StatusOK, result)
 }
 
+// handleListRestrictionReview は公開の裁定と現在の会限判定が食い違う
+// 配信の一覧（content:edit、issue #26）。解決は既存の PUT /api/streams/{id} の
+// is_restricted で行う ── 裁定を書き直すと、その時点の判定が控えられて一覧から消える。
+func (r *Router) handleListRestrictionReview(w http.ResponseWriter, req *http.Request) {
+	limit := 100
+	if v := req.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 500 {
+			limit = n
+		}
+	}
+	result, err := r.streamService.ListRestrictionReview(limit)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, result)
+}
+
 // handleDismissNonSingingCandidate は「見たが歌回ではない」を記録する（content:edit）。
 func (r *Router) handleDismissNonSingingCandidate(w http.ResponseWriter, req *http.Request) {
 	id := req.PathValue("id")
@@ -2132,18 +2160,23 @@ func (r *Router) handleRestoreNonSingingCandidate(w http.ResponseWriter, req *ht
 func (r *Router) handleGetAutoFillSettings(w http.ResponseWriter, req *http.Request) {
 	// 設定と実行結果は**別のキー**に保存している（実行結果の保存が設定を
 	// 巻き戻さないため）。画面には 1 つにまとめて返す。
-	settings := r.autoFillService.GetSettings()
-	last := r.autoFillService.GetLastRun()
-	respondJSON(w, http.StatusOK, map[string]any{
+	respondJSON(w, http.StatusOK, autoFillSettingsResponse(r.autoFillService.GetSettings(), r.autoFillService.GetLastRun()))
+}
+
+// autoFillSettingsResponse は取得と保存の応答を 1 か所で組み立てる。
+// 項目を足したとき片方だけ返す、を起こさないため。
+func autoFillSettingsResponse(settings service.AutoFillSettings, last service.AutoFillLastRun) map[string]any {
+	return map[string]any{
 		"enabled":         settings.Enabled,
 		"interval_hours":  settings.IntervalHours,
 		"refresh_days":    settings.RefreshDays,
+		"include_collabs": settings.IncludeCollabs,
 		"last_run_at":     last.At,
 		"last_skipped_at": last.SkippedAt,
 		"last_skip_note":  last.SkipNote,
 		"last_run_note":   last.Note,
 		"last_run_error":  last.Error,
-	})
+	}
 }
 
 // handleUpdateAutoFillSettings は自動処理の設定を保存する（content:edit）。
@@ -2155,29 +2188,19 @@ func (r *Router) handleUpdateAutoFillSettings(w http.ResponseWriter, req *http.R
 	}
 	// **項目が無いのを false / 0 と読まない。** `{}` や項目名の typo が decode に
 	// 成功して、動いている自動処理を黙って止めたり間隔を最小にしたりする。
-	if body.Enabled == nil || body.IntervalHours == nil || body.RefreshDays == nil {
+	if body.Enabled == nil || body.IntervalHours == nil || body.RefreshDays == nil || body.IncludeCollabs == nil {
 		respondError(w, http.StatusBadRequest,
-			"enabled / interval_hours / refresh_days はすべて必須です")
+			"enabled / interval_hours / refresh_days / include_collabs はすべて必須です")
 		return
 	}
-	settings, err := r.autoFillService.UpdateSettings(*body.Enabled, *body.IntervalHours, *body.RefreshDays)
+	settings, err := r.autoFillService.UpdateSettings(*body.Enabled, *body.IntervalHours, *body.RefreshDays, *body.IncludeCollabs)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	logger.Infof("auto fill settings updated: enabled=%v interval=%dh refresh=%dd",
-		settings.Enabled, settings.IntervalHours, settings.RefreshDays)
-	last := r.autoFillService.GetLastRun()
-	respondJSON(w, http.StatusOK, map[string]any{
-		"enabled":         settings.Enabled,
-		"interval_hours":  settings.IntervalHours,
-		"refresh_days":    settings.RefreshDays,
-		"last_run_at":     last.At,
-		"last_skipped_at": last.SkippedAt,
-		"last_skip_note":  last.SkipNote,
-		"last_run_note":   last.Note,
-		"last_run_error":  last.Error,
-	})
+	logger.Infof("auto fill settings updated: enabled=%v interval=%dh refresh=%dd collabs=%v",
+		settings.Enabled, settings.IntervalHours, settings.RefreshDays, settings.IncludeCollabs)
+	respondJSON(w, http.StatusOK, autoFillSettingsResponse(settings, r.autoFillService.GetLastRun()))
 }
 
 // handleRunAutoFill は自動処理を今すぐ 1 回走らせる（content:edit）。
@@ -2854,11 +2877,63 @@ func (r *Router) handleBackfillChatEnds(w http.ResponseWriter, req *http.Request
 			concurrency = v
 		}
 	}
-	go r.chatEndService.Backfill(concurrency)
+	run, ok := r.startTask(w, req, service.TaskChatEndBackfill, map[string]any{"concurrency": concurrency})
+	if !ok {
+		return
+	}
+	go r.chatEndService.Backfill(concurrency, run)
 	respondJSON(w, http.StatusAccepted, map[string]interface{}{
-		"message":     "拍手 end のバックフィルを開始しました（バックグラウンド、ログ参照）",
+		"message":     "拍手 end のバックフィルを開始しました（進捗は管理→Holodex 同期の「背景処理」）",
 		"concurrency": concurrency,
+		"task_id":     run.ID,
 	})
+}
+
+// startTask は背景処理の記録を始める。同じ種類が走っていれば 409 を返して false。
+func (r *Router) startTask(w http.ResponseWriter, req *http.Request, kind string, params any) (*service.TaskRun, bool) {
+	var by *uuid.UUID
+	if u := currentUser(req); u != nil {
+		by = &u.ID
+	}
+	run, err := r.taskRunService.Start(kind, params, by)
+	if errors.Is(err, service.ErrTaskRunning) {
+		respondError(w, http.StatusConflict, err.Error())
+		return nil, false
+	}
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return nil, false
+	}
+	return run, true
+}
+
+// handleListTasks / handleGetTask は背景処理の実行記録（content:edit、issue #22）。
+func (r *Router) handleListTasks(w http.ResponseWriter, req *http.Request) {
+	limit, _ := strconv.Atoi(req.URL.Query().Get("limit"))
+	runs, err := r.taskRunService.List(limit)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"tasks": runs})
+}
+
+func (r *Router) handleGetTask(w http.ResponseWriter, req *http.Request) {
+	id, err := uuid.Parse(req.PathValue("id"))
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "無効なID")
+		return
+	}
+	run, err := r.taskRunService.Get(id)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if run == nil {
+		respondError(w, http.StatusNotFound, "実行が見つかりません")
+		return
+	}
+	respondJSON(w, http.StatusOK, run)
 }
 
 // ========== Chapter Handlers ==========
@@ -2921,10 +2996,15 @@ func (r *Router) handleBackfillChapters(w http.ResponseWriter, req *http.Request
 			concurrency = v
 		}
 	}
-	go r.chapterService.Backfill(concurrency)
+	run, ok := r.startTask(w, req, service.TaskChapterBackfill, map[string]any{"concurrency": concurrency})
+	if !ok {
+		return
+	}
+	go r.chapterService.Backfill(concurrency, run)
 	respondJSON(w, http.StatusAccepted, map[string]interface{}{
-		"message":     "チャプターの取得を開始しました（バックグラウンド、ログ参照）",
+		"message":     "チャプターの取得を開始しました（進捗は管理→Holodex 同期の「背景処理」）",
 		"concurrency": concurrency,
+		"task_id":     run.ID,
 	})
 }
 
@@ -3770,6 +3850,19 @@ func requiredPermission(method, path string) (perm string, needsAuth bool) {
 	// 見直しが要る配信の一覧も content:edit。**GET は既定で公開に落ちる**ので、
 	// 書かないと「非表示にしている配信の題名」が未ログインから読める。
 	if isRouteOrSubpath(path, "/api/non-singing-candidates") {
+		return auth.PermContentEdit, true
+	}
+
+	// 背景処理の実行記録（issue #22）。**GET は既定で公開に落ちる**ので明示が要る ──
+	// 失敗の理由に配信 ID と yt-dlp のエラー（BOT 判定・cookie の状態）が載る。
+	if isRouteOrSubpath(path, "/api/tasks") {
+		return auth.PermContentEdit, true
+	}
+
+	// 裁定の見直しが要る配信（issue #26）も同じ。**GET は既定で公開に落ちる**ので、
+	// 書かないと「公開してよいと裁定した会限配信」の一覧が未ログインから読める
+	// ── 配信者にまだ確かめていないものを外から拾える一覧になる。
+	if isRouteOrSubpath(path, "/api/restriction-review") {
 		return auth.PermContentEdit, true
 	}
 

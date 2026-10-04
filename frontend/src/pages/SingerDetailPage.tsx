@@ -833,6 +833,8 @@ function MembersPolicyPicker({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['singer', singer.id] });
       queryClient.invalidateQueries({ queryKey: ['singers'] });
+      // 方針は自動判定の材料なので、裁定の見直し一覧（issue #26）の中身も変わる
+      queryClient.invalidateQueries({ queryKey: ['restriction-review'] });
       setOpen(false);
       showToast('会限セットリストの方針を更新しました', 'success');
     },
