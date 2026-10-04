@@ -2139,18 +2139,23 @@ func (r *Router) handleRestoreNonSingingCandidate(w http.ResponseWriter, req *ht
 func (r *Router) handleGetAutoFillSettings(w http.ResponseWriter, req *http.Request) {
 	// 設定と実行結果は**別のキー**に保存している（実行結果の保存が設定を
 	// 巻き戻さないため）。画面には 1 つにまとめて返す。
-	settings := r.autoFillService.GetSettings()
-	last := r.autoFillService.GetLastRun()
-	respondJSON(w, http.StatusOK, map[string]any{
+	respondJSON(w, http.StatusOK, autoFillSettingsResponse(r.autoFillService.GetSettings(), r.autoFillService.GetLastRun()))
+}
+
+// autoFillSettingsResponse は取得と保存の応答を 1 か所で組み立てる。
+// 項目を足したとき片方だけ返す、を起こさないため。
+func autoFillSettingsResponse(settings service.AutoFillSettings, last service.AutoFillLastRun) map[string]any {
+	return map[string]any{
 		"enabled":         settings.Enabled,
 		"interval_hours":  settings.IntervalHours,
 		"refresh_days":    settings.RefreshDays,
+		"include_collabs": settings.IncludeCollabs,
 		"last_run_at":     last.At,
 		"last_skipped_at": last.SkippedAt,
 		"last_skip_note":  last.SkipNote,
 		"last_run_note":   last.Note,
 		"last_run_error":  last.Error,
-	})
+	}
 }
 
 // handleUpdateAutoFillSettings は自動処理の設定を保存する（content:edit）。
@@ -2162,29 +2167,19 @@ func (r *Router) handleUpdateAutoFillSettings(w http.ResponseWriter, req *http.R
 	}
 	// **項目が無いのを false / 0 と読まない。** `{}` や項目名の typo が decode に
 	// 成功して、動いている自動処理を黙って止めたり間隔を最小にしたりする。
-	if body.Enabled == nil || body.IntervalHours == nil || body.RefreshDays == nil {
+	if body.Enabled == nil || body.IntervalHours == nil || body.RefreshDays == nil || body.IncludeCollabs == nil {
 		respondError(w, http.StatusBadRequest,
-			"enabled / interval_hours / refresh_days はすべて必須です")
+			"enabled / interval_hours / refresh_days / include_collabs はすべて必須です")
 		return
 	}
-	settings, err := r.autoFillService.UpdateSettings(*body.Enabled, *body.IntervalHours, *body.RefreshDays)
+	settings, err := r.autoFillService.UpdateSettings(*body.Enabled, *body.IntervalHours, *body.RefreshDays, *body.IncludeCollabs)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	logger.Infof("auto fill settings updated: enabled=%v interval=%dh refresh=%dd",
-		settings.Enabled, settings.IntervalHours, settings.RefreshDays)
-	last := r.autoFillService.GetLastRun()
-	respondJSON(w, http.StatusOK, map[string]any{
-		"enabled":         settings.Enabled,
-		"interval_hours":  settings.IntervalHours,
-		"refresh_days":    settings.RefreshDays,
-		"last_run_at":     last.At,
-		"last_skipped_at": last.SkippedAt,
-		"last_skip_note":  last.SkipNote,
-		"last_run_note":   last.Note,
-		"last_run_error":  last.Error,
-	})
+	logger.Infof("auto fill settings updated: enabled=%v interval=%dh refresh=%dd collabs=%v",
+		settings.Enabled, settings.IntervalHours, settings.RefreshDays, settings.IncludeCollabs)
+	respondJSON(w, http.StatusOK, autoFillSettingsResponse(settings, r.autoFillService.GetLastRun()))
 }
 
 // handleRunAutoFill は自動処理を今すぐ 1 回走らせる（content:edit）。

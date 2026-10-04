@@ -95,7 +95,7 @@ func TestCommentRefreshBackoffExprExact(t *testing.T) {
 
 func TestFindStreamsNeedingCommentRefreshAppliesBackoff(t *testing.T) {
 	db, rec := newAvailDB(t)
-	repository.NewStreamRepository(db).FindStreamsNeedingCommentRefresh(nil, 30, nil)
+	repository.NewStreamRepository(db).FindStreamsNeedingCommentRefresh(nil, 30, nil, false)
 	issued := rec.all()
 	if len(issued) != 1 {
 		t.Fatalf("1 本のはずが %d 本: %q", len(issued), issued)

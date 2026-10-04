@@ -1474,13 +1474,13 @@ func (r *StreamRepository) ClearCommentsUnavailable(id string) error {
 // 配信はこの実行の中で複数回取りに行くこともあるが、
 // **飛ばして取りこぼすよりは安い**という判断。
 //
-// singerIDs が空なら全チャンネル。**所有者で絞る**（ゲスト参加しただけの
-// 他人の配信まで対象にしない。FindStreamsForFill と同じ）。
+// singerIDs が空なら全チャンネル。既定は所有者だけで絞り、includeCollabs が
+// true のときは参加者まで含む（FindStreamsForFill と同じ）。
 // justSynced はこの実行の同期で入ってきた配信。**それだけでは除外しない** ──
 // 同期のコメント取得は失敗してもログだけで、その配信は「新規」として返る。
 // 「新規だから取得済み」と決めつけると、取得に失敗した配信を黙って飛ばすことになる。
 // **実際にコメントが入っているものだけ**を除外する（＝取得できた証拠がある）。
-func (r *StreamRepository) FindStreamsNeedingCommentRefresh(singerIDs []string, days int, justSynced []string) ([]string, error) {
+func (r *StreamRepository) FindStreamsNeedingCommentRefresh(singerIDs []string, days int, justSynced []string, includeCollabs bool) ([]string, error) {
 	if days < 1 {
 		days = 30
 	}
@@ -1513,9 +1513,16 @@ func (r *StreamRepository) FindStreamsNeedingCommentRefresh(singerIDs []string, 
 		  AND NOT ` + CommentRefreshBackoffExpr("s")
 	args := []any{days}
 	if len(singerIDs) > 0 {
+		// **既定は所有者だけ。** includeCollabs で参加しただけの配信（客串）まで広げる
+		// （issue #60）。一括作成（FindStreamsForFill）と同じ値を渡すこと ──
+		// 片方だけ広げると、取り直していない入力を一括が見続ける。
+		ownerOnly := " AND ss.is_owner"
+		if includeCollabs {
+			ownerOnly = ""
+		}
 		query += `
 		  AND EXISTS (SELECT 1 FROM stream_singers ss
-		              WHERE ss.stream_id = s.id AND ss.is_owner AND ss.singer_id = ANY($2))`
+		              WHERE ss.stream_id = s.id` + ownerOnly + ` AND ss.singer_id = ANY($2))`
 		args = append(args, pq.Array(singerIDs))
 	}
 	if len(justSynced) > 0 {

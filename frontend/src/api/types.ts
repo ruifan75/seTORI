@@ -540,6 +540,11 @@ export interface AutoFillSettings {
   interval_hours: number;
   /** コメントを取り直す対象の上限日数（歌単は配信後に貼られることが多い） */
   refresh_days: number;
+  /**
+   * 参加しただけの配信（客串）も対象にするか（issue #60）。既定は所有者の配信だけ。
+   * 客串は歌手が複数なので、一括作成は全行を審査へ回す
+   */
+  include_collabs: boolean;
   last_run_at?: string;
   last_run_note?: string;
   last_run_error?: string;

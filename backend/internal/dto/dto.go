@@ -196,6 +196,9 @@ type UpdateAutoFillSettingsRequest struct {
 	Enabled       *bool `json:"enabled"`
 	IntervalHours *int  `json:"interval_hours"`
 	RefreshDays   *int  `json:"refresh_days"`
+	// IncludeCollabs も必須（他の項目と同じ理由）。無いのを false と読むと、
+	// 古い画面から保存しただけで客串の対象が黙って外れる。
+	IncludeCollabs *bool `json:"include_collabs"`
 }
 
 // UpdateSingerAutoFillRequest は自動処理の対象かの切り替え。
