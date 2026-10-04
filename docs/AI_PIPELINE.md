@@ -274,7 +274,10 @@ comment / chapter 両方のキャッシュが一斉に**失効する**。
 > つまり現状、**comment 側にも chapter 側にも完全な一括再構築口は無い**。
 >
 > `songmatch.RulesVersion` は同じ「version を混ぜる」手だが、**効き方が違う**。
-> あちらは起動時の再構築を前提にしているのに production では走っていない（issue #21）。
+> あちらはサーバーの起動時に全楽曲のキーを作り直す（`cmd/server/main.go` の
+> `RebuildKeys`）ので、上げれば次の起動で追随する。入力の取り直しが要る comment 側と違い、
+> 材料（曲名・アーティスト）が DB に全部あるから成り立つ。
+> （以前「production では走っていない」と書いていたのは誤り。issue #21）
 
 ---
 
