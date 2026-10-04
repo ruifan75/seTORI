@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -11,6 +12,9 @@ import (
 	"github.com/ruifan75/setori/internal/models"
 	"github.com/ruifan75/setori/pkg/util"
 )
+
+// ErrTooManyStreamTags は AND 条件を切り捨てず、要求を拒否するためのエラー。
+var ErrTooManyStreamTags = errors.New("配信タグは20個まで指定できます")
 
 type StreamRepository struct {
 	db *sql.DB
@@ -20,11 +24,19 @@ func NewStreamRepository(db *sql.DB) *StreamRepository {
 	return &StreamRepository{db: db}
 }
 
-// FindAll はすべての歌枠を取得する（ページング対応、既定では非表示を除外）。
-func (r *StreamRepository) FindAll(limit, offset int, includeHidden bool, sort, dir string) ([]models.Stream, int, error) {
+// FindAll はすべての配信を取得する（ページング対応、既定では非表示を除外）。
+//
+// tags は配信タグでの絞り込み（**全部を持つ**＝AND。issue #63）。空なら絞らない。
+// 重複はここで除く（`NormalizeStreamTagFilter`）── 同じ ID が 2 つあると件数の照合が
+// 合わなくなり 1 件も返らないので、呼び出し側に任せない。
+func (r *StreamRepository) FindAll(limit, offset int, includeHidden bool, sort, dir string, tags []string) ([]models.Stream, int, error) {
+	tags = NormalizeStreamTagFilter(tags)
+	if len(tags) > 20 {
+		return nil, 0, ErrTooManyStreamTags
+	}
 	var total int
-	countQuery := "SELECT COUNT(*) FROM streams WHERE " + streamListFilter("streams", includeHidden)
-	err := r.db.QueryRow(countQuery).Scan(&total)
+	countQuery := "SELECT COUNT(*) FROM streams WHERE " + streamListWhere("streams", includeHidden, "$1")
+	err := r.db.QueryRow(countQuery, pq.Array(tags)).Scan(&total)
 	if err != nil {
 		return nil, 0, fmt.Errorf("count streams: %w", err)
 	}
@@ -36,11 +48,11 @@ func (r *StreamRepository) FindAll(limit, offset int, includeHidden bool, sort, 
 	}
 
 	query := streamListQuery("streams", `
-		WHERE `+streamListFilter("streams", includeHidden)+`
+		WHERE `+streamListWhere("streams", includeHidden, "$1")+`
 		ORDER BY `+order+`
-		LIMIT $1 OFFSET $2`)
+		LIMIT $2 OFFSET $3`)
 
-	rows, err := r.db.Query(query, limit, offset)
+	rows, err := r.db.Query(query, pq.Array(tags), limit, offset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("query streams: %w", err)
 	}
@@ -86,6 +98,77 @@ func streamListFilter(alias string, includeHidden bool) string {
 		return "TRUE"
 	}
 	return alias + ".is_hidden = FALSE AND " + VisibleChannelExpr(alias)
+}
+
+// streamListWhere は配信一覧（`/streams`）の WHERE 条件。**件数・一覧・タグの件数で
+// 必ず共有する**（`streamListFilter` と同じ理由。別々に書くと画面の合計と合わない）。
+//
+// tagParam は text[] のプレースホルダ（"$1" など）。番号はクエリごとに違うので
+// 呼び出し側が渡す。
+func streamListWhere(alias string, includeHidden bool, tagParam string) string {
+	return streamListFilter(alias, includeHidden) + " AND " + streamTagsAllExpr(alias, tagParam)
+}
+
+// streamTagsAllExpr は指定タグをすべて持つ配信をまとめて求める（AND）。
+// 配信ごとの相関 COUNT はタグ件数の JOIN でも繰り返され、1 万配信・2 タグで
+// 推定 cost が 10 万を超えた。GROUP BY の結果を一度作り、IN で照合する。
+// 空配列は TRUE にし、タグがない配信も含める。
+func streamTagsAllExpr(alias, tagParam string) string {
+	return "(cardinality(" + tagParam + "::text[]) = 0 OR " + alias + ".id IN (" +
+		"SELECT tf.stream_id FROM stream_stream_tags tf WHERE tf.tag_id = ANY(" + tagParam + "::text[])" +
+		" GROUP BY tf.stream_id HAVING COUNT(DISTINCT tf.tag_id) = cardinality(" + tagParam + "::text[])))"
+}
+
+// NormalizeStreamTagFilter は絞り込みのタグを整える（空白を除き、空と重複を落とす）。
+//
+// **重複は必ず落とす。** `streamTagsAllExpr` は「持っている種類の数 = 指定の数」で
+// 判定するので、同じ ID が 2 つあると永久に一致せず、1 件も返らない。
+// 条件を黙って捨てると AND が広がるため、上限の検査は正規化後に別途行う。
+func NormalizeStreamTagFilter(raw []string) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, t := range raw {
+		t = strings.TrimSpace(t)
+		if t == "" || seen[t] {
+			continue
+		}
+		seen[t] = true
+		out = append(out, t)
+	}
+	return out
+}
+
+// CountByTagForList は配信一覧の母集合（＋選んだタグでの絞り込み）の中で、
+// 配信タグごとの件数を返す（issue #63）。チップに「あと何件に絞れるか」を出すため。
+//
+// **母集合は一覧と同じ式から作る**（`streamListWhere`）。別に書き下ろすと、
+// チップの数字と一覧の件数が合わない。
+func (r *StreamRepository) CountByTagForList(tags []string) (map[string]int, error) {
+	tags = NormalizeStreamTagFilter(tags)
+	if len(tags) > 20 {
+		return nil, ErrTooManyStreamTags
+	}
+	rows, err := r.db.Query(`
+		SELECT st.tag_id, COUNT(*)
+		FROM stream_stream_tags st
+		JOIN streams ON streams.id = st.stream_id
+		WHERE `+streamListWhere("streams", false, "$1")+`
+		GROUP BY st.tag_id`, pq.Array(tags))
+	if err != nil {
+		return nil, fmt.Errorf("count streams by tag: %w", err)
+	}
+	defer rows.Close()
+
+	counts := map[string]int{}
+	for rows.Next() {
+		var id string
+		var n int
+		if err := rows.Scan(&id, &n); err != nil {
+			return nil, fmt.Errorf("scan stream tag count: %w", err)
+		}
+		counts[id] = n
+	}
+	return counts, rows.Err()
 }
 
 // VisibleChannelExpr は「この配信が、一覧に出しているチャンネルのものか」を返す SQL 式。
@@ -391,7 +474,7 @@ func (r *StreamRepository) FindByDateRange(start, end time.Time) ([]models.Strea
 // GetTags は歌枠に付いたすべてのタグを取得する。
 func (r *StreamRepository) GetTags(streamID string) ([]models.StreamTag, error) {
 	query := `
-		SELECT st.id, st.display_name, st.color, st.created_at
+		SELECT st.id, st.display_name, COALESCE(st.color, ''), st.created_at
 		FROM stream_tags st
 		JOIN stream_stream_tags sst ON st.id = sst.tag_id
 		WHERE sst.stream_id = $1`
@@ -423,7 +506,7 @@ func (r *StreamRepository) GetTagsForStreams(streamIDs []string) (map[string][]m
 	}
 
 	query := `
-		SELECT sst.stream_id, st.id, st.display_name, st.color, st.created_at
+		SELECT sst.stream_id, st.id, st.display_name, COALESCE(st.color, ''), st.created_at
 		FROM stream_tags st
 		JOIN stream_stream_tags sst ON st.id = sst.tag_id
 		WHERE sst.stream_id = ANY($1)`

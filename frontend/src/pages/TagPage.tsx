@@ -74,6 +74,16 @@ export default function TagPage() {
           {isStream ? '配信タグ' : '演出タグ'}
           {total !== undefined && ` · ${total}件`}
         </span>
+        {/* 配信一覧でも同じタグで絞れる（並び替え・タグの組み合わせができる。issue #63） */}
+        {isStream && tagId && (
+          <Link
+            to={`/streams?tag=${encodeURIComponent(tagId)}`}
+            className="text-sm text-indigo-600 hover:underline"
+            title="配信一覧で、このタグで絞り込む（並び替えや他のタグとの組み合わせができます）"
+          >
+            配信一覧で絞り込む →
+          </Link>
+        )}
         {!isStream && (perfData?.performances.length ?? 0) > 0 && (
           <button
             onClick={() => playFrom(0)}
@@ -94,7 +104,7 @@ export default function TagPage() {
         </div>
       ) : isStream ? (
         <>
-          {/* 配信カードグリッド（歌枠一覧と同じ形式） */}
+          {/* 配信カードグリッド（配信一覧と同じ形式） */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {streamData?.streams.map((stream) => (
               <Link

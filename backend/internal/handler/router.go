@@ -325,6 +325,7 @@ func (r *Router) setupRoutes() {
 
 	// API routes - Streams
 	r.mux.HandleFunc("GET /api/streams", r.handleListStreams)
+	r.mux.HandleFunc("GET /api/streams/tag-counts", r.handleStreamTagCounts)
 	r.mux.HandleFunc("GET /api/streams/{id}", r.handleGetStream)
 	r.mux.HandleFunc("POST /api/streams", r.handleCreateStream)
 	r.mux.HandleFunc("PUT /api/streams/{id}", r.handleUpdateStream)
@@ -1867,13 +1868,33 @@ func (r *Router) handleListStreams(w http.ResponseWriter, req *http.Request) {
 		limit = 20
 	}
 
-	result, err := r.streamService.GetAll(page, limit, sort, dir, userHasPermission(req, auth.PermContentEdit))
+	// tag は複数指定できる（tag=singing&tag=3d）。**全部を持つ配信**に絞る（AND）。
+	result, err := r.streamService.GetAll(page, limit, sort, dir, req.URL.Query()["tag"], userHasPermission(req, auth.PermContentEdit))
+	if errors.Is(err, repository.ErrTooManyStreamTags) {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	respondJSON(w, http.StatusOK, result)
+}
+
+// handleStreamTagCounts は配信一覧の母集合（＋選んだタグ）での、配信タグごとの件数（issue #63）。
+// **公開**：配信一覧そのものが未ログインで見られるので、その内訳を伏せる理由が無い。
+func (r *Router) handleStreamTagCounts(w http.ResponseWriter, req *http.Request) {
+	counts, err := r.streamService.CountTagsForList(req.URL.Query()["tag"])
+	if errors.Is(err, repository.ErrTooManyStreamTags) {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"counts": counts})
 }
 
 func (r *Router) handleGetStream(w http.ResponseWriter, req *http.Request) {
@@ -1891,7 +1912,7 @@ func (r *Router) handleGetStream(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	if result == nil {
-		respondError(w, http.StatusNotFound, "歌枠が見つかりません")
+		respondError(w, http.StatusNotFound, "配信が見つかりません")
 		return
 	}
 
@@ -1923,7 +1944,7 @@ func (r *Router) handleUpdateStream(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	if result == nil {
-		respondError(w, http.StatusNotFound, "歌枠が見つかりません")
+		respondError(w, http.StatusNotFound, "配信が見つかりません")
 		return
 	}
 
