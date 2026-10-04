@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { sameViewer, viewerID } from '../queryClient';
+import { useViewerState } from '../hooks/useViewerState';
 import RestrictedBadge from '../components/RestrictedBadge';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from 'react-router-dom';
@@ -29,9 +30,9 @@ export default function PlaylistDetailPage({ shared = false }: { shared?: boolea
   const { showToast } = useToast();
   const queryClient = useQueryClient();
 
-  const [editing, setEditing] = useState(false);
-  const [editName, setEditName] = useState('');
-  const [editDescription, setEditDescription] = useState('');
+  const [editing, setEditing] = useViewerState(false);
+  const [editName, setEditName] = useViewerState('');
+  const [editDescription, setEditDescription] = useViewerState('');
 
   const playlistQuery = useQuery({
     queryKey: ['playlist', key, shared],
@@ -115,12 +116,15 @@ export default function PlaylistDetailPage({ shared = false }: { shared?: boolea
   };
 
   const copyShareLink = async () => {
+    const startedAs = viewerID();
     if (!playlist?.share_slug) return;
     const url = `${window.location.origin}/shared/playlists/${playlist.share_slug}`;
     try {
       await navigator.clipboard.writeText(url);
+      if (!sameViewer(startedAs)) return;
       showToast('共有リンクをコピーしました', 'success');
     } catch {
+      if (!sameViewer(startedAs)) return;
       // クリップボードが使えない環境（http や権限拒否）ではリンクを直接見せる
       showToast(url, 'info');
     }
@@ -146,7 +150,7 @@ export default function PlaylistDetailPage({ shared = false }: { shared?: boolea
     <div className="space-y-6">
       {/* ヘッダー */}
       <div className="space-y-3">
-        {editing ? (
+        {editing && isOwner ? (
           <form
             onSubmit={(e) => {
               e.preventDefault();

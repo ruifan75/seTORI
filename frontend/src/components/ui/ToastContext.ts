@@ -1,4 +1,5 @@
-import { createContext, useContext } from 'react';
+import { createContext, useCallback, useContext, useSyncExternalStore } from 'react';
+import { onViewerChange, sameViewer, viewerID } from '../../queryClient';
 
 // 取り消しなど、トーストから直接引ける操作（例：「元に戻す」）。
 // 押すとトーストは閉じる。
@@ -23,8 +24,13 @@ export const ToastContext = createContext<ToastContextValue | null>(null);
 
 export function useToast() {
   const context = useContext(ToastContext);
+  const viewer = useSyncExternalStore(onViewerChange, viewerID, viewerID);
+  const sendToast = context?.showToast;
+  const showToast = useCallback<ToastContextValue['showToast']>((...args) => {
+    if (sameViewer(viewer)) sendToast?.(...args);
+  }, [sendToast, viewer]);
   if (!context) {
     throw new Error('useToast must be used within ToastProvider');
   }
-  return context;
+  return { ...context, showToast };
 }

@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { sameViewer, viewerID } from '../queryClient';
+import { useViewerState } from '../hooks/useViewerState';
+import { useEffect, useRef } from 'react';
 import { artistApi } from '../api/client';
 import type { Artist } from '../api/types';
 
@@ -23,10 +25,10 @@ interface Props {
 }
 
 export default function ArtistSearchInput({ value, onChange, onSelectArtist, placeholder }: Props) {
-  const [isOpen, setIsOpen] = useState(false);
-  const [query, setQuery] = useState('');
-  const [suggestions, setSuggestions] = useState<Artist[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isOpen, setIsOpen] = useViewerState(false);
+  const [query, setQuery] = useViewerState('');
+  const [suggestions, setSuggestions] = useViewerState<Artist[]>([]);
+  const [isLoading, setIsLoading] = useViewerState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -37,7 +39,9 @@ export default function ArtistSearchInput({ value, onChange, onSelectArtist, pla
       setSuggestions([]);
       return;
     }
+    const startedAs = viewerID();
     const timer = setTimeout(async () => {
+      if (!sameViewer(startedAs)) return;
       setIsLoading(true);
       try {
         const result = await artistApi.list(1, 8, query, 'songs', 'desc');
@@ -49,7 +53,7 @@ export default function ArtistSearchInput({ value, onChange, onSelectArtist, pla
       }
     }, 300);
     return () => clearTimeout(timer);
-  }, [query]);
+  }, [query, setIsLoading, setSuggestions]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -64,7 +68,7 @@ export default function ArtistSearchInput({ value, onChange, onSelectArtist, pla
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+  }, [setIsOpen]);
 
   const select = (artist: Artist) => {
     onSelectArtist(artist);

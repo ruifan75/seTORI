@@ -54,6 +54,7 @@ export function resetQueryCacheForAuthChange() {
 // 応答が返るまでの間にログアウトすると、捨てたはずのデータが復活する
 // （実測：おすすめ全曲再生の補充リクエストで再現）。
 let currentViewerKey: string | null = null;
+let viewerRevision = 0;
 
 // ViewerChangeListener は利用者が変わったときに呼ばれる。
 type ViewerChangeListener = () => void;
@@ -68,12 +69,13 @@ export function onViewerChange(fn: ViewerChangeListener): () => void {
 
 // viewerID は現在の視界の鍵。非同期処理の前後で比べる。
 export function viewerID(): string | null {
-  return currentViewerKey;
+  // 同じ人がログインし直しても、ログアウト前の処理を復活させない。
+  return `${viewerRevision}:${currentViewerKey ?? ''}`;
 }
 
 // sameViewer は「始めたときと同じ視界か」。**非同期の完了時に必ず確かめる。**
 export function sameViewer(startedAs: string | null): boolean {
-  return currentViewerKey === startedAs;
+  return viewerID() === startedAs;
 }
 
 // viewerKey は利用者と権限から鍵を作る。**権限を含めるのが要点**
@@ -87,9 +89,10 @@ export function viewerKey(userID: string | null | undefined, permissions: string
 //
 // **散らばらせないこと。** 以前はログアウト時にしか捨てていなかったので、
 // ログイン（利用者の切り替え）・非同期の完了・ポップアップ・通知が全部漏れた。
-export function applyViewerChange(nextKey: string | null) {
-  if (currentViewerKey === nextKey) return;
+export function applyViewerChange(nextKey: string | null, force = false) {
+  if (!force && currentViewerKey === nextKey) return;
   currentViewerKey = nextKey;
+  viewerRevision++;
   // 表示中も含めて初期状態へ戻し、購読中のものは取り直させる。
   void queryClient.resetQueries();
   for (const fn of viewerChangeListeners) fn();

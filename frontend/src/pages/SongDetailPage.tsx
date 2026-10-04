@@ -1,7 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { sameViewer, viewerID } from '../queryClient';
+import { useViewerState } from '../hooks/useViewerState';
+import { useEffect, useRef } from 'react';
 import RestrictedBadge from '../components/RestrictedBadge';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiErrorMessage } from '../utils/apiError';
+import { itunesTrackURL } from '../utils/itunesURL';
 import { useParams, useSearchParams, Link, useNavigate } from 'react-router-dom';
 import { songApi, itunesApi, suggestionApi } from '../api/client';
 import type {
@@ -45,10 +48,10 @@ interface SongSearchInputProps {
 
 // 楽曲検索入力コンポーネント（オートコンプリート付き）
 function SongSearchInput({ value, onChange, onSelectSong, placeholder, excludeSongId }: SongSearchInputProps) {
-  const [isOpen, setIsOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [suggestions, setSuggestions] = useState<Song[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isOpen, setIsOpen] = useViewerState(false);
+  const [searchQuery, setSearchQuery] = useViewerState('');
+  const [suggestions, setSuggestions] = useViewerState<Song[]>([]);
+  const [isLoading, setIsLoading] = useViewerState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -59,7 +62,9 @@ function SongSearchInput({ value, onChange, onSelectSong, placeholder, excludeSo
       return;
     }
 
+    const startedAs = viewerID();
     const timer = setTimeout(async () => {
+      if (!sameViewer(startedAs)) return;
       setIsLoading(true);
       try {
         const result = await songApi.list(1, 10, searchQuery);
@@ -73,7 +78,7 @@ function SongSearchInput({ value, onChange, onSelectSong, placeholder, excludeSo
     }, 300);
 
     return () => clearTimeout(timer);
-  }, [searchQuery, excludeSongId]);
+  }, [searchQuery, excludeSongId, setIsLoading, setSuggestions]);
 
   // 外部クリックでドロップダウンを閉じる
   useEffect(() => {
@@ -90,7 +95,7 @@ function SongSearchInput({ value, onChange, onSelectSong, placeholder, excludeSo
 
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+  }, [setIsOpen]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newValue = e.target.value;
@@ -149,14 +154,14 @@ export default function SongDetailPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const canEdit = hasPermission(useAuthStore((s) => s.user), PERM.CONTENT_EDIT);
-  const [isEditing, setIsEditing] = useState(false);
-  const [mergeTargetId, setMergeTargetId] = useState('');
-  const [mergeTargetQuery, setMergeTargetQuery] = useState('');
-  const [itunesDetails, setItunesDetails] = useState<Record<number, ITunesQueryResult>>({});
+  const [isEditing, setIsEditing] = useViewerState(false);
+  const [mergeTargetId, setMergeTargetId] = useViewerState('');
+  const [mergeTargetQuery, setMergeTargetQuery] = useViewerState('');
+  const [itunesDetails, setItunesDetails] = useViewerState<Record<number, ITunesQueryResult>>({});
   const fetchedItunesDetailIdsRef = useRef<Set<number>>(new Set());
-  const [itunesTrackUrls, setItunesTrackUrls] = useState<Record<number, string>>({});
+  const [itunesTrackUrls, setItunesTrackUrls] = useViewerState<Record<number, string>>({});
   const fetchedItunesIdsRef = useRef<Set<number>>(new Set());
-  const [editedSong, setEditedSong] = useState<UpdateSongRequest>({
+  const [editedSong, setEditedSong] = useViewerState<UpdateSongRequest>({
     name: '',
     name_reading: '',
     original_artist: '',
@@ -165,11 +170,11 @@ export default function SongDetailPage() {
   });
 
   // iTunes 検索関連状態
-  const [itunesSearchQuery, setItunesSearchQuery] = useState('');
-  const [itunesSearchResults, setItunesSearchResults] = useState<ITunesSearchResult[]>([]);
-  const [showItunesSearch, setShowItunesSearch] = useState(false);
-  const [directItunesId, setDirectItunesId] = useState('');
-  const [isSearching, setIsSearching] = useState(false);
+  const [itunesSearchQuery, setItunesSearchQuery] = useViewerState('');
+  const [itunesSearchResults, setItunesSearchResults] = useViewerState<ITunesSearchResult[]>([]);
+  const [showItunesSearch, setShowItunesSearch] = useViewerState(false);
+  const [directItunesId, setDirectItunesId] = useViewerState('');
+  const [isSearching, setIsSearching] = useViewerState(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ['song', id, 'performances', page],
@@ -221,7 +226,7 @@ export default function SongDetailPage() {
           // ignore fetch errors
         });
     });
-  }, [editedSong.itunes_ids, isEditing]);
+  }, [editedSong.itunes_ids, isEditing, setItunesDetails]);
 
   const deleteMutation = useMutation({
     mutationFn: () => songApi.delete(id!),
@@ -271,14 +276,14 @@ export default function SongDetailPage() {
 
           setItunesTrackUrls((prev) => ({
             ...prev,
-            [itunesId]: result.track_view_url,
+            [itunesId]: itunesTrackURL(result.track_view_url, itunesId),
           }));
         })
         .catch(() => {
           // ignore errors to avoid blocking UI
         });
     });
-  }, [data?.song?.itunes_ids, isEditing]);
+  }, [data?.song?.itunes_ids, isEditing, setItunesTrackUrls]);
 
   const toggleEditing = () => {
     if (!isEditing && data?.song) {
@@ -358,20 +363,20 @@ export default function SongDetailPage() {
   const handleOpenItunes = async (itunesId: number) => {
     const cached = itunesTrackUrls[itunesId];
     if (cached) {
-      window.open(cached, '_blank', 'noopener,noreferrer');
+      window.open(itunesTrackURL(cached, itunesId), '_blank', 'noopener,noreferrer');
       return;
     }
 
     try {
       const result = await itunesApi.queryById(itunesId);
-      const url = result.track_view_url || `https://music.apple.com/song/${itunesId}`;
+      const url = itunesTrackURL(result.track_view_url, itunesId);
       setItunesTrackUrls((prev) => ({
         ...prev,
         [itunesId]: url,
       }));
       window.open(url, '_blank', 'noopener,noreferrer');
     } catch {
-      window.open(`https://music.apple.com/song/${itunesId}`, '_blank', 'noopener,noreferrer');
+      window.open(itunesTrackURL(null, itunesId), '_blank', 'noopener,noreferrer');
     }
   };
 

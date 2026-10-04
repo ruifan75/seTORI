@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { sameViewer, viewerID } from '../queryClient';
+import { useViewerState } from '../hooks/useViewerState';
+import { useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { singerApi } from '../api/client';
 import type { Singer } from '../api/types';
@@ -34,12 +36,12 @@ export default function SingerSearchInput({
 }: SingerSearchInputProps) {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
-  const [isOpen, setIsOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [suggestions, setSuggestions] = useState<Singer[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [isCreating, setIsCreating] = useState(false);
-  const [createError, setCreateError] = useState('');
+  const [isOpen, setIsOpen] = useViewerState(false);
+  const [searchQuery, setSearchQuery] = useViewerState('');
+  const [suggestions, setSuggestions] = useViewerState<Singer[]>([]);
+  const [isLoading, setIsLoading] = useViewerState(false);
+  const [isCreating, setIsCreating] = useViewerState(false);
+  const [createError, setCreateError] = useViewerState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -50,7 +52,9 @@ export default function SingerSearchInput({
       return;
     }
 
+    const startedAs = viewerID();
     const timer = setTimeout(async () => {
+      if (!sameViewer(startedAs)) return;
       setIsLoading(true);
       try {
         const results = await singerApi.search(searchQuery, 10);
@@ -64,7 +68,7 @@ export default function SingerSearchInput({
     }, 300);
 
     return () => clearTimeout(timer);
-  }, [searchQuery, excludeIds]);
+  }, [searchQuery, excludeIds, setIsLoading, setSuggestions]);
 
   // 外部クリックでドロップダウンを閉じる
   useEffect(() => {
@@ -81,7 +85,7 @@ export default function SingerSearchInput({
 
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+  }, [setIsOpen]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setSearchQuery(e.target.value);
