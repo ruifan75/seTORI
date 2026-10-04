@@ -434,8 +434,8 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("POST /api/sync/holodex/to-holodex/{id}", r.handleSyncSetoriToHolodex)
 
 	// Load songs from Holodex (without adding to normalization queue)
-	r.mux.HandleFunc("GET /api/streams/{id}/holodex-songs", r.handleLoadHolodexSongs)
-	r.mux.HandleFunc("POST /api/streams/{id}/holodex-songs/analyze", r.handleAnalyzeHolodexSongs)
+	r.mux.HandleFunc("GET /api/streams/{id}/holodex-songs", r.withAnalysisAccess(r.handleLoadHolodexSongs))
+	r.mux.HandleFunc("POST /api/streams/{id}/holodex-songs/analyze", r.withAnalysisAccess(r.handleAnalyzeHolodexSongs))
 
 	// Estimate end times
 	r.mux.HandleFunc("POST /api/streams/{id}/estimate-end-times", r.handleEstimateEndTimes)
@@ -450,18 +450,18 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("PUT /api/performances/{id}", r.handleUpdatePerformance)
 
 	// Comment analysis
-	r.mux.HandleFunc("GET /api/streams/{id}/comments", r.handleGetComments)
-	r.mux.HandleFunc("POST /api/streams/{id}/comments/sync-youtube", r.handleSyncYouTubeComments)
-	r.mux.HandleFunc("POST /api/streams/{id}/comments/analyze", r.handleAnalyzeComments)
+	r.mux.HandleFunc("GET /api/streams/{id}/comments", r.withAnalysisAccess(r.handleGetComments))
+	r.mux.HandleFunc("POST /api/streams/{id}/comments/sync-youtube", r.withAnalysisAccess(r.handleSyncYouTubeComments))
+	r.mux.HandleFunc("POST /api/streams/{id}/comments/analyze", r.withAnalysisAccess(r.handleAnalyzeComments))
 	r.mux.HandleFunc("POST /api/comments/backfill", r.handleBackfillCommentSongs)
 	r.mux.HandleFunc("POST /api/comments/backfill-hashes", r.handleBackfillCommentSongsHashes)
-	r.mux.HandleFunc("POST /api/streams/{id}/analyze-chat-ends", r.handleAnalyzeChatEnds)
+	r.mux.HandleFunc("POST /api/streams/{id}/analyze-chat-ends", r.withAnalysisAccess(r.handleAnalyzeChatEnds))
 	// 手動での取り込み（会限配信は本番から入力源を取れないため。content:edit）
 	r.mux.HandleFunc("POST /api/streams/{id}/import/info-json", r.handleImportInfoJSON)
 	r.mux.HandleFunc("POST /api/streams/{id}/import/live-chat", r.handleImportLiveChat)
-	r.mux.HandleFunc("GET /api/streams/{id}/import/live-chat", r.handleGetImportedLiveChat)
+	r.mux.HandleFunc("GET /api/streams/{id}/import/live-chat", r.withAnalysisAccess(r.handleGetImportedLiveChat))
 	r.mux.HandleFunc("DELETE /api/streams/{id}/import/live-chat", r.handleDeleteImportedLiveChat)
-	r.mux.HandleFunc("POST /api/streams/{id}/chat-end-estimate", r.handleEstimateChatEnds)
+	r.mux.HandleFunc("POST /api/streams/{id}/chat-end-estimate", r.withAnalysisAccess(r.handleEstimateChatEnds))
 	r.mux.HandleFunc("POST /api/chat-ends/backfill", r.handleBackfillChatEnds)
 	r.mux.HandleFunc("POST /api/streams/prepare", r.handlePrepareStreams)
 	r.mux.HandleFunc("POST /api/tasks/{id}/cancel", r.handleCancelPreparation)
@@ -469,9 +469,9 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("GET /api/tasks/{id}", r.handleGetTask)
 
 	// チャプター分析（配信者が付けた目次を 3 つ目の入力元にする）
-	r.mux.HandleFunc("GET /api/streams/{id}/chapters", r.handleGetChapters)
-	r.mux.HandleFunc("POST /api/streams/{id}/chapters/sync", r.handleSyncChapters)
-	r.mux.HandleFunc("POST /api/streams/{id}/chapters/analyze", r.handleAnalyzeChapters)
+	r.mux.HandleFunc("GET /api/streams/{id}/chapters", r.withAnalysisAccess(r.handleGetChapters))
+	r.mux.HandleFunc("POST /api/streams/{id}/chapters/sync", r.withAnalysisAccess(r.handleSyncChapters))
+	r.mux.HandleFunc("POST /api/streams/{id}/chapters/analyze", r.withAnalysisAccess(r.handleAnalyzeChapters))
 	r.mux.HandleFunc("POST /api/chapters/backfill", r.handleBackfillChapters)
 
 	// 再生可否（会限・削除済みの判定材料。issue #3）
@@ -863,7 +863,7 @@ func (r *Router) handleListBatchFillGaps(w http.ResponseWriter, req *http.Reques
 		respondError(w, http.StatusBadRequest, "無効な実行 ID")
 		return
 	}
-	gaps, err := r.batchFillService.ListGaps(runID)
+	gaps, err := r.batchFillService.ListGaps(runID, viewerAccess(req))
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -2103,7 +2103,7 @@ func (r *Router) handleListNonSingingCandidates(w http.ResponseWriter, req *http
 	}
 	// dismissed=true は「歌回ではないと判断した」一覧（取り消すため）。
 	dismissed := req.URL.Query().Get("dismissed") == "true"
-	result, err := r.streamService.ListNonSingingCandidates(limit, dismissed)
+	result, err := r.streamService.ListNonSingingCandidates(limit, dismissed, viewerAccess(req))
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -2563,9 +2563,6 @@ func (r *Router) handleLoadHolodexSongs(w http.ResponseWriter, req *http.Request
 		respondError(w, http.StatusBadRequest, "無効な動画ID")
 		return
 	}
-	if !r.requireAnalysisAccess(w, req, videoID) {
-		return
-	}
 
 	result, err := r.holodexService.LoadHolodexSongs(videoID)
 	if err != nil {
@@ -2704,15 +2701,15 @@ func (r *Router) handleUpdatePerformance(w http.ResponseWriter, req *http.Reques
 
 // requireAnalysisAccess は「この配信の解析素材を要求者へ渡してよいか」を確かめる。
 //
-// **`/comments` `/chapters` `/holodex-songs` は解析の *元データ* を返す。**
+// **GET の素材、POST の解析結果・再取得、チャット要約・終了時刻推定を同じ視界にする。**
 // セットリストを濾しても、ここから元の曲名・時刻がそのまま読める ──
 // むしろこちらのほうが生々しい（コメント原文・章節の見出し）。
 //
 // 権限は `content:edit` なので、`restricted:view` を持たない編集者も通る。
 // **公開配信の編集は妨げず、秘匿配信のときだけ止める**（403）。
 //
-// 配信が見つからないときは通す ── 存在しない ID を秘匿と区別しない
-// （各ハンドラが自分で 404 なり空なりを返す）。
+// 配信が無いと公開可否も確認できない。DB 行が削除されてもファイルキャッシュや
+// 実行中の解析結果は残るので、restricted:view の無い要求を公開へ倒さない。
 func (r *Router) requireAnalysisAccess(w http.ResponseWriter, req *http.Request, videoID string) bool {
 	if viewerAccess(req) == repository.RestrictedView {
 		return true
@@ -2722,7 +2719,11 @@ func (r *Router) requireAnalysisAccess(w http.ResponseWriter, req *http.Request,
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return false
 	}
-	if stream != nil && stream.IsRestrictedEffective {
+	if stream == nil {
+		respondError(w, http.StatusNotFound, "配信が登録されていません")
+		return false
+	}
+	if stream.IsRestrictedEffective {
 		respondError(w, http.StatusForbidden,
 			"この配信は公開可否が未確認のため、解析素材を表示できません")
 		return false
@@ -2732,9 +2733,6 @@ func (r *Router) requireAnalysisAccess(w http.ResponseWriter, req *http.Request,
 
 func (r *Router) handleGetComments(w http.ResponseWriter, req *http.Request) {
 	videoID := req.PathValue("id")
-	if !r.requireAnalysisAccess(w, req, videoID) {
-		return
-	}
 	if videoID == "" {
 		respondError(w, http.StatusBadRequest, "無効な動画ID")
 		return
@@ -2952,9 +2950,6 @@ func (r *Router) handleGetTask(w http.ResponseWriter, req *http.Request) {
 // handleGetChapters は保存済みのチャプターを返す（未取得なら yt-dlp で取りに行く）。
 func (r *Router) handleGetChapters(w http.ResponseWriter, req *http.Request) {
 	videoID := req.PathValue("id")
-	if !r.requireAnalysisAccess(w, req, videoID) {
-		return
-	}
 	if videoID == "" {
 		respondError(w, http.StatusBadRequest, "無効な動画ID")
 		return
@@ -3208,12 +3203,12 @@ func (r *Router) handleDeletePerformanceTag(w http.ResponseWriter, req *http.Req
 // 無視して消す ── どちらも次の計算に効くので、一覧は放っておくと減る作りにしてある。
 func (r *Router) handleListTagGaps(w http.ResponseWriter, req *http.Request) {
 	limit, _ := strconv.Atoi(req.URL.Query().Get("limit"))
-	gaps, err := r.tagRepo.FindTagGaps(limit)
+	gaps, err := r.tagRepo.FindTagGaps(limit, viewerAccess(req))
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	dismissed, err := r.tagRepo.ListTagGapDismissals(limit)
+	dismissed, err := r.tagRepo.ListTagGapDismissals(limit, viewerAccess(req))
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -3817,6 +3812,14 @@ func requiredPermission(method, path string) (perm string, needsAuth bool) {
 		return "", true
 	}
 
+	// 管理画面の整備状況・入力の解釈規則・照合の否決。GET も編集者に限る。
+	if isRouteOrSubpath(path, "/api/readings") ||
+		isRouteOrSubpath(path, "/api/filter-keywords") ||
+		isRouteOrSubpath(path, "/api/tag-keyword-rules") ||
+		isRouteOrSubpath(path, "/api/songs/identity-checks") {
+		return auth.PermContentEdit, true
+	}
+
 	// 一括セットリスト作成・一括プレ分析は進捗・履歴も含めて content:edit。
 	// 実行の履歴には誰が回したかが載るので、閲覧者には出さない。
 	//
@@ -3913,7 +3916,7 @@ func requiredPermission(method, path string) (perm string, needsAuth bool) {
 	if path == "/api/suggestions/mine" {
 		return "", true
 	}
-	if strings.HasPrefix(path, "/api/suggestions") {
+	if isRouteOrSubpath(path, "/api/suggestions") {
 		if method == http.MethodDelete {
 			return "", true
 		}
@@ -3921,14 +3924,14 @@ func requiredPermission(method, path string) (perm string, needsAuth bool) {
 	}
 
 	// 限定公開 URL（共有リンク）は未ログインでも閲覧可
-	if strings.HasPrefix(path, "/api/shared/playlists") {
+	if (method == http.MethodGet || method == http.MethodHead) && isRouteOrSubpath(path, "/api/shared/playlists") {
 		return "", false
 	}
 
 	// 外部アカウント連携：ログイン導線なので未ログインで通す必要がある。
 	// start はログイン中なら「連携追加」として扱うため、どちらでも通す（判定はハンドラ側）。
 	// 連携一覧の閲覧と解除だけはログインが要る。
-	if strings.HasPrefix(path, "/api/auth/oauth") {
+	if isRouteOrSubpath(path, "/api/auth/oauth") {
 		switch {
 		case path == "/api/auth/oauth/identities":
 			return "", true
@@ -3943,11 +3946,11 @@ func requiredPermission(method, path string) (perm string, needsAuth bool) {
 	// （viewer ロールの一般利用者も自分のプレイリストを作れる必要がある）。
 	// 誰のものを触れるかという行単位の判定は PlaylistService が行う。
 	// 公開・限定公開の閲覧は未ログインでも可。
-	if strings.HasPrefix(path, "/api/playlists") {
-		if strings.HasPrefix(path, "/api/playlists/public") {
+	if isRouteOrSubpath(path, "/api/playlists") {
+		if (method == http.MethodGet || method == http.MethodHead) && path == "/api/playlists/public" {
 			return "", false
 		}
-		if method == http.MethodGet {
+		if method == http.MethodGet || method == http.MethodHead {
 			// 個別取得は公開のものもあるため未ログインで通し、可否はサービス層で判定する。
 			// ただし一覧（GET /api/playlists）は本人のものを返すのでログインが要る。
 			if path == "/api/playlists" {
@@ -3961,8 +3964,8 @@ func requiredPermission(method, path string) (perm string, needsAuth bool) {
 	// プリセットプレイリストは運営が用意した公開の歌単。中身の閲覧は誰でもできる。
 	// フォローとコピーは自分のデータを作るだけなので、ログインだけを求める
 	// （プレイリストと同じ考え方。フォロー中の一覧も本人の分しか返らない）。
-	if strings.HasPrefix(path, "/api/presets") {
-		if method == http.MethodGet && path != "/api/presets/followed" {
+	if isRouteOrSubpath(path, "/api/presets") {
+		if (method == http.MethodGet || method == http.MethodHead) && path != "/api/presets/followed" {
 			return "", false
 		}
 		return "", true
@@ -3970,7 +3973,7 @@ func requiredPermission(method, path string) (perm string, needsAuth bool) {
 
 	// 照合の学習層は全楽曲の照合結果を左右する。AI の判定も含まれるので、
 	// 閲覧も編集もレビュー担当（content:edit）に限る。
-	if strings.HasPrefix(path, "/api/aliases") {
+	if isRouteOrSubpath(path, "/api/aliases") {
 		return auth.PermContentEdit, true
 	}
 
@@ -3981,7 +3984,7 @@ func requiredPermission(method, path string) (perm string, needsAuth bool) {
 	}
 
 	// タグ漏れもレビュー用の作業一覧。閲覧も編集と同じ権限に揃える。
-	if strings.HasPrefix(path, "/api/tag-gaps") {
+	if isRouteOrSubpath(path, "/api/tag-gaps") {
 		return auth.PermContentEdit, true
 	}
 
@@ -3994,21 +3997,21 @@ func requiredPermission(method, path string) (perm string, needsAuth bool) {
 
 	// 管理系リソースはメソッドを問わず専用権限が必要
 	switch {
-	case strings.HasPrefix(path, "/api/users"),
-		strings.HasPrefix(path, "/api/roles"),
+	case isRouteOrSubpath(path, "/api/users"),
+		isRouteOrSubpath(path, "/api/roles"),
 		path == "/api/permissions",
-		strings.HasPrefix(path, "/api/activity"):
+		isRouteOrSubpath(path, "/api/activity"):
 		return auth.PermUsersManage, true
-	case strings.HasPrefix(path, "/api/settings"):
+	case isRouteOrSubpath(path, "/api/settings"):
 		// 連携設定は実質的に資格情報の管理なのでユーザー管理と同格の権限を要求する
 		return auth.PermUsersManage, true
-	case strings.HasPrefix(path, "/api/ai-providers"):
+	case isRouteOrSubpath(path, "/api/ai-providers"):
 		return auth.PermAIManage, true
-	case strings.HasPrefix(path, "/api/logs"):
+	case isRouteOrSubpath(path, "/api/logs"):
 		return auth.PermLogsView, true
-	case strings.HasPrefix(path, "/api/sync"):
+	case isRouteOrSubpath(path, "/api/sync"):
 		return auth.PermSyncRun, true
-	case strings.HasPrefix(path, "/api/backups"):
+	case isRouteOrSubpath(path, "/api/backups"):
 		// バックアップ/リストアはダウンロード（GET）含め全操作で専用権限が必要
 		return auth.PermBackupManage, true
 	}

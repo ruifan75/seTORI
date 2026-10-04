@@ -392,8 +392,15 @@ func (r *SuggestionRepository) FindMissingSongsByStream(streamID string) ([]mode
 }
 
 // FindByID は提案を1件取得する。見つからなければ nil。
+// FindByID は閲覧ではない内部操作用。応答に対象の値を返す呼び出しは FindByIDForViewer を使う。
 func (r *SuggestionRepository) FindByID(id uuid.UUID) (*models.EditSuggestion, error) {
-	row := r.db.QueryRow(`SELECT `+suggestionColumns+` FROM edit_suggestions WHERE id = $1`, id)
+	return r.FindByIDForViewer(id, RestrictedView)
+}
+
+// FindByIDForViewer は現在の対象の公開可否で、保存済みの提案自体を濾す。
+// 審査の衝突応答も対象の現在値を返すので、一覧と同じ視界を要求する。
+func (r *SuggestionRepository) FindByIDForViewer(id uuid.UUID, access ViewerAccess) (*models.EditSuggestion, error) {
+	row := r.db.QueryRow(`SELECT `+suggestionColumns+` FROM edit_suggestions WHERE id = $1`+restrictSuggestionsClause(access), id)
 	s, err := scanSuggestion(row.Scan)
 	if err == sql.ErrNoRows {
 		return nil, nil
