@@ -100,7 +100,7 @@ export interface ITunesQueryResult {
   existing_song?: SongBrief;
 }
 
-// ========== 歌手 ==========
+// ========== チャンネル ==========
 
 export interface Singer {
   id: string;
@@ -239,7 +239,7 @@ export interface Stream {
   duration_seconds?: number;
   thumbnail_url?: string;
   tags: StreamTag[];
-  participants: Singer[];  // 参加者
+  participants: Singer[];  // 参加チャンネル
   channel_owner?: Singer;  // チャンネルオーナー
   /**
    * 処理済み（セットリストを作り終えたか）。**content:edit のときだけ返る**。
@@ -249,7 +249,7 @@ export interface Stream {
   is_processed?: boolean;
   is_hidden: boolean;      // 非表示（初回登録後は手動編集のみ）
   // 中身（セットリスト・解析結果）を公開してよいか未確認。**is_hidden とは別の軸**。
-  // 立っている間、歌唱は編集者にしか返らない（曲/歌手/ランダム/プレイリストからも消える）
+  // 立っている間、歌唱は編集者にしか返らない（曲/チャンネル/ランダム/プレイリストからも消える）
   is_restricted: boolean;
   // Holodex への**送信を試みた**時刻（PUT の前に記録するので「送信済み」ではない）。
   // content:edit のときだけ返る。秘匿にしても向こうのコピーは残りうる
@@ -357,7 +357,7 @@ export interface UpdatePerformanceRequest {
   singer_ids?: string[];
 }
 
-// 楽曲詳細ページからの逆引きクエリ用（歌手詳細ページでも使用）
+// 楽曲詳細ページからの逆引きクエリ用（チャンネル詳細ページでも使用）
 export interface SongPerformance {
   id: string;
   stream_id: string;
@@ -549,7 +549,7 @@ export interface AutoFillSettings {
   refresh_days: number;
   /**
    * 参加しただけの配信（客串）も対象にするか（issue #60）。既定は所有者の配信だけ。
-   * 客串は歌手が複数なので、一括作成は全行を審査へ回す
+   * 客串は参加チャンネルが複数なので、一括作成は全行を審査へ回す
    */
   include_collabs: boolean;
   last_run_at?: string;
@@ -635,7 +635,7 @@ export interface LoadHolodexSongsResponse {
   stream_id: string;
   stream_title: string;
   channel_owner: Singer;
-  participants: Singer[];  // すべての参加者（チャンネル所有者を含む）
+  participants: Singer[];  // すべての参加チャンネル（チャンネル所有者を含む）
   songs: SongSuggestion[];
 }
 

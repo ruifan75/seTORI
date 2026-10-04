@@ -294,7 +294,7 @@ export const streamApi = {
   },
 };
 
-// ========== 歌手 API ==========
+// ========== チャンネル API ==========
 
 export const singerApi = {
   // includeHidden は content:edit を持つ場合のみ有効（無ければサーバー側で無視される）
