@@ -24,7 +24,7 @@ func NewTagRepository(db *sql.DB) *TagRepository {
 
 // FindAllStreamTags はすべての stream tag を取得する。
 func (r *TagRepository) FindAllStreamTags() ([]models.StreamTag, error) {
-	rows, err := r.db.Query(`SELECT id, display_name, color, created_at FROM stream_tags ORDER BY id`)
+	rows, err := r.db.Query(`SELECT id, display_name, COALESCE(color, ''), created_at FROM stream_tags ORDER BY id`)
 	if err != nil {
 		return nil, fmt.Errorf("query stream tags: %w", err)
 	}

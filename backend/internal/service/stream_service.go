@@ -60,8 +60,8 @@ func (s *StreamService) Exists(id string) (bool, error) {
 	return st != nil, nil
 }
 
-// GetAll は歌枠一覧を取得する（既定では非表示を除外）。
-func (s *StreamService) GetAll(page, limit int, sort, dir string, isEditor bool) (*dto.StreamListResponse, error) {
+// GetAll は配信一覧を取得する（既定では非表示を除外）。tags は配信タグでの絞り込み（AND）。
+func (s *StreamService) GetAll(page, limit int, sort, dir string, tags []string, isEditor bool) (*dto.StreamListResponse, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -71,7 +71,7 @@ func (s *StreamService) GetAll(page, limit int, sort, dir string, isEditor bool)
 	offset := (page - 1) * limit
 
 	// 既定では非表示の歌枠を除外する
-	streams, total, err := s.streamRepo.FindAll(limit, offset, false, sort, dir)
+	streams, total, err := s.streamRepo.FindAll(limit, offset, false, sort, dir, tags)
 	if err != nil {
 		return nil, fmt.Errorf("get streams: %w", err)
 	}
@@ -211,7 +211,16 @@ func (s *StreamService) GetPerformancesByTag(tagID string, page, limit int, acce
 	}, nil
 }
 
-// GetByID は歌枠の詳細（セットリストを含む）を取得する。
+// CountTagsForList は配信一覧で選べるタグごとの件数を返す（issue #63）。
+// 選んだタグで絞った中での件数なので、チップに「押すと何件になるか」を出せる。
+func (s *StreamService) CountTagsForList(tags []string) (map[string]int, error) {
+	counts, err := s.streamRepo.CountByTagForList(tags)
+	if err != nil {
+		return nil, fmt.Errorf("count stream tags: %w", err)
+	}
+	return counts, nil
+}
+
 // ListNonSingingCandidates は「非表示だが現行規則で曲が出た」配信を返す（issue #42）。
 //
 // **自動で非表示は解除しない。** 誤判定は両方向にある（雑談が歌枠と判定される／

@@ -327,6 +327,7 @@ func (r *Router) setupRoutes() {
 
 	// API routes - Streams
 	r.mux.HandleFunc("GET /api/streams", r.handleListStreams)
+	r.mux.HandleFunc("GET /api/streams/tag-counts", r.handleStreamTagCounts)
 	r.mux.HandleFunc("GET /api/streams/{id}", r.handleGetStream)
 	r.mux.HandleFunc("POST /api/streams", r.handleCreateStream)
 	r.mux.HandleFunc("PUT /api/streams/{id}", r.handleUpdateStream)
@@ -420,7 +421,7 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("PUT /api/organizations/{key}", r.handleUpdateOrganization)
 	r.mux.HandleFunc("DELETE /api/organizations/{key}", r.handleDeleteOrganization)
 
-	// Holodex sync
+	// Holodex からの読み取りは sync:run、運用者名義での書き込みは holodex:upload。
 	r.mux.HandleFunc("POST /api/sync/holodex", r.handleSyncHolodex)
 	r.mux.HandleFunc("POST /api/sync/holodex/video/{id}", r.handleSyncHolodexVideo)
 	r.mux.HandleFunc("POST /api/sync/holodex/to-holodex/{id}", r.handleSyncSetoriToHolodex)
@@ -1871,13 +1872,33 @@ func (r *Router) handleListStreams(w http.ResponseWriter, req *http.Request) {
 		limit = 20
 	}
 
-	result, err := r.streamService.GetAll(page, limit, sort, dir, userHasPermission(req, auth.PermContentEdit))
+	// tag は複数指定できる（tag=singing&tag=3d）。**全部を持つ配信**に絞る（AND）。
+	result, err := r.streamService.GetAll(page, limit, sort, dir, req.URL.Query()["tag"], userHasPermission(req, auth.PermContentEdit))
+	if errors.Is(err, repository.ErrTooManyStreamTags) {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	respondJSON(w, http.StatusOK, result)
+}
+
+// handleStreamTagCounts は配信一覧の母集合（＋選んだタグ）での、配信タグごとの件数（issue #63）。
+// **公開**：配信一覧そのものが未ログインで見られるので、その内訳を伏せる理由が無い。
+func (r *Router) handleStreamTagCounts(w http.ResponseWriter, req *http.Request) {
+	counts, err := r.streamService.CountTagsForList(req.URL.Query()["tag"])
+	if errors.Is(err, repository.ErrTooManyStreamTags) {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"counts": counts})
 }
 
 func (r *Router) handleGetStream(w http.ResponseWriter, req *http.Request) {
@@ -1895,7 +1916,7 @@ func (r *Router) handleGetStream(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	if result == nil {
-		respondError(w, http.StatusNotFound, "歌枠が見つかりません")
+		respondError(w, http.StatusNotFound, "配信が見つかりません")
 		return
 	}
 
@@ -1927,7 +1948,7 @@ func (r *Router) handleUpdateStream(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	if result == nil {
-		respondError(w, http.StatusNotFound, "歌枠が見つかりません")
+		respondError(w, http.StatusNotFound, "配信が見つかりません")
 		return
 	}
 
@@ -3955,6 +3976,13 @@ func requiredPermission(method, path string) (perm string, needsAuth bool) {
 	// タグ漏れもレビュー用の作業一覧。閲覧も編集と同じ権限に揃える。
 	if strings.HasPrefix(path, "/api/tag-gaps") {
 		return auth.PermContentEdit, true
+	}
+
+	// editor token を使う外部への書き込みは読み取り同期より強い権限を要求する。
+	// 現在は送信・再送とも POST /api/sync/holodex/to-holodex/{id} の 1 本。
+	// 同じ配下に操作を足した場合も保護を継承し、一般の /api/sync より先に判定する。
+	if isRouteOrSubpath(path, "/api/sync/holodex/to-holodex") {
+		return auth.PermHolodexUpload, true
 	}
 
 	// 管理系リソースはメソッドを問わず専用権限が必要
