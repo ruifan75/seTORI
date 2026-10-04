@@ -66,6 +66,10 @@ func main() {
 		logger.Infof("楽曲照合キーを再構築しました: %d 件", n)
 	}
 
+	// 前のプロセスが running のまま残した背景処理を「中断」として片付ける（issue #22）。
+	// goroutine はプロセスと一緒に止まっているので、残すと進まない進捗を出し続ける。
+	router.TaskRunService().MarkInterrupted()
+
 	// 初期管理者アカウントをブートストラップ（ユーザーが 0 件のときのみ作成）
 	if err := router.AuthService().EnsureBootstrapAdmin(cfg.BootstrapAdminUser, cfg.BootstrapAdminPass); err != nil {
 		logger.Errorf("初期管理者の作成に失敗しました: %v", err)

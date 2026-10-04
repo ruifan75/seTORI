@@ -81,6 +81,10 @@ func TestStreamAnalysisEndpointsRequireContentEdit(t *testing.T) {
 		{"却下の取り消し", http.MethodDelete, "/api/non-singing-candidates/abc/dismiss", auth.PermContentEdit, true},
 		{"近い名前の別ルート(candidates)", http.MethodGet, "/api/non-singing-candidates-report", "", false},
 
+		// 背景処理の実行記録（issue #22）。失敗の理由に yt-dlp のエラーが載る
+		{"背景処理の一覧", http.MethodGet, "/api/tasks", auth.PermContentEdit, true},
+		{"背景処理の詳細", http.MethodGet, "/api/tasks/abc", auth.PermContentEdit, true},
+		{"近い名前の別ルート(tasks)", http.MethodGet, "/api/tasks-report", "", false},
 		// 裁定の見直し（issue #26）。GET は既定で公開に落ちるので明示が要る
 		{"裁定の見直しの一覧", http.MethodGet, "/api/restriction-review", auth.PermContentEdit, true},
 		{"裁定の見直しのサブパス", http.MethodGet, "/api/restriction-review/x", auth.PermContentEdit, true},
