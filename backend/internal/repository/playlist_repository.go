@@ -364,15 +364,3 @@ func (r *PlaylistRepository) UnfollowPreset(userID uuid.UUID, presetKey string) 
 	}
 	return nil
 }
-
-// ContainsPerformance は指定の歌唱が既に入っているかを返す（UI の追加済み表示用）。
-func (r *PlaylistRepository) ContainsPerformance(playlistID, performanceID uuid.UUID) (bool, error) {
-	var exists bool
-	err := r.db.QueryRow(
-		"SELECT EXISTS(SELECT 1 FROM playlist_items WHERE playlist_id = $1 AND performance_id = $2)",
-		playlistID, performanceID).Scan(&exists)
-	if err != nil {
-		return false, fmt.Errorf("check playlist item: %w", err)
-	}
-	return exists, nil
-}

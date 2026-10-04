@@ -291,15 +291,6 @@ type Playlist struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
-// PlaylistItem プレイリストの1項目＝1歌唱記録（performances）。
-type PlaylistItem struct {
-	ID            uuid.UUID `json:"id"`
-	PlaylistID    uuid.UUID `json:"playlist_id"`
-	PerformanceID uuid.UUID `json:"performance_id"`
-	Position      int       `json:"position"`
-	AddedAt       time.Time `json:"added_at"`
-}
-
 // プレイリストの公開範囲
 const (
 	PlaylistPrivate  = "private"
@@ -332,14 +323,6 @@ type EditSuggestion struct {
 	ReviewNote string     `json:"review_note"`
 	CreatedAt  time.Time  `json:"created_at"`
 	ReviewedAt *time.Time `json:"reviewed_at"`
-}
-
-// Session Bearer トークンのセッション。DB には token の SHA-256 ハッシュのみ保存する。
-type Session struct {
-	TokenHash string    `json:"-"`
-	UserID    uuid.UUID `json:"user_id"`
-	ExpiresAt time.Time `json:"expires_at"`
-	CreatedAt time.Time `json:"created_at"`
 }
 
 // VisitorActivity は UTC の1日・IP・利用者ごとにまとめたページ表示記録。

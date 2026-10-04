@@ -284,12 +284,22 @@ func (s *SingerService) GetStreams(singerID string, page, limit int, processedFi
 		return nil, fmt.Errorf("get streams: %w", err)
 	}
 
-	// DTO に変換する
+	// 配信一覧と同じ一括取得を使い、件数に比例したタグ・参加者の問い合わせを避ける。
+	streamIDs := make([]string, len(streams))
+	for i, stream := range streams {
+		streamIDs[i] = stream.ID
+	}
+	tags, err := s.streamRepo.GetTagsForStreams(streamIDs)
+	if err != nil {
+		return nil, fmt.Errorf("get stream tags: %w", err)
+	}
+	participants, _, err := s.streamRepo.GetSingersForStreams(streamIDs)
+	if err != nil {
+		return nil, fmt.Errorf("get stream singers: %w", err)
+	}
 	streamResponses := make([]dto.StreamResponse, len(streams))
 	for i, stream := range streams {
-		tags, _ := s.streamRepo.GetTags(stream.ID)
-		participants, _ := s.streamRepo.GetSingers(stream.ID)
-		streamResponses[i] = s.toStreamResponse(stream, tags, participants, isEditor)
+		streamResponses[i] = s.toStreamResponse(stream, tags[stream.ID], participants[stream.ID], isEditor)
 	}
 
 	totalPages := (total + limit - 1) / limit

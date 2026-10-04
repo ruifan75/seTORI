@@ -8,11 +8,6 @@ import (
 
 // ========== ページング ==========
 
-type PaginationRequest struct {
-	Page  int `json:"page"`
-	Limit int `json:"limit"`
-}
-
 type PaginationResponse struct {
 	Page       int `json:"page"`
 	Limit      int `json:"limit"`
@@ -793,30 +788,6 @@ type MergeCandidateResponse struct {
 
 // ========== 照合の学習層（別名義・別表記） ==========
 
-// ArtistAliasMemberResponse は別名義グループの 1 名。
-type ArtistAliasMemberResponse struct {
-	NameKey     string `json:"name_key"`
-	DisplayName string `json:"display_name"`
-	Source      string `json:"source"` // manual | ai
-	Note        string `json:"note,omitempty"`
-}
-
-// ArtistAliasGroupResponse は同一人物としてまとめられた名前の集まり。
-type ArtistAliasGroupResponse struct {
-	GroupID string                      `json:"group_id"`
-	Members []ArtistAliasMemberResponse `json:"members"`
-}
-
-// SongAliasResponse は統合から学習した「この表記はこの曲」の 1 件。
-type SongAliasResponse struct {
-	NameKey    string `json:"name_key"`
-	ArtistKey  string `json:"artist_key"`
-	Source     string `json:"source"`
-	SongID     string `json:"song_id"`
-	SongName   string `json:"song_name"`
-	SongArtist string `json:"song_artist"`
-}
-
 // SongMatchCandidate は既存楽曲との照合候補 1 件。
 type SongMatchCandidate struct {
 	SongID  string  `json:"song_id"`
@@ -832,23 +803,6 @@ type SongMatchCandidate struct {
 type BatchAINormalizationResponse struct {
 	Suggestions []AISuggestionResult `json:"suggestions"`
 	Warning     string               `json:"warning,omitempty"`
-}
-
-// ========== 認証 ==========
-
-type LoginRequest struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
-}
-
-type LoginResponse struct {
-	Token string `json:"token"`
-	User  struct {
-		ID          uuid.UUID `json:"id"`
-		Username    string    `json:"username"`
-		DisplayName string    `json:"display_name"`
-		Role        string    `json:"role"`
-	} `json:"user"`
 }
 
 // ========== アーティスト ==========

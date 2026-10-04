@@ -231,15 +231,6 @@ func scoreHits(hits []repository.KeyedSong, name, artist string, queryArtist son
 	return out
 }
 
-// Best は最有力候補を返す。候補が無ければ nil。
-func (s *SongMatchService) Best(name, artist string, itunesID *int64) (*MatchCandidate, error) {
-	cands, err := s.FindCandidates(name, artist, itunesID)
-	if err != nil || len(cands) == 0 {
-		return nil, err
-	}
-	return &cands[0], nil
-}
-
 // sortCandidates は確信度の降順に並べる（同点は元の順＝古い曲が先）。
 func sortCandidates(c []MatchCandidate) {
 	for i := 1; i < len(c); i++ {
@@ -337,11 +328,6 @@ func (s *SongMatchService) RemoveArtistAlias(canonical, alias string) error {
 	}
 	s.invalidateAliasCache()
 	return nil
-}
-
-// RejectedArtistPairs は「別人」と記録済みの組を返す（AI への再問い合わせ抑止）。
-func (s *SongMatchService) RejectedArtistPairs(pairKeys []string) (map[string]bool, error) {
-	return s.aliasRepo.FindArtistRejections(pairKeys)
 }
 
 // RecordArtistRejection は「この 2 つは別人」を残す。

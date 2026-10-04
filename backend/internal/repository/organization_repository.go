@@ -50,19 +50,6 @@ func (r *OrganizationRepository) FindAll() ([]models.Organization, error) {
 	return orgs, nil
 }
 
-// FindByKey は1件取得する。見つからなければ (nil, nil)。
-func (r *OrganizationRepository) FindByKey(key string) (*models.Organization, error) {
-	o, err := scanOrganization(r.db.QueryRow(
-		`SELECT `+organizationColumns+` FROM organizations WHERE key = $1`, key))
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("find organization: %w", err)
-	}
-	return &o, nil
-}
-
 // EnsureExists は取り込み時に呼ぶ。未知の key なら display_name = key で作る。
 //
 // 「知らない事務所だから取り込まない」は選ばない。song_merge_candidates と同じ考えで、

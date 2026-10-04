@@ -3,7 +3,6 @@ package repository
 import (
 	"fmt"
 	"strings"
-	"unicode"
 )
 
 // 名前ソートの共通定義。
@@ -50,17 +49,6 @@ func nameSortOrderDir(nameCol, readingCol, dir string) string {
 		END %[5]s,
 		translate(lower(coalesce(nullif(%[2]s, ''), %[1]s)), '%[3]s', '%[4]s') %[5]s,
 		%[1]s %[5]s`, nameCol, readingCol, katakanaChars, hiraganaChars, d)
-}
-
-// ContainsKatakana は文字列に片仮名が含まれるかを返す。
-// 読みは平仮名で統一する方針のため、片仮名が残る読みは「要修正」とみなす。
-func ContainsKatakana(s string) bool {
-	for _, r := range s {
-		if unicode.In(r, unicode.Katakana) {
-			return true
-		}
-	}
-	return false
 }
 
 // KataToHira は片仮名を平仮名に変換する（長音符・他の文字はそのまま）。
