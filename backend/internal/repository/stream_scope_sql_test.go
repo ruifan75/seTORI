@@ -57,6 +57,10 @@ func (s *recordingStmt) Exec([]driver.Value) (driver.Result, error) {
 
 // 件数は 1 行返さないと呼び出し側が早退して一覧の SQL が出てこない。
 func (s *recordingStmt) Query([]driver.Value) (driver.Rows, error) {
+	// GROUP BY の歌唱数は空の行集合を返す（単一の総件数とは列数が違う）。
+	if strings.Contains(s.query, "SELECT p.song_id, COUNT(*)") {
+		return &noRows{}, nil
+	}
 	if strings.Contains(s.query, "COUNT(*)") {
 		return &oneIntRow{}, nil
 	}

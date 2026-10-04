@@ -177,7 +177,7 @@ func (r *TagRepository) SearchPerformanceTags(query string, limit int, access Vi
 		       (SELECT COUNT(*) FROM performance_performance_tags ppt
 		        JOIN performances p ON p.id = ppt.performance_id
 		        JOIN streams s ON s.id = p.stream_id
-		        WHERE ppt.tag_id = t.id AND `+DiscoverableFor("s", access)+`) AS cnt
+		        WHERE ppt.tag_id = t.id AND `+ListedFor("s", access)+`) AS cnt
 		FROM performance_tags t
 		WHERE t.id ILIKE '%' || $1 || '%' OR t.display_name ILIKE '%' || $1 || '%'
 		ORDER BY cnt DESC, t.id
