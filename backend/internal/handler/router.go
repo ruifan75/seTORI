@@ -55,6 +55,7 @@ type Router struct {
 	artistService        *service.ArtistService
 	batchAnalyzeService  *service.BatchAnalyzeService
 	batchFillService     *service.BatchFillService
+	visibilityReview     *repository.VisibilityReviewRepository
 	authService          *service.AuthService
 	// ログイン試行の絞り込み（総当たりと bcrypt による CPU 消費を止める）
 	loginLimiter      *loginLimiter
@@ -221,6 +222,7 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	}
 
 	r.prepareService = service.NewPrepareService(streamRepo, chapterService, batchAnalyzeService, batchFillService, r.taskRunService)
+	r.visibilityReview = repository.NewVisibilityReviewRepository(db)
 	r.setupRoutes()
 	return r
 }
@@ -405,6 +407,11 @@ func (r *Router) setupRoutes() {
 
 	// 自動処理（定期実行）。設定・手動実行とも content:edit。
 	// 見直しが要る配信（非表示だが現行規則で曲が出た）。content:edit。
+	r.mux.HandleFunc("GET /api/visibility-review", r.handleVisibilityCandidates)
+	r.mux.HandleFunc("POST /api/visibility-review/preview", r.handleVisibilityPreview)
+	r.mux.HandleFunc("POST /api/visibility-review/runs/{id}/apply", r.handleVisibilityApply)
+	r.mux.HandleFunc("POST /api/visibility-review/runs/{id}/revert", r.handleVisibilityRevert)
+	r.mux.HandleFunc("GET /api/visibility-review/runs", r.handleVisibilityRuns)
 	r.mux.HandleFunc("GET /api/non-singing-candidates", r.handleListNonSingingCandidates)
 	r.mux.HandleFunc("GET /api/restriction-review", r.handleListRestrictionReview)
 	r.mux.HandleFunc("POST /api/non-singing-candidates/{id}/dismiss", r.handleDismissNonSingingCandidate)
@@ -3853,7 +3860,7 @@ func requiredPermission(method, path string) (perm string, needsAuth bool) {
 
 	// 見直しが要る配信の一覧も content:edit。**GET は既定で公開に落ちる**ので、
 	// 書かないと「非表示にしている配信の題名」が未ログインから読める。
-	if isRouteOrSubpath(path, "/api/non-singing-candidates") {
+	if isRouteOrSubpath(path, "/api/non-singing-candidates") || isRouteOrSubpath(path, "/api/visibility-review") {
 		return auth.PermContentEdit, true
 	}
 
