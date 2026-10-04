@@ -44,7 +44,7 @@ func songListBody(sort, dir, where string, access ViewerAccess) string {
 			    SELECT p.song_id, COUNT(*) AS n
 			    FROM performances p
 			    JOIN streams st ON st.id = p.stream_id
-			    WHERE ` + DiscoverableFor("st", access) + `
+			    WHERE ` + ListedFor("st", access) + `
 			    GROUP BY p.song_id
 			) visible ON visible.song_id = songs.id`
 		// 歌唱が 1 件も無い曲は JOIN で NULL になる。COALESCE を外すと
@@ -240,7 +240,7 @@ func (r *SongRepository) Delete(id uuid.UUID) error {
 // restrictedOnly を立てると、母体はそのままに秘匿のものだけへ絞る。
 // **narrow するだけで母体は触らない**のが、この関数が守っている性質。
 func songPerformanceCountQuery(access ViewerAccess, restrictedOnly bool) string {
-	where := "p.song_id = $1 AND " + DiscoverableFor("st", access)
+	where := "p.song_id = $1 AND " + ListedFor("st", access)
 	if restrictedOnly {
 		where += " AND " + EffectiveRestrictedExpr("st")
 	}
@@ -268,12 +268,12 @@ func (r *SongRepository) GetPerformanceCount(songID uuid.UUID, access ViewerAcce
 // `restricted:view` を持つ運用者には「5 回」と出ていても公開されているのは 3 回、
 // という食い違いが説明なしに起きる ── その数字を対外的に使えない。
 //
-// **権限が無ければ問い合わせずに 0 を返す。** 秘匿の行は `DiscoverableFor` が
-// 既に落としているので内訳は常に 0 であり、その人には出す内訳が無い。
+// **権限が無ければ問い合わせずに 0 を返す。** 秘匿の行は `ListedFor`
+// （→ `DiscoverableFor`）が既に落としているので内訳は常に 0 であり、その人には出す内訳が無い。
 // ここで早退しておかないと、呼び出し側が「0 だから秘匿は無い」と
 // 「見えないから 0」を取り違える余地が残る。
 //
-// **母体は `GetPerformanceCount` と同じものを使う**（`DiscoverableFor` に
+// **母体は `GetPerformanceCount` と同じものを使う**（`ListedFor` に
 // 秘匿の条件を足すだけ）。条件を書き下ろすと総数と母体がずれ、内訳が総数の
 // 部分集合でなくなる ── 実際、最初は `is_hidden = FALSE` を書いていて
 // **非表示かつ秘匿の歌唱が総数には入るのに内訳から漏れて**いた。
@@ -327,7 +327,7 @@ func (r *SongRepository) GetPerformanceCounts(songIDs []uuid.UUID, access Viewer
 		SELECT p.song_id, COUNT(*)
 		FROM performances p
 		JOIN streams st ON p.stream_id = st.id
-		WHERE p.song_id = ANY($1::uuid[]) AND ` + DiscoverableFor("st", access) + `
+		WHERE p.song_id = ANY($1::uuid[]) AND ` + ListedFor("st", access) + `
 		GROUP BY p.song_id`
 
 	rows, err := r.db.Query(query, pq.Array(ids))

@@ -33,7 +33,7 @@ func TestFilterScopeForPath(t *testing.T) {
 		{"regex", true, "判断する者がいないので辞書が要る"},
 	} {
 		t.Run(tt.path, func(t *testing.T) {
-			gotDict, gotKeep := filterScopeForPath(tt.path, dict, keep)
+			gotDict, gotKeep := FilterScopeForPath(tt.path, dict, keep)
 			if (len(gotDict) > 0) != tt.wantDict {
 				t.Errorf("dict の有無 = %v, want %v（%s）", len(gotDict) > 0, tt.wantDict, tt.reason)
 			}
@@ -60,7 +60,7 @@ func TestWeekEndSurvivesOnAIPaths(t *testing.T) {
 		{"regex", false},
 	} {
 		t.Run(tt.path, func(t *testing.T) {
-			d, k := filterScopeForPath(tt.path, dict, nil)
+			d, k := FilterScopeForPath(tt.path, dict, nil)
 			got := comment.FilterSongsWith([]comment.ParsedSong{weekEnd}, d, k, true)
 			if kept := len(got) > 0; kept != tt.wantKept {
 				t.Errorf("path=%s: 残った=%v, want %v", tt.path, kept, tt.wantKept)
@@ -78,7 +78,7 @@ func TestStructuralFilterAppliesOnEveryPath(t *testing.T) {
 	}
 	for _, path := range []string{"grouped", "two_stage", "none"} {
 		t.Run(path, func(t *testing.T) {
-			d, k := filterScopeForPath(path, []string{"end"}, []string{"original"})
+			d, k := FilterScopeForPath(path, []string{"end"}, []string{"original"})
 			for _, j := range junk {
 				if got := comment.FilterSongsWith([]comment.ParsedSong{j}, d, k, true); len(got) > 0 {
 					t.Errorf("%q が残った", j.Name)
