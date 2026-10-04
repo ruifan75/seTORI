@@ -312,7 +312,7 @@ export default function PerformanceFields({
                         <label className="block text-sm font-medium text-gray-700 mb-1">
                           開始時間
                         </label>
-                        <div className="flex gap-2">
+                        <div className="flex max-lg:flex-wrap gap-2">
                           <input
                             key={`start-${value.id}-${value.start}`}
                             type="text"
@@ -362,7 +362,7 @@ export default function PerformanceFields({
                         <label className="block text-sm font-medium text-gray-700 mb-1">
                           終了時間 <span className="text-red-500">*</span>
                         </label>
-                        <div className="flex gap-2">
+                        <div className="flex max-lg:flex-wrap gap-2">
                           <input
                             key={`end-${value.id}-${value.end}`}
                             type="text"

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { usePlayerStore } from '../store/player';
 import ArtistLinks from './ArtistLinks';
@@ -214,6 +214,13 @@ export default function PlayerBar() {
   // スワイプ判定用（ミニバー：上へ→拡大 / 拡大表示：下へ→縮小）
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
   const queueListRef = useRef<HTMLDivElement>(null);
+  const informationRef = useRef<HTMLDivElement>(null);
+  const isScrollableTarget = useCallback((target: Node) => {
+    if (queueListRef.current?.contains(target)) return true;
+    const info = informationRef.current;
+    return !!info && info.contains(target) &&
+      ['auto', 'scroll'].includes(getComputedStyle(info).overflowY) && info.scrollHeight > info.clientHeight;
+  }, []);
 
   // 拡大表示のアニメーション：オーバーレイと動画コンテナ（別 fixed 要素）を
   // 同じ transform で動かす。ドラッグ追従は再レンダー回避のため DOM 直接操作。
@@ -244,17 +251,17 @@ export default function PlayerBar() {
 
   // 拡大表示中は背面ページのスクロールを完全にロックする。
   // iOS はオーバーレイ上のスワイプでも背後のページが動く（ラバーバンド含む）ため、
-  // キュー一覧内と input 以外の touchmove を preventDefault で止める。
+  // キュー一覧・スクロールできる情報部・input 以外の touchmove を止める。
   useEffect(() => {
     if (!expanded) return;
     const onTouchMove = (e: TouchEvent) => {
       const t = e.target as HTMLElement;
-      if (queueListRef.current?.contains(t) || t.closest('input')) return;
+      if (isScrollableTarget(t) || (overlayRef.current?.contains(t) && t.closest('input'))) return;
       e.preventDefault();
     };
     document.addEventListener('touchmove', onTouchMove, { passive: false });
     return () => document.removeEventListener('touchmove', onTouchMove);
-  }, [expanded]);
+  }, [expanded, isScrollableTarget]);
 
   // YT IFrame API のロード（既存の YoutubePlayer と同じ script を共有）。
   // プレイヤーは最初の曲が積まれたときに生成する。
@@ -597,7 +604,7 @@ export default function PlayerBar() {
             ? // 位置は style（測ったプレースホルダ）で決める。ダイアログより前面に出す
               'fixed z-[70] bg-black rounded-lg overflow-hidden [&_iframe]:w-full [&_iframe]:h-full'
             : expanded
-              ? 'fixed z-[60] top-12 sm:top-16 left-2 right-2 h-[min(calc((100vw-1rem)*9/16),36vh)] lg:top-20 lg:left-8 lg:right-auto lg:h-auto lg:aspect-video lg:w-[min(calc((100vh-17rem)*1.7778),60vw)] bg-black rounded-lg overflow-hidden [&_iframe]:w-full [&_iframe]:h-full animate-[player-slide-up_240ms_ease-out]'
+              ? 'fixed z-[60] top-12 sm:top-16 left-2 right-2 h-[min(calc((100vw-1rem)*9/16),36vh)] max-lg:w-[min(calc(100vw-1rem),calc(36vh*16/9))] max-lg:left-[max(0.5rem,calc((100vw-36vh*16/9)/2))] max-lg:right-auto lg:top-20 lg:left-8 lg:right-auto lg:h-auto lg:aspect-video lg:w-[min(calc((100vh-17rem)*1.7778),60vw)] bg-black rounded-lg overflow-hidden [&_iframe]:w-full [&_iframe]:h-full animate-[player-slide-up_240ms_ease-out]'
               : 'fixed z-[45] bottom-2 left-3 w-32 h-[72px] hidden sm:block bg-black rounded overflow-hidden [&_iframe]:w-full [&_iframe]:h-full'
         }
         // スロットを測れていない一瞬だけ画面外へ逃がす（左上にちらつかせない）
@@ -620,9 +627,9 @@ export default function PlayerBar() {
         <div
           ref={overlayRef}
           className="fixed inset-0 z-50 bg-gray-950 text-white flex flex-col pb-[env(safe-area-inset-bottom)] animate-[player-slide-up_240ms_ease-out]"
-          // キュー一覧以外の領域は下へドラッグで追従し、離した位置で縮小/復帰（ヘッダー・動画・情報部）
+          // キューとスクロール中の情報部は除き、下ドラッグで縮小/復帰する。
           onTouchStart={(e) => {
-            if (closingRef.current || queueListRef.current?.contains(e.target as Node)) {
+            if (closingRef.current || isScrollableTarget(e.target as Node) || (e.target as HTMLElement).closest('input')) {
               touchStartRef.current = null;
               return;
             }
@@ -670,10 +677,11 @@ export default function PlayerBar() {
           <div className="flex-1 min-h-0 flex flex-col lg:flex-row">
             {/* 左：動画（fixed の動画コンテナがこの領域に浮いている）＋情報・コントロール。
                 幅は動画（16:9）の実寸に合わせ、余白はすべて右のキューに渡す */}
-            <div className="shrink-0 lg:w-[calc(min(calc((100vh-17rem)*1.7778),60vw)+4rem)] flex flex-col">
+            <div className="min-h-0 shrink lg:shrink-0 lg:w-[calc(min(calc((100vh-17rem)*1.7778),60vw)+4rem)] flex flex-col">
               {/* モバイルは幅基準の 16:9（36vh 上限）にして残りをキューへ渡す */}
-              <div className="h-[min(calc((100vw-1rem)*9/16),36vh)] lg:flex-1 mt-2" /> {/* 動画スペース */}
-              <div className="px-6 py-4 space-y-3 lg:h-36 shrink-0">
+              <div className="h-[min(calc((100vw-1rem)*9/16),36vh)] shrink-0 lg:flex-1 mt-2" /> {/* 動画スペース */}
+              {/* 高さの短い画面では情報・操作だけをスクロールし、キューの操作面を残す */}
+              <div ref={informationRef} className="px-6 py-4 space-y-3 min-h-0 overflow-y-auto overflow-x-hidden max-lg:overscroll-contain lg:overflow-visible lg:h-36 lg:shrink-0">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-baseline gap-x-2">
                     {track.songId ? (
@@ -734,7 +742,7 @@ export default function PlayerBar() {
             </div>
 
             {/* 右：キュー一覧（残り幅をすべて使う） */}
-            <div className="flex-1 min-w-0 min-h-0 border-t lg:border-t-0 lg:border-l border-white/10 flex flex-col">
+            <div className="flex-1 min-w-0 min-h-[8rem] lg:min-h-0 border-t lg:border-t-0 lg:border-l border-white/10 flex flex-col">
               <div className="px-4 py-2.5 text-sm border-b border-white/10 shrink-0 flex items-center justify-between">
                 <span className="font-medium text-gray-300">
                   再生キュー <span className="font-mono text-gray-400">{index + 1}/{queue.length}</span>
@@ -806,7 +814,7 @@ export default function PlayerBar() {
         <div className="relative shrink-0 bg-white border-t shadow-[0_-2px_8px_rgba(0,0,0,0.06)] z-40 pb-[env(safe-area-inset-bottom)]">
           {/* キューパネル（クイック表示） */}
           {queueOpen && (
-            <div className="absolute bottom-full right-2 mb-1 w-[26rem] max-w-[calc(100vw-1rem)] max-h-80 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-xl">
+            <div className="absolute bottom-full right-2 mb-1 w-[26rem] max-w-[calc(100vw-1rem)] max-h-80 max-h-player-queue-dynamic overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-xl">
               <div className="px-3 py-2 border-b flex items-center justify-between sticky top-0 bg-white">
                 <span className="text-sm font-medium text-gray-700">再生キュー（{queue.length}曲）</span>
                 <span className="flex items-center gap-2">
