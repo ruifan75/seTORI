@@ -319,8 +319,8 @@ func (s *BatchFillService) ListRuns(limit int) ([]repository.BatchFillRun, error
 }
 
 // ListGaps は実行が見つけた「DB にあるが入力元に無い」歌唱を返す。
-func (s *BatchFillService) ListGaps(runID uuid.UUID) ([]repository.BatchFillGap, error) {
-	return s.runRepo.ListGaps(runID)
+func (s *BatchFillService) ListGaps(runID uuid.UUID, access repository.ViewerAccess) ([]repository.BatchFillGap, error) {
+	return s.runRepo.ListGaps(runID, access)
 }
 
 // RevertRun は実行が作った歌唱をまとめて消す。

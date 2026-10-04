@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -15,10 +16,11 @@ import (
 const (
 	TaskChatEndBackfill = "chat_end_backfill"
 	TaskChapterBackfill = "chapter_backfill"
+	TaskStreamPrepare   = "stream_prepare"
 )
 
-// ErrTaskRunning は同じ種類の処理が既に走っていること。
-var ErrTaskRunning = errors.New("同じ処理が既に実行中です")
+// ErrTaskRunning は同じ種類、または準備と競合する backfill が既に走っていること。
+var ErrTaskRunning = errors.New("同じ処理または競合する背景処理が実行中です")
 
 // maxTaskFailures は残す失敗の件数。全件を JSONB に積むと、BOT 判定で全滅した
 // 1300 件の実行が 1 行で数百 KB になる。「何が起きたか」が分かれば足りる。
@@ -29,15 +31,17 @@ const maxTaskFailures = 200
 // 汎用の job framework ではない。走らせるのは今までどおり呼び出し側の goroutine で、
 // ここは開始・進捗・失敗・終了を DB に残すだけ。**同じ種類は同時に 1 つまで**
 // ── 2 つ走らせると、同じ配信へ yt-dlp を二重に起動する。
+// 準備は章節・拍手 end backfill とも相互排他にする（issue #27）。
 type TaskRunService struct {
 	repo *repository.TaskRunRepository
 
 	mu      sync.Mutex
 	running map[string]bool
+	active  map[uuid.UUID]*TaskRun
 }
 
 func NewTaskRunService(repo *repository.TaskRunRepository) *TaskRunService {
-	return &TaskRunService{repo: repo, running: map[string]bool{}}
+	return &TaskRunService{repo: repo, running: map[string]bool{}, active: map[uuid.UUID]*TaskRun{}}
 }
 
 // MarkInterrupted は前のプロセスが running のまま残した行を片付ける（起動時に呼ぶ）。
@@ -52,11 +56,12 @@ func (s *TaskRunService) MarkInterrupted() {
 	}
 }
 
-// Start は実行を始める。同じ種類が走っていれば ErrTaskRunning。
+// Start は実行を始める。同じ種類、または準備と競合する backfill が走っていれば ErrTaskRunning。
 // 戻り値の TaskRun は**必ず Finish すること**（しないと以後その種類が開始できない）。
 func (s *TaskRunService) Start(kind string, params any, startedBy *uuid.UUID) (*TaskRun, error) {
 	s.mu.Lock()
-	if s.running[kind] {
+	if s.running[kind] || (kind == TaskStreamPrepare && (s.running[TaskChapterBackfill] || s.running[TaskChatEndBackfill])) ||
+		(kind != TaskStreamPrepare && s.running[TaskStreamPrepare] && (kind == TaskChapterBackfill || kind == TaskChatEndBackfill)) {
 		s.mu.Unlock()
 		return nil, ErrTaskRunning
 	}
@@ -68,12 +73,21 @@ func (s *TaskRunService) Start(kind string, params any, startedBy *uuid.UUID) (*
 		s.release(kind)
 		return nil, err
 	}
-	return &TaskRun{svc: s, ID: id, kind: kind}, nil
+	run := &TaskRun{svc: s, ID: id, kind: kind}
+	s.mu.Lock()
+	s.active[id] = run
+	s.mu.Unlock()
+	return run, nil
 }
 
 func (s *TaskRunService) release(kind string) {
 	s.mu.Lock()
 	delete(s.running, kind)
+	for id, run := range s.active {
+		if run.kind == kind {
+			delete(s.active, id)
+		}
+	}
 	s.mu.Unlock()
 }
 
@@ -102,6 +116,7 @@ type TaskRun struct {
 	failures  []repository.TaskFailure
 	lastFlush time.Time
 	finished  bool
+	cancelled atomic.Bool
 }
 
 // SetTotal は対象の件数を決める（対象を列挙したあとに呼ぶ）。

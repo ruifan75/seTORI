@@ -282,7 +282,7 @@ type TagGapRow struct {
 //
 // 時刻が同じでも曲が違うことがある（人が曲を差し替えた／コメントの曲名が誤り）。
 // そこは機械では裁けないので落とさず、name_matches を付けて人に見せる。
-func (r *TagRepository) FindTagGaps(limit int) ([]TagGapRow, error) {
+func (r *TagRepository) FindTagGaps(limit int, access ViewerAccess) ([]TagGapRow, error) {
 	if limit <= 0 || limit > 1000 {
 		limit = 300
 	}
@@ -348,6 +348,7 @@ func (r *TagRepository) FindTagGaps(limit int) ([]TagGapRow, error) {
 		JOIN performances p ON p.id = g.performance_id
 		JOIN streams st ON st.id = p.stream_id
 		JOIN songs so ON so.id = p.song_id
+		WHERE `+NotRestrictedFor("st", access)+`
 		GROUP BY g.performance_id, p.stream_id, st.title, st.stream_date,
 		         p.start_seconds, p.song_id, so.name, so.original_artist
 		ORDER BY st.stream_date DESC NULLS LAST, p.start_seconds
@@ -393,7 +394,8 @@ type TagGapDismissalRow struct {
 //
 // 無視は一覧からその組を消し続けるので、見えないと誤って無視したものを戻せない
 // （song_identity_checks を管理画面から見直せるようにしてあるのと同じ理由）。
-func (r *TagRepository) ListTagGapDismissals(limit int) ([]TagGapDismissalRow, error) {
+// 曲名と歌唱時刻を返すので、候補と同じ要求者の視界で濾す。
+func (r *TagRepository) ListTagGapDismissals(limit int, access ViewerAccess) ([]TagGapDismissalRow, error) {
 	if limit <= 0 || limit > 1000 {
 		limit = 300
 	}
@@ -405,6 +407,7 @@ func (r *TagRepository) ListTagGapDismissals(limit int) ([]TagGapDismissalRow, e
 		JOIN streams st ON st.id = p.stream_id
 		JOIN songs so ON so.id = p.song_id
 		LEFT JOIN users u ON u.id = k.checked_by
+		WHERE `+NotRestrictedFor("st", access)+`
 		ORDER BY k.checked_at DESC
 		LIMIT $1`, limit)
 	if err != nil {

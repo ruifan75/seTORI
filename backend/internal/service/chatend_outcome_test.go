@@ -39,7 +39,7 @@ func TestFetchLiveChatClassifiesTransientBeforeNoReplay(t *testing.T) {
 		"The current session has been rate-limited by YouTube for up to an hour."
 
 	svc := NewChatEndService(nil, fakeYtdlp(t, rateLimited), t.TempDir())
-	_, outcome, err := svc.fetchLiveChat("abc")
+	_, outcome, err := svc.fetchLiveChat("hVfDBfreYNI")
 
 	if outcome != chatTransientError {
 		t.Errorf("outcome = %v, want chatTransientError（%v だと「チャット無し」として確定する）", outcome, chatNoReplay)
@@ -54,7 +54,7 @@ func TestFetchLiveChatClassifiesTransientBeforeNoReplay(t *testing.T) {
 func TestFetchLiveChatReturnsNoReplayWhenNothingIsWrong(t *testing.T) {
 	// 警告も何も出ないまま、ファイルだけが書かれなかった状態。
 	svc := NewChatEndService(nil, fakeYtdlp(t, "WARNING: [youtube] abc: no subtitles"), t.TempDir())
-	_, outcome, _ := svc.fetchLiveChat("abc")
+	_, outcome, _ := svc.fetchLiveChat("hVfDBfreYNI")
 
 	if outcome != chatNoReplay {
 		t.Errorf("outcome = %v, want chatNoReplay", outcome)

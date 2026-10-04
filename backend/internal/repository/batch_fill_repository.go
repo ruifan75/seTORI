@@ -107,14 +107,15 @@ func (r *BatchFillRepository) RecordGaps(runID uuid.UUID, streamID string, perfI
 
 // ListGaps は実行が見つけた「入力元に無い既存の歌唱」を返す。
 // 歌唱が後から消されていれば CASCADE で行ごと消えるので、ここには出てこない。
-func (r *BatchFillRepository) ListGaps(runID uuid.UUID) ([]BatchFillGap, error) {
+// 現在の歌唱の所属配信で秘匿を判定する。実行時の stream_id の控えでは判定しない。
+func (r *BatchFillRepository) ListGaps(runID uuid.UUID, access ViewerAccess) ([]BatchFillGap, error) {
 	rows, err := r.db.Query(`
-		SELECT g.stream_id, st.title, g.performance_id, s.name, p.start_seconds
+		SELECT p.stream_id, st.title, g.performance_id, s.name, p.start_seconds
 		FROM batch_fill_gaps g
 		JOIN performances p ON p.id = g.performance_id
 		JOIN songs s ON s.id = p.song_id
-		JOIN streams st ON st.id = g.stream_id
-		WHERE g.run_id = $1
+		JOIN streams st ON st.id = p.stream_id
+		WHERE g.run_id = $1`+access.restrictClause()+`
 		ORDER BY st.stream_date DESC, p.start_seconds`, runID)
 	if err != nil {
 		return nil, fmt.Errorf("list batch fill gaps: %w", err)

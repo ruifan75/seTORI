@@ -225,8 +225,8 @@ func (s *StreamService) CountTagsForList(tags []string) (map[string]int, error) 
 //
 // **自動で非表示は解除しない。** 誤判定は両方向にある（雑談が歌枠と判定される／
 // 本物の歌枠が隠れる）ので、判断は人に委ねる。
-func (s *StreamService) ListNonSingingCandidates(limit int, dismissed bool) (*dto.NonSingingCandidateList, error) {
-	rows, err := s.streamRepo.FindNonSingingCandidates(limit, dismissed)
+func (s *StreamService) ListNonSingingCandidates(limit int, dismissed bool, access repository.ViewerAccess) (*dto.NonSingingCandidateList, error) {
+	rows, err := s.streamRepo.FindNonSingingCandidates(limit, dismissed, access)
 	if err != nil {
 		return nil, fmt.Errorf("list non singing candidates: %w", err)
 	}
@@ -703,10 +703,8 @@ func (s *StreamService) Update(id string, req *dto.UpdateStreamRequest, isEditor
 		}
 	}
 
-	// 更新後のデータを返す。Update は content:edit の経路なので解析結果も秘匿された
-	// 歌唱も載せる（編集画面がそのまま使う）。
-	// 内部の読み直し。**閲覧ではないので両方とも全部見る。**
-	// 返す内容の判断は呼び出し側が行う（要求者へそのまま返さないこと）。
+	// 更新後の応答にも要求者の視界を使う。content:edit だけでは、
+	// 秘匿された歌唱・解析結果を返さない。
 	return s.GetByID(id, isEditor, access)
 }
 

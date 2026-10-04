@@ -351,6 +351,9 @@ func recordChatEndResult(run *TaskRun, id string, res AnalyzeResult, err error) 
 
 // fetchLiveChat は yt-dlp で live chat replay をダウンロードする（取得済みならキャッシュを使う）。
 func (s *ChatEndService) fetchLiveChat(videoID string) (string, chatOutcome, error) {
+	if err := validVideoID(videoID); err != nil {
+		return "", chatTransientError, err
+	}
 	if err := os.MkdirAll(s.cacheDir, 0o755); err != nil {
 		return "", chatTransientError, fmt.Errorf("create cache dir: %w", err)
 	}

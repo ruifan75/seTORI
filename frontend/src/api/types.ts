@@ -504,7 +504,8 @@ export interface AnalyzeCommentsResponse {
 export interface TaskRun {
   id: string;
   kind: 'chat_end_backfill' | 'chapter_backfill' | string;
-  status: 'running' | 'done' | 'failed' | 'interrupted';
+  status: 'running' | 'done' | 'failed' | 'interrupted' | 'cancelled';
+  phase: string;
   total: number;
   done: number;
   succeeded: number;
