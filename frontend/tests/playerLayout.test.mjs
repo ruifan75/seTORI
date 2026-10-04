@@ -80,10 +80,13 @@ async function layoutFixture(dir) {
       setTimeout(()=>{ const p=document.getElementById('player')||document.querySelector('.aspect-video');
         const inner=p.firstElementChild;const link=p.querySelector('a');
         const topOK=!link||inner.getBoundingClientRect().top>=p.getBoundingClientRect().top-1;
+        // overflow:hidden も JS の scrollTop は動く。利用者がスクロールできるかを別に見る。
+        const scrollOK=!link||p.scrollHeight<=p.clientHeight+1||['auto','scroll'].includes(getComputedStyle(p).overflowY);
         if(link) p.scrollTop=p.scrollHeight;
         const endOK=!link||link.getBoundingClientRect().bottom<=p.getBoundingClientRect().bottom+1;
+        const frame=p.querySelector('iframe');
         parent.postMessage({tc:${JSON.stringify(tc)},player:rect(p),size:rect(document.getElementById('sizebox')),
-          timeline:rect(document.getElementById('timeline')),topOK,endOK},'*'); },50);
+          timeline:rect(document.getElementById('timeline')),iframe:frame?rect(frame):null,topOK,endOK,scrollOK},'*'); },50);
       </script></body></html>`;
     return { tc, doc };
   });
@@ -148,7 +151,11 @@ test('幅・高さ・閲覧権限・案内表示が変わっても 16:9 を保�
           assert.ok(row.player.y >= row.size.y - 1, `上へ溢れた: ${label}`);
           assert.ok(row.player.b <= row.timeline.y + 1, `時間帯バーと重なる: ${label}`);
         }
-        assert.ok(row.topOK && row.endOK, `案内の先頭・リンクまで辿れない: ${label}`);
+        if (!row.tc.noticeMode) {
+          assert.ok(row.iframe && Math.abs(row.iframe.w - row.player.w) < 1 && Math.abs(row.iframe.h - row.player.h) < 1,
+            `iframe が 16:9 の器を埋めていない: ${label}`);
+        }
+        assert.ok(row.topOK && row.endOK && row.scrollOK, `案内の先頭・リンクまで辿れない: ${label}`);
       }
     } finally { await rm(dir, { recursive: true, force: true }); }
   });
