@@ -11,6 +11,7 @@ export const PERM = {
   ALL: '*',
   CONTENT_EDIT: 'content:edit',
   SYNC_RUN: 'sync:run',
+  HOLODEX_UPLOAD: 'holodex:upload',
   AI_MANAGE: 'ai:manage',
   LOGS_VIEW: 'logs:view',
   USERS_MANAGE: 'users:manage',

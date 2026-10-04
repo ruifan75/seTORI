@@ -260,12 +260,22 @@ export const songApi = {
 // ========== 歌枠 API ==========
 
 export const streamApi = {
-  list: async (page = 1, limit = 20, sort?: string, dir?: string): Promise<StreamListResponse> => {
+  // tags は配信タグでの絞り込み。**全部を持つ配信**だけが返る（AND。issue #63）
+  list: async (page = 1, limit = 20, sort?: string, dir?: string, tags: string[] = []): Promise<StreamListResponse> => {
     const params = new URLSearchParams({ page: String(page), limit: String(limit) });
     if (sort) params.set('sort', sort);
     if (dir) params.set('dir', dir);
+    for (const t of tags) params.append('tag', t);
     const { data } = await api.get(`/api/streams?${params}`);
     return data;
+  },
+
+  // 配信一覧の母集合（＋選んだタグ）での、配信タグごとの件数。チップに「押すと何件か」を出す
+  tagCounts: async (tags: string[] = []): Promise<Record<string, number>> => {
+    const params = new URLSearchParams();
+    for (const t of tags) params.append('tag', t);
+    const { data } = await api.get(`/api/streams/tag-counts?${params}`);
+    return data.counts ?? {};
   },
 
   get: async (id: string): Promise<StreamDetailResponse> => {

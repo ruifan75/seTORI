@@ -89,10 +89,16 @@
   seTORI 側から取り消す手段はありません（Holodex 上で個別に直すことになります）。
   未設定またはプレースホルダー文字列の場合はエラーを返して実行しません。
 
-- 🔴 **権限が足りていません（TODO 35、優先度：高）**：この書き込みは読み取り側の
-  同期と同じ `sync:run` で通り、そして **`sync:run` は system role の `editor` に
-  既定で入っています**。つまり誰かを editor にした時点で、その人は運用者の名義で
-  Holodex へ書き込めるようになります。**誰かを editor にする前に権限を分けること。**
+- **書き込みは専用権限 `holodex:upload` が必要です（TODO 35 対応済み、migration 068）。**
+  editor token を使う経路は上記の送信端点 1 本で、再送も同じ端点です。削除の端点はありません。
+  認可は ServeMux より前の `requiredPermission` で行い、同じ端点の配下も保護します。
+  既定では system role の admin だけに付与し、editor・既存のカスタムロールの
+  `sync:run` からは引き継ぎません。移行前に非 admin へ保存されていた同名キーも除きます。
+  admin でも `*` と `sync:run` を両方外していた場合は、新たに送信権限を付けません。
+  admin に既に保存されていた `holodex:upload` はそのまま保ちます。
+  `*` は引き続き全権限です。必要な委任はロール管理で明示的に行います。
+  読み取り同期は従来どおり `sync:run`。配信編集の送信ボタンも `holodex:upload` で表示し、
+  `content:edit` だけ、または既定の editor の権限だけでは表示しません。
 
 ## 3. Groq API（LLM） — `GROQ_API_KEY`
 
@@ -264,7 +270,7 @@ DB セッション + `roles.permissions` に置き換わりました。判定は
 
 | ルート | 何が起きるか | 必要な権限 |
 |---|---|---|
-| `POST /api/sync/holodex/to-holodex/{id}` | **あなたの Holodex アカウント名義**で書き込み | `sync:run` |
+| `POST /api/sync/holodex/to-holodex/{id}` | **あなたの Holodex アカウント名義**で書き込み | `holodex:upload` |
 | `POST /api/sync/holodex`、`.../video/{id}` | Holodex / YouTube のクォータを消費 | `sync:run` |
 | `POST /api/ai/normalize` | AI プロバイダーの課金 | `content:edit` |
 | `POST /api/streams/{id}/comments/analyze` | 上表 | `content:edit` |
@@ -307,5 +313,5 @@ DB セッション + `roles.permissions` に置き換わりました。判定は
 > 別ルートを巻き込んだり、`/api/streams/{id}/comments/raw` のようなサブリソースを
 > 素通りさせたりします。認可は ServeMux より前に path 文字列だけで決まるためです。
 
-> ⚠️ 新しいロールに権限を配るときは `sync:run` に注意してください。
+> ⚠️ 新しいロールに権限を配るときは `holodex:upload`（および全権限 `*`）に注意してください。
 > Holodex への書き込みは**運用者本人の名義**で残り、取り消せません。

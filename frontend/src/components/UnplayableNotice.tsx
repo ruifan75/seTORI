@@ -44,9 +44,12 @@ export default function UnplayableNotice({
   videoId: string;
 }) {
   const { title, detail } = MESSAGES[kind];
+  // 高さから幅を決める器では案内が数十 px になることもある。
+  // 本文の最小高さで 16:9 を押し広げず、器の内側でスクロールする。
+  // my-auto は余裕があるときだけ中央に置き、溢れるときは上端とリンクまで辿れる。
   return (
-    <div className="w-full aspect-video bg-gray-900 text-gray-100 flex items-center justify-center p-6">
-      <div className="max-w-md text-center space-y-2">
+    <div className="w-full aspect-video min-h-0 bg-gray-900 text-gray-100 flex flex-col overflow-y-auto">
+      <div className="w-full max-w-md text-center space-y-2 p-6 my-auto mx-auto shrink-0">
         <p className="text-base font-medium">{title}</p>
         <p className="text-sm text-gray-400 leading-relaxed">{detail}</p>
         <a

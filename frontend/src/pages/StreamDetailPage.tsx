@@ -23,6 +23,7 @@ import ReportButton from '../components/ReportButton';
 import RawCommentsPanel from '../components/RawCommentsPanel';
 import SourceSongList from '../components/SourceSongList';
 import ArtistLinks from '../components/ArtistLinks';
+import HolodexSyncActions from '../components/HolodexSyncActions';
 import { extractRawCommentTimestamps } from '../utils/rawCommentTimestamps';
 import { analysisFailureMessage } from '../utils/apiError';
 
@@ -1225,7 +1226,7 @@ export default function StreamDetailPage() {
   if (!stream) {
     return (
       <div className="text-center py-12 text-gray-500">
-        歌枠が見つかりませんでした
+        配信が見つかりませんでした
       </div>
     );
   }
@@ -1439,26 +1440,12 @@ export default function StreamDetailPage() {
                         </button>
                       </div>
                     </div>
-                    <div>
-                      <p className="text-xs font-medium text-gray-400 mb-1.5">Holodex 同期</p>
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          onClick={() => syncVideoMutation.mutate()}
-                          disabled={syncVideoMutation.isPending}
-                          className="px-3 py-1.5 text-sm bg-indigo-50 text-indigo-700 border border-indigo-200 font-medium rounded-lg hover:bg-indigo-100 transition-colors disabled:opacity-50"
-                        >
-                          {syncVideoMutation.isPending ? '同期中...' : 'Holodex から同期'}
-                        </button>
-                        <button
-                          onClick={() => syncToHolodexMutation.mutate()}
-                          disabled={syncToHolodexMutation.isPending}
-                          title="seTORI のセットリストを Holodex に書き込みます（外部サービスへの反映）"
-                          className="px-3 py-1.5 text-sm bg-amber-50 text-amber-700 border border-amber-300 font-medium rounded-lg hover:bg-amber-100 transition-colors disabled:opacity-50"
-                        >
-                          {syncToHolodexMutation.isPending ? 'Holodex へ同期中...' : 'seTORI から Holodex へ同期'}
-                        </button>
-                      </div>
-                    </div>
+                    <HolodexSyncActions
+                      onDownload={() => syncVideoMutation.mutate()}
+                      onUpload={() => syncToHolodexMutation.mutate()}
+                      downloading={syncVideoMutation.isPending}
+                      uploading={syncToHolodexMutation.isPending}
+                    />
                   </div>
                 )}
 
@@ -1894,12 +1881,22 @@ export default function StreamDetailPage() {
         </div>
 
         {/* Player + Timeline - 60% */}
-        <div className="flex-1 min-w-0 bg-white rounded-lg shadow-sm border flex flex-col min-h-0">
-          {/* 16:9 の器。プレイヤーはこれを埋める（審査画面の器と同じ形）。
-              **1300px 以上での話。** それ未満では親が sm:max-h-[40vh] で高さを絞るので、
-              この箱は縮められ 16:9 を保てない（実測 1299px で比 1.99）。
-              上限そのものは 1bb43a5 で「1300px 未満でページをスクロールできるように」
-              入れたものなので、直すなら上限の側の設計を見直す必要がある。issue #16 */}
+        {/* **sm〜1300px では高さを 40vh に決め打つ。** 親が sm:max-h-[40vh] で絞るこの幅帯で、
+            以前は `w-full aspect-video` の器が縦に縮められて 16:9 を保てなかった
+            （実測 1299px で比 1.99。issue #16）。上限（1bb43a5）は下のセットリストを
+            見せるためのものなので残し、器のほうを「高さから幅を決める」形にする。
+            カードの高さが決まっていないと下のコンテナクエリの基準が無いので、ここで決める。 */}
+        <div className="flex-1 min-w-0 bg-white rounded-lg shadow-sm border flex flex-col min-h-0 sm:h-[40vh] min-[1300px]:h-auto">
+          {/* 映像の領域。sm〜1300px では残りの高さ（時間帯バーを除いた分）を占め、
+              その中に **min(幅いっぱい, 高さ × 16/9)** の 16:9 を中央に置く。
+              高さだけで幅を決めると狭い幅でカードから溢れ（800px で 476px 幅 vs 369px）、
+              幅だけで決めると縦が溢れる ── 両方の小さいほうを取れば比も収まりも保てる。
+              時間帯バーの高さは閲覧者 1 段・編集者 3 段で違うので、定数で引かずに
+              コンテナクエリ（cqw / cqh）で実際の残りを基準にする。
+              1300px 以上（grid が内容から高さを決める）と sm 未満（縦積み・上限なし）は従来どおり。 */}
+          <div className="sm:flex-1 sm:min-h-0 sm:[container-type:size] sm:flex sm:items-center sm:justify-center min-[1300px]:flex-none min-[1300px]:[container-type:normal] min-[1300px]:block">
+          {/* 16:9 の器。プレイヤーはこれを埋める（審査画面の器と同じ形）。 */}
+          <div className="w-full sm:w-[min(100cqw,calc(100cqh*16/9))] min-[1300px]:w-full">
           {/* **基本は描いてみて、失敗したら onError で切り替える。**
               保存済みの判定は古くなるし（アーカイブが後から会限化する、権利で
               降ろされる）、`public` はそもそも「反証が無かった」という弱い結論
@@ -1920,9 +1917,11 @@ export default function StreamDetailPage() {
               />
             </div>
           )}
+          </div>
+          </div>
 
           <div className="border-t py-3 px-0 shrink-0">
-            {/* YouTube の進捗バーと左右端を揃える（デスクトップ UI は左側の余白が少し広い）。 */}
+            {/* 時間帯バーはカード幅に置く。映像は高さ上限に合わせて幅が狭くなる場合がある。 */}
             <div className="space-y-1 px-3 sm:pl-9 sm:pr-8">
               <div className="relative h-3 bg-gray-100 rounded-none">
                 {setoriTimeline.map((item) => (
