@@ -100,11 +100,6 @@ func AliasPairKey(a, b string) string {
 	return a + "|" + b
 }
 
-// FindArtistRejections は「別人」と記録済みの組を返す。
-func (r *AliasRepository) FindArtistRejections(pairKeys []string) (map[string]bool, error) {
-	return r.findRejections(`SELECT pair_key FROM artist_alias_checks WHERE NOT same AND pair_key = ANY($1)`, pairKeys)
-}
-
 // RecordArtistRejection は「この 2 つは別人」を残す。
 func (r *AliasRepository) RecordArtistRejection(keyA, keyB, source, note string) error {
 	a, b := keyA, keyB

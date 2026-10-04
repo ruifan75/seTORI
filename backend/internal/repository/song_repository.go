@@ -369,37 +369,6 @@ func (r *SongRepository) FindByItunesID(itunesID int64) (*models.Song, error) {
 	return &s, nil
 }
 
-// SearchSimilar は trigram で類似楽曲を検索する（AI 正規化候補用）。
-func (r *SongRepository) SearchSimilar(name string, limit int) ([]models.Song, error) {
-	query := `
-		SELECT id, name, name_reading, original_artist, original_artist_reading, arts, created_at, updated_at,
-		       similarity(name, $1) AS sim
-		FROM songs
-		WHERE similarity(name, $1) > 0.3
-		ORDER BY sim DESC
-		LIMIT $2`
-
-	rows, err := r.db.Query(query, name, limit)
-	if err != nil {
-		return nil, fmt.Errorf("search similar songs: %w", err)
-	}
-	defer rows.Close()
-
-	var songs []models.Song
-	for rows.Next() {
-		var s models.Song
-		var sim float64
-		err := rows.Scan(&s.ID, &s.Name, &s.NameReading, &s.OriginalArtist,
-			&s.OriginalArtistReading, &s.Arts, &s.CreatedAt, &s.UpdatedAt, &sim)
-		if err != nil {
-			return nil, fmt.Errorf("scan similar song: %w", err)
-		}
-		songs = append(songs, s)
-	}
-
-	return songs, nil
-}
-
 // MergeSong は統合元楽曲のすべての performance を統合先へ移し、統合元を削除する。
 func (r *SongRepository) MergeSong(sourceSongID, targetSongID uuid.UUID) error {
 	tx, err := r.db.Begin()
