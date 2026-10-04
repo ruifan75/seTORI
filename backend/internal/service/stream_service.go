@@ -1,7 +1,6 @@
 package service
 
 import (
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"github.com/google/uuid"
@@ -239,6 +238,24 @@ func (s *StreamService) ListNonSingingCandidates(limit int, dismissed bool) (*dt
 	return &dto.NonSingingCandidateList{Candidates: items, Total: len(items)}, nil
 }
 
+// ListRestrictionReview は裁定の見直しが要る配信を返す（issue #26）。
+func (s *StreamService) ListRestrictionReview(limit int) (*dto.RestrictionReviewList, error) {
+	rows, err := s.streamRepo.FindRestrictionReview(limit)
+	if err != nil {
+		return nil, fmt.Errorf("list restriction review: %w", err)
+	}
+	items := make([]dto.RestrictionReviewItem, len(rows))
+	for i, row := range rows {
+		items[i] = dto.RestrictionReviewItem{
+			ID:           row.ID,
+			Title:        row.Title,
+			StreamDate:   row.StreamDate.Format(time.RFC3339),
+			BasisUnknown: row.BasisUnknown,
+		}
+	}
+	return &dto.RestrictionReviewList{Items: items, Total: len(items)}, nil
+}
+
 // MarkNotSinging は「見たが歌回ではない」を記録する（候補から外し続ける）。
 func (s *StreamService) MarkNotSinging(streamID string, by *uuid.UUID, note string) error {
 	return s.streamRepo.SaveNonSingingCheck(streamID, by, note)
@@ -365,6 +382,15 @@ func (s *StreamService) toStreamResponse(stream models.Stream, tags []models.Str
 		IsRestricted: stream.IsRestrictedEffective,
 		CreatedAt:    stream.CreatedAt,
 		UpdatedAt:    stream.UpdatedAt,
+	}
+
+	// 人の裁定と、その食い違い（issue #26）は**運用の状態**。編集者だけに載せる。
+	if view.Operational {
+		if stream.RestrictionOverride.Valid {
+			override := stream.RestrictionOverride.Bool
+			resp.RestrictionOverride = &override
+		}
+		resp.RestrictionNeedsReview = stream.RestrictionNeedsReview
 	}
 
 	if stream.DurationSeconds.Valid {
@@ -632,14 +658,8 @@ func (s *StreamService) Update(id string, req *dto.UpdateStreamRequest, isEditor
 		stream.IsHidden = *req.IsHidden
 	}
 
-	// 秘匿の切り替えは**人の裁定として override 列へ書く**。検出（members_only タグ）は
-	// 触らない ── 同じ列へ書くと、次の同期の検出で人の判断が消える。
-	if req.IsRestricted != nil {
-		stream.RestrictionOverride = sql.NullBool{Bool: *req.IsRestricted, Valid: true}
-	}
-
 	// 配信の metadata を更新する（変更可能なフィールドだけを更新し、大きな JSONB は書き戻さない）
-	if err := s.streamRepo.UpdateMetadata(id, stream.Title, stream.StreamDate, stream.IsProcessed, stream.IsHidden, stream.RestrictionOverride); err != nil {
+	if err := s.streamRepo.UpdateMetadata(id, stream.Title, stream.StreamDate, stream.IsProcessed, stream.IsHidden); err != nil {
 		return nil, fmt.Errorf("update stream: %w", err)
 	}
 
@@ -659,6 +679,18 @@ func (s *StreamService) Update(id string, req *dto.UpdateStreamRequest, isEditor
 		}
 		if err := s.streamRepo.SetSingers(id, req.ParticipantIDs, ownerID); err != nil {
 			return nil, fmt.Errorf("set participants: %w", err)
+		}
+	}
+
+	// 秘匿の切り替えは**人の裁定として override 列へ書く**。検出（members_only タグ）は
+	// 触らない ── 同じ列へ書くと、次の同期の検出で人の判断が消える。
+	//
+	// **タグと参加者のあとに書く。** 裁定と一緒に、その時点の自動判定を控える
+	// （issue #26）。自動判定はタグ（members_only）と所有者の方針で決まるので、
+	// 同じ要求で変えたならその後の値を控えないと、控えが人の見ていた状態と食い違う。
+	if req.IsRestricted != nil {
+		if err := s.streamRepo.SetRestrictionOverride(id, *req.IsRestricted); err != nil {
+			return nil, fmt.Errorf("set restriction override: %w", err)
 		}
 	}
 

@@ -2,6 +2,7 @@ package youtube
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -313,6 +314,45 @@ func (c *Client) GetChannelPhoto(channelID string) (string, error) {
 	return "", fmt.Errorf("no thumbnail found for channel: %s", channelID)
 }
 
+// ErrCommentsUnavailable は「この動画のコメントは取れない」と YouTube が**明言した**こと
+// （issue #56）。404、または 403 で理由が `commentsDisabled` のとき。
+//
+// **一時的な失敗と同じ値にしない。** 呼び出し側はこれを見て取り直しの間隔を空ける。
+// クォータ超過（403 `quotaExceeded`）や 5xx まで含めると、障害のあいだに触った配信が
+// 全部「取れない配信」として後回しになる。`forbidden`（会限・非公開）も含めない ──
+// 会限は members_only タグで取り直しの対象から既に外しており、API キーの設定誤りでも
+// 同じ理由が返りうる（そのとき全配信を後回しにしてしまう）。
+//
+// 恒久とは決めつけない。配信者があとでコメント欄を開くことはあるので、
+// 呼び出し側は間隔を空けて取り直すだけにする。
+var ErrCommentsUnavailable = errors.New("YouTube comments unavailable for this video")
+
+// commentsUnavailable は commentThreads の失敗応答が「取れない」の明言かを判定する。
+func commentsUnavailable(status int, body []byte) bool {
+	if status == http.StatusNotFound {
+		return true
+	}
+	if status != http.StatusForbidden {
+		return false
+	}
+	var e struct {
+		Error struct {
+			Errors []struct {
+				Reason string `json:"reason"`
+			} `json:"errors"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(body, &e) != nil {
+		return false
+	}
+	for _, r := range e.Error.Errors {
+		if r.Reason == "commentsDisabled" {
+			return true
+		}
+	}
+	return false
+}
+
 // ListVideoComments は公開されているトップレベルコメントを全ページ取得する。
 // セットリストは通常トップレベルコメントに投稿されるため、返信は取得しない。
 func (c *Client) ListVideoComments(videoID string) ([]string, error) {
@@ -349,6 +389,11 @@ func (c *Client) ListVideoComments(videoID string) ([]string, error) {
 		if resp.StatusCode != http.StatusOK {
 			body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 			resp.Body.Close()
+			// **最初のページでだけ判定する。** 2 ページ目以降で落ちたなら、
+			// 1 ページ目は取れている＝コメント欄はある。途中の失敗は一時的なもの。
+			if pageToken == "" && commentsUnavailable(resp.StatusCode, body) {
+				return nil, fmt.Errorf("%w: status %d: %s", ErrCommentsUnavailable, resp.StatusCode, strings.TrimSpace(string(body)))
+			}
 			return nil, fmt.Errorf("YouTube comments API returned status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 		}
 

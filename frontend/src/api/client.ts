@@ -2,6 +2,8 @@ import axios from 'axios';
 import type {
   AutoFillSettings,
   NonSingingCandidate,
+  TaskRun,
+  RestrictionReviewItem,
   AutoFillRunResult,
   SongListResponse,
   Song,
@@ -417,6 +419,35 @@ export const nonSingingApi = {
   },
 };
 
+// ========== 背景処理 API（issue #22） ==========
+// yt-dlp を起動する backfill。以前は投げっぱなしで log にしか出なかったので、
+// 実行ごとの進捗と失敗の理由を task_runs に残して読めるようにした。
+export const taskApi = {
+  list: async (limit = 10): Promise<TaskRun[]> => {
+    const { data } = await api.get('/api/tasks', { params: { limit } });
+    return data.tasks ?? [];
+  },
+  // 同じ種類が走っていれば 409（同じ配信へ yt-dlp を二重に起動しないため）
+  startChapterBackfill: async (concurrency = 3): Promise<{ task_id: string }> => {
+    const { data } = await api.post('/api/chapters/backfill', null, { params: { concurrency } });
+    return data;
+  },
+  startChatEndBackfill: async (concurrency = 3): Promise<{ task_id: string }> => {
+    const { data } = await api.post('/api/chat-ends/backfill', null, { params: { concurrency } });
+    return data;
+  },
+};
+
+// ========== 秘匿の裁定の見直し API（issue #26） ==========
+// 公開の裁定と現在の会限判定が食い違う配信（旧裁定も含む）。解決は
+// streamApi.update の is_restricted ── 裁定を書き直すとその時点の判定が控えられ、一覧から消える。
+export const restrictionReviewApi = {
+  list: async (limit = 100): Promise<{ items: RestrictionReviewItem[]; total: number }> => {
+    const { data } = await api.get('/api/restriction-review', { params: { limit } });
+    return data;
+  },
+};
+
 // ========== 自動処理（定期実行）API ==========
 // 登録チャンネルを定期的に 同期 → コメント取り直し → 歌単作成 する。
 // 審査と処理完了は自動化しない（設計上わざと人に残した関門）。
@@ -426,18 +457,16 @@ export const autoFillApi = {
     return data;
   },
 
-  updateSettings: async (
-    enabled: boolean,
-    intervalHours: number,
-    refreshDays: number,
-  ): Promise<AutoFillSettings> => {
-    // 3 項目とも送る。バックエンドは欠けていると 400 を返す
-    // （`{}` が黙って自動処理を止めるのを防ぐため）。
-    const { data } = await api.put('/api/auto-fill/settings', {
-      enabled,
-      interval_hours: intervalHours,
-      refresh_days: refreshDays,
-    });
+  // 4 項目とも送る。バックエンドは欠けていると 400 を返す
+  // （`{}` が黙って自動処理を止めるのを防ぐため）。真偽値が 2 つあるので
+  // 位置引数にせず名前で渡す（取り違えると客串の旗と有効の旗が入れ替わる）。
+  updateSettings: async (next: {
+    enabled: boolean;
+    interval_hours: number;
+    refresh_days: number;
+    include_collabs: boolean;
+  }): Promise<AutoFillSettings> => {
+    const { data } = await api.put('/api/auto-fill/settings', next);
     return data;
   },
 

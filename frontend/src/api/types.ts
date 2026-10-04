@@ -256,6 +256,11 @@ export interface Stream {
   holodex_uploaded_at?: string;
   // 台帳の追跡開始より前から存在する配信。**台帳が空でも「送っていない」とは言えない**
   holodex_upload_unknown?: boolean;
+  // 人の裁定（true＝伏せる / false＝公開してよい）。未裁定なら無い。**content:edit のときだけ**。
+  // is_restricted は実効値なので、それだけでは「チャンネルの方針で公開」と区別できない
+  restriction_override?: boolean;
+  // 公開の裁定と現在の会限判定が食い違う（旧裁定も含む、issue #26）。**content:edit のときだけ**
+  restriction_needs_review?: boolean;
   holodex_timeline_songs?: SongSuggestion[];  // Holodex タイムライン データ
   comment_timeline_songs?: CommentSong[];     // コメント解析済みタイムライン（分析キャッシュ）
   // 解析を最後に走らせた時刻。updated_at は Holodex 同期でも動くので代用できない
@@ -495,6 +500,35 @@ export interface AnalyzeCommentsResponse {
 
 // 未処理配信の一括プレ分析ジョブの進捗
 /** 自動処理（定期実行）の設定。**content:edit のみ**。 */
+/** 背景処理の実行 1 回（issue #22）。**content:edit のみ** */
+export interface TaskRun {
+  id: string;
+  kind: 'chat_end_backfill' | 'chapter_backfill' | string;
+  status: 'running' | 'done' | 'failed' | 'interrupted';
+  total: number;
+  done: number;
+  succeeded: number;
+  /** 失敗ではないが今回は結論を出さなかった（replay がまだ無い等） */
+  skipped: number;
+  failed: number;
+  params: Record<string, unknown>;
+  /** 失敗した対象と理由（直近の一部） */
+  failures: { target: string; reason: string }[];
+  message: string;
+  started_by_name?: string;
+  started_at: string;
+  finished_at?: string;
+}
+
+/** 公開の裁定と現在の会限判定が食い違う配信（旧裁定も含む、issue #26）。**content:edit のみ**。 */
+export interface RestrictionReviewItem {
+  id: string;
+  title: string;
+  stream_date: string;
+  /** 裁定の時点の判定が分からない（この仕組みより前の裁定） */
+  basis_unknown: boolean;
+}
+
 /** 「非表示だが現行規則で曲が出た」配信（issue #42）。**content:edit のみ**。 */
 export interface NonSingingCandidate {
   id: string;
@@ -512,6 +546,11 @@ export interface AutoFillSettings {
   interval_hours: number;
   /** コメントを取り直す対象の上限日数（歌単は配信後に貼られることが多い） */
   refresh_days: number;
+  /**
+   * 参加しただけの配信（客串）も対象にするか（issue #60）。既定は所有者の配信だけ。
+   * 客串は歌手が複数なので、一括作成は全行を審査へ回す
+   */
+  include_collabs: boolean;
   last_run_at?: string;
   last_run_note?: string;
   last_run_error?: string;
@@ -1431,6 +1470,8 @@ export interface BatchFillRun {
   songs_review: number;
   /** 「DB にあるが入力元に無い」と分かった既存の歌唱の件数（force 実行のみ） */
   songs_gap: number;
+  /** 入力元を確定できずに飛ばした配信（live chat 待ち・分析中のコメント差し替えなど。issue #7） */
+  skipped_stream_ids: string[];
   ai_asked: number;
   message: string;
   started_at: string;
