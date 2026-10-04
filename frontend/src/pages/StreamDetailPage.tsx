@@ -1225,7 +1225,7 @@ export default function StreamDetailPage() {
   if (!stream) {
     return (
       <div className="text-center py-12 text-gray-500">
-        歌枠が見つかりませんでした
+        配信が見つかりませんでした
       </div>
     );
   }
