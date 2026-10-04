@@ -1,0 +1,803 @@
+[
+  {
+    "tc": {
+      "w": 390,
+      "h": 900,
+      "role": "anonymous",
+      "restricted": true
+    },
+    "value": {
+      "snapshots": {
+        "view": "3038be8a50c21c520aa0bdf0cf6a639e6c9419932703b53dbe11bca802697757"
+      },
+      "iframeSame": true,
+      "queueSame": true,
+      "calls": [],
+      "playing": true,
+      "texts": {
+        "title": "配信タイトル",
+        "setlist": "セットリスト (0曲)非公開"
+      }
+    }
+  },
+  {
+    "tc": {
+      "w": 1024,
+      "h": 900,
+      "role": "anonymous",
+      "restricted": true
+    },
+    "value": {
+      "snapshots": {
+        "view": "3038be8a50c21c520aa0bdf0cf6a639e6c9419932703b53dbe11bca802697757"
+      },
+      "iframeSame": true,
+      "queueSame": true,
+      "calls": [],
+      "playing": true,
+      "texts": {
+        "title": "配信タイトル",
+        "setlist": "セットリスト (0曲)非公開"
+      }
+    }
+  },
+  {
+    "tc": {
+      "w": 1440,
+      "h": 900,
+      "role": "anonymous",
+      "restricted": true
+    },
+    "value": {
+      "snapshots": {
+        "view": "3038be8a50c21c520aa0bdf0cf6a639e6c9419932703b53dbe11bca802697757"
+      },
+      "iframeSame": true,
+      "queueSame": true,
+      "calls": [],
+      "playing": true,
+      "texts": {
+        "title": "配信タイトル",
+        "setlist": "セットリスト (0曲)非公開"
+      }
+    }
+  },
+  {
+    "tc": {
+      "w": 390,
+      "h": 900,
+      "role": "anonymous",
+      "restricted": false
+    },
+    "value": {
+      "snapshots": {
+        "view": "d5fc84580de6f920f27e89b3d453d94de07af591c229284f998a43636b1925b5"
+      },
+      "iframeSame": true,
+      "queueSame": true,
+      "calls": [
+        [
+          "create",
+          "abcdefghijk"
+        ],
+        [
+          "create",
+          "abcdefghijk"
+        ],
+        "play"
+      ],
+      "playing": true,
+      "texts": {
+        "title": "配信タイトル",
+        "setlist": "セットリスト (2曲)"
+      }
+    }
+  },
+  {
+    "tc": {
+      "w": 390,
+      "h": 900,
+      "role": "restricted",
+      "restricted": false
+    },
+    "value": {
+      "snapshots": {
+        "view": "d5fc84580de6f920f27e89b3d453d94de07af591c229284f998a43636b1925b5"
+      },
+      "iframeSame": true,
+      "queueSame": true,
+      "calls": [
+        [
+          "create",
+          "abcdefghijk"
+        ],
+        [
+          "create",
+          "abcdefghijk"
+        ],
+        "play"
+      ],
+      "playing": true,
+      "texts": {
+        "title": "配信タイトル",
+        "setlist": "セットリスト (2曲)"
+      }
+    }
+  },
+  {
+    "tc": {
+      "w": 390,
+      "h": 900,
+      "role": "restricted",
+      "restricted": true
+    },
+    "value": {
+      "snapshots": {
+        "view": "65b2181d48a704733081dba4d5b074a21ab4f8ed795d3d7972f12867132443a1"
+      },
+      "iframeSame": true,
+      "queueSame": true,
+      "calls": [
+        [
+          "create",
+          "abcdefghijk"
+        ],
+        "play"
+      ],
+      "playing": true,
+      "texts": {
+        "title": "配信タイトル",
+        "setlist": "セットリスト (2曲)非公開"
+      }
+    }
+  },
+  {
+    "tc": {
+      "w": 1024,
+      "h": 900,
+      "role": "anonymous",
+      "restricted": false
+    },
+    "value": {
+      "snapshots": {
+        "view": "d5fc84580de6f920f27e89b3d453d94de07af591c229284f998a43636b1925b5",
+        "vocalists": "707ed16a2a214ab45fcf3bd36a55094ea1e361c84e069a1cca1dedddf0caf5ea"
+      },
+      "iframeSame": true,
+      "queueSame": true,
+      "calls": [
+        [
+          "create",
+          "abcdefghijk"
+        ],
+        [
+          "create",
+          "abcdefghijk"
+        ],
+        "play"
+      ],
+      "playing": true,
+      "texts": {
+        "title": "配信タイトル",
+        "setlist": "セットリスト (2曲)"
+      }
+    }
+  },
+  {
+    "tc": {
+      "w": 1024,
+      "h": 900,
+      "role": "restricted",
+      "restricted": false
+    },
+    "value": {
+      "snapshots": {
+        "view": "d5fc84580de6f920f27e89b3d453d94de07af591c229284f998a43636b1925b5",
+        "vocalists": "707ed16a2a214ab45fcf3bd36a55094ea1e361c84e069a1cca1dedddf0caf5ea"
+      },
+      "iframeSame": true,
+      "queueSame": true,
+      "calls": [
+        [
+          "create",
+          "abcdefghijk"
+        ],
+        [
+          "create",
+          "abcdefghijk"
+        ],
+        "play"
+      ],
+      "playing": true,
+      "texts": {
+        "title": "配信タイトル",
+        "setlist": "セットリスト (2曲)"
+      }
+    }
+  },
+  {
+    "tc": {
+      "w": 1024,
+      "h": 900,
+      "role": "restricted",
+      "restricted": true
+    },
+    "value": {
+      "snapshots": {
+        "view": "65b2181d48a704733081dba4d5b074a21ab4f8ed795d3d7972f12867132443a1",
+        "vocalists": "73b2f0ab98603d262684f52cf4786cd9d7479b7ad09a7ffd3d7f7fea22596e5b"
+      },
+      "iframeSame": true,
+      "queueSame": true,
+      "calls": [
+        [
+          "create",
+          "abcdefghijk"
+        ],
+        "play"
+      ],
+      "playing": true,
+      "texts": {
+        "title": "配信タイトル",
+        "setlist": "セットリスト (2曲)非公開"
+      }
+    }
+  },
+  {
+    "tc": {
+      "w": 1440,
+      "h": 900,
+      "role": "anonymous",
+      "restricted": false
+    },
+    "value": {
+      "snapshots": {
+        "view": "d5fc84580de6f920f27e89b3d453d94de07af591c229284f998a43636b1925b5",
+        "vocalists": "707ed16a2a214ab45fcf3bd36a55094ea1e361c84e069a1cca1dedddf0caf5ea"
+      },
+      "iframeSame": true,
+      "queueSame": true,
+      "calls": [
+        [
+          "create",
+          "abcdefghijk"
+        ],
+        [
+          "create",
+          "abcdefghijk"
+        ],
+        "play"
+      ],
+      "playing": true,
+      "texts": {
+        "title": "配信タイトル",
+        "setlist": "セットリスト (2曲)"
+      }
+    }
+  },
+  {
+    "tc": {
+      "w": 1440,
+      "h": 900,
+      "role": "restricted",
+      "restricted": false
+    },
+    "value": {
+      "snapshots": {
+        "view": "d5fc84580de6f920f27e89b3d453d94de07af591c229284f998a43636b1925b5",
+        "vocalists": "707ed16a2a214ab45fcf3bd36a55094ea1e361c84e069a1cca1dedddf0caf5ea"
+      },
+      "iframeSame": true,
+      "queueSame": true,
+      "calls": [
+        [
+          "create",
+          "abcdefghijk"
+        ],
+        [
+          "create",
+          "abcdefghijk"
+        ],
+        "play"
+      ],
+      "playing": true,
+      "texts": {
+        "title": "配信タイトル",
+        "setlist": "セットリスト (2曲)"
+      }
+    }
+  },
+  {
+    "tc": {
+      "w": 1440,
+      "h": 900,
+      "role": "restricted",
+      "restricted": true
+    },
+    "value": {
+      "snapshots": {
+        "view": "65b2181d48a704733081dba4d5b074a21ab4f8ed795d3d7972f12867132443a1",
+        "vocalists": "73b2f0ab98603d262684f52cf4786cd9d7479b7ad09a7ffd3d7f7fea22596e5b"
+      },
+      "iframeSame": true,
+      "queueSame": true,
+      "calls": [
+        [
+          "create",
+          "abcdefghijk"
+        ],
+        "play"
+      ],
+      "playing": true,
+      "texts": {
+        "title": "配信タイトル",
+        "setlist": "セットリスト (2曲)非公開"
+      }
+    }
+  },
+  {
+    "tc": {
+      "w": 390,
+      "h": 900,
+      "role": "editor",
+      "restricted": true
+    },
+    "value": {
+      "snapshots": {
+        "view": "a09a91601c7b5fb3a6143c2943af174e89326406cf099882758c0380b7d73e7d",
+        "tag-picker": "1446e435185556135b9591f004501475a0768cc22e9caa56201fe49fd42478ab",
+        "participants": "e998cd514293bffbefff89eabd682707a217c0991f7f2ab699fc23179427a9f8",
+        "edit-actions": "83792be82179813482cc9f39dbcd54a68e6c56a97e87b19804a3425fcb7c7ca0",
+        "Holodex": "127bb47b49d44d8b9795a551b189ae650696db98015b0bfef12822193669d1dc",
+        "コメント": "5088b4e7245152205a985ec799ad36a5025eafcf45f42e122d491bf6eb4b6740",
+        "チャプター": "83bbae9956c4de1b53c9583c0f352bec445ac90f5cfe7937728576d780d93bd8",
+        "手動": "baccd840c72afbbff90c7654410442eeb979e9d22f54eb4fd1246f2fc086a5bb",
+        "生コメント": "b520aa5e8584a29054b96831e598ad3c91d6ff817b23ac7d997d91fe60dd1b8a",
+        "操作": "83792be82179813482cc9f39dbcd54a68e6c56a97e87b19804a3425fcb7c7ca0",
+        "cancel": "a09a91601c7b5fb3a6143c2943af174e89326406cf099882758c0380b7d73e7d"
+      },
+      "iframeSame": true,
+      "queueSame": true,
+      "calls": [],
+      "playing": false,
+      "texts": {
+        "title": "配信タイトル",
+        "setlist": "セットリスト (0曲)非公開"
+      }
+    }
+  },
+  {
+    "tc": {
+      "w": 1024,
+      "h": 900,
+      "role": "editor",
+      "restricted": true
+    },
+    "value": {
+      "snapshots": {
+        "view": "a09a91601c7b5fb3a6143c2943af174e89326406cf099882758c0380b7d73e7d",
+        "tag-picker": "1446e435185556135b9591f004501475a0768cc22e9caa56201fe49fd42478ab",
+        "participants": "e998cd514293bffbefff89eabd682707a217c0991f7f2ab699fc23179427a9f8",
+        "edit-actions": "83792be82179813482cc9f39dbcd54a68e6c56a97e87b19804a3425fcb7c7ca0",
+        "Holodex": "127bb47b49d44d8b9795a551b189ae650696db98015b0bfef12822193669d1dc",
+        "コメント": "5088b4e7245152205a985ec799ad36a5025eafcf45f42e122d491bf6eb4b6740",
+        "チャプター": "83bbae9956c4de1b53c9583c0f352bec445ac90f5cfe7937728576d780d93bd8",
+        "手動": "baccd840c72afbbff90c7654410442eeb979e9d22f54eb4fd1246f2fc086a5bb",
+        "生コメント": "b520aa5e8584a29054b96831e598ad3c91d6ff817b23ac7d997d91fe60dd1b8a",
+        "操作": "83792be82179813482cc9f39dbcd54a68e6c56a97e87b19804a3425fcb7c7ca0",
+        "cancel": "a09a91601c7b5fb3a6143c2943af174e89326406cf099882758c0380b7d73e7d"
+      },
+      "iframeSame": true,
+      "queueSame": true,
+      "calls": [],
+      "playing": false,
+      "texts": {
+        "title": "配信タイトル",
+        "setlist": "セットリスト (0曲)非公開"
+      }
+    }
+  },
+  {
+    "tc": {
+      "w": 1440,
+      "h": 900,
+      "role": "editor",
+      "restricted": true
+    },
+    "value": {
+      "snapshots": {
+        "view": "a09a91601c7b5fb3a6143c2943af174e89326406cf099882758c0380b7d73e7d",
+        "tag-picker": "1446e435185556135b9591f004501475a0768cc22e9caa56201fe49fd42478ab",
+        "participants": "e998cd514293bffbefff89eabd682707a217c0991f7f2ab699fc23179427a9f8",
+        "edit-actions": "83792be82179813482cc9f39dbcd54a68e6c56a97e87b19804a3425fcb7c7ca0",
+        "Holodex": "127bb47b49d44d8b9795a551b189ae650696db98015b0bfef12822193669d1dc",
+        "コメント": "5088b4e7245152205a985ec799ad36a5025eafcf45f42e122d491bf6eb4b6740",
+        "チャプター": "83bbae9956c4de1b53c9583c0f352bec445ac90f5cfe7937728576d780d93bd8",
+        "手動": "baccd840c72afbbff90c7654410442eeb979e9d22f54eb4fd1246f2fc086a5bb",
+        "生コメント": "b520aa5e8584a29054b96831e598ad3c91d6ff817b23ac7d997d91fe60dd1b8a",
+        "操作": "83792be82179813482cc9f39dbcd54a68e6c56a97e87b19804a3425fcb7c7ca0",
+        "cancel": "a09a91601c7b5fb3a6143c2943af174e89326406cf099882758c0380b7d73e7d"
+      },
+      "iframeSame": true,
+      "queueSame": true,
+      "calls": [],
+      "playing": false,
+      "texts": {
+        "title": "配信タイトル",
+        "setlist": "セットリスト (0曲)非公開"
+      }
+    }
+  },
+  {
+    "tc": {
+      "w": 390,
+      "h": 900,
+      "role": "editor",
+      "restricted": false
+    },
+    "value": {
+      "snapshots": {
+        "view": "8d8e1bd4affdb06852cc52d83f19d05a1bd09ec67f3d820d4f9e8d1cfc5d83e7",
+        "tag-picker": "10f09629e238960ab53d730fe42446a1581f49e2ffdd085819fbcd3ae4e9ccce",
+        "participants": "eacb3aa2fc87b70629b42e422a40067edeb07557bbb357e3cdbd3437aa32b0f3",
+        "edit-actions": "6badc5627e218f595c13e979a72db469a5deef742a0818c46979f6e84405ee91",
+        "Holodex": "a6bbf1063608bfede581bc8479ae9a6522fa52f3204426a3eff50331c10f2def",
+        "コメント": "7ab97bb54e0bb9c353d4e2081bb28d195a1a9fbb66e8e779932dc348beb40683",
+        "チャプター": "4f912e54c207fd49206ff0d0a1a1e485a095117a5db072eb4e199ea9a764ef88",
+        "手動": "7666f0b73fdb2f6e8af06f65dc6f468084d46dbe654e15d286f18675d5ccf60e",
+        "生コメント": "65f7fcc8b42a666a375772cd8dbe10afb5b568c227339deea2e6d9cc4804bb9d",
+        "操作": "6badc5627e218f595c13e979a72db469a5deef742a0818c46979f6e84405ee91",
+        "cancel": "8d8e1bd4affdb06852cc52d83f19d05a1bd09ec67f3d820d4f9e8d1cfc5d83e7"
+      },
+      "iframeSame": true,
+      "queueSame": true,
+      "calls": [
+        [
+          "create",
+          "abcdefghijk"
+        ],
+        [
+          "create",
+          "abcdefghijk"
+        ],
+        "play",
+        "pause"
+      ],
+      "playing": false,
+      "texts": {
+        "title": "配信タイトル",
+        "setlist": "セットリスト (2曲)"
+      }
+    }
+  },
+  {
+    "tc": {
+      "w": 390,
+      "h": 900,
+      "role": "both",
+      "restricted": false
+    },
+    "value": {
+      "snapshots": {
+        "view": "8d8e1bd4affdb06852cc52d83f19d05a1bd09ec67f3d820d4f9e8d1cfc5d83e7",
+        "tag-picker": "10f09629e238960ab53d730fe42446a1581f49e2ffdd085819fbcd3ae4e9ccce",
+        "participants": "eacb3aa2fc87b70629b42e422a40067edeb07557bbb357e3cdbd3437aa32b0f3",
+        "edit-actions": "93585f0934e7d00b967e7c4e4671a99b76eec50a3b732cba73a59cd994e45e37",
+        "Holodex": "a6bbf1063608bfede581bc8479ae9a6522fa52f3204426a3eff50331c10f2def",
+        "コメント": "7ab97bb54e0bb9c353d4e2081bb28d195a1a9fbb66e8e779932dc348beb40683",
+        "チャプター": "4f912e54c207fd49206ff0d0a1a1e485a095117a5db072eb4e199ea9a764ef88",
+        "手動": "7666f0b73fdb2f6e8af06f65dc6f468084d46dbe654e15d286f18675d5ccf60e",
+        "生コメント": "65f7fcc8b42a666a375772cd8dbe10afb5b568c227339deea2e6d9cc4804bb9d",
+        "操作": "93585f0934e7d00b967e7c4e4671a99b76eec50a3b732cba73a59cd994e45e37",
+        "cancel": "8d8e1bd4affdb06852cc52d83f19d05a1bd09ec67f3d820d4f9e8d1cfc5d83e7"
+      },
+      "iframeSame": true,
+      "queueSame": true,
+      "calls": [
+        [
+          "create",
+          "abcdefghijk"
+        ],
+        [
+          "create",
+          "abcdefghijk"
+        ],
+        "play",
+        "pause"
+      ],
+      "playing": false,
+      "texts": {
+        "title": "配信タイトル",
+        "setlist": "セットリスト (2曲)"
+      }
+    }
+  },
+  {
+    "tc": {
+      "w": 390,
+      "h": 900,
+      "role": "both",
+      "restricted": true
+    },
+    "value": {
+      "snapshots": {
+        "view": "e7f115f7c4328fa8ce224a21711e9f22b814e479cd5022f221ff78198f672645",
+        "tag-picker": "8abf296b76f2258aab18338e77783b5e623f3c260070b242be383ff80e60332d",
+        "participants": "5d237795cfc8ac4886785b0c64b31069faf259a2b748e5a862cb9379fa103763",
+        "edit-actions": "fda37282ee3a2344f1636fbfb1332747c6a55490197dcd27b1d906faf19042ee",
+        "Holodex": "e727826c7d0a34f7c6b78b11e4716b4276d7e27a9d8988604be7f264c066f608",
+        "コメント": "8b0ff754bab96df812ef3dee5c079230da2e76cd0ce9f399309b6b013b392ebf",
+        "チャプター": "6e05842512ce95d82550b115addddadc1e0fb38897b180c5f42b9e4f781c2e67",
+        "手動": "e0e6ed17eca286fcf6fc4cd84f788e9caf439d781191cad19ce5171c8b414394",
+        "生コメント": "8e069b766cd20c8021855c30435bfaadcbb575afd039db92c822756dd82e0f3f",
+        "操作": "fda37282ee3a2344f1636fbfb1332747c6a55490197dcd27b1d906faf19042ee",
+        "cancel": "e7f115f7c4328fa8ce224a21711e9f22b814e479cd5022f221ff78198f672645"
+      },
+      "iframeSame": true,
+      "queueSame": true,
+      "calls": [
+        [
+          "create",
+          "abcdefghijk"
+        ],
+        "play",
+        "pause"
+      ],
+      "playing": false,
+      "texts": {
+        "title": "配信タイトル",
+        "setlist": "セットリスト (2曲)非公開"
+      }
+    }
+  },
+  {
+    "tc": {
+      "w": 1024,
+      "h": 900,
+      "role": "editor",
+      "restricted": false
+    },
+    "value": {
+      "snapshots": {
+        "view": "8d8e1bd4affdb06852cc52d83f19d05a1bd09ec67f3d820d4f9e8d1cfc5d83e7",
+        "vocalists": "e2170f7b1533ecea229c1ae0c4a06735c4e0bb16b2b3205682960ea0322c75ba",
+        "tag-picker": "10f09629e238960ab53d730fe42446a1581f49e2ffdd085819fbcd3ae4e9ccce",
+        "participants": "eacb3aa2fc87b70629b42e422a40067edeb07557bbb357e3cdbd3437aa32b0f3",
+        "edit-actions": "6badc5627e218f595c13e979a72db469a5deef742a0818c46979f6e84405ee91",
+        "Holodex": "a6bbf1063608bfede581bc8479ae9a6522fa52f3204426a3eff50331c10f2def",
+        "コメント": "7ab97bb54e0bb9c353d4e2081bb28d195a1a9fbb66e8e779932dc348beb40683",
+        "チャプター": "4f912e54c207fd49206ff0d0a1a1e485a095117a5db072eb4e199ea9a764ef88",
+        "手動": "7666f0b73fdb2f6e8af06f65dc6f468084d46dbe654e15d286f18675d5ccf60e",
+        "生コメント": "65f7fcc8b42a666a375772cd8dbe10afb5b568c227339deea2e6d9cc4804bb9d",
+        "操作": "6badc5627e218f595c13e979a72db469a5deef742a0818c46979f6e84405ee91",
+        "cancel": "8d8e1bd4affdb06852cc52d83f19d05a1bd09ec67f3d820d4f9e8d1cfc5d83e7"
+      },
+      "iframeSame": true,
+      "queueSame": true,
+      "calls": [
+        [
+          "create",
+          "abcdefghijk"
+        ],
+        [
+          "create",
+          "abcdefghijk"
+        ],
+        "play",
+        "pause"
+      ],
+      "playing": false,
+      "texts": {
+        "title": "配信タイトル",
+        "setlist": "セットリスト (2曲)"
+      }
+    }
+  },
+  {
+    "tc": {
+      "w": 1024,
+      "h": 900,
+      "role": "both",
+      "restricted": false
+    },
+    "value": {
+      "snapshots": {
+        "view": "8d8e1bd4affdb06852cc52d83f19d05a1bd09ec67f3d820d4f9e8d1cfc5d83e7",
+        "vocalists": "e2170f7b1533ecea229c1ae0c4a06735c4e0bb16b2b3205682960ea0322c75ba",
+        "tag-picker": "10f09629e238960ab53d730fe42446a1581f49e2ffdd085819fbcd3ae4e9ccce",
+        "participants": "eacb3aa2fc87b70629b42e422a40067edeb07557bbb357e3cdbd3437aa32b0f3",
+        "edit-actions": "93585f0934e7d00b967e7c4e4671a99b76eec50a3b732cba73a59cd994e45e37",
+        "Holodex": "a6bbf1063608bfede581bc8479ae9a6522fa52f3204426a3eff50331c10f2def",
+        "コメント": "7ab97bb54e0bb9c353d4e2081bb28d195a1a9fbb66e8e779932dc348beb40683",
+        "チャプター": "4f912e54c207fd49206ff0d0a1a1e485a095117a5db072eb4e199ea9a764ef88",
+        "手動": "7666f0b73fdb2f6e8af06f65dc6f468084d46dbe654e15d286f18675d5ccf60e",
+        "生コメント": "65f7fcc8b42a666a375772cd8dbe10afb5b568c227339deea2e6d9cc4804bb9d",
+        "操作": "93585f0934e7d00b967e7c4e4671a99b76eec50a3b732cba73a59cd994e45e37",
+        "cancel": "8d8e1bd4affdb06852cc52d83f19d05a1bd09ec67f3d820d4f9e8d1cfc5d83e7"
+      },
+      "iframeSame": true,
+      "queueSame": true,
+      "calls": [
+        [
+          "create",
+          "abcdefghijk"
+        ],
+        [
+          "create",
+          "abcdefghijk"
+        ],
+        "play",
+        "pause"
+      ],
+      "playing": false,
+      "texts": {
+        "title": "配信タイトル",
+        "setlist": "セットリスト (2曲)"
+      }
+    }
+  },
+  {
+    "tc": {
+      "w": 1024,
+      "h": 900,
+      "role": "both",
+      "restricted": true
+    },
+    "value": {
+      "snapshots": {
+        "view": "e7f115f7c4328fa8ce224a21711e9f22b814e479cd5022f221ff78198f672645",
+        "vocalists": "2638e60d3cff7a4d982312724b1aeae8c9ee225f15ca948a437c60fc29f6b573",
+        "tag-picker": "8abf296b76f2258aab18338e77783b5e623f3c260070b242be383ff80e60332d",
+        "participants": "5d237795cfc8ac4886785b0c64b31069faf259a2b748e5a862cb9379fa103763",
+        "edit-actions": "fda37282ee3a2344f1636fbfb1332747c6a55490197dcd27b1d906faf19042ee",
+        "Holodex": "e727826c7d0a34f7c6b78b11e4716b4276d7e27a9d8988604be7f264c066f608",
+        "コメント": "8b0ff754bab96df812ef3dee5c079230da2e76cd0ce9f399309b6b013b392ebf",
+        "チャプター": "6e05842512ce95d82550b115addddadc1e0fb38897b180c5f42b9e4f781c2e67",
+        "手動": "e0e6ed17eca286fcf6fc4cd84f788e9caf439d781191cad19ce5171c8b414394",
+        "生コメント": "8e069b766cd20c8021855c30435bfaadcbb575afd039db92c822756dd82e0f3f",
+        "操作": "fda37282ee3a2344f1636fbfb1332747c6a55490197dcd27b1d906faf19042ee",
+        "cancel": "e7f115f7c4328fa8ce224a21711e9f22b814e479cd5022f221ff78198f672645"
+      },
+      "iframeSame": true,
+      "queueSame": true,
+      "calls": [
+        [
+          "create",
+          "abcdefghijk"
+        ],
+        "play",
+        "pause"
+      ],
+      "playing": false,
+      "texts": {
+        "title": "配信タイトル",
+        "setlist": "セットリスト (2曲)非公開"
+      }
+    }
+  },
+  {
+    "tc": {
+      "w": 1440,
+      "h": 900,
+      "role": "editor",
+      "restricted": false
+    },
+    "value": {
+      "snapshots": {
+        "view": "8d8e1bd4affdb06852cc52d83f19d05a1bd09ec67f3d820d4f9e8d1cfc5d83e7",
+        "vocalists": "e2170f7b1533ecea229c1ae0c4a06735c4e0bb16b2b3205682960ea0322c75ba",
+        "tag-picker": "10f09629e238960ab53d730fe42446a1581f49e2ffdd085819fbcd3ae4e9ccce",
+        "participants": "eacb3aa2fc87b70629b42e422a40067edeb07557bbb357e3cdbd3437aa32b0f3",
+        "edit-actions": "6badc5627e218f595c13e979a72db469a5deef742a0818c46979f6e84405ee91",
+        "Holodex": "a6bbf1063608bfede581bc8479ae9a6522fa52f3204426a3eff50331c10f2def",
+        "コメント": "7ab97bb54e0bb9c353d4e2081bb28d195a1a9fbb66e8e779932dc348beb40683",
+        "チャプター": "4f912e54c207fd49206ff0d0a1a1e485a095117a5db072eb4e199ea9a764ef88",
+        "手動": "7666f0b73fdb2f6e8af06f65dc6f468084d46dbe654e15d286f18675d5ccf60e",
+        "生コメント": "65f7fcc8b42a666a375772cd8dbe10afb5b568c227339deea2e6d9cc4804bb9d",
+        "操作": "6badc5627e218f595c13e979a72db469a5deef742a0818c46979f6e84405ee91",
+        "cancel": "8d8e1bd4affdb06852cc52d83f19d05a1bd09ec67f3d820d4f9e8d1cfc5d83e7"
+      },
+      "iframeSame": true,
+      "queueSame": true,
+      "calls": [
+        [
+          "create",
+          "abcdefghijk"
+        ],
+        [
+          "create",
+          "abcdefghijk"
+        ],
+        "play",
+        "pause"
+      ],
+      "playing": false,
+      "texts": {
+        "title": "配信タイトル",
+        "setlist": "セットリスト (2曲)"
+      }
+    }
+  },
+  {
+    "tc": {
+      "w": 1440,
+      "h": 900,
+      "role": "both",
+      "restricted": false
+    },
+    "value": {
+      "snapshots": {
+        "view": "8d8e1bd4affdb06852cc52d83f19d05a1bd09ec67f3d820d4f9e8d1cfc5d83e7",
+        "vocalists": "e2170f7b1533ecea229c1ae0c4a06735c4e0bb16b2b3205682960ea0322c75ba",
+        "tag-picker": "10f09629e238960ab53d730fe42446a1581f49e2ffdd085819fbcd3ae4e9ccce",
+        "participants": "eacb3aa2fc87b70629b42e422a40067edeb07557bbb357e3cdbd3437aa32b0f3",
+        "edit-actions": "93585f0934e7d00b967e7c4e4671a99b76eec50a3b732cba73a59cd994e45e37",
+        "Holodex": "a6bbf1063608bfede581bc8479ae9a6522fa52f3204426a3eff50331c10f2def",
+        "コメント": "7ab97bb54e0bb9c353d4e2081bb28d195a1a9fbb66e8e779932dc348beb40683",
+        "チャプター": "4f912e54c207fd49206ff0d0a1a1e485a095117a5db072eb4e199ea9a764ef88",
+        "手動": "7666f0b73fdb2f6e8af06f65dc6f468084d46dbe654e15d286f18675d5ccf60e",
+        "生コメント": "65f7fcc8b42a666a375772cd8dbe10afb5b568c227339deea2e6d9cc4804bb9d",
+        "操作": "93585f0934e7d00b967e7c4e4671a99b76eec50a3b732cba73a59cd994e45e37",
+        "cancel": "8d8e1bd4affdb06852cc52d83f19d05a1bd09ec67f3d820d4f9e8d1cfc5d83e7"
+      },
+      "iframeSame": true,
+      "queueSame": true,
+      "calls": [
+        [
+          "create",
+          "abcdefghijk"
+        ],
+        [
+          "create",
+          "abcdefghijk"
+        ],
+        "play",
+        "pause"
+      ],
+      "playing": false,
+      "texts": {
+        "title": "配信タイトル",
+        "setlist": "セットリスト (2曲)"
+      }
+    }
+  },
+  {
+    "tc": {
+      "w": 1440,
+      "h": 900,
+      "role": "both",
+      "restricted": true
+    },
+    "value": {
+      "snapshots": {
+        "view": "e7f115f7c4328fa8ce224a21711e9f22b814e479cd5022f221ff78198f672645",
+        "vocalists": "2638e60d3cff7a4d982312724b1aeae8c9ee225f15ca948a437c60fc29f6b573",
+        "tag-picker": "8abf296b76f2258aab18338e77783b5e623f3c260070b242be383ff80e60332d",
+        "participants": "5d237795cfc8ac4886785b0c64b31069faf259a2b748e5a862cb9379fa103763",
+        "edit-actions": "fda37282ee3a2344f1636fbfb1332747c6a55490197dcd27b1d906faf19042ee",
+        "Holodex": "e727826c7d0a34f7c6b78b11e4716b4276d7e27a9d8988604be7f264c066f608",
+        "コメント": "8b0ff754bab96df812ef3dee5c079230da2e76cd0ce9f399309b6b013b392ebf",
+        "チャプター": "6e05842512ce95d82550b115addddadc1e0fb38897b180c5f42b9e4f781c2e67",
+        "手動": "e0e6ed17eca286fcf6fc4cd84f788e9caf439d781191cad19ce5171c8b414394",
+        "生コメント": "8e069b766cd20c8021855c30435bfaadcbb575afd039db92c822756dd82e0f3f",
+        "操作": "fda37282ee3a2344f1636fbfb1332747c6a55490197dcd27b1d906faf19042ee",
+        "cancel": "e7f115f7c4328fa8ce224a21711e9f22b814e479cd5022f221ff78198f672645"
+      },
+      "iframeSame": true,
+      "queueSame": true,
+      "calls": [
+        [
+          "create",
+          "abcdefghijk"
+        ],
+        "play",
+        "pause"
+      ],
+      "playing": false,
+      "texts": {
+        "title": "配信タイトル",
+        "setlist": "セットリスト (2曲)非公開"
+      }
+    }
+  }
+]
