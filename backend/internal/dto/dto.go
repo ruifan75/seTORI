@@ -1158,7 +1158,7 @@ type MergeSuggestionsRequest struct {
 	TargetType string            `json:"target_type"`
 	TargetID   string            `json:"target_id"`
 	Fields     map[string]string `json:"fields"` // 実際に反映する値
-	IDs        []string          `json:"ids"`    // このグループの提案（すべて処理済みにする）
+	IDs        []string          `json:"ids"`    // このグループの提案。UUID の重複は不可（書き込み前に拒否）
 	Note       string            `json:"note"`   // レビューメモ（任意）
 }
 
