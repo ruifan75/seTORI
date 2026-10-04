@@ -1,0 +1,182 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { spawn } from 'node:child_process';
+import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { build } from 'vite';
+import postcss from 'postcss';
+import tailwindcss from 'tailwindcss';
+import config from '../tailwind.config.js';
+
+const chrome = process.env.SETORI_CHROME_PATH;
+const root = dirname(dirname(fileURLToPath(import.meta.url)));
+
+async function fixture(dir) {
+  const bundle = await build({ root, configFile: false, logLevel: 'silent',
+    resolve: { alias: { '/src': join(root, 'src') } }, esbuild: { jsx: 'automatic' },
+    define: { __APP_COMMIT__: '"dev"', __APP_BUILT_AT__: '""', 'process.env.NODE_ENV': '"production"' },
+    build: { write: false, minify: false, lib: { entry: join(root, 'tests/fixtures/mobilePlayer.jsx'),
+      name: 'MobileFixture', formats: ['iife'] } } });
+  const output = Array.isArray(bundle) ? bundle[0].output : bundle.output;
+  const script = output.find((item) => item.type === 'chunk').code;
+  // フォントはローカルの既定値。Google Fonts・YouTube・バックエンドには接続しない。
+  const input = (await readFile(join(root, 'src/index.css'), 'utf8')).replace(/^@import[^\n]*\n/, '');
+  const { css } = await postcss([tailwindcss({ ...config, content: [join(root, 'src/**/*.{ts,tsx}')] })])
+    .process(input, { from: undefined });
+  const cases = [];
+  for (const w of [390, 640, 844, 1023, 1023.5, 1024, 1440]) for (const h of [390, 900]) {
+    cases.push({ mode: 'player', w, h, resize: w === 844 && h === 390 });
+  }
+  for (const w of [360, 640, 1024, 1440]) cases.push({ mode: 'settings', w, h: 900 });
+  for (const w of [360, 1023, 1024]) cases.push({ mode: 'fields', w, h: 900 });
+  for (const variant of [{ inset: 20 }, { staticVh: 500 }, { fallback: true }, { fallback: true, inset: 20 }, { fallback: true, noEnv: true }]) {
+    cases.push({ mode: 'player', w: 844, h: 390, ...variant });
+  }
+  const docs = cases.map((tc) => {
+    const style = postcss.parse(css);
+    // 未対応ブラウザが無視する宣言を取り除く。inset は実機の代わりに 20px を注入する。
+    style.walkDecls((decl) => {
+      if ((tc.fallback && decl.value.includes('dvh')) || (tc.noEnv && decl.value.includes('env('))) decl.remove();
+      else if (tc.inset) decl.value = decl.value.replace(/env\(safe-area-inset-bottom(?:,\s*0px)?\)/g, `${tc.inset}px`);
+      if (tc.staticVh && decl.parent?.selector === '.max-h-player-queue-dynamic') {
+        decl.value = decl.value.replaceAll('100vh', `${tc.staticVh}px`);
+      }
+    });
+    return { tc, doc: `<html><head><style>${style}</style></head><body><script>
+    addEventListener('error',e=>parent.postMessage({tc:${JSON.stringify(tc)},error:e.message},'*'));
+    window.fetch=()=>{throw new Error('fixture からの通信は禁止')};
+    XMLHttpRequest.prototype.open=()=>{throw new Error('fixture からの通信は禁止')};
+    ${script.replaceAll('</script', '<\\/script')}
+    MobileFixture.run(${JSON.stringify(tc)}).then(value=>parent.postMessage({tc:${JSON.stringify(tc)},value},'*'))
+      .catch(error=>parent.postMessage({tc:${JSON.stringify(tc)},error:error.stack},'*'));
+    </script></body></html>` };
+  });
+  const html = `<html><body><pre id="result"></pre><script>
+    const docs=${JSON.stringify(docs).replaceAll('<', '\\u003c')};const results=[];
+    addEventListener('message',e=>{if(!e.data.tc)return;results.push(e.data);if(results.length===docs.length){
+      document.getElementById('result').textContent=JSON.stringify(results);
+      for(const f of document.querySelectorAll('iframe'))f.remove();document.querySelector('script').remove();}});
+    for(const {tc,doc} of docs){const f=document.createElement('iframe');
+      f.style.cssText='position:absolute;left:0;top:0;border:0;width:'+tc.w+'px;height:'+tc.h+'px';
+      f.srcdoc=doc;document.body.append(f);}
+    </script></body></html>`;
+  const file = join(dir, 'fixture.html');
+  await writeFile(file, html);
+  return { file, count: cases.length };
+}
+
+async function measure(file, dir) {
+  const child = spawn(chrome, ['--headless=new', '--disable-gpu', '--disable-background-networking',
+    '--disable-component-update', '--disable-sync', '--no-first-run', '--no-default-browser-check',
+    '--password-store=basic', '--use-mock-keychain', `--user-data-dir=${join(dir, 'chrome')}`,
+    '--remote-debugging-pipe'], { stdio: ['ignore', 'ignore', 'pipe', 'pipe', 'pipe'] });
+  let sequence = 0, buffer = '', errors = '';
+  const pending = new Map();
+  const fail = (error) => {
+    for (const { reject, timer } of pending.values()) { clearTimeout(timer); reject(error); }
+    pending.clear();
+  };
+  child.on('error', fail);
+  child.on('exit', (code, signal) => fail(new Error(`Chrome 終了: ${code}/${signal} ${errors.slice(-500)}`)));
+  child.stderr.on('data', (data) => { errors = (errors + data).slice(-2000); });
+  child.stdio[4].on('data', (data) => {
+    buffer += data;
+    let end;
+    while ((end = buffer.indexOf('\0')) >= 0) {
+      const raw = buffer.slice(0, end); buffer = buffer.slice(end + 1);
+      if (!raw) continue;
+      const message = JSON.parse(raw);
+      const request = pending.get(message.id);
+      if (!request) continue;
+      pending.delete(message.id); clearTimeout(request.timer);
+      if (message.error) request.reject(new Error(JSON.stringify(message.error)));
+      else request.resolve(message.result);
+    }
+  });
+  function send(method, params = {}, sessionId) {
+    return new Promise((resolve, reject) => {
+      const id = ++sequence;
+      const timer = setTimeout(() => { pending.delete(id); reject(new Error(`Chrome timeout: ${method} ${errors.slice(-500)}`)); }, 25000);
+      pending.set(id, { resolve, reject, timer });
+      child.stdio[3].write(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }) + '\0');
+    });
+  }
+  try {
+    const { targetId } = await send('Target.createTarget', { url: 'about:blank' });
+    const { sessionId } = await send('Target.attachToTarget', { targetId, flatten: true });
+    await send('Page.enable', {}, sessionId);
+    await send('Page.navigate', { url: pathToFileURL(file).href }, sessionId);
+    // 仮想時間は matchMedia / ResizeObserver の通知を飛ばし得るため、実時間で描画を待つ。
+    const result = await send('Runtime.evaluate', { awaitPromise: true, returnByValue: true,
+      expression: `(async()=>{for(let i=0;i<300;i++){
+        const text=document.getElementById('result')?.textContent;
+        if(text)return JSON.parse(text);await new Promise(r=>setTimeout(r,50));}
+        throw new Error('測定が完了しません');})()` }, sessionId);
+    if (result.exceptionDetails) throw new Error(JSON.stringify(result.exceptionDetails));
+    return result.result.value;
+  } finally {
+    const closed = new Promise((resolve) => child.once('close', resolve));
+    if (child.exitCode === null && child.signalCode === null) { child.kill('SIGTERM'); await closed; }
+  }
+}
+
+test('再生バー・報告画面・編集欄・設定のモバイル境界とデスクトップの制約', { skip: !chrome }, async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'setori-mobile-'));
+  try {
+    const { file, count } = await fixture(dir);
+    const rows = await measure(file, dir);
+    assert.equal(rows.length, count);
+    for (const { tc, value: v, error } of rows) await t.test(JSON.stringify(tc), () => {
+      const label = JSON.stringify(tc);
+      assert.equal(error, undefined, label);
+      if (tc.mode === 'settings') {
+        assert.equal(v.forms.length, 2, label);
+        for (const form of v.forms) {
+          assert.equal(form.direction, tc.w < 640 ? 'column' : 'row', label);
+          assert.equal(form.overflow, 0, label);
+        }
+        assert.equal(v.pageOverflow, 0, label);
+        if (tc.w < 640) assert.ok(v.model.w >= 80, `モデル欄の操作面: ${label}`);
+        if (tc.w >= 1024) {
+          assert.equal(v.modelMinWidth, 'auto', `デスクトップのモデル欄の最小幅: ${label}`);
+          assert.equal(v.modelContainerMaxWidth, 'none', `デスクトップのモデル欄の上限: ${label}`);
+        }
+      } else if (tc.mode === 'fields') {
+        for (const row of v) {
+          if (tc.w < 1024) assert.equal(row.overflow, 0, `${label} ${row.title}`);
+          assert.equal(row.wrap, tc.w < 1024 ? 'wrap' : 'nowrap', `${label} ${row.title}`);
+        }
+      } else {
+        assert.ok(v.sameFrame && v.unchanged, `iframe・キュー・再生操作が変わった: ${label} ${JSON.stringify(v.calls)}`);
+        assert.equal(v.report.compact, !v.report.lg, `報告画面と Tailwind の境界: ${label}`);
+        assert.ok(Math.abs(v.expanded.video.w / v.expanded.video.h - 16 / 9) < 0.001, `拡大動画の比率: ${label}`);
+        assert.ok(v.expanded.queue.h >= 40, `キューの操作面: ${label}`);
+        if (v.popup.lg) assert.equal(v.popup.maxHeight, '320px', `デスクトップのキュー高さ: ${label}`);
+        else {
+          assert.equal(v.popup.maxHeight, `${Math.min(320, tc.h - 160 - (tc.inset ?? 0))}px`, `vh / dvh / safe-area の高さ: ${label}`);
+          assert.ok(v.popup.y >= 64, `キューポップアップが画面上へ溢れた: ${label}`);
+          assert.ok(Math.abs(v.report.video.w / v.report.video.h - 16 / 9) < 0.001, `報告動画の比率: ${label}`);
+        }
+        const scrollable = ['auto', 'scroll'].includes(v.expanded.overflow) && v.expanded.scrollHeight > v.expanded.clientHeight;
+        assert.equal(v.scrollTouch.prevented, !scrollable, `情報部の touchmove: ${label}`);
+        if (scrollable) {
+          assert.equal(v.expanded.overscroll, 'contain', `情報部のスクロール連鎖: ${label}`);
+          assert.notEqual(v.scrollTouch.transform, 'translateY(70px)', `情報部のスクロールでパネルが動いた: ${label}`);
+        }
+        assert.equal(v.queueTouch.prevented, false, `キューの touchmove: ${label}`);
+        assert.notEqual(v.queueTouch.transform, 'translateY(70px)', `キューのスクロールでパネルが動いた: ${label}`);
+        assert.equal(v.inputTouch.prevented, false, `プレイヤー input の touchmove: ${label}`);
+        assert.notEqual(v.inputTouch.transform, 'translateY(70px)', `input 操作でパネルが動いた: ${label}`);
+        assert.equal(v.outsideTouch.prevented, true, `背面の touchmove: ${label}`);
+        assert.equal(v.outsideInputTouch.prevented, true, `背面 input の touchmove: ${label}`);
+        for (const state of v.resize) {
+          assert.equal(state.compact, !state.lg, `リサイズ時の境界: ${state.width}`);
+          assert.equal(state.sameFrame, true, `リサイズ時の iframe: ${state.width}`);
+        }
+      }
+    });
+    t.diagnostic(`${count} 通りと 5 回の連続リサイズを実コンポーネントで測定`);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});

@@ -20,5 +20,6 @@ export function useMediaQuery(query: string): boolean {
 
 // 報告画面が「縦に積む」側に入るか。lg 未満＝スマホ・小さいタブレット。
 export function useIsCompact(): boolean {
-  return useMediaQuery('(max-width: 1023px)');
+  // min-width の補集合にする。ズーム等で 1023.5px になっても lg と隙間ができない。
+  return !useMediaQuery('(min-width: 1024px)');
 }

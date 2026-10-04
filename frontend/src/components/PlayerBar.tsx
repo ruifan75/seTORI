@@ -256,7 +256,7 @@ export default function PlayerBar() {
     if (!expanded) return;
     const onTouchMove = (e: TouchEvent) => {
       const t = e.target as HTMLElement;
-      if (isScrollableTarget(t) || t.closest('input')) return;
+      if (isScrollableTarget(t) || (overlayRef.current?.contains(t) && t.closest('input'))) return;
       e.preventDefault();
     };
     document.addEventListener('touchmove', onTouchMove, { passive: false });
@@ -629,7 +629,7 @@ export default function PlayerBar() {
           className="fixed inset-0 z-50 bg-gray-950 text-white flex flex-col pb-[env(safe-area-inset-bottom)] animate-[player-slide-up_240ms_ease-out]"
           // キューとスクロール中の情報部は除き、下ドラッグで縮小/復帰する。
           onTouchStart={(e) => {
-            if (closingRef.current || isScrollableTarget(e.target as Node)) {
+            if (closingRef.current || isScrollableTarget(e.target as Node) || (e.target as HTMLElement).closest('input')) {
               touchStartRef.current = null;
               return;
             }
@@ -681,7 +681,7 @@ export default function PlayerBar() {
               {/* モバイルは幅基準の 16:9（36vh 上限）にして残りをキューへ渡す */}
               <div className="h-[min(calc((100vw-1rem)*9/16),36vh)] shrink-0 lg:flex-1 mt-2" /> {/* 動画スペース */}
               {/* 高さの短い画面では情報・操作だけをスクロールし、キューの操作面を残す */}
-              <div ref={informationRef} className="px-6 py-4 space-y-3 min-h-0 overflow-y-auto overflow-x-hidden lg:overflow-visible lg:h-36 lg:shrink-0">
+              <div ref={informationRef} className="px-6 py-4 space-y-3 min-h-0 overflow-y-auto overflow-x-hidden max-lg:overscroll-contain lg:overflow-visible lg:h-36 lg:shrink-0">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-baseline gap-x-2">
                     {track.songId ? (
@@ -814,7 +814,7 @@ export default function PlayerBar() {
         <div className="relative shrink-0 bg-white border-t shadow-[0_-2px_8px_rgba(0,0,0,0.06)] z-40 pb-[env(safe-area-inset-bottom)]">
           {/* キューパネル（クイック表示） */}
           {queueOpen && (
-            <div className="absolute bottom-full right-2 mb-1 w-[26rem] max-w-[calc(100vw-1rem)] max-h-[min(20rem,calc(100vh-10rem))] supports-[height:100dvh]:max-h-[min(20rem,calc(100dvh-10rem-env(safe-area-inset-bottom)))] overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-xl">
+            <div className="absolute bottom-full right-2 mb-1 w-[26rem] max-w-[calc(100vw-1rem)] max-h-80 max-h-player-queue-dynamic overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-xl">
               <div className="px-3 py-2 border-b flex items-center justify-between sticky top-0 bg-white">
                 <span className="text-sm font-medium text-gray-700">再生キュー（{queue.length}曲）</span>
                 <span className="flex items-center gap-2">

@@ -40,6 +40,16 @@ body {
   max-height: 50dvh;
 }
 
+/* lg 未満だけキューを画面内に収める。env / dvh が未対応なら直前の宣言へ戻る。
+   safe-area は vh の段階でも引く（dvh 未対応の Safari でも下部の余白がある）。 */
+@media not all and (min-width: 1024px) {
+  .max-h-player-queue-dynamic {
+    max-height: min(20rem, calc(100vh - 10rem));
+    max-height: min(20rem, calc(100vh - 10rem - env(safe-area-inset-bottom, 0px)));
+    max-height: min(20rem, calc(100dvh - 10rem - env(safe-area-inset-bottom, 0px)));
+  }
+}
+
 /* 全画面プレイヤーのスライドイン（動画コンテナと重ねて同距離 100vh を動かす） */
 @keyframes player-slide-up {
   from {

@@ -338,14 +338,14 @@ function ProviderRow({ p, idx, total, onUpdate, onDelete, onMove }: {
           {!p.enabled && <span className="text-xs text-gray-400">（無効）</span>}
         </div>
         <div className="flex flex-wrap sm:flex-nowrap items-center gap-1 text-xs text-gray-500 sm:pl-7">
-          <div className="flex items-center max-w-full">
+          <div className="flex items-center max-sm:max-w-full">
             <input
               value={model}
               onChange={(e) => setModel(e.target.value)}
               onBlur={() => saveModel()}
               onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
               title="モデルを編集（Enter / フォーカスアウトで保存）"
-              className="w-48 min-w-0 px-1.5 py-0.5 font-mono text-gray-700 border border-gray-200 rounded-l focus:ring-1 focus:ring-indigo-400 focus:border-transparent"
+              className="w-48 max-sm:min-w-0 px-1.5 py-0.5 font-mono text-gray-700 border border-gray-200 rounded-l focus:ring-1 focus:ring-indigo-400 focus:border-transparent"
             />
             <ModelPicker
               fetcher={() => aiProviderApi.listModels(p.id)}
