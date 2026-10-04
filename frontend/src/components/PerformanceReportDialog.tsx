@@ -327,7 +327,7 @@ function CompactShell({ report, onVideoSlot }: { report: Report; onVideoSlot: (r
 
       {pane === 'time' && (
         <div className="shrink-0 px-3 pt-2">
-          <div ref={slotRef} className="w-full aspect-video max-h-[30vh] mx-auto bg-black rounded-lg" />
+          <div ref={slotRef} className="w-[min(100%,calc(30vh*16/9))] aspect-video mx-auto bg-black rounded-lg" />
           <Transport currentTime={currentTime} compact />
         </div>
       )}
