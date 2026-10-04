@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -124,9 +125,10 @@ func (f stubTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 }
 
 type availDriver struct {
-	mu        sync.Mutex
-	queries   []string
-	storedRaw []byte
+	mu         sync.Mutex
+	queries    []string
+	storedRaw  []byte
+	executions []availExecution
 }
 
 func (d *availDriver) Open(string) (driver.Conn, error) { return &availConn{d: d}, nil }
@@ -134,6 +136,37 @@ func (d *availDriver) all() []string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return append([]string(nil), d.queries...)
+}
+
+type availExecution struct {
+	query string
+	args  []driver.Value
+}
+
+func (d *availDriver) recordExecution(query string, args []driver.Value) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.executions = append(d.executions, availExecution{query: query, args: append([]driver.Value(nil), args...)})
+}
+
+// Prepare の SQL だけでなく、実行時に結び付けた対象 ID も見る。
+func (d *availDriver) assertAvailabilityBindings(t *testing.T, wantCount int) {
+	t.Helper()
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	count := 0
+	for _, call := range d.executions {
+		if !strings.Contains(call.query, "comment_unavailable_") {
+			continue
+		}
+		count++
+		if !reflect.DeepEqual(call.args, []driver.Value{"abc"}) {
+			t.Errorf("取得不能記録の対象が違う: args=%v want=[abc]", call.args)
+		}
+	}
+	if count != wantCount {
+		t.Errorf("取得不能記録の実行=%d want=%d", count, wantCount)
+	}
 }
 
 type availConn struct{ d *availDriver }
@@ -154,12 +187,14 @@ type availStmt struct {
 
 func (s *availStmt) Close() error  { return nil }
 func (s *availStmt) NumInput() int { return -1 }
-func (s *availStmt) Exec([]driver.Value) (driver.Result, error) {
+func (s *availStmt) Exec(args []driver.Value) (driver.Result, error) {
+	s.d.recordExecution(s.q, args)
 	return driver.RowsAffected(1), nil
 }
 
 // 連続回数と、保存経路が先に読む配信を返す。空の comment_raw なら遠隔取得へ進む。
-func (s *availStmt) Query([]driver.Value) (driver.Rows, error) {
+func (s *availStmt) Query(args []driver.Value) (driver.Rows, error) {
+	s.d.recordExecution(s.q, args)
 	if strings.Contains(s.q, "RETURNING comment_unavailable_count") {
 		return &availRows{values: []driver.Value{int64(1)}}, nil
 	}
@@ -241,6 +276,7 @@ func TestCommentAvailabilityWritesExact(t *testing.T) {
 			if err := tc.call(repository.NewStreamRepository(db)); err != nil {
 				t.Fatal(err)
 			}
+			rec.assertAvailabilityBindings(t, 1)
 			issued := rec.all()
 			if len(issued) != 1 {
 				t.Fatalf("queries=%d, want 1", len(issued))
@@ -329,6 +365,7 @@ func TestCommentRecoveryAllFetchPaths(t *testing.T) {
 				if len(availabilitySQL) != len(want) || (len(want) > 0 && availabilitySQL[0] != want[0]) {
 					t.Errorf("availability SQL=%q, want %q", availabilitySQL, want)
 				}
+				rec.assertAvailabilityBindings(t, len(want))
 				if path == "dry-run" && len(rec.all()) != 0 {
 					t.Errorf("dry-run が DB を更新している: %q", rec.all())
 				}
@@ -354,4 +391,20 @@ func TestCachedCommentsLeaveAvailabilityAlone(t *testing.T) {
 			t.Errorf("キャッシュの読み取りで更新している: %s", q)
 		}
 	}
+}
+
+// info.json は過去に取得した入力で、現在の遠隔側の復旧の証拠にはならない。
+// SaveCommentRaw 全体で解除するように移すと、この経路まで解除されてしまう。
+func TestInfoJSONImportLeavesAvailabilityAlone(t *testing.T) {
+	db, rec := newAvailDB(t)
+	cs := &CommentService{streamRepo: repository.NewStreamRepository(db)}
+	out, err := cs.ImportInfoJSON("abc", []byte(`{"id":"abc","comments":[{"text":"0:10 曲","parent":"root"}]}`))
+	if err != nil || out.Saved != 1 {
+		t.Fatalf("import=%+v err=%v", out, err)
+	}
+	issued := rec.all()
+	if len(issued) != 1 || !strings.Contains(issued[0], "comment_raw = $2") {
+		t.Fatalf("コメント保存の陽性対照: %q", issued)
+	}
+	rec.assertAvailabilityBindings(t, 0)
 }
