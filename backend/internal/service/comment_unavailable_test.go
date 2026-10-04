@@ -207,6 +207,7 @@ func (s *availStmt) Query(args []driver.Value) (driver.Rows, error) {
 		return &availRows{values: []driver.Value{
 			"abc", "t", now, nil, nil, nil, nil, raw, nil, nil, nil, nil,
 			false, false, nil, nil, false, nil, nil, nil, now, now, false,
+			false, // restriction_needs_review（#70）
 		}}, nil
 	}
 	return &availRows{done: true}, nil
