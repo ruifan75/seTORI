@@ -36,6 +36,9 @@ func TestHolodexUploadMigrationEmittedSQL(t *testing.T) {
 	if capture.applied != 1 || capture.recorded != 1 {
 		t.Fatalf("applied = %d, recorded = %d; want 1 each", capture.applied, capture.recorded)
 	}
+	if capture.begun != 1 || capture.committed != 1 || capture.inTx {
+		t.Fatalf("transaction: begun=%d, committed=%d, active=%v", capture.begun, capture.committed, capture.inTx)
+	}
 }
 
 // SQL コメントと空白だけを除く。述語・列・演算子・定数は丸ごと比較する。
@@ -54,6 +57,8 @@ func holodexMigrationSQL(query string) string {
 type holodexMigrationCapture struct {
 	query             string
 	applied, recorded int
+	begun, committed  int
+	inTx              bool
 }
 
 func (c *holodexMigrationCapture) Connect(context.Context) (driver.Conn, error) { return c, nil }
@@ -64,7 +69,24 @@ func (c *holodexMigrationCapture) Prepare(string) (driver.Stmt, error) {
 	return nil, fmt.Errorf("unexpected Prepare")
 }
 func (c *holodexMigrationCapture) Begin() (driver.Tx, error) {
-	return nil, fmt.Errorf("unexpected Begin")
+	if c.inTx {
+		return nil, fmt.Errorf("nested Begin")
+	}
+	c.inTx = true
+	c.begun++
+	return c, nil
+}
+func (c *holodexMigrationCapture) Commit() error {
+	if !c.inTx || c.applied != 1 || c.recorded != 1 {
+		return fmt.Errorf("commit before SQL and record")
+	}
+	c.inTx = false
+	c.committed++
+	return nil
+}
+func (c *holodexMigrationCapture) Rollback() error {
+	c.inTx = false
+	return nil
 }
 
 const holodexUploadMigrationVersion = "068_add_holodex_upload_permission.sql"
@@ -83,12 +105,12 @@ func (c *holodexMigrationCapture) ExecContext(_ context.Context, query string, a
 			return nil, fmt.Errorf("unexpected create args: %v", args)
 		}
 	case "INSERT INTO schema_migrations (version) VALUES ($1)":
-		if c.applied != 1 || len(args) != 1 || args[0].Value != holodexUploadMigrationVersion {
+		if !c.inTx || c.applied != 1 || len(args) != 1 || args[0].Value != holodexUploadMigrationVersion {
 			return nil, fmt.Errorf("unexpected migration record: %v", args)
 		}
 		c.recorded++
 	default:
-		if len(args) != 0 {
+		if !c.inTx || len(args) != 0 {
 			return nil, fmt.Errorf("unexpected migration args: %v", args)
 		}
 		c.query = query
