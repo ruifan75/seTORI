@@ -148,21 +148,29 @@ export function setUnauthorizedHandler(fn: (() => void) | null) {
   onUnauthorized = fn;
 }
 
+// 認証の結果は auth store の操作世代と保存済み token で照合する。
+// 旧セッションの失効で視点が変わっても、新しい認証を成功させられる。
+// 認証済み情報を読む identities 等は、この例外に含めない。
+function isSessionAuthentication(config: { method?: string; url?: string }): boolean {
+  return (config.method === 'post' && (config.url === '/api/auth/login' || config.url === '/api/auth/oauth/exchange'))
+    || (config.method === 'get' && config.url === '/api/auth/me');
+}
+
 // エラーインターセプター：バックエンドのエラーメッセージを取り出す
 api.interceptors.response.use(
   (response) => {
-    if (!sameViewer(requestViewers.get(response.config) ?? null)) {
+    if (!isSessionAuthentication(response.config) && !sameViewer(requestViewers.get(response.config) ?? null)) {
       throw new CanceledError('利用者または権限が変わったため処理を中止しました');
     }
     return response;
   },
   (error) => {
-    if (error.config && !sameViewer(requestViewers.get(error.config) ?? null)) {
+    if (error.config && !isSessionAuthentication(error.config) && !sameViewer(requestViewers.get(error.config) ?? null)) {
       return Promise.reject(new CanceledError('利用者または権限が変わったため処理を中止しました'));
     }
-    const url: string = error.config?.url ?? '';
-    // ログイン以外で 401 の場合はセッション失効とみなしてログアウト処理を促す
-    if (error.response?.status === 401 && url !== '/api/auth/login'
+    // 無効な password / OAuth code は、既存 Bearer の失効を意味しない。
+    // /me の 401 も auth store が検証の世代と token を照合してから扱う。
+    if (error.response?.status === 401 && !isSessionAuthentication(error.config ?? {})
       && authToken && error.config?.headers.get('Authorization') === `Bearer ${authToken}`) {
       onUnauthorized?.();
     }

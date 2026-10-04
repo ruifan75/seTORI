@@ -38,9 +38,9 @@ function runtime(dependencies = {}, globals = {}) {
   return { load };
 }
 const user = (id = 'owner', permissions = ['content:edit', 'restricted:view']) => ({ id, username: id, permissions });
-function authFixture() {
+function authFixture(sharedStorage) {
   const requests = [], events = new Map(), storage = new Map();
-  const localStorage = {
+  const localStorage = sharedStorage ?? {
     getItem: (key) => storage.get(key) ?? null,
     setItem: (key, value) => storage.set(key, value),
     removeItem: (key) => storage.delete(key),
@@ -70,6 +70,347 @@ function authFixture() {
     async lastRequest() { await new Promise((r) => setImmediate(r)); return requests.at(-1); },
     close() { viewer.queryClient.clear(); } };
 }
+
+// Each fixture loads its own auth/API/query modules: stores and pending responses
+// are tab-local; only storage is shared. Events can be delivered after another login.
+function authTabs() {
+  const values = new Map(), events = [], tabs = [];
+  function add() {
+    let tab;
+    const storage = {
+      getItem: (key) => values.get(key) ?? null,
+      setItem(key, value) {
+        const oldValue = values.get(key) ?? null;
+        if (oldValue === value) return;
+        values.set(key, value);
+        for (const other of tabs) if (other !== tab) events.push({ tab: other, key, oldValue, newValue: value });
+      },
+      removeItem(key) {
+        const oldValue = values.get(key) ?? null;
+        if (oldValue === null) return;
+        values.delete(key);
+        for (const other of tabs) if (other !== tab) events.push({ tab: other, key, oldValue, newValue: null });
+      },
+    };
+    tab = authFixture(storage); tabs.push(tab); return tab;
+  }
+  return { add, events,
+    deliver() {
+      const event = events.shift();
+      if (event) event.tab.events.get('storage')({ ...event, storageArea: event.tab.localStorage });
+      return event;
+    },
+    close() { for (const tab of tabs) tab.close(); },
+  };
+}
+
+for (const method of ['login', 'loginWithOAuthCode']) for (const savedToken of [null, 'saved-token']) {
+  test(`${method}: startup init cannot supersede an already started interactive login (${savedToken})`, async () => {
+    const f = authFixture();
+    try {
+      if (savedToken) f.localStorage.setItem('setori_token', savedToken);
+      const pending = (method === 'login' ? f.store.getState().login('next', 'pw') :
+        f.store.getState().loginWithOAuthCode('one-time-code')).then(() => null, error => error);
+      const exchange = await f.lastRequest();
+      const init = f.store.getState().init();
+      assert.equal(f.requests.length, 1, 'bootstrap must not start a competing /me');
+      await init;
+      f.respond(exchange, { token: 'token-next', user: user('next') });
+      assert.equal(await pending, null);
+      assert.equal(f.store.getState().user?.id, 'next');
+    } finally { f.close(); }
+  });
+}
+
+for (const method of ['login', 'loginWithOAuthCode']) test(`${method}: expiry while a new login is pending clears old copies without cancelling the new credentials`, async () => {
+  const f = authFixture();
+  try {
+    await f.login();
+    f.viewer.queryClient.setQueryData(['stream', 'private'], ['private']);
+    const old = f.api.songApi.get('one').catch(error => error), request = await f.lastRequest();
+    const login = (method === 'login' ? f.store.getState().login('next', 'pw') :
+      f.store.getState().loginWithOAuthCode('new-code')).then(() => null, error => error);
+    const exchange = await f.lastRequest();
+    f.respond(request, { error: 'expired' }, 401); await old;
+    assert.equal(f.store.getState().status, 'anonymous');
+    assert.equal(f.viewer.queryClient.getQueryData(['stream', 'private']), undefined);
+    f.respond(exchange, { token: 'token-next', user: user('next') });
+    assert.equal(await login, null, 'old Bearer expiry is not a rejection of the new credentials');
+    assert.equal(f.store.getState().token, 'token-next');
+  } finally { f.close(); }
+});
+
+for (const method of ['login', 'loginWithOAuthCode']) test(`${method}: failed credentials do not revoke an existing valid session`, async () => {
+  const f = authFixture();
+  try {
+    await f.login();
+    const epoch = f.viewer.viewerID();
+    const pending = (method === 'login' ? f.store.getState().login('bad', 'pw') :
+      f.store.getState().loginWithOAuthCode('expired-code')).catch(error => error);
+    f.respond(await f.lastRequest(), { error: 'invalid credentials' }, 401);
+    assert.equal((await pending).response.status, 401);
+    assert.equal(f.store.getState().token, 'token-owner');
+    assert.equal(f.localStorage.getItem('setori_token'), 'token-owner');
+    assert.equal(f.viewer.viewerID(), epoch);
+  } finally { f.close(); }
+});
+
+for (const method of ['login', 'loginWithOAuthCode']) test(`${method}: credential rejection after expiry still returns its safe 401 reason`, async () => {
+  const f = authFixture();
+  try {
+    await f.login();
+    const old = f.api.songApi.get('one').catch(error => error), request = await f.lastRequest();
+    const pending = (method === 'login' ? f.store.getState().login('bad', 'pw') :
+      f.store.getState().loginWithOAuthCode('bad-code')).catch(error => error);
+    const exchange = await f.lastRequest();
+    f.respond(request, { error: 'expired' }, 401); await old;
+    f.respond(exchange, { error: 'invalid new credentials' }, 401);
+    const error = await pending;
+    assert.equal(error.message, 'invalid new credentials');
+    assert.equal(error.response?.status, 401);
+    assert.equal(error.config, undefined);
+    assert.equal(f.store.getState().status, 'anonymous');
+  } finally { f.close(); }
+});
+
+for (const status of [200, 401, 500]) test(`/me ${status} from a replaced token cannot commit before the storage event arrives`, async () => {
+  const f = authFixture();
+  try {
+    f.localStorage.setItem('setori_token', 'old-token');
+    const init = f.store.getState().init(), old = await f.lastRequest();
+    f.localStorage.setItem('setori_token', 'new-token');
+    f.respond(old, status === 200 ? user('old') : { error: 'old failure' }, status);
+    await init;
+    assert.equal(f.localStorage.getItem('setori_token'), 'new-token');
+    assert.equal(f.store.getState().user, null, 'unvalidated old user cannot be restored');
+    assert.equal(f.store.getState().status, 'loading');
+    const validation = await f.lastRequest();
+    assert.equal(validation.config.headers.get('Authorization'), 'Bearer new-token');
+    f.respond(validation, user('next')); await new Promise(r => setImmediate(r));
+    assert.equal(f.store.getState().user?.id, 'next');
+    const epoch = f.viewer.viewerID(), count = f.requests.length;
+    f.events.get('storage')({ key: 'setori_token', newValue: 'new-token', storageArea: f.localStorage });
+    assert.equal(f.viewer.viewerID(), epoch, 'already adopted token does not trigger another reset');
+    assert.equal(f.requests.length, count);
+  } finally { f.close(); }
+});
+
+test('an old tab 401 cannot remove the new tab token or cause cascading logouts', async () => {
+  const tabs = authTabs(), a = tabs.add(), b = tabs.add();
+  try {
+    await a.login(); tabs.deliver();
+    b.respond(await b.lastRequest(), user()); await new Promise(r => setImmediate(r));
+    const old = a.api.songApi.get('one').catch(error => error), request = await a.lastRequest();
+    await b.login('next'); // storage event is deliberately still queued
+    a.respond(request, { error: 'expired' }, 401); await old;
+    assert.equal(a.store.getState().user, null);
+    assert.equal(b.localStorage.getItem('setori_token'), 'token-next');
+    tabs.deliver(); a.respond(await a.lastRequest(), user('next')); await new Promise(r => setImmediate(r));
+    assert.equal(a.store.getState().user?.id, 'next');
+    assert.equal(b.store.getState().user?.id, 'next');
+    assert.equal(tabs.events.length, 0, 'adoption must not write another token event');
+  } finally { tabs.close(); }
+});
+
+for (const failure of ['network', 500]) test(`transient /me ${failure} in one tab does not log out the valid other tab`, async () => {
+  const tabs = authTabs(), a = tabs.add(), b = tabs.add();
+  try {
+    await a.login(); tabs.deliver();
+    const validation = await b.lastRequest();
+    if (failure === 'network') validation.reject(new AxiosError('offline', 'ERR_NETWORK', validation.config));
+    else b.respond(validation, { error: 'temporary failure' }, failure);
+    await new Promise(r => setImmediate(r));
+    assert.equal(b.store.getState().status, 'anonymous', 'this tab discards unvalidated private copies');
+    assert.equal(a.localStorage.getItem('setori_token'), 'token-owner');
+    assert.equal(tabs.events.length, 0, 'a temporary validation failure must not broadcast logout');
+    assert.equal(a.store.getState().user?.id, 'owner');
+    // Retry bootstrap is allowed, including after a transient failure.
+    const retry = b.store.getState().init();
+    b.respond(await b.lastRequest(), user()); await retry;
+    assert.equal(b.store.getState().user?.id, 'owner');
+  } finally { tabs.close(); }
+});
+
+for (const loginStarted of [false, true]) test(`queued logout event reads latest storage without cancelling a later local login (pending=${loginStarted})`, async () => {
+  const tabs = authTabs(), a = tabs.add(), b = tabs.add();
+  try {
+    await a.login(); tabs.deliver();
+    b.respond(await b.lastRequest(), user()); await new Promise(r => setImmediate(r));
+    void a.store.getState().logout(); // queues a logout event for B
+    void b.store.getState().logout(); // B sees the logout too, before delivery
+    const login = b.store.getState().login('next', 'pw').then(() => null, error => error);
+    const request = await b.lastRequest();
+    if (!loginStarted) { b.respond(request, { token: 'token-next', user: user('next') }); assert.equal(await login, null); }
+    const epoch = b.viewer.viewerID();
+    tabs.deliver(); // old null event, latest storage is null (pending) or B's own new token
+    assert.equal(b.viewer.viewerID(), epoch, 'duplicate notification must not reset the newer operation');
+    if (loginStarted) { b.respond(request, { token: 'token-next', user: user('next') }); assert.equal(await login, null); }
+    assert.equal(b.store.getState().user?.id, 'next');
+  } finally { tabs.close(); }
+});
+
+test('interactive login superseding startup can fail without leaving status loading', async () => {
+  const f = authFixture();
+  try {
+    f.localStorage.setItem('setori_token', 'saved-token');
+    const init = f.store.getState().init(), me = await f.lastRequest();
+    const login = f.store.getState().login('bad', 'pw').catch(error => error);
+    f.respond(await f.lastRequest(), { error: 'bad credentials' }, 401); await login;
+    f.respond(me, user()); await init;
+    assert.equal(f.store.getState().status, 'anonymous');
+    assert.equal(f.store.getState().user, null);
+    const publicRequest = f.api.songApi.get('public');
+    const request = await f.lastRequest();
+    assert.equal(request.config.headers.has('Authorization'), false);
+    f.respond(request, { id: 'public' }); await publicRequest;
+  } finally { f.close(); }
+});
+
+for (const method of ['login', 'loginWithOAuthCode']) for (const change of ['logout', 'replacement']) {
+  test(`${method}: an undelivered ${change} from another tab supersedes pending authentication`, async () => {
+    const tabs = authTabs(), a = tabs.add(), b = tabs.add();
+    try {
+      await a.login(); tabs.deliver();
+      b.respond(await b.lastRequest(), user()); await new Promise(r => setImmediate(r));
+      const pending = (method === 'login' ? b.store.getState().login('next', 'pw') :
+        b.store.getState().loginWithOAuthCode('code')).catch(error => error);
+      const exchange = await b.lastRequest();
+      if (change === 'logout') void a.store.getState().logout();
+      else await a.login('other');
+      b.respond(exchange, { token: 'token-next', user: user('next') });
+      assert.equal((await pending)?.message, 'ログイン処理は取り消されました');
+      assert.equal(b.store.getState().user, null);
+      assert.equal(b.localStorage.getItem('setori_token'), change === 'logout' ? null : 'token-other');
+      if (change === 'replacement') {
+        b.respond(await b.lastRequest(), user('other')); await new Promise(r => setImmediate(r));
+        assert.equal(b.store.getState().user?.id, 'other');
+      }
+      const epoch = b.viewer.viewerID();
+      tabs.deliver();
+      assert.equal(b.viewer.viewerID(), epoch, 'the queued event has already been handled');
+      assert.equal(tabs.events.length, 0);
+    } finally { tabs.close(); }
+  });
+}
+
+for (const status of [200, 401, 500]) test(`auth identities ${status} remains protected by the viewer epoch`, async () => {
+  const f = authFixture();
+  try {
+    await f.login();
+    const response = f.api.authApi.oauthIdentities().then(data => ({ data }), error => ({ error }));
+    const request = await f.lastRequest();
+    void f.store.getState().logout(); await f.login('next');
+    f.respond(request, { identities: [{ email: 'synthetic-private@example.invalid' }], error: 'private email' }, status);
+    const result = await response;
+    assert.equal(result.data, undefined);
+    assert.equal(isCancel(result.error), true);
+    assert.equal(result.error.response, undefined);
+    assert.equal(f.store.getState().user?.id, 'next');
+  } finally { f.close(); }
+});
+
+for (const status of [401, 500]) for (const verified of [false, true]) test(`late failed /me ${status} for the same shared token cannot erase a newer successful validation (verified=${verified})`, async () => {
+  const f = authFixture();
+  try {
+    if (verified) await f.login();
+    else f.localStorage.setItem('setori_token', 'saved-token');
+    const token = f.localStorage.getItem('setori_token');
+    const old = f.store.getState().init(), first = await f.lastRequest();
+    const current = f.store.getState().init(), second = await f.lastRequest();
+    f.respond(second, user()); await current;
+    f.respond(first, { error: 'old validation failure' }, status); await old;
+    assert.equal(f.store.getState().user?.id, 'owner');
+    assert.equal(f.localStorage.getItem('setori_token'), token);
+  } finally { f.close(); }
+});
+
+for (const method of ['login', 'loginWithOAuthCode']) test(`${method}: an old /me 401 clears the expired current viewer but lets pending new credentials finish`, async () => {
+  const f = authFixture();
+  try {
+    await f.login();
+    f.viewer.queryClient.setQueryData(['private'], ['synthetic-private']);
+    const validation = f.store.getState().init(), me = await f.lastRequest();
+    const login = (method === 'login' ? f.store.getState().login('next', 'pw') :
+      f.store.getState().loginWithOAuthCode('new-code')).then(() => null, error => error);
+    const exchange = await f.lastRequest();
+    f.respond(me, { error: 'expired' }, 401); await validation;
+    assert.equal(f.store.getState().user, null);
+    assert.equal(f.viewer.queryClient.getQueryData(['private']), undefined);
+    f.respond(exchange, { token: 'token-next', user: user('next') });
+    assert.equal(await login, null);
+    assert.equal(f.store.getState().user?.id, 'next');
+  } finally { f.close(); }
+});
+
+test('duplicate same-account notifications keep both tabs authenticated and never revalidate in a loop', async () => {
+  const tabs = authTabs(), a = tabs.add(), b = tabs.add();
+  try {
+    await a.login(); tabs.deliver();
+    b.respond(await b.lastRequest(), user()); await new Promise(r => setImmediate(r));
+    const epoch = b.viewer.viewerID(), count = b.requests.length;
+    for (let i = 0; i < 3; i++) b.events.get('storage')({ key: 'setori_token', newValue: 'token-owner', storageArea: b.localStorage });
+    assert.equal(b.store.getState().user?.id, 'owner');
+    assert.equal(b.viewer.viewerID(), epoch);
+    assert.equal(b.requests.length, count);
+    assert.equal(a.store.getState().user?.id, 'owner');
+    assert.equal(tabs.events.length, 0);
+    // A genuine logout still clears B immediately, before the server responds.
+    b.viewer.queryClient.setQueryData(['private'], ['synthetic-private']);
+    void a.store.getState().logout(); tabs.deliver();
+    assert.equal(b.store.getState().status, 'anonymous');
+    assert.equal(b.viewer.queryClient.getQueryData(['private']), undefined);
+    assert.equal(tabs.events.length, 0);
+  } finally { tabs.close(); }
+});
+
+for (const status of [200, 401, 500]) test(`/me ${status} cannot revive an undelivered other-tab logout`, async () => {
+  const f = authFixture();
+  try {
+    await f.login();
+    f.viewer.queryClient.setQueryData(['private'], ['synthetic-private']);
+    const init = f.store.getState().init(), request = await f.lastRequest();
+    f.localStorage.removeItem('setori_token');
+    f.respond(request, status === 200 ? user() : { error: 'old failure' }, status); await init;
+    assert.equal(f.store.getState().user, null);
+    assert.equal(f.localStorage.getItem('setori_token'), null);
+    assert.equal(f.viewer.queryClient.getQueryData(['private']), undefined);
+  } finally { f.close(); }
+});
+
+test('cold startup 401 deletes only the invalid saved token and rejects old private responses', async () => {
+  const f = authFixture();
+  try {
+    f.localStorage.setItem('setori_token', 'invalid-token');
+    const init = f.store.getState().init(), me = await f.lastRequest();
+    const pending = f.api.streamApi.get('private').then(data => ({ data }), error => ({ error }));
+    const request = await f.lastRequest();
+    f.respond(me, { error: 'expired' }, 401); await init;
+    assert.equal(f.localStorage.getItem('setori_token'), null);
+    assert.equal(f.store.getState().status, 'anonymous');
+    f.respond(request, { performances: ['synthetic-private'] });
+    const result = await pending;
+    assert.equal(result.data, undefined);
+    assert.equal(isCancel(result.error), true);
+  } finally { f.close(); }
+});
+
+test('storage ignores unrelated keys; clear() erases this tab without writing back', async () => {
+  const f = authFixture();
+  try {
+    await f.login();
+    const epoch = f.viewer.viewerID(), count = f.requests.length;
+    for (const event of [{ key: 'theme', storageArea: f.localStorage }, { key: 'setori_token', storageArea: {} }]) {
+      f.events.get('storage')(event);
+    }
+    assert.equal(f.viewer.viewerID(), epoch);
+    assert.equal(f.requests.length, count);
+    assert.equal(f.store.getState().user?.id, 'owner');
+    f.localStorage.removeItem('setori_token');
+    f.events.get('storage')({ key: null, storageArea: f.localStorage });
+    assert.equal(f.store.getState().status, 'anonymous');
+    assert.equal(f.requests.length, count, 'remote logout need not call the logout API again');
+  } finally { f.close(); }
+});
 
 test('logout clears local Bearer, observed cache, and player immediately without a server answer', async () => {
   const f = authFixture(); let unsubscribe;

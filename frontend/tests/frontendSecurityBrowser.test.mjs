@@ -9,12 +9,19 @@ import { build } from 'vite';
 
 const chrome = process.env.SETORI_CHROME_PATH;
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
-test('Chrome: actual React state/notification cleanup and raw comment/name/URL rendering', { skip: !chrome }, async () => {
+for (const { fixture, title, expected } of [
+  { fixture: 'frontendSecurity.jsx', title: 'actual React state/notification cleanup and raw comment/name/URL rendering',
+    expected: { textEscaped: true, javascriptHrefBlocked: true, javascriptImageDidNotExecute: true, blankRel: true,
+      positiveCopy: true, sameUserPermissionLoss: true, lateCallbacksBlocked: true, newSetterWorks: true } },
+  { fixture: 'authLifecycle.jsx', title: 'OAuth callback survives parent startup; Google/password login works with and without StrictMode',
+    expected: { 'oauth-normal-cold': true, 'oauth-normal-saved': true, 'oauth-strict-cold': true, 'oauth-strict-saved': true,
+      'providers-normal': true, 'password-normal': true, 'providers-strict': true, 'password-strict': true } },
+]) test(`Chrome: ${title}`, { skip: !chrome }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'setori-fesec-'));
   try {
     const bundle = await build({ configFile: false, root, logLevel: 'silent', esbuild: { jsx: 'automatic' },
       define: { 'process.env.NODE_ENV': JSON.stringify('test') },
-      build: { write: false, minify: false, lib: { entry: join(root, 'tests/fixtures/frontendSecurity.jsx'), name: 'SecurityFixture', formats: ['iife'] },
+      build: { write: false, minify: false, lib: { entry: join(root, 'tests/fixtures', fixture), name: 'SecurityFixture', formats: ['iife'] },
         rollupOptions: { output: { inlineDynamicImports: true } } } });
     const script = (Array.isArray(bundle) ? bundle[0] : bundle).output.find((item) => item.type === 'chunk').code;
     await writeFile(join(dir, 'fixture.js'), script);
@@ -59,10 +66,9 @@ test('Chrome: actual React state/notification cleanup and raw comment/name/URL r
       assert.ok(result, 'Chrome fixture did not finish');
     } finally {
       socket?.close(); child.kill('SIGTERM');
-      await new Promise((resolve) => { if (child.exitCode !== null) resolve(); else child.once('exit', resolve); });
+      await new Promise((resolve) => { if (child.exitCode !== null || child.signalCode !== null) resolve(); else child.once('exit', resolve); });
     }
     assert.equal(result.error, undefined, JSON.stringify(result));
-    assert.deepEqual(result, { textEscaped: true, javascriptHrefBlocked: true, javascriptImageDidNotExecute: true, blankRel: true,
-      positiveCopy: true, sameUserPermissionLoss: true, lateCallbacksBlocked: true, newSetterWorks: true });
+    assert.deepEqual(result, expected);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
