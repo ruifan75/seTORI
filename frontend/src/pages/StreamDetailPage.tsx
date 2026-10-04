@@ -23,6 +23,7 @@ import ReportButton from '../components/ReportButton';
 import RawCommentsPanel from '../components/RawCommentsPanel';
 import SourceSongList from '../components/SourceSongList';
 import ArtistLinks from '../components/ArtistLinks';
+import HolodexSyncActions from '../components/HolodexSyncActions';
 import { extractRawCommentTimestamps } from '../utils/rawCommentTimestamps';
 import { analysisFailureMessage } from '../utils/apiError';
 
@@ -1439,26 +1440,12 @@ export default function StreamDetailPage() {
                         </button>
                       </div>
                     </div>
-                    <div>
-                      <p className="text-xs font-medium text-gray-400 mb-1.5">Holodex 同期</p>
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          onClick={() => syncVideoMutation.mutate()}
-                          disabled={syncVideoMutation.isPending}
-                          className="px-3 py-1.5 text-sm bg-indigo-50 text-indigo-700 border border-indigo-200 font-medium rounded-lg hover:bg-indigo-100 transition-colors disabled:opacity-50"
-                        >
-                          {syncVideoMutation.isPending ? '同期中...' : 'Holodex から同期'}
-                        </button>
-                        <button
-                          onClick={() => syncToHolodexMutation.mutate()}
-                          disabled={syncToHolodexMutation.isPending}
-                          title="seTORI のセットリストを Holodex に書き込みます（外部サービスへの反映）"
-                          className="px-3 py-1.5 text-sm bg-amber-50 text-amber-700 border border-amber-300 font-medium rounded-lg hover:bg-amber-100 transition-colors disabled:opacity-50"
-                        >
-                          {syncToHolodexMutation.isPending ? 'Holodex へ同期中...' : 'seTORI から Holodex へ同期'}
-                        </button>
-                      </div>
-                    </div>
+                    <HolodexSyncActions
+                      onDownload={() => syncVideoMutation.mutate()}
+                      onUpload={() => syncToHolodexMutation.mutate()}
+                      downloading={syncVideoMutation.isPending}
+                      uploading={syncToHolodexMutation.isPending}
+                    />
                   </div>
                 )}
 

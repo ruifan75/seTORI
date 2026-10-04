@@ -1,0 +1,14 @@
+-- 読み取り同期 (sync:run) と運用者名義の Holodex 書き込みを分ける。
+-- 初期の付与先は system admin だけ。editor とカスタムロールの sync:run は
+-- そのまま残し、新しい権限には変換しない。'*' の全権限という意味も変えない。
+-- ロール編集は未知キーを許容するため、非 admin に先行保存された同名キーも除く。
+UPDATE roles
+SET permissions = array_remove(permissions, 'holodex:upload'), updated_at = NOW()
+WHERE NOT (is_system AND name = 'admin')
+  AND 'holodex:upload' = ANY(permissions);
+
+-- admin の権限が編集済みで '*' を持たない場合も、これまでの送信能力を保つ。
+UPDATE roles
+SET permissions = array_append(permissions, 'holodex:upload'), updated_at = NOW()
+WHERE is_system AND name = 'admin'
+  AND NOT ('holodex:upload' = ANY(permissions));
