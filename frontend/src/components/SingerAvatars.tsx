@@ -25,7 +25,7 @@ export function SingerImage({ singer }: { singer: Singer }) {
 function SingerAvatar({ singer }: { singer: Singer }) {
   return (
     <Link
-      to={`/singers/${singer.id}`}
+      to={`/channels/${singer.id}`}
       aria-label={singer.name}
       title={singer.name}
       className="relative inline-flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 border-white bg-indigo-100 text-[10px] font-semibold text-indigo-700 shadow-sm transition-transform hover:z-10 hover:-translate-y-0.5 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
@@ -85,7 +85,7 @@ function SingerOverflowMenu({ singers }: { singers: Singer[] }) {
         {singers.map((singer) => (
           <Link
             key={singer.id}
-            to={`/singers/${singer.id}`}
+            to={`/channels/${singer.id}`}
             onClick={() => popoverRef.current?.hidePopover()}
             className="flex items-center gap-2 rounded-md px-2 py-2 text-sm text-gray-700 hover:bg-indigo-50 hover:text-indigo-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
           >

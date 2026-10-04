@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { ToastProvider } from './components/ui/Toast';
 import Layout from './components/Layout';
+import LegacyChannelRedirect from './components/LegacyChannelRedirect';
 import ActivityTracker from './components/ActivityTracker';
 import RequirePermission from './components/RequirePermission';
 import { useAuthStore, PERM } from './store/auth';
@@ -63,8 +64,11 @@ function App() {
               <Route path="songs/:id" element={<SongDetailPage />} />
               <Route path="streams" element={<StreamsPage />} />
               <Route path="streams/:id" element={<StreamDetailPage />} />
-              <Route path="singers" element={<SingersPage />} />
-              <Route path="singers/:id" element={<SingerDetailPage />} />
+              <Route path="channels" element={<SingersPage />} />
+              <Route path="channels/:id" element={<SingerDetailPage />} />
+              {/* 旧 URL も Layout 内で置換し、PlayerBar の iframe を保つ。 */}
+              <Route path="singers" element={<LegacyChannelRedirect />} />
+              <Route path="singers/:id" element={<LegacyChannelRedirect />} />
               <Route path="tags/:kind/:id" element={<TagPage />} />
               <Route path="artists" element={<ArtistsPage />} />
               <Route path="artists/:id" element={<ArtistDetailPage />} />

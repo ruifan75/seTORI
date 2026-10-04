@@ -33,7 +33,7 @@
   - `POST /api/sync/holodex/video/{id}`（単一動画同期）
   - `GET /api/streams/{id}/holodex-songs`（セットリスト即時読込）
   - `GET /api/streams/{id}/comments`、`POST /api/streams/{id}/comments/analyze`（コメント取得）
-  - `POST /api/singers`（チャンネル情報のみ同期）
+  - `POST /api/channels`（チャンネル情報のみ同期）
 - **topic と表示状態**：Holodex の topic ID と seTORI の tag ID は同一とは限らない。
   `Original_Song` は `original_song`、`Music_Cover` は `music_cover` へ正規化する。
   topic とタイトルキーワード規則を両方タグへ反映したあと、`concert` / `karaoke` /
@@ -141,7 +141,7 @@
   - `GET /youtube/v3/commentThreads?part=snippet&videoId=...` — 公開トップレベルコメントを `maxResults=100`、`textFormat=plainText` で全ページ取得。
   - `GET /youtube/v3/channels?part=snippet&id=` または `forHandle=` — チャンネル情報を取得（アバターは high → medium → default 優先）。
 - **用途**：一般動画コメントは YouTube を優先し、未設定・取得失敗・空の場合に Holodex へ fallback する。編集ページの手動同期は YouTube のみを使用し、Holodex へ fallback しない。空の `comment_raw` は有効な永続キャッシュと見なさず、次回アクセス時に再取得する。チャンネル/歌手同期では YouTube 高解像度アバターを優先し、Holodex 未登録チャンネルの追加にも利用する。
-- **呼び出しトリガー**：`POST /api/sync/holodex`、`POST /api/sync/holodex/video/{id}`、`GET /api/streams/{id}/comments`、`POST /api/streams/{id}/comments/sync-youtube`（YouTube 限定の手動同期）、`POST /api/streams/{id}/comments/analyze`、`POST /api/singers`。
+- **呼び出しトリガー**：`POST /api/sync/holodex`、`POST /api/sync/holodex/video/{id}`、`GET /api/streams/{id}/comments`、`POST /api/streams/{id}/comments/sync-youtube`（YouTube 限定の手動同期）、`POST /api/streams/{id}/comments/analyze`、`POST /api/channels`。
 - **制限**：デフォルトでプロジェクトあたり 10,000 units/日。`commentThreads.list` と `channels.list` は 1 request あたり 1 unit（コメントは 100 件ごとに 1 request）。取得するのはトップレベルコメントのみで、live chat replay は従来どおり yt-dlp を使用する
 （拍手による終了時間の推定。BOT 判定を避けるための cookie 設定は `docs/DATA_COMPLETION.md`）。
 
@@ -295,7 +295,7 @@ DB セッション + `roles.permissions` に置き換わりました。判定は
 | `POST /api/chat-ends/backfill` | yt-dlp（**非空の `comment_songs` を持つ配信だけ**。全配信ではない） | `content:edit` |
 | `POST /api/streams/{id}/chapters/sync`、`POST /api/chapters/backfill` | **yt-dlp を起動** | `content:edit` |
 | `POST /api/streams/{id}/comments/sync-youtube` | YouTube Data API のクォータを消費 | `content:edit` |
-| `POST /api/singers` | Holodex を叩き、必要なら YouTube Data API へ fallback | `content:edit` |
+| `POST /api/channels` | Holodex を叩き、必要なら YouTube Data API へ fallback | `content:edit` |
 | `/api/ai-providers/*` | API キーの登録・変更 | `ai:manage` |
 | `/api/backups/*` | ダウンロード（GET）含む全操作 | `backup:manage` |
 | `GET /api/streams/{id}/comments` | Holodex / YouTube のクォータを消費（キャッシュが無いとき） | `content:edit` |

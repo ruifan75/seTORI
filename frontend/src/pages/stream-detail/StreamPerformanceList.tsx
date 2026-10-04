@@ -179,7 +179,7 @@ export default function StreamPerformanceList({ model }: { model: StreamDetailMo
                         {displaySingers?.map((singer, singerIndex) => (
                           <Link
                             key={singer.id}
-                            to={`/singers/${singer.id}`}
+                            to={`/channels/${singer.id}`}
                             title={singer.name}
                             className="relative -ml-2 first:ml-0 hover:z-50"
                             style={{

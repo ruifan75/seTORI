@@ -48,7 +48,7 @@ Holodex の分類もタイトルキーワード規則も自動判定であり、
 |---|---|
 | `GET /api/streams/search` | 非表示行を**意図的に含める**（未ログインで 100 本中 51 本） |
 | `GET /api/search?q=<タイトル>` | `SearchByTitle` に `is_hidden` 条件が無い。ID・タイトル・日付を返す |
-| `GET /api/singers/{id}/streams?hidden=true` | **非表示だけ**を返す。この GET 自体は公開 |
+| `GET /api/channels/{id}/streams?hidden=true` | **非表示だけ**を返す。この GET 自体は公開 |
 | `GET /api/streams/{id}` | 非表示でも 200。`performances` も含む |
 | `GET /api/performances/{id}` | `FindByID` は `WHERE p.id = $1` のみ。公開 |
 | `GET /api/playlists/{id}/items`（公開プレイリスト） | `ListItems` は非表示配信の歌唱を**意図的に残す** |
@@ -161,7 +161,7 @@ Holodex の分類もタイトルキーワード規則も自動判定であり、
 | 列 | 誰が書くか | 意味 |
 |---|---|---|
 | `members_only` タグ | 自動（同期の候補判定）＋**人** | 会限だという**検出** |
-| `singers.members_only_policy` | 人だけ（`PUT /api/singers/{id}/members-policy`） | チャンネル単位の方針。NULL＝未確認 / `allow` / `deny` |
+| `singers.members_only_policy` | 人だけ（`PUT /api/channels/{id}/members-policy`） | チャンネル単位の方針。NULL＝未確認 / `allow` / `deny` |
 | `restriction_override` | 人だけ（`PUT /api/streams/{id}`） | NULL＝未裁定 / TRUE＝伏せる / FALSE＝公開してよい |
 
 読むときは 3 段（下ほど強い）：`members_only` タグ → チャンネルの方針 → `restriction_override`。

@@ -313,7 +313,7 @@ export default function SearchPage() {
               <h2 className="mb-2 text-sm font-semibold text-gray-500">チャンネル</h2>
               <div className="space-y-1">
                 {globalResults.singers.map((singer) => (
-                  <Link key={singer.id} to={`/singers/${singer.id}`} className="block truncate text-sm text-indigo-600 hover:text-indigo-800">
+                  <Link key={singer.id} to={`/channels/${singer.id}`} className="block truncate text-sm text-indigo-600 hover:text-indigo-800">
                     {singer.name}
                   </Link>
                 ))}

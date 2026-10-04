@@ -129,8 +129,13 @@ test('配信詳細の権限別 DOM・iframe・キューが分割前と一致す�
     assert.equal(rows.length, count);
     for (const row of rows) {
       assert.equal(row.error, undefined, JSON.stringify(row.tc));
-      row.value.snapshots = Object.fromEntries(Object.entries(row.value.snapshots).map(([name, dom]) =>
-        [name, createHash('sha256').update(dom).digest('hex')]));
+      row.value.snapshots = Object.fromEntries(Object.entries(row.value.snapshots).map(([name, dom]) => {
+        assert.ok(!dom.includes('["href","/singers/'), '旧チャンネル URL が残っている');
+        if (name === 'view') assert.ok(dom.includes('["href","/channels/channel"]'), '配信主への新リンクが無い');
+        // 分割前の固定 DOM は書き換えず、意図したリンク先変更だけを比較から除く。
+        const comparable = dom.replaceAll('["href","/channels/', '["href","/singers/');
+        return [name, createHash('sha256').update(comparable).digest('hex')];
+      }));
     }
     const baseline = JSON.parse(await readFile(join(root, 'tests/fixtures/streamDetailDom.json'), 'utf8'));
     for (const row of rows) await t.test(JSON.stringify(row.tc), () => {

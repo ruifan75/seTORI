@@ -393,6 +393,21 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("POST /api/presets/{key}/add", r.handleAddPresetToPlaylist)
 
 	// API routes - Singers
+	r.mux.HandleFunc("GET /api/channels", r.handleListSingers)
+	r.mux.HandleFunc("GET /api/channels/search", r.handleSearchSingers)
+	r.mux.HandleFunc("GET /api/channels/{id}", r.handleGetSinger)
+	r.mux.HandleFunc("GET /api/channels/{id}/streams", r.handleGetSingerStreams)
+	r.mux.HandleFunc("GET /api/channels/{id}/performances", r.handleGetSingerPerformances)
+	r.mux.HandleFunc("POST /api/channels", r.handleCreateSinger)
+	r.mux.HandleFunc("PUT /api/channels/{id}", r.handleUpdateSinger)
+	r.mux.HandleFunc("PUT /api/channels/{id}/visibility", r.handleUpdateSingerVisibility)
+	r.mux.HandleFunc("PUT /api/channels/{id}/members-policy", r.handleUpdateSingerMembersPolicy)
+	r.mux.HandleFunc("PUT /api/channels/{id}/auto-fill", r.handleUpdateSingerAutoFill)
+	r.mux.HandleFunc("GET /api/channels/auto-fill", r.handleListAutoFillTargets)
+	r.mux.HandleFunc("PUT /api/channels/{id}/organization", r.handleUpdateSingerOrganization)
+
+	// 旧 API は同じハンドラへの別名。初回デプロイから 1 リリース維持し、
+	// その次のリリースでこの登録と requiredPermission の別名変換を削除する（issue #62）。
 	r.mux.HandleFunc("GET /api/singers", r.handleListSingers)
 	r.mux.HandleFunc("GET /api/singers/search", r.handleSearchSingers)
 	r.mux.HandleFunc("GET /api/singers/{id}", r.handleGetSinger)
@@ -404,6 +419,7 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("PUT /api/singers/{id}/members-policy", r.handleUpdateSingerMembersPolicy)
 	r.mux.HandleFunc("PUT /api/singers/{id}/auto-fill", r.handleUpdateSingerAutoFill)
 	r.mux.HandleFunc("GET /api/singers/auto-fill", r.handleListAutoFillTargets)
+	r.mux.HandleFunc("PUT /api/singers/{id}/organization", r.handleUpdateSingerOrganization)
 
 	// 自動処理（定期実行）。設定・手動実行とも content:edit。
 	// 見直しが要る配信（非表示だが現行規則で曲が出た）。content:edit。
@@ -420,7 +436,6 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("GET /api/auto-fill/settings", r.handleGetAutoFillSettings)
 	r.mux.HandleFunc("PUT /api/auto-fill/settings", r.handleUpdateAutoFillSettings)
 	r.mux.HandleFunc("POST /api/auto-fill/run", r.handleRunAutoFill)
-	r.mux.HandleFunc("PUT /api/singers/{id}/organization", r.handleUpdateSingerOrganization)
 
 	// 事務所（取り込み時の key と表示名を分けて持つ）
 	r.mux.HandleFunc("GET /api/organizations", r.handleListOrganizations)
@@ -3804,6 +3819,13 @@ func requiredPermission(method, path string) (perm string, needsAuth bool) {
 		return "", false
 	}
 
+	// authzPath が正規化したセグメントだけを扱う。旧 API は 1 リリースの別名。
+	// 初回デプロイの次のリリースで旧ルートとともに削除する（issue #62）。
+	// セグメント境界を守り、%2F をデコードし直さない。新旧で規則を共有する。
+	if isRouteOrSubpath(path, "/api/singers") {
+		path = "/api/channels" + strings.TrimPrefix(path, "/api/singers")
+	}
+
 	// 公開・認証のみ（特定権限不要）のエンドポイント
 	switch path {
 	case "/health", "/api/version", "/api/auth/login", "/api/activity/visit", "/api/activity/policy":
@@ -3895,10 +3917,10 @@ func requiredPermission(method, path string) (perm string, needsAuth bool) {
 	// 自動処理の対象一覧は運用の設定なので content:edit。
 	//
 	// **GET は既定で公開に落ちる**ので、書かないと「どのチャンネルを自動で
-	// 回しているか」が未ログインから読める。`/api/singers/{id}` より先に
+	// 回しているか」が未ログインから読める。`/api/channels/{id}` より先に
 	// 判定されるが、認可は ServeMux の前に path 文字列だけで決まるため、
 	// ここに書いてあることが唯一の保護になる。
-	if isRouteOrSubpath(path, "/api/singers/auto-fill") {
+	if isRouteOrSubpath(path, "/api/channels/auto-fill") {
 		return auth.PermContentEdit, true
 	}
 
