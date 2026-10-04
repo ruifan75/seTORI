@@ -119,13 +119,16 @@ ZIGG-ZAGG (feat. 初音ミク) / Junky
 3. `song_match_keys` は**計算元の曲名・アーティストを控えている**。
    `RebuildStale` が `songs` と突き合わせ、ズレていれば作り直す
 
-> ⚠️ **3 は今のところ production では走っていない。** `RebuildKeys`（→ `RebuildStale`）を
-> 呼んでいるのは `cmd/setoribench/main.go` だけで、サーバーの起動処理からは呼ばれていない
-> （関数コメントは「起動時に呼ぶ」と書いてあるが、その呼び出しが無い）。
->
-> つまり **`songmatch.RulesVersion` を上げても production のキーは旧版のまま**で、
-> 「マイグレーションを書く必要はない」も成立しない。上げるなら、
-> 起動時の呼び出しを足すか、一度手で流す必要がある。issue #21。
+3 はサーバーの起動時に走る（`cmd/server/main.go`、マイグレーションの直後）。失敗したら
+起動を止める ── 古いキーのまま照合を始めるより、落ちて気付くほうがよい。
+したがって `songmatch.RulesVersion` を上げれば、**次の起動で全件が作り直される**
+（マイグレーションは要らない）。手元の 922 曲で、全件が古い状態からの起動は約 1 秒
+（2026-10-04 実測）。
+
+> 以前ここに「3 は production では走っていない（呼んでいるのは setoribench だけ）」と
+> 書いていたが、**誤りだった**（issue #21）。起動時の呼び出しは照合キーを入れたときから
+> `cmd/server/main.go` にあり、`internal/` と `cmd/setoribench` だけを探して
+> 「呼び出しが無い」と結論していた。
 
 ## 照合が外れたときの受け皿（`song_merge_candidates`）
 
