@@ -2012,8 +2012,8 @@ export default function StreamDetailPage() {
       <div className="w-full min-[1300px]:basis-3/5 min-[1300px]:shrink-0 min-w-0 min-h-0 min-[1300px]:self-stretch min-[1300px]:pr-6 flex flex-col">
         {/* Setlist Section - Unified View */}
         <div className="flex flex-col gap-3 mb-4 flex-none shrink-0">
-          <div className="flex items-center gap-3">
-            <h2 className="text-2xl font-bold text-gray-900">
+          <div className={`flex items-center gap-3 ${isEditing ? 'max-lg:flex-wrap' : ''}`}>
+            <h2 className={`text-2xl font-bold text-gray-900 ${isEditing ? 'max-lg:w-full' : ''}`}>
               セットリスト ({isEditing ? editableSongs.length : stream.performances.length}曲)
               {stream.is_restricted && (
                 <span className="ml-2 align-middle text-xs font-normal px-2 py-0.5 rounded bg-amber-100 text-amber-800">
@@ -2060,8 +2060,8 @@ export default function StreamDetailPage() {
               </div>
             )}
             {isEditing && (
-              /* 編集コントロールはタイトルと同じ行の右側に寄せる。処理完了は保存の直前に置く（即時保存） */
-              <div className="ml-auto flex items-center gap-2 shrink-0">
+              /* lg 未満は見出しと操作を別行にし、操作も折り返す。処理完了は保存の直前（即時保存）。 */
+              <div className="ml-auto flex items-center gap-2 shrink-0 max-lg:ml-0 max-lg:w-full max-lg:min-w-0 max-lg:flex-wrap max-lg:[&>button]:whitespace-nowrap">
                 <button
                   onClick={toggleEditing}
                   className="px-3 py-1.5 text-sm bg-gray-200 text-gray-700 font-medium rounded-lg hover:bg-gray-300 transition-colors"
