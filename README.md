@@ -317,7 +317,6 @@ ParsedSong[]  (comment_songs、未重複排除)
 ## 既知の問題と改善点
 
 **アーキテクチャ**
-- `StreamDetailPage.tsx` が 2900 行を超えており、コンポーネント分割が急務
 - OpenAPI / Swagger 形式は未整備（[日本語の API ドキュメント](./docs/API.md) はあり）
 - テストは `pkg` 配下と一部 service にとどまり、カバレッジは低い
 - middleware フレームワークなし（CORS / logging は手動処理）

@@ -19,19 +19,13 @@ type documentedAPIRoute struct {
 	permission string
 	login      bool
 	line       int
+	response   string
 }
 
 // 期待値は人が書いた docs/API.md。そのまま読んで使い、登録や認可表から作らない。
 // AST は登録の棚卸しだけに使い、実際の ServeMux と認可関数も呼ぶ。
 func TestAPIDocumentation(t *testing.T) {
-	data, err := os.ReadFile("../../../docs/API.md")
-	if err != nil {
-		t.Fatal(err)
-	}
-	documented, err := parseAPIDocumentation(string(data))
-	if err != nil {
-		t.Fatal(err)
-	}
+	documented := loadAPIDocumentation(t)
 	registered := registeredAPIPatterns(t)
 	for _, pattern := range sortedAPIPatterns(registered) {
 		if _, ok := documented[pattern]; !ok {
@@ -76,6 +70,19 @@ func TestAPIDocumentation(t *testing.T) {
 			}
 		})
 	}
+}
+
+func loadAPIDocumentation(t *testing.T) map[string]documentedAPIRoute {
+	t.Helper()
+	data, err := os.ReadFile("../../../docs/API.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	routes, err := parseAPIDocumentation(string(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return routes
 }
 
 func sortedAPIPatterns[V any](routes map[string]V) []string {
@@ -139,9 +146,32 @@ func parseAPIDocumentation(markdown string) (map[string]documentedAPIRoute, erro
 	routes := make(map[string]documentedAPIRoute)
 	scanner := bufio.NewScanner(strings.NewReader(markdown))
 	lineNumber := 0
+	var fence byte
+	fenceLength := 0
+	inComment := false
 	for scanner.Scan() {
 		lineNumber++
-		line := strings.TrimSpace(scanner.Text())
+		raw := scanner.Text()
+		line := strings.TrimSpace(raw)
+		if !inComment && (strings.HasPrefix(raw, "    ") || strings.HasPrefix(raw, "\t")) {
+			continue
+		}
+		if char, length, suffix := apiDocFence(line); length >= 3 {
+			if fence == 0 {
+				// コメント内のフェンスはコードブロックを開始しない。
+				if !inComment {
+					fence, fenceLength = char, length
+					continue
+				}
+			} else if char == fence && length >= fenceLength && strings.TrimSpace(suffix) == "" {
+				fence = 0
+				continue
+			}
+		}
+		if fence != 0 {
+			continue
+		}
+		line = strings.TrimSpace(apiDocVisibleLine(line, &inComment))
 		if !strings.HasPrefix(line, "|") {
 			continue
 		}
@@ -182,7 +212,7 @@ func parseAPIDocumentation(markdown string) (map[string]documentedAPIRoute, erro
 		if _, exists := routes[pattern]; exists {
 			return nil, fmt.Errorf("API.md:%d: duplicate documented route %s", lineNumber, pattern)
 		}
-		route := documentedAPIRoute{line: lineNumber}
+		route := documentedAPIRoute{line: lineNumber, response: cells[6]}
 		switch cells[3] {
 		case "未ログイン可":
 		case "ログインのみ":
@@ -205,6 +235,41 @@ func parseAPIDocumentation(markdown string) (map[string]documentedAPIRoute, erro
 	return routes, nil
 }
 
+// Markdown のコード例と非表示コメントの行を、公開された端点の表として数えない。
+func apiDocFence(line string) (byte, int, string) {
+	if len(line) == 0 || (line[0] != '`' && line[0] != '~') {
+		return 0, 0, ""
+	}
+	i := 0
+	for i < len(line) && line[i] == line[0] {
+		i++
+	}
+	return line[0], i, line[i:]
+}
+func apiDocVisibleLine(line string, inComment *bool) string {
+	var visible strings.Builder
+	for len(line) > 0 {
+		if *inComment {
+			end := strings.Index(line, "-->")
+			if end < 0 {
+				break
+			}
+			line = line[end+3:]
+			*inComment = false
+		} else {
+			start := strings.Index(line, "<!--")
+			if start < 0 {
+				visible.WriteString(line)
+				break
+			}
+			visible.WriteString(line[:start])
+			line = line[start+4:]
+			*inComment = true
+		}
+	}
+	return visible.String()
+}
+
 func apiDocLiteral(cell string) (string, error) {
 	if len(cell) < 3 || cell[0] != '`' || cell[len(cell)-1] != '`' || strings.Contains(cell[1:len(cell)-1], "`") {
 		return "", fmt.Errorf("expected one nonempty backtick literal, got %q", cell)
@@ -220,6 +285,15 @@ func TestParseAPIDocumentation(t *testing.T) {
 		wantError      bool
 	}{
 		{"route", row, false},
+		{"indented example is not inventory", "    " + row, true},
+		{"fenced example is not inventory", "```markdown\n" + row + "```\n", true},
+		{"indented closing fence stays code", "```\n    ```\n" + row, true},
+		{"tilde example is not inventory", "~~~markdown\n" + row + "~~~\n", true},
+		{"hidden comment is not inventory", "<!--\n" + row + "-->\n", true},
+		{"commented duplicate", row + "<!--\n" + row + "-->\n", false},
+		{"fenced duplicate", row + "```markdown\n" + row + "```\n", false},
+		{"comment includes a fence", "<!--\n```markdown\n-->\n" + row, false},
+		{"literal comment in code example", "```markdown\n<!--\n```\n" + row, false},
 		{"different methods", row + otherMethod, false},
 		{"prose is not inventory", "本文の `GET /api/example`", true},
 		{"duplicate", row + row, true},

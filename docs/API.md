@@ -179,7 +179,7 @@ system role の削除・使用中ロールの削除などは 400。組み込み�
 | `GET` | `/api/songs/merge-candidates` | `content:edit` | 未処理の統合候補を見る | Q: `limit` | `{candidates, total}`（total は返した件数）。秘匿：候補内の歌唱数を制限 |
 | `GET` | `/api/songs/{id}/merge-candidates` | 未ログイン可 | この曲に関係する統合候補を見る | — | `{candidates}`。秘匿：候補内の歌唱数を制限 |
 | `POST` | `/api/songs/merge-candidates/{id}/dismiss` | `content:edit` | 別の曲として統合候補を却下する | — | `{message}`。無い・処理済みなら 404 |
-| `POST` | `/api/songs/merge-candidates/scan` | `content:edit` | 曲名キーと AI で重複候補を走査する | — | **同期** / `{added, by_key, by_ai, ai_error, message}`。AI 部分失敗も 200 で ai_error=true |
+| `POST` | `/api/songs/merge-candidates/scan` | `content:edit` | 曲名キーと AI で重複候補を走査する | — | 202 / `{task_id, message}`。二重起動は 409。曲名キー→AI の順で背景処理。結果・失敗は GET /api/tasks/{id} で確認し、AI の一部失敗も status=failed |
 | `POST` | `/api/songs/merge-candidates/adjudicate` | `content:edit` | 未判定候補の AI の見立てを取る | — | `{judged, message}`。1 回最大 30 件。統合はしない |
 | `GET` | `/api/songs/identity-checks` | `content:edit` | 曲の照合で否決した組を見る | Q: `limit` | `{checks: [否決記録]}` |
 | `POST` | `/api/songs/identity-checks/delete` | `content:edit` | 否決を取り消す | B: `pair_key`（制御文字を含むため body で渡す） | `{message}` |
@@ -197,7 +197,7 @@ system role の削除・使用中ロールの削除などは 400。組み込み�
 | `GET` | `/api/readings/stats` | `content:edit` | 未整備の読みの件数を見る | — | `{artists_total, artists_needs_fix, songs_total, songs_needs_fix}` |
 | `GET` | `/api/readings/export` | `content:edit` | 読みを一括出力する | Q: `filter=needs_fix`、`format=csv` | 通常 `{artists:[{id,name,reading}], songs:[…]}`。csv は `text/csv` の添付（`type,id,name,reading`） |
 | `POST` | `/api/readings/import` | `content:edit` | 読みを一括取り込みする | B: 書き出しと同じ JSON、または `Content-Type: text/csv` の CSV 本文 | `{artists_updated, songs_updated, skipped, errors}` |
-| `POST` | `/api/ai/backfill-readings` | `content:edit` | AI で未整備の読みを補完する | — | **同期** / `{artists_updated, songs_updated, warning?}`。各対象最大 30 件 |
+| `POST` | `/api/ai/backfill-readings` | `content:edit` | AI で未整備の読みを補完する | — | 202 / `{task_id, message}`。二重起動は 409。各対象最大 30 件を背景で補完し、結果・失敗は GET /api/tasks/{id} で確認。一部失敗も status=failed |
 
 ## 歌唱・タグ
 
@@ -211,7 +211,7 @@ system role の削除・使用中ロールの削除などは 400。組み込み�
 | `PUT` | `/api/performances/{id}` | `content:edit` | 歌唱 1 件を部分更新する | B: `song_id, start_seconds, end_seconds, tags[], custom_tags[], singer_ids[]` | 歌唱の保存行＋関連情報（下記）。秘匿：権限が無ければ 404。重複 409、時刻不正 400 |
 | `POST` | `/api/streams/{id}/performances` | `content:edit` | セットリストを保存する | B: `performances[]`（下記。1 曲以上） | `{created_count}` |
 | `DELETE` | `/api/streams/{id}/performances` | `content:edit` | 配信の歌唱を全件削除する | — | `{success:true, message}` |
-| `GET` | `/api/performances/random` | 未ログイン可 | 曲を重複させず歌唱をランダムに返す | Q: `limit`（既定 50、最大 100）、`exclude_song_ids`（UUID の CSV） | `{performances}`。秘匿：歌唱を制限。非表示配信・チャンネルも除外 |
+| `GET` | `/api/performances/random` | 未ログイン可 | 曲を重複させず歌唱をランダムに返す | Q: `limit`（既定 50、最大 100）、`exclude_song_ids`（UUID の CSV） | `{performances}`。秘匿：歌唱を制限。通常は非表示配信も除くが、restricted:view ではその条件を外す。表示中チャンネルの参加がない配信と members_only / unarchived タグは常に除外 |
 | `GET` | `/api/performance-tags/{id}/performances` | 未ログイン可 | 歌唱タグが付いた歌唱を見る | Q: `page, limit` | `{performances, pagination}`。秘匿：歌唱・件数を制限 |
 | `GET` | `/api/stream-tags/{id}/streams` | 未ログイン可 | 配信タグが付いた配信を見る | Q: `page, limit` | `{streams, pagination}`。通常の配信一覧と同じ表示範囲 |
 | `GET` | `/api/stream-tags` | 未ログイン可 | 配信タグの定義を見る | — | `[{id, display_name, color, …}]` |
@@ -284,8 +284,9 @@ private は所有者だけに返し、他人には 404。変更・項目操作�
 
 ### プリセット
 
-プリセットはその時点の歌唱から作る。非表示配信・非表示チャンネルは除く。
-閲覧は `restricted:view` によって広がるが、個人プレイリストへの追加は公開の視界だけを使う。
+プリセットはその時点の歌唱から作る。通常は非表示配信を除き、`restricted:view` ではその条件を外す。
+どちらの視界でも、表示中のチャンネルが参加していない配信と、`members_only` / `unarchived` タグの
+配信は除く（公開の裁定があっても再生できない可能性があるため）。個人プレイリストへの追加は公開の視界だけを使う。
 
 | メソッド | パス | 必要な権限 | 何をするか | 主な入力 | 応答の要点 |
 |---|---|---|---|---|---|
@@ -313,7 +314,7 @@ private は所有者だけに返し、他人には 404。変更・項目操作�
 
 ### task_runs の実行記録
 
-章節取得・拍手 end 補完・同期後の準備の記録を残す。同じ種類が実行中なら開始は 409。準備は章節・拍手 end 補完とも相互排他。
+章節取得・拍手 end 補完・同期後の準備・読み仮名補完・重複候補走査の記録を残す。同じ種類が実行中なら開始は 409。準備は章節・拍手 end 補完とも相互排他。
 終了しても実行記録と対象別の失敗理由は残る。サーバー再起動で実行中だった記録は interrupted になる。
 停止 API は現在 **stream_prepare だけ**が対象。
 
@@ -329,6 +330,9 @@ private は所有者だけに返し、他人には 404。変更・項目操作�
 status は `running/done/failed/interrupted/cancelled`。件数は `done, succeeded, skipped, failed` を区別する。
 開始応答の task_id を使って GET でポーリングする。失敗一覧は `{target, reason}` の配列（末尾 200 件まで）。
 章節・拍手 end 補完の done は実行終了であり、全対象の成功ではない。failed の件数も見る。
+読み仮名補完（kind=readings_backfill）と重複候補走査（kind=duplicate_scan）は、
+AI・保存などの一部失敗も status=failed として終わる。既に保存した読み・候補は残る。
+これら2種類の停止APIは無く、途中結果の件数・失敗理由は同じ実行記録で確認する。
 
 ### 一括作成・プレ分析・自動処理
 
@@ -489,13 +493,16 @@ DB ダンプの作成・復元と Drive 連携。リストアは DB 全体を置
 
 端点を追加・削除・移動するときは、この文書の表と認可監査表を同じ変更で更新する。
 表は **メソッド・パス・必要な権限・何をするか・主な入力・応答の要点の 6 列**。
-メソッドとパスをバッククォートで囲み、端点ごとに 1 行を書く。入力が無ければ `—` と書く。
+メソッドとパスをバッククォートで囲み、端点ごとに 1 行を書く。表の行頭は `|` に揃え、
+本文の表として置く（コード例・HTMLコメントの中には置かない）。入力が無ければ `—` と書く。
 
 `TestAPIDocumentation` はこの文書を期待値として読み、handler の全ファイルにある
 ServeMux 登録とメソッド・パスを双方向に突き合わせる。
 登録だけ足す・文書だけ残す・重複する・必須の列を空にする場合は落ちる。
 記載したルートが実際の ServeMux でも選ばれることと、認可関数の結果が権限欄と完全一致することも検査する。
-テストはパラメータ・応答の説明の意味までは検証しないので、handler・DTO・呼び出すサービスを確認して更新する。
+コードブロック・HTMLコメント内の表は文書の一覧として数えない。
+読み仮名補完・重複候補走査は、文書の成功コード・JSONキー・二重起動コードを実際のhandler応答とも照合する。
+それ以外のパラメータ・応答の説明の意味までは検証しないので、handler・DTO・呼び出すサービスを確認して更新する。
 
 ```sh
 cd backend
