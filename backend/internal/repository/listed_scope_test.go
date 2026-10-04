@@ -324,3 +324,40 @@ func TestGetPerformanceCountsQueryExact(t *testing.T) {
 		})
 	}
 }
+
+// タグ一覧では件数と一覧で FROM/JOIN が別々に組み立てられる。
+// 両方の SQL 全体を固定し、片方の JOIN だけを取り違えた改変も検出する。
+func TestFindByTagIDQueriesExact(t *testing.T) {
+	const restricted = "COALESCE(st.restriction_override, EXISTS (SELECT 1 FROM stream_stream_tags mt WHERE mt.stream_id = st.id AND mt.tag_id = 'members_only') AND NOT COALESCE((SELECT bool_and(COALESCE(eg.members_only_policy, '') = 'allow') FROM stream_singers eo JOIN singers eg ON eg.id = eo.singer_id WHERE eo.stream_id = st.id AND eo.is_owner), FALSE))"
+	const public = "st.is_hidden = FALSE AND NOT " + restricted + " AND EXISTS (SELECT 1 FROM stream_singers ss JOIN singers si ON si.id = ss.singer_id WHERE ss.stream_id = st.id AND si.is_hidden = FALSE)"
+	const joins = "FROM performances p JOIN streams st ON p.stream_id = st.id "
+	const tagJoin = "JOIN performance_performance_tags ppt ON ppt.performance_id = p.id "
+	const projection = "SELECT p.id, p.stream_id, p.song_id, p.start_seconds, p.end_seconds, p.order_index, p.holodex_song_id, p.custom_tags, p.created_at, p.end_source, p.end_confirmed, st.title AS stream_title, st.stream_date, st.thumbnail_url, s.name AS song_name, s.original_artist, s.arts, " + restricted + " "
+	for _, tc := range []struct {
+		name   string
+		access ViewerAccess
+		scope  string
+	}{
+		{"public", PublicAccess, public}, {"restricted-view", RestrictedView, "TRUE"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, rec := newRecordingDB(t)
+			if _, _, err := NewPerformanceRepository(db).FindByTagID("acoustic", 20, 0, tc.access); err != nil {
+				t.Fatal(err)
+			}
+			want := []string{
+				"SELECT COUNT(*) " + joins + tagJoin + "WHERE ppt.tag_id = $1 AND " + tc.scope,
+				projection + joins + "JOIN songs s ON p.song_id = s.id " + tagJoin + "WHERE ppt.tag_id = $1 AND " + tc.scope + " ORDER BY st.stream_date DESC, p.order_index ASC LIMIT $2 OFFSET $3",
+			}
+			issued := rec.all()
+			if len(issued) != len(want) {
+				t.Fatalf("queries=%d want=%d", len(issued), len(want))
+			}
+			for i, q := range issued {
+				if got := strings.Join(strings.Fields(q), " "); got != want[i] {
+					t.Errorf("query %d got: %s\nwant: %s", i, got, want[i])
+				}
+			}
+		})
+	}
+}
