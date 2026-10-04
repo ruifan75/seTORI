@@ -748,11 +748,6 @@ func (s *BackupService) EncryptPlaintextDriveToken() (bool, error) {
 	return true, nil
 }
 
-// DriveConfigured は OAuth クライアントが設定済みかを返す。
-func (s *BackupService) DriveConfigured() bool {
-	return s.drive.Configured()
-}
-
 // DriveConnected はアカウント連携済みかを返す。
 func (s *BackupService) DriveConnected() bool {
 	if !s.drive.Configured() {

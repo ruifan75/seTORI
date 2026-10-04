@@ -477,14 +477,6 @@ func buildStats(path string, dryRun, saved bool, songs []dto.CommentSong, aliasA
 	return st
 }
 
-// strPtrEq は *string 同士を値で比べる（どちらも nil なら等しい）。
-func strPtrEq(a, b *string) bool {
-	if a == nil || b == nil {
-		return a == b
-	}
-	return *a == *b
-}
-
 // matchInputs は照合に渡す名称を返す。正規化結果が無い古いデータは抽出名に落とす。
 //
 // 分析時に AI が空の曲名を返した行がこれに当たる（a0973fb 以前）。落とし先が無いと
