@@ -204,3 +204,104 @@ func (r *channelAliasRows) Next(dest []driver.Value) error {
 	r.values = r.values[1:]
 	return nil
 }
+
+// 復号はセグメントごとに1回だけ行い、現れた / を区切りへ昇格させない。
+// 公開の詳細・歌唱と content:edit の自動処理設定が、新旧名で一致することを固定する。
+// 大文字・近い名前は ServeMux が別のパスとして扱う。期待値は登録や認可実装から
+// 生成せず、パス解釈と権限の契約から指定する。実 Router で拒否時に
+// 認証以外の DB 操作へ進まないことも見る。
+func TestChannelAPIAliasPathBoundaries(t *testing.T) {
+	cases := []struct {
+		method, path, normalized, pattern, permission string
+		success                                       int
+	}{
+		{"GET", "/api/singers/auto-fill", "/api/singers/auto-fill", "GET /api/singers/auto-fill", "content:edit", 200},
+		{"GET", "/api/channels/auto-fill", "/api/channels/auto-fill", "GET /api/channels/auto-fill", "content:edit", 200},
+		{"HEAD", "/api/%73ingers/%61uto-fill", "/api/singers/auto-fill", "GET /api/singers/auto-fill", "content:edit", 200},
+		{"GET", "/%61pi/%73ingers/auto%2Dfill", "/api/singers/auto-fill", "GET /api/singers/auto-fill", "content:edit", 200},
+		{"GET", "/%61pi/%63hannels/%61uto-fill", "/api/channels/auto-fill", "GET /api/channels/auto-fill", "content:edit", 200},
+		{"GET", "/api/singers%2Fauto-fill", "/api/singers%2Fauto-fill", "", "", 404},
+		{"GET", "/api/channels%2Fauto-fill", "/api/channels%2Fauto-fill", "", "", 404},
+		{"GET", "/api/singers/%2Fauto-fill", "/api/singers/%2Fauto-fill", "GET /api/singers/{id}", "", 200},
+		{"GET", "/api/channels/.%2fauto-fill", "/api/channels/.%2Fauto-fill", "GET /api/channels/{id}", "", 200},
+		{"GET", "/api/singers/auto-fill%2Fchild", "/api/singers/auto-fill%2Fchild", "GET /api/singers/{id}", "", 200},
+		{"GET", "/api/channels/auto-fill%2fchild", "/api/channels/auto-fill%2Fchild", "GET /api/channels/{id}", "", 200},
+		{"GET", "/api/singers/auto%252Dfill", "/api/singers/auto%2Dfill", "GET /api/singers/{id}", "", 200},
+		{"GET", "/api/channels/auto%252Dfill", "/api/channels/auto%2Dfill", "GET /api/channels/{id}", "", 200},
+		{"GET", "/api/singers-report/auto-fill", "/api/singers-report/auto-fill", "", "", 404},
+		{"GET", "/api/channels-report/auto-fill", "/api/channels-report/auto-fill", "", "", 404},
+		{"GET", "/api/%73ingers-report/auto-fill", "/api/singers-report/auto-fill", "", "", 404},
+		{"GET", "/api/singers/auto-fill-report", "/api/singers/auto-fill-report", "GET /api/singers/{id}", "", 200},
+		{"GET", "/api/channels/auto-fill-report", "/api/channels/auto-fill-report", "GET /api/channels/{id}", "", 200},
+		{"GET", "/api/SINGERS/auto-fill", "/api/SINGERS/auto-fill", "", "", 404},
+		{"GET", "/api/CHANNELS/auto-fill", "/api/CHANNELS/auto-fill", "", "", 404},
+		{"GET", "/api/%53INGERS/auto-fill", "/api/SINGERS/auto-fill", "", "", 404},
+		{"GET", "/api/singers/AUTO-FILL", "/api/singers/AUTO-FILL", "GET /api/singers/{id}", "", 200},
+		{"GET", "/api/channels/a%2Fb/performances", "/api/channels/a%2Fb/performances", "GET /api/channels/{id}/performances", "", 200},
+		{"GET", "/api/%73ingers/a%2Fb/performances", "/api/singers/a%2Fb/performances", "GET /api/singers/{id}/performances", "", 200},
+		{"PUT", "/api/%73ingers/channel/%76isibility", "/api/singers/channel/visibility", "PUT /api/singers/{id}/visibility", "content:edit", 200},
+		{"PUT", "/api/channels/channel%2Fchild/visibility", "/api/channels/channel%2Fchild/visibility", "PUT /api/channels/{id}/visibility", "content:edit", 200},
+		{"POST", "/api/%73ingers", "/api/singers", "POST /api/singers", "content:edit", 400},
+		{"POST", "/api/%63hannels", "/api/channels", "POST /api/channels", "content:edit", 400},
+	}
+	users := []struct {
+		token, permissions string
+		edit               bool
+	}{
+		{"", "{}", false}, {"viewer", "{}", false}, {"restricted", "{restricted:view}", false},
+		{"editor", "{content:edit}", true}, {"both", "{content:edit,restricted:view}", true}, {"admin", "{*}", true},
+	}
+	for _, tc := range cases {
+		for _, u := range users {
+			t.Run(tc.method+tc.path+"/"+u.token, func(t *testing.T) {
+				fixture := &channelAliasDB{permissions: u.permissions}
+				db := sql.OpenDB(fixture)
+				defer db.Close()
+				r := &Router{mux: http.NewServeMux(),
+					authService: service.NewAuthService(repository.NewAuthRepository(db)),
+					singerService: service.NewSingerService(repository.NewSingerRepository(db),
+						repository.NewStreamRepository(db), repository.NewPerformanceRepository(db)),
+				}
+				r.setupRoutes()
+				req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(`{"is_hidden":true}`))
+				if u.token != "" {
+					req.Header.Set("Authorization", "Bearer "+u.token)
+				}
+				if got := authzPath(req.URL.EscapedPath()); got != tc.normalized {
+					t.Fatalf("normalized=%q want=%q", got, tc.normalized)
+				}
+				if _, pattern := r.mux.Handler(req); pattern != tc.pattern {
+					t.Fatalf("pattern=%q want=%q", pattern, tc.pattern)
+				}
+				perm, login := requiredPermission(tc.method, authzPath(req.URL.EscapedPath()))
+				if perm != tc.permission || login != (tc.permission != "") {
+					t.Errorf("permission=(%q,%t) want=(%q,%t)", perm, login, tc.permission, tc.permission != "")
+				}
+				w := httptest.NewRecorder()
+				r.ServeHTTP(w, req)
+				want := tc.success
+				if tc.permission != "" && !u.edit {
+					want = 403
+					if u.token == "" {
+						want = 401
+					}
+				}
+				if w.Code != want {
+					t.Fatalf("status=%d want=%d body=%s", w.Code, want, w.Body.String())
+				}
+				if fixture.unexpected != "" {
+					t.Fatal(fixture.unexpected)
+				}
+				if tc.permission != "" && !u.edit {
+					n := 0
+					if u.token != "" {
+						n = 1
+					}
+					if len(fixture.calls) != n {
+						t.Fatalf("rejected request reached repository: %#v", fixture.calls)
+					}
+				}
+			})
+		}
+	}
+}
