@@ -2,12 +2,14 @@ package database
 
 import (
 	"database/sql"
+	"errors"
 	"os"
 	"strings"
 	"testing"
 	"testing/fstest"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 // Use a dedicated test DB. Each case owns a new schema; no application rows are touched.
@@ -108,6 +110,68 @@ func TestRunMigrationsPostgresRecordFailureCanRetry(t *testing.T) {
 				if !exists {
 					t.Fatalf("%s missing after retry", table)
 				}
+			}
+		})
+	}
+}
+
+// Tx 非対応の文は PostgreSQL の実行エラーで戻り、Tx を終える文は
+// 実行前の検査で戻る。どちらも DDL と適用記録を残さないことを確認する。
+func TestApplyMigrationPostgresRejectsTransactionEscape(t *testing.T) {
+	url := os.Getenv("SETORI_TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("SETORI_TEST_DATABASE_URL is not set")
+	}
+	for _, tc := range []struct {
+		command string
+		pgError bool
+	}{
+		{"CREATE INDEX CONCURRENTLY idx_probe ON probe(id)", true},
+		{"VACUUM probe", true},
+		{"COMMIT", false},
+		{"COMMIT AND CHAIN", false},
+		{"ROLLBACK", false},
+		{"ROLLBACK AND CHAIN", false},
+	} {
+		t.Run(tc.command, func(t *testing.T) {
+			db, err := sql.Open("postgres", url)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			db.SetMaxOpenConns(1)
+			schema := "migration_escape_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+			if _, err := db.Exec("CREATE SCHEMA " + schema); err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				if _, err := db.Exec("DROP SCHEMA " + schema + " CASCADE"); err != nil {
+					t.Error(err)
+				}
+			}()
+			if _, err := db.Exec("SET search_path TO " + schema + "; SET statement_timeout TO '15s'; SET lock_timeout TO '3s'; CREATE TABLE schema_migrations (version TEXT PRIMARY KEY)"); err != nil {
+				t.Fatal(err)
+			}
+			err = applyMigration(db, "069_probe.sql", []byte("CREATE TABLE probe(id int); "+tc.command+";"))
+			if tc.pgError {
+				var pgErr *pq.Error
+				if !errors.As(err, &pgErr) || pgErr.Code != "25001" {
+					t.Fatalf("got %v; want PostgreSQL active_sql_transaction (25001)", err)
+				}
+			} else {
+				head := strings.Fields(tc.command)[0]
+				want := "マイグレーション 069_probe.sql の SQL 検査失敗: 文 2: " + head + " は使えません（トランザクションは migration runner が管理します）"
+				if err == nil || err.Error() != want {
+					t.Fatalf("got %v; want %s", err, want)
+				}
+			}
+			var tableExists bool
+			var recorded int
+			if err := db.QueryRow("SELECT to_regclass($1) IS NOT NULL, (SELECT count(*) FROM schema_migrations)", schema+".probe").Scan(&tableExists, &recorded); err != nil {
+				t.Fatal(err)
+			}
+			if tableExists || recorded != 0 {
+				t.Fatalf("nontransactional SQL left state: table=%v records=%d", tableExists, recorded)
 			}
 		})
 	}

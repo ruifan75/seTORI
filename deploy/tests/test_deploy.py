@@ -26,7 +26,7 @@ class DeployVersionTest(unittest.TestCase):
                 'git': '#!/bin/sh\ncase "$*" in *"--short HEAD") echo ' + TARGET[:7] + ';; *"rev-parse HEAD") echo ' + TARGET + ';; *) exit 90;; esac\n',
                 'docker': '#!/bin/sh\necho "$*" >> "$DEPLOY_PROBE_DIR/docker.log"\nexit 0\n',
                 'sleep': '#!/bin/sh\nexit 0\n',
-                'curl': '#!' + shutil.which('python3') + '\n' + '''import json, os, pathlib, sys
+                'curl': '#!' + shutil.which('python3') + '\n' + '''import json, os, pathlib, sys, time
 root = pathlib.Path(os.environ['DEPLOY_PROBE_DIR'])
 with (root / 'curl.log').open('a') as output:
     output.write(json.dumps(sys.argv[1:]) + '\\n')
@@ -35,6 +35,11 @@ count = int(count_file.read_text()) if count_file.exists() else 0
 responses = json.loads((root / 'responses.json').read_text())
 response = responses[min(count, len(responses) - 1)]
 count_file.write_text(str(count + 1))
+if isinstance(response, dict):
+    time.sleep(response.get('delay', 0))
+    if 'exit' in response:
+        sys.exit(response['exit'])
+    response = response['body']
 if response is None:
     sys.exit(22)
 print(response)
@@ -66,6 +71,16 @@ print(response)
 
     def test_waits_for_target_after_old_version(self):
         result, calls = self.run_deploy([json.dumps({'commit': OLD}), json.dumps({'commit': TARGET[:7]})])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(calls), 2)
+
+    def test_timeout_then_delayed_target(self):
+        # A curl timeout is retryable, and a response arriving within the
+        # deadline still succeeds. The stub does not measure real curl timing.
+        result, calls = self.run_deploy([
+            {'exit': 28},
+            {'delay': 0.1, 'body': json.dumps({'commit': TARGET[:7]})},
+        ])
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(len(calls), 2)
 

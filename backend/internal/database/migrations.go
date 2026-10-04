@@ -78,6 +78,9 @@ func runMigrations(db *sql.DB, files fs.FS) error {
 // ADD COLUMN / CREATE TABLE を重複実行する状態を残さない。
 // 先に成功したファイルは保持し、失敗したファイルから再開する。
 func applyMigration(db *sql.DB, version string, content []byte) error {
+	if err := validateMigrationSQL(string(content)); err != nil {
+		return fmt.Errorf("マイグレーション %s の SQL 検査失敗: %w", version, err)
+	}
 	tx, err := db.Begin()
 	if err != nil {
 		return fmt.Errorf("マイグレーション %s のトランザクション開始失敗: %w", version, err)

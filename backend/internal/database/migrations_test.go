@@ -24,6 +24,7 @@ var migrationProbeVersions = []string{"062_first.sql", "066_second.sql", "067_la
 
 type migrationProbeState struct {
 	tables, versions map[string]bool
+	files            fstest.MapFS
 	events           []string
 	fail             string
 	began            int
@@ -68,8 +69,9 @@ func (c *migrationProbeConn) ExecContext(_ context.Context, q string, args []dri
 	if c.tx != nil {
 		where = "tx"
 	}
-	for _, version := range migrationProbeVersions {
-		if q != string(migrationProbeFiles["migrations/"+version].Data) {
+	for path, file := range c.state.files {
+		version := strings.TrimPrefix(path, "migrations/")
+		if q != string(file.Data) {
 			continue
 		}
 		c.state.events = append(c.state.events, "ddl:"+version+":"+where)
@@ -165,7 +167,7 @@ func (tx *migrationProbeTx) Rollback() error {
 }
 func newMigrationProbe(t *testing.T, fail string) (*sql.DB, *migrationProbeState) {
 	t.Helper()
-	state := &migrationProbeState{tables: make(map[string]bool), versions: make(map[string]bool), fail: fail}
+	state := &migrationProbeState{tables: make(map[string]bool), versions: make(map[string]bool), files: migrationProbeFiles, fail: fail}
 	db := sql.OpenDB(migrationProbeConnector{state})
 	// An accidental db.Exec inside the transaction must execute, rather than deadlock.
 	db.SetMaxOpenConns(2)
