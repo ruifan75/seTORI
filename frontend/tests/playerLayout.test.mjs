@@ -20,21 +20,31 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 // 情報カードの本文・外部 YouTube API・セットリストの行は再現対象に含めない。
 async function layoutFixture(dir) {
   const page = join(root, 'src/pages/StreamDetailPage.tsx');
+  const panel = join(root, 'src/pages/stream-detail/StreamPlayerPanel.tsx');
   const noticeFile = join(root, 'src/components/UnplayableNotice.tsx');
-  const source = await readFile(page, 'utf8');
-  const tree = ts.createSourceFile(page, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const source = await readFile(panel, 'utf8');
+  const tree = ts.createSourceFile(panel, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   let youtube;
   function visit(node, fn) { fn(node); ts.forEachChild(node, (child) => visit(child, fn)); }
   visit(tree, (node) => {
     if (ts.isJsxSelfClosingElement(node) && node.tagName.getText(tree) === 'YoutubePlayer') youtube = node;
   });
   function classes(node) {
-    return node.openingElement.attributes.properties.find((p) => p.name?.getText(tree) === 'className')?.initializer?.text;
+    return node.openingElement.attributes.properties.find((p) => p.name?.getText(node.getSourceFile()) === 'className')?.initializer?.text;
   }
   const ancestors = [];
   for (let node = youtube.parent; node; node = node.parent) {
     if (ts.isJsxElement(node) && classes(node)) ancestors.push(node);
   }
+  // ページの左右ペインと、切り出したプレイヤーカードを両方たどる。
+  const pageTree = ts.createSourceFile(page, await readFile(page, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  visit(pageTree, (node) => {
+    if (ts.isJsxSelfClosingElement(node) && node.tagName.getText(pageTree) === 'StreamPlayerPanel') {
+      for (let parent = node.parent; parent; parent = parent.parent) {
+        if (ts.isJsxElement(parent) && classes(parent)) ancestors.push(parent);
+      }
+    }
+  });
   assert.equal(ancestors.length, 6, 'プレイヤーの構造が変わったら fixture も見直す');
   const [video, widthBox, sizeBox, card, left, outer] = ancestors;
   let timeline, rows;
@@ -56,7 +66,7 @@ async function layoutFixture(dir) {
     const { default: Player } = await server.ssrLoadModule('/src/components/YoutubePlayer.tsx');
     youtubeHTML = renderToStaticMarkup(createElement(Player, { videoId: 'fixture' }));
   } finally { await server.close(); }
-  const { css } = await postcss([tailwindcss({ ...config, content: [page, noticeFile, join(root, 'src/components/YoutubePlayer.tsx')] })])
+  const { css } = await postcss([tailwindcss({ ...config, content: [page, panel, noticeFile, join(root, 'src/components/YoutubePlayer.tsx')] })])
     .process('@tailwind base;@tailwind components;@tailwind utilities;body{margin:0;min-width:320px}', { from: undefined });
   function div(node, content, id = '') {
     return `<div ${id ? `id="${id}"` : ''} class="${classes(node)}">${content}</div>`;
