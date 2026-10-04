@@ -51,50 +51,70 @@ func TestHolodexUploadPermissionMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 	baseline := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
-	for _, adminPerms := range [][]string{{"*"}, {"content:edit", "sync:run"}, {"holodex:upload"}} {
-		if _, err := tx.ExecContext(ctx, "DELETE FROM roles"); err != nil {
-			t.Fatal(err)
-		}
-		fixtures := []struct {
-			name   string
-			system bool
-			before []string
-			after  []string
-		}{
-			{"admin", true, adminPerms, append(append([]string{}, adminPerms...), "holodex:upload")},
-			{"editor", true, []string{"content:edit", "sync:run", "logs:view"}, []string{"content:edit", "sync:run", "logs:view"}},
-			{"viewer", true, []string{}, []string{}},
-			{"custom sync", false, []string{"sync:run", "content:edit"}, []string{"sync:run", "content:edit"}},
-			{"custom wildcard", false, []string{"*"}, []string{"*"}},
-			{"custom prior unknown key", false, []string{"sync:run", "holodex:upload"}, []string{"sync:run"}},
-			{"editor prior unknown key", true, []string{"holodex:upload", "content:edit"}, []string{"content:edit"}},
-		}
-		if reflect.DeepEqual(adminPerms, []string{"holodex:upload"}) {
-			fixtures[0].after = adminPerms
-		}
-		for _, f := range fixtures {
-			if _, err := tx.ExecContext(ctx, "INSERT INTO roles VALUES ($1, $2, $3, $4)", f.name, f.system, pq.Array(f.before), baseline); err != nil {
+	for _, admin := range []struct {
+		name   string
+		system bool
+		before []string
+		after  []string
+	}{
+		{"default admin", true, []string{"*"}, []string{"*", "holodex:upload"}},
+		{"edited admin with sync", true, []string{"content:edit", "sync:run"}, []string{"content:edit", "sync:run", "holodex:upload"}},
+		{"admin without write permissions", true, []string{"content:edit", "users:manage"}, []string{"content:edit", "users:manage"}},
+		{"admin with empty permissions", true, []string{}, []string{}},
+		{"admin with prior upload", true, []string{"holodex:upload"}, []string{"holodex:upload"}},
+		{"admin with all prior keys", true, []string{"*", "sync:run", "holodex:upload"}, []string{"*", "sync:run", "holodex:upload"}},
+		{"non-system admin", false, []string{"sync:run", "holodex:upload"}, []string{"sync:run"}},
+	} {
+		t.Run(admin.name, func(t *testing.T) {
+			if _, err := tx.ExecContext(ctx, "DELETE FROM roles"); err != nil {
 				t.Fatal(err)
 			}
-		}
-		for run := 0; run < 2; run++ {
-			if _, err := tx.ExecContext(ctx, string(content)); err != nil {
-				t.Fatal(err)
+			fixtures := []struct {
+				name   string
+				system bool
+				before []string
+				after  []string
+			}{
+				{"admin", admin.system, admin.before, admin.after},
+				{"editor", true, []string{"content:edit", "sync:run", "logs:view"}, []string{"content:edit", "sync:run", "logs:view"}},
+				{"viewer", true, []string{}, []string{}},
+				{"custom sync", false, []string{"sync:run", "content:edit"}, []string{"sync:run", "content:edit"}},
+				{"custom wildcard", false, []string{"*"}, []string{"*"}},
+				{"custom wildcard with prior upload", false, []string{"*", "holodex:upload"}, []string{"*"}},
+				{"custom prior unknown key", false, []string{"sync:run", "holodex:upload"}, []string{"sync:run"}},
+				{"editor prior unknown key", true, []string{"holodex:upload", "content:edit"}, []string{"content:edit"}},
 			}
 			for _, f := range fixtures {
-				var got []string
-				var updated time.Time
-				if err := tx.QueryRowContext(ctx, "SELECT permissions, updated_at FROM roles WHERE name = $1", f.name).Scan(pq.Array(&got), &updated); err != nil {
+				if _, err := tx.ExecContext(ctx, "INSERT INTO roles VALUES ($1, $2, $3, $4)", f.name, f.system, pq.Array(f.before), baseline); err != nil {
 					t.Fatal(err)
 				}
-				if !reflect.DeepEqual(got, f.after) {
-					t.Errorf("run %d role %q: permissions = %v, want %v", run, f.name, got, f.after)
+			}
+			for run := 0; run < 2; run++ {
+				// NOW() は transaction 内で一定なので、再実行前に時刻を戻して
+				// 不要な UPDATE も検出する（時刻同士を比べるだけでは見逃す）。
+				if run == 1 {
+					if _, err := tx.ExecContext(ctx, "UPDATE roles SET updated_at = $1", baseline); err != nil {
+						t.Fatal(err)
+					}
 				}
-				changed := !reflect.DeepEqual(f.before, f.after)
-				if changed == updated.Equal(baseline) {
-					t.Errorf("run %d role %q: changed = %v, updated_at = %v", run, f.name, changed, updated)
+				if _, err := tx.ExecContext(ctx, string(content)); err != nil {
+					t.Fatal(err)
+				}
+				for _, f := range fixtures {
+					var got []string
+					var updated time.Time
+					if err := tx.QueryRowContext(ctx, "SELECT permissions, updated_at FROM roles WHERE name = $1", f.name).Scan(pq.Array(&got), &updated); err != nil {
+						t.Fatal(err)
+					}
+					if !reflect.DeepEqual(got, f.after) {
+						t.Errorf("run %d role %q: permissions = %v, want %v", run, f.name, got, f.after)
+					}
+					changed := run == 0 && !reflect.DeepEqual(f.before, f.after)
+					if changed == updated.Equal(baseline) {
+						t.Errorf("run %d role %q: changed = %v, updated_at = %v", run, f.name, changed, updated)
+					}
 				}
 			}
-		}
+		})
 	}
 }

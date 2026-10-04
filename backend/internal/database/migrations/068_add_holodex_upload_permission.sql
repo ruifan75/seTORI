@@ -7,8 +7,10 @@ SET permissions = array_remove(permissions, 'holodex:upload'), updated_at = NOW(
 WHERE NOT (is_system AND name = 'admin')
   AND 'holodex:upload' = ANY(permissions);
 
--- admin の権限が編集済みで '*' を持たない場合も、これまでの送信能力を保つ。
+-- admin の旧来の送信能力を保つ。権限編集で '*' と sync:run を両方外した
+-- admin に、運用者名義の書き込みを新しく許可しない。
 UPDATE roles
 SET permissions = array_append(permissions, 'holodex:upload'), updated_at = NOW()
 WHERE is_system AND name = 'admin'
+  AND ('*' = ANY(permissions) OR 'sync:run' = ANY(permissions))
   AND NOT ('holodex:upload' = ANY(permissions));

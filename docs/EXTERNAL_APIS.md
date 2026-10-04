@@ -94,6 +94,8 @@
   認可は ServeMux より前の `requiredPermission` で行い、同じ端点の配下も保護します。
   既定では system role の admin だけに付与し、editor・既存のカスタムロールの
   `sync:run` からは引き継ぎません。移行前に非 admin へ保存されていた同名キーも除きます。
+  admin でも `*` と `sync:run` を両方外していた場合は、新たに送信権限を付けません。
+  admin に既に保存されていた `holodex:upload` はそのまま保ちます。
   `*` は引き続き全権限です。必要な委任はロール管理で明示的に行います。
   読み取り同期は従来どおり `sync:run`。配信編集の送信ボタンも `holodex:upload` で表示し、
   `content:edit` だけ、または既定の editor の権限だけでは表示しません。
