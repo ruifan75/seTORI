@@ -50,3 +50,23 @@ func TestParseIDQueryParamsCombinesNewAndLegacyValues(t *testing.T) {
 		t.Fatalf("parseIDQueryParams() = %#v, want %#v", got, want)
 	}
 }
+
+// 配信検索の4条件とも同じIDを2回指定しても1条件になる。旧名との混在も保つ。
+func TestStreamSearchDuplicateQueryIDs(t *testing.T) {
+	req := httptest.NewRequest("GET", "/api/streams/search?participant_ids=owner,guest,owner&participant_id=guest&singer_id=owner&vocalist_ids=voice,guest,voice&vocalist_id=guest&tags=singing,3d,singing&performance_tags=acoustic,piano,acoustic", nil)
+	for _, tc := range []struct {
+		name      string
+		got, want []string
+	}{
+		{"participant", parseIDQueryParams(req, "participant_ids", "participant_id", "singer_id"), []string{"owner", "guest"}},
+		{"vocalist", parseIDQueryParams(req, "vocalist_ids", "vocalist_id"), []string{"voice", "guest"}},
+		{"stream-tag", parseCSVQueryParam(req, "tags"), []string{"singing", "3d"}},
+		{"performance-tag", parseCSVQueryParam(req, "performance_tags"), []string{"acoustic", "piano"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if !reflect.DeepEqual(tc.got, tc.want) {
+				t.Fatalf("%s: got=%v want=%v", tc.name, tc.got, tc.want)
+			}
+		})
+	}
+}

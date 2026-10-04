@@ -437,40 +437,6 @@ func (r *StreamRepository) FindCommentHashRows() ([]CommentHashRow, error) {
 	return out, rows.Err()
 }
 
-// UpdateCommentSongsHash は comment_songs_hash のみを書き換える（comment_songs / comment_raw は不変）。
-func (r *StreamRepository) UpdateCommentSongsHash(id, hash string) error {
-	_, err := r.db.Exec(`UPDATE streams SET comment_songs_hash = $2 WHERE id = $1`, id, hash)
-	if err != nil {
-		return fmt.Errorf("update comment_songs_hash: %w", err)
-	}
-	return nil
-}
-
-// FindByDateRange は日付範囲で歌枠を取得する。
-func (r *StreamRepository) FindByDateRange(start, end time.Time) ([]models.Stream, error) {
-	query := streamListQuery("streams", `
-		WHERE stream_date >= $1 AND stream_date <= $2
-		ORDER BY stream_date DESC`)
-
-	rows, err := r.db.Query(query, start, end)
-	if err != nil {
-		return nil, fmt.Errorf("query streams by date range: %w", err)
-	}
-	defer rows.Close()
-
-	var streams []models.Stream
-	for rows.Next() {
-		var s models.Stream
-		s, err := scanStreamRow(rows)
-		if err != nil {
-			return nil, fmt.Errorf("scan stream: %w", err)
-		}
-		streams = append(streams, s)
-	}
-
-	return streams, nil
-}
-
 // GetTags は歌枠に付いたすべてのタグを取得する。
 func (r *StreamRepository) GetTags(streamID string) ([]models.StreamTag, error) {
 	query := `
@@ -754,9 +720,15 @@ func (r *StreamRepository) FindStreamsForBatch(mode, singerID string, hidden *bo
 }
 
 // SearchStreams は配信元・参加者・ボーカル・タグを AND で組み合わせて検索する。
-// StreamTagIDs / PerformanceTagIDs の各配列内も AND 条件。
+// 各配列内も AND 条件。一致する配信IDを条件ごとに集計してから交差させる。
 // 検索は明示的な操作なので、非表示の配信も対象に含める。
 func (r *StreamRepository) SearchStreams(filters models.StreamSearchFilters, limit, offset int, access ViewerAccess) ([]models.Stream, int, error) {
+	// 歌唱の検索に使える配信を先に確定し、2つの集計で共有する。
+	// MATERIALIZED で秘匿判定を歌唱行ごと・条件ごとに再評価させない。
+	prefix := ""
+	if len(filters.VocalistIDs) > 0 || len(filters.PerformanceTagIDs) > 0 {
+		prefix = "WITH searchable_performance_streams AS MATERIALIZED (SELECT st.id FROM streams st WHERE " + NotRestrictedFor("st", access) + ")\n"
+	}
 	where := "WHERE TRUE"
 	args := []any{}
 	i := 1
@@ -771,7 +743,7 @@ func (r *StreamRepository) SearchStreams(filters models.StreamSearchFilters, lim
 		i++
 	}
 	if len(filters.ParticipantIDs) > 0 {
-		where += fmt.Sprintf(" AND (SELECT COUNT(DISTINCT ss.singer_id) FROM stream_singers ss WHERE ss.stream_id = s.id AND ss.singer_id = ANY($%d)) = %d", i, len(filters.ParticipantIDs))
+		where += fmt.Sprintf(" AND s.id IN (SELECT ss.stream_id FROM stream_singers ss WHERE ss.singer_id = ANY($%d) GROUP BY ss.stream_id HAVING COUNT(DISTINCT ss.singer_id) = %d)", i, len(filters.ParticipantIDs))
 		args = append(args, pq.Array(filters.ParticipantIDs))
 		i++
 	}
@@ -779,27 +751,27 @@ func (r *StreamRepository) SearchStreams(filters models.StreamSearchFilters, lim
 	// 秘匿された配信は突き合わせの対象から外す。配信のタイトルは公開してよいが、
 	// 「この配信でこの人が歌った」は伏せている中身の一部。
 	if len(filters.VocalistIDs) > 0 {
-		where += fmt.Sprintf(" AND (SELECT COUNT(DISTINCT ps.singer_id) FROM performances p JOIN performance_singers ps ON ps.performance_id = p.id JOIN streams st ON st.id = p.stream_id WHERE p.stream_id = s.id AND "+NotRestrictedFor("st", access)+" AND ps.singer_id = ANY($%d)) = %d", i, len(filters.VocalistIDs))
+		where += fmt.Sprintf(" AND s.id IN (SELECT p.stream_id FROM performances p JOIN performance_singers ps ON ps.performance_id = p.id JOIN searchable_performance_streams st ON st.id = p.stream_id WHERE ps.singer_id = ANY($%d) GROUP BY p.stream_id HAVING COUNT(DISTINCT ps.singer_id) = %d)", i, len(filters.VocalistIDs))
 		args = append(args, pq.Array(filters.VocalistIDs))
 		i++
 	}
 	if len(filters.StreamTagIDs) > 0 {
-		where += fmt.Sprintf(" AND (SELECT COUNT(DISTINCT sst.tag_id) FROM stream_stream_tags sst WHERE sst.stream_id = s.id AND sst.tag_id = ANY($%d)) = %d", i, len(filters.StreamTagIDs))
+		where += fmt.Sprintf(" AND s.id IN (SELECT sst.stream_id FROM stream_stream_tags sst WHERE sst.tag_id = ANY($%d) GROUP BY sst.stream_id HAVING COUNT(DISTINCT sst.tag_id) = %d)", i, len(filters.StreamTagIDs))
 		args = append(args, pq.Array(filters.StreamTagIDs))
 		i++
 	}
 	if len(filters.PerformanceTagIDs) > 0 {
-		where += fmt.Sprintf(" AND (SELECT COUNT(DISTINCT ppt.tag_id) FROM performances p JOIN performance_performance_tags ppt ON ppt.performance_id = p.id JOIN streams st ON st.id = p.stream_id WHERE p.stream_id = s.id AND "+NotRestrictedFor("st", access)+" AND ppt.tag_id = ANY($%d)) = %d", i, len(filters.PerformanceTagIDs))
+		where += fmt.Sprintf(" AND s.id IN (SELECT p.stream_id FROM performances p JOIN performance_performance_tags ppt ON ppt.performance_id = p.id JOIN searchable_performance_streams st ON st.id = p.stream_id WHERE ppt.tag_id = ANY($%d) GROUP BY p.stream_id HAVING COUNT(DISTINCT ppt.tag_id) = %d)", i, len(filters.PerformanceTagIDs))
 		args = append(args, pq.Array(filters.PerformanceTagIDs))
 		i++
 	}
 
 	var total int
-	if err := r.db.QueryRow("SELECT COUNT(*) FROM streams s "+where, args...).Scan(&total); err != nil {
+	if err := r.db.QueryRow(prefix+"SELECT COUNT(*) FROM streams s "+where, args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count searched streams: %w", err)
 	}
 
-	query := fmt.Sprintf(streamListQuery("s", `
+	query := prefix + fmt.Sprintf(streamListQuery("s", `
 		%s
 		ORDER BY s.stream_date DESC
 		LIMIT $%d OFFSET $%d`), where, i, i+1)
@@ -1102,24 +1074,6 @@ func (r *StreamRepository) SaveHolodexSongs(id string, normalized []byte, hash s
 	return nil
 }
 
-// CheckHashChanged は Holodex データが変更されたか確認する。
-func (r *StreamRepository) CheckHashChanged(id, newHash string) (bool, error) {
-	var currentHash sql.NullString
-	err := r.db.QueryRow("SELECT holodex_hash FROM streams WHERE id = $1", id).Scan(&currentHash)
-	if err == sql.ErrNoRows {
-		return true, nil // 新しいデータ
-	}
-	if err != nil {
-		return false, fmt.Errorf("check hash: %w", err)
-	}
-
-	if !currentHash.Valid {
-		return true, nil
-	}
-
-	return currentHash.String != newHash, nil
-}
-
 // ========== Stream Singers ==========
 
 // GetSingers はこの配信に参加したすべての歌手を取得する。
@@ -1181,15 +1135,6 @@ func (r *StreamRepository) AddSinger(streamID, singerID string, isOwner bool) er
 	return nil
 }
 
-// RemoveSinger は配信から参加者を外す。
-func (r *StreamRepository) RemoveSinger(streamID, singerID string) error {
-	_, err := r.db.Exec("DELETE FROM stream_singers WHERE stream_id = $1 AND singer_id = $2", streamID, singerID)
-	if err != nil {
-		return fmt.Errorf("remove stream singer: %w", err)
-	}
-	return nil
-}
-
 // SetSingers は配信の参加者を設定する（既存値を置換）。
 func (r *StreamRepository) SetSingers(streamID string, singerIDs []string, ownerID string) error {
 	tx, err := r.db.Begin()
@@ -1220,15 +1165,6 @@ func (r *StreamRepository) SetSingers(streamID string, singerIDs []string, owner
 		return fmt.Errorf("commit transaction: %w", err)
 	}
 
-	return nil
-}
-
-// ClearTags は配信のタグをすべて消す。
-func (r *StreamRepository) ClearTags(streamID string) error {
-	_, err := r.db.Exec("DELETE FROM stream_stream_tags WHERE stream_id = $1", streamID)
-	if err != nil {
-		return fmt.Errorf("clear stream tags: %w", err)
-	}
 	return nil
 }
 
@@ -1553,7 +1489,7 @@ func (r *StreamRepository) ClearCommentsUnavailable(id string) error {
 //	終了から days 日以内 … 古い配信に今さら歌単が貼られることは稀
 //	未来日でない        … 予約配信を配信前から取りに行かない
 //
-// 取り直しは外部 API を叩く（`GetVideoComments` は YouTube → Holodex の
+// 取り直しは外部 API を叩く（`fetchVideoComments` は YouTube → Holodex の
 // 2 リクエストになりうるので、1 本につき 1 回とは限らない）。コメントが空の
 // 配信はこの実行の中で複数回取りに行くこともあるが、
 // **飛ばして取りこぼすよりは安い**という判断。

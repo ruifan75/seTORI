@@ -203,14 +203,6 @@ export interface SingerPerformanceListResponse {
   pagination: PaginationResponse;
 }
 
-export interface CreateSingerRequest {
-  id: string; // YouTube Channel ID / @handle / URL
-  name?: string;
-  english_name?: string;
-  photo_url?: string;
-  organization?: string;
-}
-
 export interface CreateSingerResponse {
   message: string;
   id: string;
@@ -1032,13 +1024,6 @@ export interface AIModelInfo {
   display_name?: string;
   context_window?: number;
   description?: string;
-}
-
-// ========== 汎用レスポンス ==========
-
-export interface ErrorResponse {
-  error: string;
-  message?: string;
 }
 
 export interface SuccessResponse {

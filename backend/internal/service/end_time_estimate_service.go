@@ -2,8 +2,6 @@ package service
 
 import (
 	"fmt"
-	"regexp"
-	"time"
 
 	"github.com/ruifan75/setori/internal/dto"
 	"github.com/ruifan75/setori/pkg/itunes"
@@ -181,36 +179,4 @@ func (s *EndTimeEstimateService) queryItunesDuration(itunesID int64) (int, error
 	// 秒に変換する
 	durationSeconds := int(trackTime / 1000)
 	return durationSeconds, nil
-}
-
-// ParseTimestamp はタイムスタンプを秒数に変換する（今後の拡張用）。
-func ParseTimestamp(ts string) int {
-	parts := regexp.MustCompile(`(\d+):(\d+)(?::(\d+))?`).FindStringSubmatch(ts)
-	if len(parts) < 3 {
-		return 0
-	}
-
-	// HH:MM:SS または MM:SS 形式を処理する
-	if len(parts) == 4 && parts[3] != "" {
-		// HH:MM:SS
-		hours := 0
-		fmt.Sscanf(parts[1], "%d", &hours)
-		minutes := 0
-		fmt.Sscanf(parts[2], "%d", &minutes)
-		seconds := 0
-		fmt.Sscanf(parts[3], "%d", &seconds)
-		return hours*3600 + minutes*60 + seconds
-	}
-
-	// MM:SS
-	minutes := 0
-	fmt.Sscanf(parts[1], "%d", &minutes)
-	seconds := 0
-	fmt.Sscanf(parts[2], "%d", &seconds)
-	return minutes*60 + seconds
-}
-
-// AddRate limiting は iTunes API への過剰な問い合わせを防ぐ。
-func (s *EndTimeEstimateService) addRateLimit() {
-	time.Sleep(100 * time.Millisecond)
 }

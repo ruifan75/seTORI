@@ -148,27 +148,3 @@ func (r *SongItunesRepository) DeleteBySongID(songID uuid.UUID) error {
 	}
 	return nil
 }
-
-// SetPrimary は primary iTunes ID を設定する（同じ楽曲の他の ID は先に非 primary にする）。
-func (r *SongItunesRepository) SetPrimary(songID uuid.UUID, itunesID int64) error {
-	tx, err := r.db.Begin()
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-	defer tx.Rollback()
-
-	// 先にすべて非 primary にする
-	_, err = tx.Exec("UPDATE song_itunes SET is_primary = FALSE WHERE song_id = $1", songID)
-	if err != nil {
-		return fmt.Errorf("unset primary: %w", err)
-	}
-
-	// 指定した ID を primary にする
-	_, err = tx.Exec("UPDATE song_itunes SET is_primary = TRUE WHERE song_id = $1 AND itunes_id = $2",
-		songID, itunesID)
-	if err != nil {
-		return fmt.Errorf("set primary: %w", err)
-	}
-
-	return tx.Commit()
-}

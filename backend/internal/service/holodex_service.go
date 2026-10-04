@@ -121,14 +121,6 @@ func (s *HolodexService) getChannelPhotoURL(channelID string, holodexPhoto strin
 	return fmt.Sprintf("https://holodex.net/statics/channelImg/%s/50.png", channelID)
 }
 
-// SyncResult は同期結果。
-type SyncResult struct {
-	SyncedCount int
-	NewStreams  []string
-	Updated     []string
-	Skipped     []string
-}
-
 // Holodex の topic_id と seTORI の stream_tags.id は同じ語でも表記が一致しない。
 // 特に Original_Song / Music_Cover はそのまま FK へ入れるとタグが付かないため、
 // seTORI 側の安定した ID へ明示的に寄せる。
@@ -755,18 +747,9 @@ func (s *HolodexService) LoadHolodexSongs(videoID string) (*dto.LoadHolodexSongs
 	}, nil
 }
 
-// GetVideoComments は動画の公開コメントを取得する（コメント分析用）。
-// YouTube を正とし、未設定・リクエスト失敗・コメントなしの場合に Holodex を試す。
-// 取得だけを行う。取得不能の記録を更新する呼び出し元は fetchVideoComments の
-// 結果を使い、recordCommentRecovery に取得元の状態も渡す。
-func (s *HolodexService) GetVideoComments(videoID string) ([]string, error) {
-	res, err := s.fetchVideoComments(videoID)
-	return res.Comments, err
-}
-
 // videoCommentsResult はコメント取得の結果と、**YouTube が何と言ったか**。
 //
-// GetVideoComments は Holodex へ落とすので、戻り値の件数だけでは
+// fetchVideoComments は Holodex へ落とすので、戻り値の件数だけでは
 // 「YouTube がコメント欄は無いと明言した」と「YouTube が一時的に落ちた」の区別が
 // 消える（issue #56：404 の配信を毎時取り直し続けていた）。取り直しの間隔を
 // 決めるのにその区別が要るので、ここで落とさずに返す。
