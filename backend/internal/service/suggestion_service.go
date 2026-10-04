@@ -1008,11 +1008,18 @@ func (s *SuggestionService) Merge(req *dto.MergeSuggestionsRequest, reviewer *mo
 	// after_data を採用／不採用件数から探れてしまう。対象違いや不正な ID は
 	// 適用前に断り、他の対象の提案を処理済みにしない。
 	selected := make([]*models.EditSuggestion, 0, len(req.IDs))
+	seenIDs := make(map[uuid.UUID]struct{}, len(req.IDs))
 	for _, raw := range req.IDs {
 		id, err := uuid.Parse(raw)
 		if err != nil {
 			return nil, invalid("無効な提案ID: %s", raw)
 		}
+		// 事前取得した pending のコピーを二度処理すると件数も二重になる。
+		// 表記違いも同じ UUID として、対象の編集・状態更新より前に拒否する。
+		if _, duplicate := seenIDs[id]; duplicate {
+			return nil, invalid("同じ提案が複数回選択されています")
+		}
+		seenIDs[id] = struct{}{}
 		sug, err := s.repo.FindByIDForViewer(id, actorAccess(SuggestionActor{User: reviewer}))
 		if err != nil {
 			return nil, err
