@@ -5,10 +5,12 @@ package auth
 const (
 	PermAll         = "*"            // すべての権限（管理者）
 	PermContentEdit = "content:edit" // 曲/歌枠/歌手/演奏/タグ/コメント解析などの編集
-	PermSyncRun     = "sync:run"     // Holodex 同期の実行
-	PermAIManage    = "ai:manage"    // AI プロバイダー設定
-	PermLogsView    = "logs:view"    // ログ閲覧・ログレベル変更
-	PermUsersManage = "users:manage" // ユーザー/ロール管理
+	PermSyncRun     = "sync:run"     // Holodex からの読み取り同期の実行
+	// 運用者の editor token 名義で外部に書き込む。読み取り同期・編集とは別に付与する。
+	PermHolodexUpload = "holodex:upload"
+	PermAIManage      = "ai:manage"    // AI プロバイダー設定
+	PermLogsView      = "logs:view"    // ログ閲覧・ログレベル変更
+	PermUsersManage   = "users:manage" // ユーザー/ロール管理
 	// DB バックアップ/リストア・Google Drive 連携
 	PermBackupManage = "backup:manage"
 	// 秘匿（会限など公開可否が未確認）の配信の中身を見る。
@@ -35,7 +37,8 @@ func AllPermissions() []PermissionInfo {
 	return []PermissionInfo{
 		{Key: PermAll, Description: "全権限（管理者）"},
 		{Key: PermContentEdit, Description: "コンテンツ編集（曲・歌枠・歌手・演奏・タグ・コメント解析）"},
-		{Key: PermSyncRun, Description: "Holodex 同期の実行"},
+		{Key: PermSyncRun, Description: "Holodex からの読み取り同期"},
+		{Key: PermHolodexUpload, Description: "Holodex へのセットリスト送信（運用者の名義で外部に書き込み）"},
 		{Key: PermAIManage, Description: "AI プロバイダー設定"},
 		{Key: PermLogsView, Description: "ログ閲覧・レベル変更"},
 		{Key: PermUsersManage, Description: "ユーザー・ロール管理"},

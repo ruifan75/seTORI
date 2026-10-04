@@ -419,7 +419,7 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("PUT /api/organizations/{key}", r.handleUpdateOrganization)
 	r.mux.HandleFunc("DELETE /api/organizations/{key}", r.handleDeleteOrganization)
 
-	// Holodex sync
+	// Holodex からの読み取りは sync:run、運用者名義での書き込みは holodex:upload。
 	r.mux.HandleFunc("POST /api/sync/holodex", r.handleSyncHolodex)
 	r.mux.HandleFunc("POST /api/sync/holodex/video/{id}", r.handleSyncHolodexVideo)
 	r.mux.HandleFunc("POST /api/sync/holodex/to-holodex/{id}", r.handleSyncSetoriToHolodex)
@@ -3972,6 +3972,13 @@ func requiredPermission(method, path string) (perm string, needsAuth bool) {
 	// タグ漏れもレビュー用の作業一覧。閲覧も編集と同じ権限に揃える。
 	if strings.HasPrefix(path, "/api/tag-gaps") {
 		return auth.PermContentEdit, true
+	}
+
+	// editor token を使う外部への書き込みは読み取り同期より強い権限を要求する。
+	// 現在は送信・再送とも POST /api/sync/holodex/to-holodex/{id} の 1 本。
+	// 同じ配下に操作を足した場合も保護を継承し、一般の /api/sync より先に判定する。
+	if isRouteOrSubpath(path, "/api/sync/holodex/to-holodex") {
+		return auth.PermHolodexUpload, true
 	}
 
 	// 管理系リソースはメソッドを問わず専用権限が必要
