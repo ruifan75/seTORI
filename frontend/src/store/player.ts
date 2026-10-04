@@ -11,7 +11,7 @@ export interface PlayerTrack {
   artist: string;
   artists: { id: string; name: string }[]; // 原曲アーティスト（UUID リンク用）
   artUrl?: string;
-  singers: { id: string; name: string }[]; // 歌唱チャンネル（リンク用に id も保持）
+  singers: { id: string; name: string }[]; // 歌った人（チャンネルへのリンク用に id も保持）
   streamTitle?: string;
   streamDate?: string; // 配信日（同一曲を複数配信から再生するときの区別用）
   start: number;
@@ -36,7 +36,7 @@ export interface PerformanceLike {
 }
 
 // 配信横断の歌唱を再生トラックへ変換する。
-// ホーム・タグ・歌手・プレイリストで同じ形を使う（曲詳細だけは曲側の情報を優先するため独自）。
+// ホーム・タグ・チャンネル・プレイリストで同じ形を使う（曲詳細だけは曲側の情報を優先するため独自）。
 export function performanceToTrack(p: PerformanceLike): PlayerTrack {
   return {
     performanceId: p.id,

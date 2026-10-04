@@ -13,7 +13,7 @@ const REASON_LABELS: Record<string, string> = {
   no_end: '終了時間が無い',
   no_artist: '歌手が未記入',
   unmatched: '曲が決まらない',
-  multi_singer: '歌手が複数',
+  multi_singer: '参加チャンネルが複数',
   conflict: '既存と食い違う',
   low_conf: 'AI の確信度が低い',
   comment_only: 'コメントにのみ存在',

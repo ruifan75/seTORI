@@ -4,12 +4,12 @@ import { singerApi } from '../api/client';
 import type { Singer } from '../api/types';
 import { useToast } from './ui/ToastContext';
 
-// 歌手（ボーカル）の検索入力。
+// チャンネルの検索入力。配信の参加チャンネル追加と、歌唱のボーカル選択で使う。
 //
 // **編集画面と審査画面で同じものを使う。** 審査側は参加者を全部 checkbox で
 // 並べていたが、22 人のコラボ配信では壁になって選びにくかった。
 
-// 歌手検索入力コンポーネントの Props
+// チャンネル検索入力コンポーネントの Props
 interface SingerSearchInputProps {
   onSelectSinger: (singer: Singer) => void;
   excludeIds?: string[];
@@ -25,7 +25,7 @@ function isChannelInput(value: string): boolean {
     || /^https?:\/\/(?:www\.|m\.)?(?:youtube\.com|youtu\.be)\//i.test(input);
 }
 
-// 歌手検索入力コンポーネント（オートコンプリート付き）
+// チャンネル検索入力コンポーネント（オートコンプリート付き）
 export default function SingerSearchInput({
   onSelectSinger,
   excludeIds = [],
