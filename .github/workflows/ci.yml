@@ -38,6 +38,11 @@ jobs:
         working-directory: backend
         run: go test ./...
 
+      - name: Deploy script (offline)
+        run: |
+          bash -n deploy/deploy.sh
+          python3 -m unittest discover -s deploy/tests -v
+
       - name: gofmt（整形漏れの検出）
         working-directory: backend
         run: |

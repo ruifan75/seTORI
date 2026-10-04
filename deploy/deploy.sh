@@ -77,21 +77,28 @@ docker compose up -d --no-build --remove-orphans
 echo
 echo "稼働中のバージョンを確認します:"
 # 公開されている経路そのもので確かめる（Cloudflare と証明書まで含めて確認できる）。
-DOMAIN="$(grep -E '^DOMAIN=' .env | head -1 | cut -d= -f2-)"
+DOMAIN="$(grep -E '^DOMAIN=' .env | head -1 | cut -d= -f2- || true)"
 if [ -z "$DOMAIN" ]; then
-	echo "  .env に DOMAIN がありません。確認を飛ばします。" >&2
-	exit 0
+	echo "  .env に DOMAIN がありません。稼働版を確認できません。" >&2
+	exit 1
 fi
 
 for _ in $(seq 1 30); do
-	if curl -fsS "https://${DOMAIN}/api/version"; then
-		echo
+	# 旧コンテナの 200 を成功としない。CI と VPS で SHA の省略桁数が
+	# 違っても、7 桁以上の commit が対象の完全 SHA と一致するか確かめる。
+	# 1 回の問い合わせにも期限を置き、接続したまま待ち続けない。
+	if version_response="$(curl -fsS --max-time 10 "https://${DOMAIN}/api/version")" &&
+		version_fields="$(printf '%s\n' "$version_response" | grep -oE '"commit"[[:space:]]*:' | tr -d '[:space:]')" &&
+		[[ "$version_fields" == '"commit":' ]] &&
+		version_commit="$(printf '%s\n' "$version_response" | grep -oE '"commit"[[:space:]]*:[[:space:]]*"[0-9a-f]{7,40}"' | cut -d '"' -f4)" &&
+		[[ "$IMAGE_TAG" == "$version_commit"* ]]; then
+		printf '%s\n' "$version_response"
 		exit 0
 	fi
 	sleep 2
 done
 
-echo "  https://${DOMAIN}/api/version から応答がありません。" >&2
+echo "  https://${DOMAIN}/api/version で対象版 ${SHORT} を確認できませんでした。" >&2
 echo "  docker compose logs -f backend / docker compose logs web を確認してください。" >&2
 exit 1
 
