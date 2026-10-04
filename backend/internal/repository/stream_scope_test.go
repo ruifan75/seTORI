@@ -8,7 +8,7 @@ import (
 // 一覧に出すチャンネルの判定は **VisibleChannelExpr に集約する**。
 //
 // 同期は description の mention からも参加者を作るので、この站が扱っていない
-// チャンネルの配信が混ざる。歌手ページは `stream_singers` を JOIN しているので
+// チャンネルの配信が混ざる。歌手ページは `stream_channels` を JOIN しているので
 // 参加者を外せば消えるのに、`/streams` とタグ別一覧は参加者を見ていなかったため
 // 残り続けた ── 直したのに直っていないように見える（2026-09-13）。
 //
@@ -16,8 +16,8 @@ import (
 // `OR TRUE` を足す、といった「呼び出しは在るが効いていない」改変が通る
 // ── 実際 3 回、部分一致を継ぎ足して塞ごうとして毎回別の穴が残った。
 func TestVisibleChannelExpr(t *testing.T) {
-	const want = "EXISTS (SELECT 1 FROM stream_singers ss" +
-		" JOIN singers si ON si.id = ss.singer_id" +
+	const want = "EXISTS (SELECT 1 FROM stream_channels ss" +
+		" JOIN channels si ON si.id = ss.channel_id" +
 		" WHERE ss.stream_id = st.id AND si.is_hidden = FALSE)"
 	if got := VisibleChannelExpr("st"); got != want {
 		t.Errorf("判定式が変わっている\n got: %q\nwant: %q", got, want)

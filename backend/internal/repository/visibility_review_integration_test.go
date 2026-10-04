@@ -74,7 +74,7 @@ func visibilityHidden(t *testing.T, db *sql.DB, id string) bool {
 func TestVisibilityPostgresCandidatesApplyRevertAndRestriction(t *testing.T) {
 	db := visibilityPostgres(t)
 	r := NewVisibilityReviewRepository(db)
-	visibilityExec(t, db, `INSERT INTO singers (id,name,is_hidden) VALUES ('owner','Owner',FALSE)`)
+	visibilityExec(t, db, `INSERT INTO channels (id,name,is_hidden) VALUES ('owner','Owner',FALSE)`)
 	for _, x := range []struct {
 		id       string
 		duration any
@@ -82,7 +82,7 @@ func TestVisibilityPostgresCandidatesApplyRevertAndRestriction(t *testing.T) {
 		music    bool
 	}{{"long", 181, true, true}, {"member", 600, true, true}, {"short", 180, true, true}, {"unknown", nil, true, true}, {"other", 600, true, false}, {"visible", 600, false, true}, {"dismissed", 600, true, true}} {
 		visibilityExec(t, db, `INSERT INTO streams (id,title,stream_date,duration_seconds,is_hidden) VALUES ($1,$1,NOW(),$2,$3)`, x.id, x.duration, x.hidden)
-		visibilityExec(t, db, `INSERT INTO stream_singers (stream_id,singer_id,is_owner) VALUES ($1,'owner',TRUE)`, x.id)
+		visibilityExec(t, db, `INSERT INTO stream_channels (stream_id,channel_id,is_owner) VALUES ($1,'owner',TRUE)`, x.id)
 		if x.music {
 			visibilityExec(t, db, `INSERT INTO stream_stream_tags (stream_id,tag_id) VALUES ($1,'singing')`, x.id)
 		}

@@ -500,9 +500,9 @@ func (s *SongService) toSongPerformanceResponse(perf repository.PerformanceWithD
 	}
 
 	// 歌手を変換する
-	resp.Singers = make([]dto.SingerResponse, len(perf.Singers))
+	resp.Singers = make([]dto.ChannelResponse, len(perf.Singers))
 	for i, singer := range perf.Singers {
-		resp.Singers[i] = dto.SingerResponse{
+		resp.Singers[i] = dto.ChannelResponse{
 			ID:        singer.ID,
 			Name:      singer.Name,
 			CreatedAt: singer.CreatedAt,

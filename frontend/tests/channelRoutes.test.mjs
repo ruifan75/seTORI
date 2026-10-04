@@ -28,7 +28,7 @@ function load(relative, overrides = {}) {
   return module.exports;
 }
 
-test('singerApi の全操作は新 API を使い、query/body と JSON のキーは保つ', async () => {
+test('channelApi の全操作は新 API を使い、query/body と JSON のキーは保つ', async () => {
   const axios = require('axios');
   const requests = [];
   const response = { singers: [{ id: 'channel' }], singer: { id: 'channel' }, singer_ids: ['vocalist'] };
@@ -37,7 +37,7 @@ test('singerApi の全操作は新 API を使い、query/body と JSON のキー
       body: config.data === undefined ? null : JSON.parse(config.data) });
     return { data: response, status: 200, statusText: 'OK', headers: {}, config };
   } });
-  const { singerApi } = load('src/api/client.ts', { axios: { ...axios, create: () => instance } });
+  const { channelApi } = load('src/api/client.ts', { axios: { ...axios, create: () => instance } });
   const cases = [
     ['list', [2, 30, 'name', 'desc', true], 'get', '/api/channels?page=2&limit=30&sort=name&dir=desc&include_hidden=true', null],
     ['listGrouped', [true], 'get', '/api/channels?group=organization&include_hidden=true', null],
@@ -53,9 +53,9 @@ test('singerApi の全操作は新 API を使い、query/body と JSON のキー
     ['listAutoFill', [], 'get', '/api/channels/auto-fill', null],
     ['setMembersPolicy', ['channel', 'allow'], 'put', '/api/channels/channel/members-policy', { members_only_policy: 'allow' }],
   ];
-  assert.deepEqual(Object.keys(singerApi).sort(), cases.map(([name]) => name).sort(), '新しい操作も期待する URL を決める');
+  assert.deepEqual(Object.keys(channelApi).sort(), cases.map(([name]) => name).sort(), '新しい操作も期待する URL を決める');
   for (const [name, args, method, url, body] of cases) {
-    assert.equal(await singerApi[name](...args), response, `${name}: JSON のキーを変換しない`);
+    assert.equal(await channelApi[name](...args), response, `${name}: JSON のキーを変換しない`);
     assert.deepEqual(requests.at(-1), { method, url, body }, name);
   }
   assert.equal(requests.length, cases.length);
@@ -119,8 +119,8 @@ export function channelRouteInventory() {
 
 test('新旧チャンネル画面を同じ Layout に登録する', () => {
   assert.deepEqual(channelRouteInventory(), [
-    { path: 'channels', element: 'SingersPage', layouts: ['Layout'] },
-    { path: 'channels/:id', element: 'SingerDetailPage', layouts: ['Layout'] },
+    { path: 'channels', element: 'ChannelsPage', layouts: ['Layout'] },
+    { path: 'channels/:id', element: 'ChannelDetailPage', layouts: ['Layout'] },
     { path: 'singers', element: 'LegacyChannelRedirect', layouts: ['Layout'] },
     { path: 'singers/:id', element: 'LegacyChannelRedirect', layouts: ['Layout'] },
   ]);
@@ -132,10 +132,10 @@ test('既存のアプリ内チャンネルリンクをすべて新 URL にする
     'src/components/Layout.tsx': ['/channels'],
     'src/components/SingerAvatars.tsx': ['/channels/${singer.id}', '/channels/${singer.id}'],
     'src/components/PlayerBar.tsx': ['/channels/${s.id}', '/channels/${s.id}'],
-    'src/pages/SearchPage.tsx': ['/channels/${singer.id}'],
-    'src/pages/SingersPage.tsx': ['/channels/${singer.id}'],
+    'src/pages/SearchPage.tsx': ['/channels/${channel.id}'],
+    'src/pages/ChannelsPage.tsx': ['/channels/${channel.id}'],
     'src/pages/admin/SyncPage.tsx': ['/channels/${sg.id}'],
-    'src/pages/stream-detail/StreamInfoCard.tsx': ['/channels/${singer.id}'],
+    'src/pages/stream-detail/StreamInfoCard.tsx': ['/channels/${channel.id}'],
     'src/pages/stream-detail/StreamPerformanceList.tsx': ['/channels/${singer.id}'],
     'src/pages/stream-detail/StreamVocalistPopup.tsx': ['/channels/${singer.id}'],
   };
@@ -253,4 +253,27 @@ test('Chrome: 旧 URL の replace と Layout/PlayerBar の継続（スマホ・P
       assert.equal(value.playerCallsSame, true, '再生操作・プレイヤー再生成を起こさない');
     });
   } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+// 内部の channelId(s) を外の singer_id(s) に変換する境界を実際の Axios 要求で固定する。
+test('チャンネル範囲の背景処理は既存の JSON/query キーを送る', async () => {
+  const axios = require('axios');
+  const requests = [];
+  const instance = axios.create({ adapter: async (config) => {
+    requests.push({ method: config.method, url: config.url, params: config.params ?? null,
+      body: config.data == null ? null : JSON.parse(config.data) });
+    return { data: { task_id: 'task' }, status: 200, statusText: 'OK', headers: {}, config };
+  } });
+  const { taskApi, batchFillApi, batchAnalyzeApi, searchApi } = load('src/api/client.ts', { axios: { ...axios, create: () => instance } });
+  await taskApi.prepare('owner');
+  await batchFillApi.start('force', ['owner', 'guest'], true);
+  await batchAnalyzeApi.start('unprocessed', 'owner', 'false');
+  await searchApi.searchStreams({ channelId: 'participant' });
+  // VM の別 realm から来た object を JSON として比較する。
+  assert.deepEqual(JSON.parse(JSON.stringify(requests)), [
+    { method: 'post', url: '/api/streams/prepare', params: { singer_id: 'owner' }, body: null },
+    { method: 'post', url: '/api/streams/batch-fill', params: null, body: { mode: 'force', singer_ids: ['owner', 'guest'], include_collabs: true } },
+    { method: 'post', url: '/api/streams/batch-analyze', params: null, body: { mode: 'unprocessed', singer_id: 'owner', hidden: 'false' } },
+    { method: 'get', url: '/api/streams/search?page=1&limit=20&participant_id=participant', params: null, body: null },
+  ]);
 });

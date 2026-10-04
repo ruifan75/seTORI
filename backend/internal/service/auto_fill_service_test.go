@@ -8,7 +8,7 @@ import (
 
 // 設定の既定は**無効**であること。
 // 外部 API と AI を自動で叩く仕組みなので、入れただけで動き出してよいものではない。
-// （`singers.auto_fill_enabled` と同じ考え方。CLAUDE.md §3 の既定を取り違えた件）
+// （`channels.auto_fill_enabled` と同じ考え方。CLAUDE.md §3 の既定を取り違えた件）
 func TestAutoFillDefaultsToDisabled(t *testing.T) {
 	// 既定値だけを見る。**GetSettings に nil の repo を渡さない** ──
 	// 「repo が無ければ既定」を許すと、DI の配線漏れが

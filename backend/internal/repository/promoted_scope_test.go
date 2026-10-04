@@ -147,7 +147,7 @@ func accessName(a ViewerAccess) string {
 // **歌手ページには通さない。** 非表示チャンネルのページは未ログインでも
 // 開ける設計（CLAUDE.md §3、既存ページからのリンクが 404 にならないように）。
 // 通すと自分の配信が 0 件のページになる。
-func TestSingerPageIsNotChannelScoped(t *testing.T) {
+func TestChannelPageIsNotChannelScoped(t *testing.T) {
 	db, rec := newRecordingDB(t)
 	NewPerformanceRepository(db).FindBySingerID("UC-x", 10, 0, "", "", PublicAccess)
 

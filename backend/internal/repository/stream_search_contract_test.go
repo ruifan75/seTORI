@@ -15,7 +15,7 @@ import (
 const streamSearchWantRestriction = `NOT COALESCE(st.restriction_override,
  EXISTS (SELECT 1 FROM stream_stream_tags mt WHERE mt.stream_id = st.id AND mt.tag_id = 'members_only')
  AND NOT COALESCE((SELECT bool_and(COALESCE(eg.members_only_policy, '') = 'allow')
- FROM stream_singers eo JOIN singers eg ON eg.id = eo.singer_id
+ FROM stream_channels eo JOIN channels eg ON eg.id = eo.channel_id
  WHERE eo.stream_id = st.id AND eo.is_owner), FALSE))`
 
 const streamSearchWantColumns = `s.id, s.title, s.stream_date, s.duration_seconds,
@@ -24,7 +24,7 @@ const streamSearchWantColumns = `s.id, s.title, s.stream_date, s.duration_second
  COALESCE(s.restriction_override,
  EXISTS (SELECT 1 FROM stream_stream_tags mt WHERE mt.stream_id = s.id AND mt.tag_id = 'members_only')
  AND NOT COALESCE((SELECT bool_and(COALESCE(eg.members_only_policy, '') = 'allow')
- FROM stream_singers eo JOIN singers eg ON eg.id = eo.singer_id
+ FROM stream_channels eo JOIN channels eg ON eg.id = eo.channel_id
  WHERE eo.stream_id = s.id AND eo.is_owner), FALSE))`
 
 func TestStreamSearchIssuedSQL(t *testing.T) {
@@ -80,13 +80,13 @@ func assertStreamSearchSQL(t *testing.T, f models.StreamSearchFilters, access Vi
 	}
 	if f.OwnerID != "" {
 		args = append(args, f.OwnerID)
-		where += fmt.Sprintf(" AND EXISTS (SELECT 1 FROM stream_singers ss WHERE ss.stream_id = s.id AND ss.singer_id = $%d AND ss.is_owner = TRUE)", len(args))
+		where += fmt.Sprintf(" AND EXISTS (SELECT 1 FROM stream_channels ss WHERE ss.stream_id = s.id AND ss.channel_id = $%d AND ss.is_owner = TRUE)", len(args))
 	}
 	for _, part := range []struct {
 		ids []string
 		sql string
 	}{
-		{f.ParticipantIDs, ` AND s.id IN (SELECT ss.stream_id FROM stream_singers ss WHERE ss.singer_id = ANY($%d) GROUP BY ss.stream_id HAVING COUNT(DISTINCT ss.singer_id) = %d)`},
+		{f.ParticipantIDs, ` AND s.id IN (SELECT ss.stream_id FROM stream_channels ss WHERE ss.channel_id = ANY($%d) GROUP BY ss.stream_id HAVING COUNT(DISTINCT ss.channel_id) = %d)`},
 		{f.VocalistIDs, ` AND s.id IN (SELECT p.stream_id FROM performances p JOIN performance_singers ps ON ps.performance_id = p.id JOIN searchable_performance_streams st ON st.id = p.stream_id WHERE ps.singer_id = ANY($%d) GROUP BY p.stream_id HAVING COUNT(DISTINCT ps.singer_id) = %d)`},
 		{f.StreamTagIDs, ` AND s.id IN (SELECT sst.stream_id FROM stream_stream_tags sst WHERE sst.tag_id = ANY($%d) GROUP BY sst.stream_id HAVING COUNT(DISTINCT sst.tag_id) = %d)`},
 		{f.PerformanceTagIDs, ` AND s.id IN (SELECT p.stream_id FROM performances p JOIN performance_performance_tags ppt ON ppt.performance_id = p.id JOIN searchable_performance_streams st ON st.id = p.stream_id WHERE ppt.tag_id = ANY($%d) GROUP BY p.stream_id HAVING COUNT(DISTINCT ppt.tag_id) = %d)`},
@@ -127,7 +127,7 @@ func legacyStreamSearchWhere(f models.StreamSearchFilters, access ViewerAccess) 
 	}
 	if f.OwnerID != "" {
 		args = append(args, f.OwnerID)
-		where += fmt.Sprintf(" AND EXISTS (SELECT 1 FROM stream_singers ss WHERE ss.stream_id = s.id AND ss.singer_id = $%d AND ss.is_owner = TRUE)", len(args))
+		where += fmt.Sprintf(" AND EXISTS (SELECT 1 FROM stream_channels ss WHERE ss.stream_id = s.id AND ss.channel_id = $%d AND ss.is_owner = TRUE)", len(args))
 	}
 	scope := streamSearchWantRestriction
 	if access == RestrictedView {
@@ -137,7 +137,7 @@ func legacyStreamSearchWhere(f models.StreamSearchFilters, access ViewerAccess) 
 		ids []string
 		sql string
 	}{
-		{f.ParticipantIDs, " AND (SELECT COUNT(DISTINCT ss.singer_id) FROM stream_singers ss WHERE ss.stream_id = s.id AND ss.singer_id = ANY($%d)) = %d"},
+		{f.ParticipantIDs, " AND (SELECT COUNT(DISTINCT ss.channel_id) FROM stream_channels ss WHERE ss.stream_id = s.id AND ss.channel_id = ANY($%d)) = %d"},
 		{f.VocalistIDs, " AND (SELECT COUNT(DISTINCT ps.singer_id) FROM performances p JOIN performance_singers ps ON ps.performance_id = p.id JOIN streams st ON st.id = p.stream_id WHERE p.stream_id = s.id AND " + scope + " AND ps.singer_id = ANY($%d)) = %d"},
 		{f.StreamTagIDs, " AND (SELECT COUNT(DISTINCT sst.tag_id) FROM stream_stream_tags sst WHERE sst.stream_id = s.id AND sst.tag_id = ANY($%d)) = %d"},
 		{f.PerformanceTagIDs, " AND (SELECT COUNT(DISTINCT ppt.tag_id) FROM performances p JOIN performance_performance_tags ppt ON ppt.performance_id = p.id JOIN streams st ON st.id = p.stream_id WHERE p.stream_id = s.id AND " + scope + " AND ppt.tag_id = ANY($%d)) = %d"},

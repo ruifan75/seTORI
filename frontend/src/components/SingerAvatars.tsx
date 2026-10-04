@@ -1,9 +1,9 @@
 import { useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import type { Singer } from '../api/types';
+import type { Channel } from '../api/types';
 
 /** チャンネルのアイコン。画像が取れなければ頭文字にする。 */
-export function SingerImage({ singer }: { singer: Singer }) {
+export function SingerImage({ singer }: { singer: Channel }) {
   const [imageFailed, setImageFailed] = useState(false);
   const imageUrl = singer.photo_url || `https://holodex.net/statics/channelImg/${singer.id}/50.png`;
 
@@ -22,7 +22,7 @@ export function SingerImage({ singer }: { singer: Singer }) {
   );
 }
 
-function SingerAvatar({ singer }: { singer: Singer }) {
+function SingerAvatar({ singer }: { singer: Channel }) {
   return (
     <Link
       to={`/channels/${singer.id}`}
@@ -35,7 +35,7 @@ function SingerAvatar({ singer }: { singer: Singer }) {
   );
 }
 
-function SingerOverflowMenu({ singers }: { singers: Singer[] }) {
+function SingerOverflowMenu({ singers }: { singers: Channel[] }) {
   const buttonRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
@@ -101,7 +101,7 @@ function SingerOverflowMenu({ singers }: { singers: Singer[] }) {
 }
 
 /** 重なったチャンネルアイコン。5人以上は「+N」にまとめ、押すと一覧を出す。 */
-export default function SingerAvatars({ singers }: { singers: Singer[] }) {
+export default function SingerAvatars({ singers }: { singers: Channel[] }) {
   const uniqueSingers = singers.filter(
     (singer, index) => singers.findIndex((candidate) => candidate.id === singer.id) === index,
   );

@@ -17,7 +17,7 @@ func TestRestrictionReviewExpressionsExact(t *testing.T) {
 	const membersOnly = "EXISTS (SELECT 1 FROM stream_stream_tags mt" +
 		" WHERE mt.stream_id = st.id AND mt.tag_id = 'members_only')"
 	const allOwnersAllow = "COALESCE((SELECT bool_and(COALESCE(eg.members_only_policy, '') = 'allow')" +
-		" FROM stream_singers eo JOIN singers eg ON eg.id = eo.singer_id" +
+		" FROM stream_channels eo JOIN channels eg ON eg.id = eo.channel_id" +
 		" WHERE eo.stream_id = st.id AND eo.is_owner), FALSE)"
 	const auto = membersOnly + " AND NOT " + allOwnersAllow
 
@@ -61,7 +61,7 @@ func TestSetRestrictionOverrideRecordsBasis(t *testing.T) {
 			const auto = "EXISTS (SELECT 1 FROM stream_stream_tags mt" +
 				" WHERE mt.stream_id = st.id AND mt.tag_id = 'members_only')" +
 				" AND NOT COALESCE((SELECT bool_and(COALESCE(eg.members_only_policy, '') = 'allow')" +
-				" FROM stream_singers eo JOIN singers eg ON eg.id = eo.singer_id" +
+				" FROM stream_channels eo JOIN channels eg ON eg.id = eo.channel_id" +
 				" WHERE eo.stream_id = st.id AND eo.is_owner), FALSE)"
 			want := "UPDATE streams AS st SET restriction_override = $2, restriction_override_auto = (" + auto +
 				"), updated_at = NOW() WHERE st.id = $1 RETURNING st.updated_at"
@@ -113,7 +113,7 @@ func TestFindRestrictionReviewUsesReviewExpr(t *testing.T) {
 	want := "WHERE st.restriction_override IS FALSE AND " +
 		"EXISTS (SELECT 1 FROM stream_stream_tags mt WHERE mt.stream_id = st.id AND mt.tag_id = 'members_only')" +
 		" AND NOT COALESCE((SELECT bool_and(COALESCE(eg.members_only_policy, '') = 'allow')" +
-		" FROM stream_singers eo JOIN singers eg ON eg.id = eo.singer_id" +
+		" FROM stream_channels eo JOIN channels eg ON eg.id = eo.channel_id" +
 		" WHERE eo.stream_id = st.id AND eo.is_owner), FALSE)" +
 		" AND st.restriction_override_auto IS DISTINCT FROM TRUE"
 	if got := whereClause(t, issued[0]); got != want {

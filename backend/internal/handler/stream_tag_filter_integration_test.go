@@ -20,7 +20,7 @@ import (
 
 func streamTagFixture(t *testing.T, db *sql.DB) *Router {
 	t.Helper()
-	_, err := db.Exec(`INSERT INTO singers(id,name,is_hidden,members_only_policy) VALUES
+	_, err := db.Exec(`INSERT INTO channels(id,name,is_hidden,members_only_policy) VALUES
  ('visible','表示',false,NULL), ('hidden','非表示',true,NULL), ('allowed','許可済み',false,'allow');
  INSERT INTO streams(id,title,stream_date,is_hidden,restriction_override) VALUES
  ('both','両方','2026-01-01',false,NULL), ('singing_only','歌枠','2026-01-02',false,NULL),
@@ -29,7 +29,7 @@ func streamTagFixture(t *testing.T, db *sql.DB) *Router {
  ('override','例外公開可','2026-01-07',false,false), ('multiowner','所有者が複数','2026-01-08',false,NULL),
  ('hidden_stream','非表示配信','2026-01-09',true,NULL), ('hidden_channel','非表示チャンネル','2026-01-10',false,NULL),
  ('guest','表示中の参加者','2026-01-11',false,NULL), ('no_channel','参加者なし','2026-01-12',false,NULL);
- INSERT INTO stream_singers(stream_id,singer_id,is_owner) VALUES
+ INSERT INTO stream_channels(stream_id,channel_id,is_owner) VALUES
  ('both','visible',true), ('both','allowed',false), ('singing_only','visible',true),
  ('3d_only','visible',true), ('untagged','visible',true), ('restricted','visible',true),
  ('allowed','allowed',true), ('override','visible',true), ('multiowner','visible',true), ('multiowner','allowed',true),

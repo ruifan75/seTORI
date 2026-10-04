@@ -175,7 +175,7 @@ func (r *fillRow) hasReliableEnd() bool {
 
 // Start はジョブを開始する。
 //
-// singerIDs は対象チャンネル（空なら全部）。既定はそのチャンネルが**所有する**配信で、
+// channelIDs は対象チャンネル（空なら全部）。既定はそのチャンネルが**所有する**配信で、
 // includeCollabs を立てるとゲスト参加した配信も含む。
 // Reserve は「これから開始する」を**原子的に**押さえる。
 //
@@ -221,15 +221,15 @@ func (s *BatchFillService) Release() {
 }
 
 // StartReserved は Reserve 済みの前提で開始する。
-func (s *BatchFillService) StartReserved(mode string, singerIDs []string, includeCollabs bool, startedBy *uuid.UUID) (uuid.UUID, error) {
-	return s.start(mode, singerIDs, includeCollabs, startedBy, true)
+func (s *BatchFillService) StartReserved(mode string, channelIDs []string, includeCollabs bool, startedBy *uuid.UUID) (uuid.UUID, error) {
+	return s.start(mode, channelIDs, includeCollabs, startedBy, true)
 }
 
-func (s *BatchFillService) Start(mode string, singerIDs []string, includeCollabs bool, startedBy *uuid.UUID) (uuid.UUID, error) {
-	return s.start(mode, singerIDs, includeCollabs, startedBy, false)
+func (s *BatchFillService) Start(mode string, channelIDs []string, includeCollabs bool, startedBy *uuid.UUID) (uuid.UUID, error) {
+	return s.start(mode, channelIDs, includeCollabs, startedBy, false)
 }
 
-func (s *BatchFillService) start(mode string, singerIDs []string, includeCollabs bool, startedBy *uuid.UUID, reserved bool) (uuid.UUID, error) {
+func (s *BatchFillService) start(mode string, channelIDs []string, includeCollabs bool, startedBy *uuid.UUID, reserved bool) (uuid.UUID, error) {
 	switch mode {
 	case BatchFillModeUnprocessed, BatchFillModeForce:
 	default:
@@ -238,7 +238,7 @@ func (s *BatchFillService) start(mode string, singerIDs []string, includeCollabs
 		}
 		return uuid.Nil, errors.New("無効なモードです（unprocessed / force）")
 	}
-	singerIDs = trimIDs(singerIDs)
+	channelIDs = trimIDs(channelIDs)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -257,8 +257,8 @@ func (s *BatchFillService) start(mode string, singerIDs []string, includeCollabs
 	}
 
 	var sid *string
-	if len(singerIDs) > 0 {
-		joined := strings.Join(singerIDs, ",")
+	if len(channelIDs) > 0 {
+		joined := strings.Join(channelIDs, ",")
 		sid = &joined
 	}
 	runID, err := s.runRepo.CreateRun(mode, sid, startedBy)
@@ -274,11 +274,11 @@ func (s *BatchFillService) start(mode string, singerIDs []string, includeCollabs
 	s.running = true
 	s.cancelled = false
 	s.status = dto.BatchFillStatus{
-		Running: true, Mode: mode, SingerIDs: singerIDs,
+		Running: true, Mode: mode, ChannelIDs: channelIDs,
 		IncludeCollabs: includeCollabs, RunID: runID.String(),
 	}
 
-	go s.run(runID, mode, singerIDs, includeCollabs)
+	go s.run(runID, mode, channelIDs, includeCollabs)
 	return runID, nil
 }
 
@@ -333,7 +333,7 @@ func (s *BatchFillService) RevertRun(runID uuid.UUID) (int64, error) {
 	return n, nil
 }
 
-func (s *BatchFillService) run(runID uuid.UUID, mode string, singerIDs []string, includeCollabs bool) {
+func (s *BatchFillService) run(runID uuid.UUID, mode string, channelIDs []string, includeCollabs bool) {
 	defer func() {
 		s.mu.Lock()
 		s.running = false
@@ -342,7 +342,7 @@ func (s *BatchFillService) run(runID uuid.UUID, mode string, singerIDs []string,
 		s.mu.Unlock()
 	}()
 
-	streams, err := s.streamRepo.FindStreamsForFill(mode, singerIDs, includeCollabs)
+	streams, err := s.streamRepo.FindStreamsForFill(mode, channelIDs, includeCollabs)
 	if err != nil {
 		logger.Warnf("[batch-fill] 対象の取得に失敗: %v", err)
 		s.finish(runID, "failed", "対象の取得に失敗しました")
@@ -350,8 +350,8 @@ func (s *BatchFillService) run(runID uuid.UUID, mode string, singerIDs []string,
 	}
 	s.update(func(st *dto.BatchFillStatus) { st.Total = len(streams) })
 	scope := "全チャンネル"
-	if len(singerIDs) > 0 {
-		scope = fmt.Sprintf("%d チャンネル（%s）", len(singerIDs),
+	if len(channelIDs) > 0 {
+		scope = fmt.Sprintf("%d チャンネル（%s）", len(channelIDs),
 			map[bool]string{true: "コラボ含む", false: "所有配信のみ"}[includeCollabs])
 	}
 	logger.Infof("[batch-fill] 開始: mode=%s %s %d 配信", mode, scope, len(streams))
@@ -635,7 +635,7 @@ type applyResult struct {
 // applyStream は 1 配信ぶんを反映する。
 func (s *BatchFillService) applyStream(runID uuid.UUID, streamID string, rows []*fillRow, mode string) applyResult {
 	// 配信に歌手が複数いるなら、誰が歌ったかを機械では埋められない。全行を審査へ。
-	multi := s.hasMultipleSingers(streamID)
+	multi := s.hasMultipleParticipants(streamID)
 	singerIDs := s.perfService.defaultSingerIDs(streamID)
 
 	// 一括セットリスト作成は編集者の操作。秘匿された配信も対象に含める
@@ -889,8 +889,8 @@ func containsReason(reasons []string, want string) bool {
 	return false
 }
 
-func (s *BatchFillService) hasMultipleSingers(streamID string) bool {
-	participants, _, err := s.streamRepo.GetSingersForStreams([]string{streamID})
+func (s *BatchFillService) hasMultipleParticipants(streamID string) bool {
+	participants, _, err := s.streamRepo.GetChannelsForStreams([]string{streamID})
 	if err != nil {
 		return true // 分からないときは安全側（人に見せる）
 	}

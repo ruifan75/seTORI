@@ -26,13 +26,13 @@ func orderByOf(t *testing.T, sqlText string) string {
 // 期待値は「含めないときの並びの先頭に `s.is_hidden ASC, ` を足したもの」と
 // 完全一致させる。並びの中身（名前・事務所の式）は実装に任せるが、
 // 第 1 キーであること・昇順であること・それ以外を変えないことは縛る。
-func TestSingerListPutsVisibleFirst(t *testing.T) {
+func TestChannelListPutsVisibleFirst(t *testing.T) {
 	for _, sortKey := range []string{"name", "organization"} {
 		for _, dir := range []string{"asc", "desc"} {
 			t.Run(sortKey+"/"+dir, func(t *testing.T) {
 				capture := func(includeHidden bool) string {
 					db, rec := newRecordingDB(t)
-					NewSingerRepository(db).FindAll(20, 0, sortKey, dir, includeHidden)
+					NewChannelRepository(db).FindAll(20, 0, sortKey, dir, includeHidden)
 					for _, q := range rec.all() {
 						if strings.Contains(q, "ORDER BY") {
 							return orderByOf(t, q)
@@ -55,9 +55,9 @@ func TestSingerListPutsVisibleFirst(t *testing.T) {
 }
 
 // 事務所別の組には**表示中だけ**を入れる。非表示は別の区（名前順）。
-func TestSingerGroupedAndHiddenQueries(t *testing.T) {
+func TestChannelGroupedAndHiddenQueries(t *testing.T) {
 	db, rec := newRecordingDB(t)
-	repo := NewSingerRepository(db)
+	repo := NewChannelRepository(db)
 	repo.FindAllGrouped()
 	repo.FindHiddenByName()
 
@@ -78,17 +78,17 @@ func TestSingerGroupedAndHiddenQueries(t *testing.T) {
 }
 
 // 件数は総数と非表示の数を同じ母集合から数える（見出しの件数が一覧と合うように）。
-func TestSingerListCountsHiddenFromSameSet(t *testing.T) {
+func TestChannelListCountsHiddenFromSameSet(t *testing.T) {
 	for _, includeHidden := range []bool{false, true} {
 		db, rec := newRecordingDB(t)
-		NewSingerRepository(db).FindAll(20, 0, "name", "asc", includeHidden)
+		NewChannelRepository(db).FindAll(20, 0, "name", "asc", includeHidden)
 		var count string
 		for _, q := range rec.all() {
 			if strings.Contains(q, "COUNT(*)") {
 				count = strings.Join(strings.Fields(q), " ")
 			}
 		}
-		want := "SELECT COUNT(*), COUNT(*) FILTER (WHERE s.is_hidden) FROM singers s"
+		want := "SELECT COUNT(*), COUNT(*) FILTER (WHERE s.is_hidden) FROM channels s"
 		if !includeHidden {
 			want += " WHERE s.is_hidden = FALSE"
 		}

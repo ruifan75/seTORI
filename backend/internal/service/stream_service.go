@@ -85,7 +85,7 @@ func (s *StreamService) GetAll(page, limit int, sort, dir string, tags []string,
 	if err != nil {
 		return nil, fmt.Errorf("get stream tags: %w", err)
 	}
-	participantsMap, ownersMap, err := s.streamRepo.GetSingersForStreams(streamIDs)
+	participantsMap, ownersMap, err := s.streamRepo.GetChannelsForStreams(streamIDs)
 	if err != nil {
 		return nil, fmt.Errorf("get stream singers: %w", err)
 	}
@@ -120,7 +120,7 @@ func (s *StreamService) composeStreamList(streams []models.Stream, total, page, 
 	if err != nil {
 		return nil, fmt.Errorf("get stream tags: %w", err)
 	}
-	participantsMap, ownersMap, err := s.streamRepo.GetSingersForStreams(streamIDs)
+	participantsMap, ownersMap, err := s.streamRepo.GetChannelsForStreams(streamIDs)
 	if err != nil {
 		return nil, fmt.Errorf("get stream singers: %w", err)
 	}
@@ -310,7 +310,7 @@ func (s *StreamService) GetByID(id string, isEditor bool, access repository.View
 	}
 
 	tags, _ := s.streamRepo.GetTags(stream.ID)
-	participants, _ := s.streamRepo.GetSingers(stream.ID)
+	participants, _ := s.streamRepo.GetChannels(stream.ID)
 	channelOwner, _ := s.streamRepo.GetChannelOwner(stream.ID)
 	streamResp := s.toStreamResponse(*stream, tags, participants, channelOwner, view)
 	// 再生可否は**詳細でだけ**返す。閲覧者にも要る（プレイヤーを描くかの判断）が、
@@ -381,7 +381,7 @@ func listView(isEditor bool) streamView {
 //
 // 引数にして呼び出し側に選ばせているのは、あとから応答を返す経路が増えたときに
 // 黙って載せてしまわないため（コンパイルが通らないので判断を迫られる）。
-func (s *StreamService) toStreamResponse(stream models.Stream, tags []models.StreamTag, participants []models.Singer, channelOwner *models.Singer, view streamView) dto.StreamResponse {
+func (s *StreamService) toStreamResponse(stream models.Stream, tags []models.StreamTag, participants []models.Channel, channelOwner *models.Channel, view streamView) dto.StreamResponse {
 	resp := dto.StreamResponse{
 		ID:           stream.ID,
 		Title:        stream.Title,
@@ -420,9 +420,9 @@ func (s *StreamService) toStreamResponse(stream models.Stream, tags []models.Str
 	}
 
 	// 参加者を変換する
-	resp.Participants = make([]dto.SingerResponse, len(participants))
+	resp.Participants = make([]dto.ChannelResponse, len(participants))
 	for i, singer := range participants {
-		resp.Participants[i] = dto.SingerResponse{
+		resp.Participants[i] = dto.ChannelResponse{
 			ID:        singer.ID,
 			Name:      singer.Name,
 			CreatedAt: singer.CreatedAt,
@@ -441,7 +441,7 @@ func (s *StreamService) toStreamResponse(stream models.Stream, tags []models.Str
 
 	// チャンネル所有者を変換する
 	if channelOwner != nil {
-		ownerResp := dto.SingerResponse{
+		ownerResp := dto.ChannelResponse{
 			ID:        channelOwner.ID,
 			Name:      channelOwner.Name,
 			CreatedAt: channelOwner.CreatedAt,
@@ -600,9 +600,9 @@ func (s *StreamService) toPerformanceResponse(perf repository.PerformanceWithDet
 	}
 
 	// 歌手を変換する
-	resp.Singers = make([]dto.SingerResponse, len(perf.Singers))
+	resp.Singers = make([]dto.ChannelResponse, len(perf.Singers))
 	for i, singer := range perf.Singers {
-		resp.Singers[i] = dto.SingerResponse{
+		resp.Singers[i] = dto.ChannelResponse{
 			ID:        singer.ID,
 			Name:      singer.Name,
 			CreatedAt: singer.CreatedAt,
@@ -686,7 +686,7 @@ func (s *StreamService) Update(id string, req *dto.UpdateStreamRequest, isEditor
 		if len(req.ParticipantIDs) > 0 {
 			ownerID = req.ParticipantIDs[0]
 		}
-		if err := s.streamRepo.SetSingers(id, req.ParticipantIDs, ownerID); err != nil {
+		if err := s.streamRepo.SetChannels(id, req.ParticipantIDs, ownerID); err != nil {
 			return nil, fmt.Errorf("set participants: %w", err)
 		}
 	}

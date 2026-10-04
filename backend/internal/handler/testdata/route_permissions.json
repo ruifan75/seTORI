@@ -687,70 +687,70 @@
   },
   {
     "pattern": "GET /api/channels",
-    "handler": "handleListSingers",
+    "handler": "handleListChannels",
     "permission": "",
     "login": false,
     "analysis": false
   },
   {
     "pattern": "GET /api/channels/search",
-    "handler": "handleSearchSingers",
+    "handler": "handleSearchChannels",
     "permission": "",
     "login": false,
     "analysis": false
   },
   {
     "pattern": "GET /api/channels/{id}",
-    "handler": "handleGetSinger",
+    "handler": "handleGetChannel",
     "permission": "",
     "login": false,
     "analysis": false
   },
   {
     "pattern": "GET /api/channels/{id}/streams",
-    "handler": "handleGetSingerStreams",
+    "handler": "handleGetChannelStreams",
     "permission": "",
     "login": false,
     "analysis": false
   },
   {
     "pattern": "GET /api/channels/{id}/performances",
-    "handler": "handleGetSingerPerformances",
+    "handler": "handleGetChannelPerformances",
     "permission": "",
     "login": false,
     "analysis": false
   },
   {
     "pattern": "POST /api/channels",
-    "handler": "handleCreateSinger",
+    "handler": "handleCreateChannel",
     "permission": "content:edit",
     "login": true,
     "analysis": false
   },
   {
     "pattern": "PUT /api/channels/{id}",
-    "handler": "handleUpdateSinger",
+    "handler": "handleUpdateChannel",
     "permission": "content:edit",
     "login": true,
     "analysis": false
   },
   {
     "pattern": "PUT /api/channels/{id}/visibility",
-    "handler": "handleUpdateSingerVisibility",
+    "handler": "handleUpdateChannelVisibility",
     "permission": "content:edit",
     "login": true,
     "analysis": false
   },
   {
     "pattern": "PUT /api/channels/{id}/members-policy",
-    "handler": "handleUpdateSingerMembersPolicy",
+    "handler": "handleUpdateChannelMembersPolicy",
     "permission": "content:edit",
     "login": true,
     "analysis": false
   },
   {
     "pattern": "PUT /api/channels/{id}/auto-fill",
-    "handler": "handleUpdateSingerAutoFill",
+    "handler": "handleUpdateChannelAutoFill",
     "permission": "content:edit",
     "login": true,
     "analysis": false
@@ -764,77 +764,77 @@
   },
   {
     "pattern": "PUT /api/channels/{id}/organization",
-    "handler": "handleUpdateSingerOrganization",
+    "handler": "handleUpdateChannelOrganization",
     "permission": "content:edit",
     "login": true,
     "analysis": false
   },
   {
     "pattern": "GET /api/singers",
-    "handler": "handleListSingers",
+    "handler": "handleListChannels",
     "permission": "",
     "login": false,
     "analysis": false
   },
   {
     "pattern": "GET /api/singers/search",
-    "handler": "handleSearchSingers",
+    "handler": "handleSearchChannels",
     "permission": "",
     "login": false,
     "analysis": false
   },
   {
     "pattern": "GET /api/singers/{id}",
-    "handler": "handleGetSinger",
+    "handler": "handleGetChannel",
     "permission": "",
     "login": false,
     "analysis": false
   },
   {
     "pattern": "GET /api/singers/{id}/streams",
-    "handler": "handleGetSingerStreams",
+    "handler": "handleGetChannelStreams",
     "permission": "",
     "login": false,
     "analysis": false
   },
   {
     "pattern": "GET /api/singers/{id}/performances",
-    "handler": "handleGetSingerPerformances",
+    "handler": "handleGetChannelPerformances",
     "permission": "",
     "login": false,
     "analysis": false
   },
   {
     "pattern": "POST /api/singers",
-    "handler": "handleCreateSinger",
+    "handler": "handleCreateChannel",
     "permission": "content:edit",
     "login": true,
     "analysis": false
   },
   {
     "pattern": "PUT /api/singers/{id}",
-    "handler": "handleUpdateSinger",
+    "handler": "handleUpdateChannel",
     "permission": "content:edit",
     "login": true,
     "analysis": false
   },
   {
     "pattern": "PUT /api/singers/{id}/visibility",
-    "handler": "handleUpdateSingerVisibility",
+    "handler": "handleUpdateChannelVisibility",
     "permission": "content:edit",
     "login": true,
     "analysis": false
   },
   {
     "pattern": "PUT /api/singers/{id}/members-policy",
-    "handler": "handleUpdateSingerMembersPolicy",
+    "handler": "handleUpdateChannelMembersPolicy",
     "permission": "content:edit",
     "login": true,
     "analysis": false
   },
   {
     "pattern": "PUT /api/singers/{id}/auto-fill",
-    "handler": "handleUpdateSingerAutoFill",
+    "handler": "handleUpdateChannelAutoFill",
     "permission": "content:edit",
     "login": true,
     "analysis": false
@@ -897,7 +897,7 @@
   },
   {
     "pattern": "PUT /api/singers/{id}/organization",
-    "handler": "handleUpdateSingerOrganization",
+    "handler": "handleUpdateChannelOrganization",
     "permission": "content:edit",
     "login": true,
     "analysis": false

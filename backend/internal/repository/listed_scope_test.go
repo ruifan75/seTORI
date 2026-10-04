@@ -12,8 +12,8 @@ import (
 // visibleChannelLiteral は `VisibleChannelExpr(alias)` の期待値を**実装を呼ばずに**作る。
 // `TestVisibleChannelExpr` と同じ文字列で、alias だけ差し替えられるようにしたもの。
 func visibleChannelLiteral(alias string) string {
-	return "EXISTS (SELECT 1 FROM stream_singers ss" +
-		" JOIN singers si ON si.id = ss.singer_id" +
+	return "EXISTS (SELECT 1 FROM stream_channels ss" +
+		" JOIN channels si ON si.id = ss.channel_id" +
 		" WHERE ss.stream_id = " + alias + ".id AND si.is_hidden = FALSE)"
 }
 
@@ -259,7 +259,7 @@ func TestListedSurfacesApplyChannelScope(t *testing.T) {
 //
 //   - 歌手ページの歌唱数 … 非表示チャンネルのページは未ログインでも開ける設計
 //     （CLAUDE.md §3）。通すと自分の歌唱が 0 件のページになる
-//     （歌唱一覧の側は `TestSingerPageIsNotChannelScoped`）
+//     （歌唱一覧の側は `TestChannelPageIsNotChannelScoped`）
 //   - 統合候補の件数 … 統合の向きは件数で決めるので、非表示チャンネルの歌唱しか
 //     無い曲が 0 件に見えると、残すべきほうを消す方向へ誘導する
 //   - 配信検索 … 非表示の配信も意図的に含める（CLAUDE.md §2）。同じ性質の
@@ -268,7 +268,7 @@ func TestChannelScopeStaysOffWhereItWouldMislead(t *testing.T) {
 	needle := strings.Join(strings.Fields(visibleChannelLiteral("st")), " ")
 	for _, access := range []ViewerAccess{PublicAccess, RestrictedView} {
 		db, rec := newRecordingDB(t)
-		NewSingerRepository(db).GetPerformanceCount("UC-x", access)
+		NewChannelRepository(db).GetPerformanceCount("UC-x", access)
 		NewStreamRepository(db).SearchStreams(models.StreamSearchFilters{
 			// 歌唱を参照する絞り込みを両方立てる（どちらも歌唱の副問い合わせを持つ）。
 			VocalistIDs:       []string{"UC-x"},
@@ -296,9 +296,9 @@ func TestGetPerformanceCountsQueryExact(t *testing.T) {
 	const publicWhere = "p.song_id = ANY($1::uuid[]) AND st.is_hidden = FALSE AND NOT COALESCE(st.restriction_override, " +
 		"EXISTS (SELECT 1 FROM stream_stream_tags mt WHERE mt.stream_id = st.id AND mt.tag_id = 'members_only')" +
 		" AND NOT COALESCE((SELECT bool_and(COALESCE(eg.members_only_policy, '') = 'allow')" +
-		" FROM stream_singers eo JOIN singers eg ON eg.id = eo.singer_id" +
+		" FROM stream_channels eo JOIN channels eg ON eg.id = eo.channel_id" +
 		" WHERE eo.stream_id = st.id AND eo.is_owner), FALSE))" +
-		" AND EXISTS (SELECT 1 FROM stream_singers ss JOIN singers si ON si.id = ss.singer_id" +
+		" AND EXISTS (SELECT 1 FROM stream_channels ss JOIN channels si ON si.id = ss.channel_id" +
 		" WHERE ss.stream_id = st.id AND si.is_hidden = FALSE)"
 	for _, tc := range []struct {
 		name   string
@@ -328,8 +328,8 @@ func TestGetPerformanceCountsQueryExact(t *testing.T) {
 // タグ一覧では件数と一覧で FROM/JOIN が別々に組み立てられる。
 // 両方の SQL 全体を固定し、片方の JOIN だけを取り違えた改変も検出する。
 func TestFindByTagIDQueriesExact(t *testing.T) {
-	const restricted = "COALESCE(st.restriction_override, EXISTS (SELECT 1 FROM stream_stream_tags mt WHERE mt.stream_id = st.id AND mt.tag_id = 'members_only') AND NOT COALESCE((SELECT bool_and(COALESCE(eg.members_only_policy, '') = 'allow') FROM stream_singers eo JOIN singers eg ON eg.id = eo.singer_id WHERE eo.stream_id = st.id AND eo.is_owner), FALSE))"
-	const public = "st.is_hidden = FALSE AND NOT " + restricted + " AND EXISTS (SELECT 1 FROM stream_singers ss JOIN singers si ON si.id = ss.singer_id WHERE ss.stream_id = st.id AND si.is_hidden = FALSE)"
+	const restricted = "COALESCE(st.restriction_override, EXISTS (SELECT 1 FROM stream_stream_tags mt WHERE mt.stream_id = st.id AND mt.tag_id = 'members_only') AND NOT COALESCE((SELECT bool_and(COALESCE(eg.members_only_policy, '') = 'allow') FROM stream_channels eo JOIN channels eg ON eg.id = eo.channel_id WHERE eo.stream_id = st.id AND eo.is_owner), FALSE))"
+	const public = "st.is_hidden = FALSE AND NOT " + restricted + " AND EXISTS (SELECT 1 FROM stream_channels ss JOIN channels si ON si.id = ss.channel_id WHERE ss.stream_id = st.id AND si.is_hidden = FALSE)"
 	const joins = "FROM performances p JOIN streams st ON p.stream_id = st.id "
 	const tagJoin = "JOIN performance_performance_tags ppt ON ppt.performance_id = p.id "
 	const projection = "SELECT p.id, p.stream_id, p.song_id, p.start_seconds, p.end_seconds, p.order_index, p.holodex_song_id, p.custom_tags, p.created_at, p.end_source, p.end_confirmed, st.title AS stream_title, st.stream_date, st.thumbnail_url, s.name AS song_name, s.original_artist, s.arts, " + restricted + " "

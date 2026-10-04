@@ -14,12 +14,12 @@ import (
 	"github.com/ruifan75/setori/pkg/auth"
 )
 
-func singerSectionsFixture(t *testing.T, db *sql.DB) *Router {
+func channelSectionsFixture(t *testing.T, db *sql.DB) *Router {
 	t.Helper()
 	if _, err := db.Exec(`INSERT INTO organizations(key,display_name,sort_order) VALUES ('review_a','あ事務所',0),('review_b','い事務所',10)`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`INSERT INTO singers(id,name,english_name,organization,organization_override,is_hidden,auto_fill_enabled) VALUES
+	if _, err := db.Exec(`INSERT INTO channels(id,name,english_name,organization,organization_override,is_hidden,auto_fill_enabled) VALUES
  ('visible_a','あ','Zulu','review_b',NULL,false,true),
  ('visible_i','い','Alpha','review_a',NULL,false,false),
  ('hidden_a','あ','Zulu','review_b',NULL,true,true),
@@ -27,7 +27,7 @@ func singerSectionsFixture(t *testing.T, db *sql.DB) *Router {
  ('hidden_e','え','Alpha','review_b','review_a',true,false)`); err != nil {
 		t.Fatal(err)
 	}
-	return &Router{singerService: service.NewSingerService(repository.NewSingerRepository(db), repository.NewStreamRepository(db), nil)}
+	return &Router{channelService: service.NewChannelService(repository.NewChannelRepository(db), repository.NewStreamRepository(db), nil)}
 }
 func sectionJSON(t *testing.T, r *Router, path string, user *models.User) map[string]json.RawMessage {
 	t.Helper()
@@ -36,7 +36,7 @@ func sectionJSON(t *testing.T, r *Router, path string, user *models.User) map[st
 		req = withUser(req, user)
 	}
 	w := httptest.NewRecorder()
-	r.handleListSingers(w, req)
+	r.handleListChannels(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("%s: status=%d %s", path, w.Code, w.Body.String())
 	}
@@ -83,25 +83,25 @@ func sectionHiddenFlags(t *testing.T, raw json.RawMessage, want map[string]bool)
 }
 
 // handler の権限判定、実際の SELECT/Scan、JSON の省略までを確認する。
-func TestSingerSectionsRespectViewerAndEditor(t *testing.T) {
+func TestChannelSectionsRespectViewerAndEditor(t *testing.T) {
 	db := reviewTestDB(t)
-	r := singerSectionsFixture(t, db)
+	r := channelSectionsFixture(t, db)
 	editor := &models.User{Permissions: []string{auth.PermContentEdit}}
 	for _, user := range []*models.User{nil, {Permissions: []string{}}, editor} {
 		canEdit := user == editor
 		grouped := sectionJSON(t, r, "/api/singers?group=organization&include_hidden=true", user)
 		var groups []struct {
 			Organization string          `json:"organization"`
-			Singers      json.RawMessage `json:"singers"`
+			Channels     json.RawMessage `json:"singers"`
 		}
 		if err := json.Unmarshal(grouped["groups"], &groups); err != nil {
 			t.Fatal(err)
 		}
-		if len(groups) != 2 || groups[0].Organization != "review_a" || groups[1].Organization != "review_b" || !reflect.DeepEqual(sectionIDs(t, groups[0].Singers), []string{"visible_i"}) || !reflect.DeepEqual(sectionIDs(t, groups[1].Singers), []string{"visible_a"}) {
+		if len(groups) != 2 || groups[0].Organization != "review_a" || groups[1].Organization != "review_b" || !reflect.DeepEqual(sectionIDs(t, groups[0].Channels), []string{"visible_i"}) || !reflect.DeepEqual(sectionIDs(t, groups[1].Channels), []string{"visible_a"}) {
 			t.Fatalf("表示中の事務所区分: %s", grouped["groups"])
 		}
-		sectionHiddenFlags(t, groups[0].Singers, map[string]bool{"visible_i": false})
-		sectionHiddenFlags(t, groups[1].Singers, map[string]bool{"visible_a": false})
+		sectionHiddenFlags(t, groups[0].Channels, map[string]bool{"visible_i": false})
+		sectionHiddenFlags(t, groups[1].Channels, map[string]bool{"visible_a": false})
 		total := 2
 		if canEdit {
 			total = 5
@@ -141,10 +141,10 @@ func TestSingerSectionsRespectViewerAndEditor(t *testing.T) {
 			t.Fatal("閲覧者へ非表示件数が届いた")
 		}
 		// 運用情報を持つ fixture の欄も閲覧者には届かない。
-		var singers []map[string]json.RawMessage
-		json.Unmarshal(list["singers"], &singers)
-		for _, singer := range singers {
-			_, exists := singer["auto_fill_enabled"]
+		var channels []map[string]json.RawMessage
+		json.Unmarshal(list["singers"], &channels)
+		for _, channel := range channels {
+			_, exists := channel["auto_fill_enabled"]
 			if exists != canEdit {
 				t.Fatalf("権限別の運用情報: %s", list["singers"])
 			}
@@ -152,9 +152,9 @@ func TestSingerSectionsRespectViewerAndEditor(t *testing.T) {
 	}
 }
 
-func TestSingerSectionsKeepOrderAcrossPages(t *testing.T) {
+func TestChannelSectionsKeepOrderAcrossPages(t *testing.T) {
 	db := reviewTestDB(t)
-	r := singerSectionsFixture(t, db)
+	r := channelSectionsFixture(t, db)
 	editor := &models.User{Permissions: []string{auth.PermContentEdit}}
 	for _, tc := range []struct {
 		query string
@@ -187,11 +187,11 @@ func TestSingerSectionsKeepOrderAcrossPages(t *testing.T) {
 	}
 }
 
-func TestSingerSectionsReturnEmptyHiddenToEditor(t *testing.T) {
+func TestChannelSectionsReturnEmptyHiddenToEditor(t *testing.T) {
 	db := reviewTestDB(t)
-	r := singerSectionsFixture(t, db)
+	r := channelSectionsFixture(t, db)
 	// 全行はこのテストの fixture。既存の利用者データには触れない。
-	if _, err := db.Exec(`UPDATE singers SET is_hidden=false`); err != nil {
+	if _, err := db.Exec(`UPDATE channels SET is_hidden=false`); err != nil {
 		t.Fatal(err)
 	}
 	editor := &models.User{Permissions: []string{auth.PermContentEdit}}

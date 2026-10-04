@@ -98,15 +98,15 @@ func TestUpdateWritesRestrictionAfterTagsAndParticipants(t *testing.T) {
 		return -1
 	}
 	tags := pos("DELETE FROM stream_stream_tags")
-	singers := pos("DELETE FROM stream_singers")
+	channels := pos("DELETE FROM stream_channels")
 	// 詳細の SELECT も `restriction_override_auto` を含む（警告の判定式）ので、
 	// UPDATE にしか現れない形で探す。
 	override := pos("SET restriction_override")
-	if tags < 0 || singers < 0 || override < 0 {
-		t.Fatalf("必要な文が発行されていない（tags=%d singers=%d override=%d）: %q", tags, singers, override, issued)
+	if tags < 0 || channels < 0 || override < 0 {
+		t.Fatalf("必要な文が発行されていない（tags=%d singers=%d override=%d）: %q", tags, channels, override, issued)
 	}
-	if override < tags || override < singers {
-		t.Errorf("裁定がタグ・参加者より先に書かれている（tags=%d singers=%d override=%d）", tags, singers, override)
+	if override < tags || override < channels {
+		t.Errorf("裁定がタグ・参加者より先に書かれている（tags=%d singers=%d override=%d）", tags, channels, override)
 	}
 }
 

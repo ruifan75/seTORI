@@ -32,7 +32,7 @@ seTORI は VTuber の歌枠で歌われた楽曲を収集・識別・管理す�
 |---|------|------|
 | 1 | **楽曲管理 (Songs)** | CRUD、GIN trigram あいまい検索、重複楽曲のマージ、全履歴の歌唱記録。一意キー `(name + original_artist)` |
 | 2 | **配信管理 (Streams)** | YouTube 動画 ID を主キーに使用。`is_processed` / `is_hidden` ステータス、Holodex topic とタイトル規則から配信タグ・既定表示を決定。JSONB カラム `holodex_data` / `comment_raw` / `comment_songs` |
-| 3 | **歌手管理 (Singers)** | YouTube チャンネル ID を主キーに使用。所属事務所、アバター、英語名、複数人コラボ歌枠に対応 |
+| 3 | **チャンネル管理 (Channels)** | YouTube チャンネル ID を主キーに使用。所属事務所、アバター、英語名、複数人コラボ歌枠に対応 |
 | 4 | **歌唱記録 (Performances)** | 開始/終了秒数、歌唱タグ、複数歌手コラボ。一意キー `(stream_id + song_id + start_seconds)` |
 | 5 | **Holodex 双方向同期** | チャンネルの配信とセットリストの取得、seTORI セットリストの Holodex へのアップロード、SHA256 ハッシュキャッシュによる重複防止 |
 | 6 | **コメント分析** | YouTube/Holodex からコメントを取得、正規表現でタイムスタンプ（HH:MM:SS / MM:SS）を解析 + 区切り文字で曲名/アーティストを分解 |
@@ -229,7 +229,7 @@ API は原則 `/api` をプレフィックスとし、JSON を返却します（
 | POST | `/api/streams/{id}/comments/sync-youtube` | YouTube Data API から生コメントを手動同期 |
 | POST | `/api/streams/{id}/comments/analyze` | コメントを楽曲に解析 |
 | POST | `/api/comments/backfill` | comment_songs を補完 |
-| **Singers** | | |
+| **Channels** | | |
 | GET | `/api/channels` · `/search` · `/{id}` · `/{id}/streams` · `/{id}/performances` | 一覧/検索/詳細/配信/歌唱 |
 | POST | `/api/channels` | Holodex 同期によりチャンネル情報から新規追加。Holodex 未登録時は YouTube fallback |
 | PUT | `/api/channels/{id}` | Holodex 未登録（YouTube fallback）チャンネルの手動メタデータ更新 |
@@ -264,11 +264,11 @@ API は原則 `/api` をプレフィックスとし、JSON を返却します（
 
 主なテーブル（完全な定義は `backend/internal/database/migrations/` を参照）：
 
-- `singers` — VTuber、PK は YouTube チャンネル ID。`metadata_source=holodex` は Holodex 管理、`youtube` は手動編集可能な fallback 登録
+- `channels` — YouTube チャンネル、PK は YouTube チャンネル ID。`metadata_source=holodex` は Holodex 管理、`youtube` は手動編集可能な fallback 登録
 - `songs` — 楽曲マスター。一意キー `(name, original_artist)`。`song_itunes` で iTunes Track と 1:N 紐付け
 - `streams` — 歌枠。PK は YouTube 動画 ID。`holodex_data` / `comment_raw` / `comment_songs` は JSONB。自動表示判定と手動固定は [`docs/STREAM_VISIBILITY.md`](./docs/STREAM_VISIBILITY.md) を参照
 - `performances` — 歌唱記録、一意キー `(stream_id, song_id, start_seconds)`
-- 多対多：`stream_singers`（`is_owner` 含む）、`performance_singers`、`stream_stream_tags`、`performance_performance_tags`
+- 多対多：`stream_channels`（`is_owner` 含む）、`performance_singers`、`stream_stream_tags`、`performance_performance_tags`
 - `performance_tags` / `stream_tags` — ビルトインタグをプリロード。`filter_keywords` — コメントの除外/保持キーワード（seed 含む）
 - `users` / `roles` / `sessions` / `oauth_identities` — 認証。セッションはトークンの SHA-256 ハッシュのみ保存
 - `playlists` / `playlist_items` — プレイリスト。項目は `performances(id)` を参照（`ON DELETE CASCADE`）

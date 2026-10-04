@@ -67,7 +67,7 @@ function pageFixture(scenario) {
     artistApi: { backfillReadings: async () => ({ task_id: 'task-one', message: '読み補完を開始しました' }) },
     songApi: { scanDuplicates: async () => ({ task_id: 'task-one', message: '走査を開始しました' }) },
     readingApi: {}, itunesApi: {}, holodexApi: {}, batchAnalyzeApi: {}, batchFillApi: {},
-    singerApi: {}, autoFillApi: {}, nonSingingApi: {}, restrictionReviewApi: {}, streamApi: {},
+    channelApi: {}, autoFillApi: {}, nonSingingApi: {}, restrictionReviewApi: {}, streamApi: {},
   };
   const results = loadTS('../src/utils/taskResults.ts');
   const hook = loadTS('../src/hooks/useTaskProgress.ts', { react, '@tanstack/react-query': reactQuery, '../api/client': api, '../utils/taskResults': results });

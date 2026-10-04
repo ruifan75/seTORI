@@ -1,5 +1,5 @@
 import { holodexApi, commentApi, chapterApi } from '../../api/client';
-import type { Singer, CommentSong, SongSuggestion } from '../../api/types';
+import type { Channel, CommentSong, SongSuggestion } from '../../api/types';
 import type { useToast } from '../../components/ui/ToastContext';
 import { sameViewer, viewerID } from '../../queryClient';
 import { analysisFailureMessage } from '../../utils/apiError';
@@ -11,7 +11,7 @@ import { mergeDuplicateSongs, endSourceForSourceSong } from './utils';
 
 interface Context {
   stream: StreamDetailResponse | undefined;
-  channelOwner: Singer | null;
+  channelOwner: Channel | null;
   fetchTrackDurationByItunesId: (itunesId: number) => Promise<number | null>;
   id: string | undefined;
   showToast: ReturnType<typeof useToast>['showToast'];

@@ -9,9 +9,9 @@ import (
 // SQL の字面だけでは分からない引数の反転・対象の取り違えを、保存後の列で検査する。
 func TestRestrictionDecisionPersistence(t *testing.T) {
 	db := reviewTestDB(t)
-	if _, err := db.Exec(`INSERT INTO singers(id,name,is_hidden,members_only_policy) VALUES ('owner','所有者',false,NULL);
+	if _, err := db.Exec(`INSERT INTO channels(id,name,is_hidden,members_only_policy) VALUES ('owner','所有者',false,NULL);
  INSERT INTO streams(id,title,stream_date) VALUES ('target','対象','2026-01-01'),('other','別の配信','2026-01-02');
- INSERT INTO stream_singers(stream_id,singer_id,is_owner) VALUES ('target','owner',TRUE);`); err != nil {
+ INSERT INTO stream_channels(stream_id,channel_id,is_owner) VALUES ('target','owner',TRUE);`); err != nil {
 		t.Fatal(err)
 	}
 	repo := NewStreamRepository(db)

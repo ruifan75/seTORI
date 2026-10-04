@@ -1,0 +1,1016 @@
+{
+  "GET /auto-fill ": {
+    "status": 401,
+    "body": {
+      "error": "ログインが必要です"
+    }
+  },
+  "GET /auto-fill admin": {
+    "status": 200,
+    "body": {
+      "singers": [
+        {
+          "id": "channel",
+          "name": "channel",
+          "metadata_source": "manual",
+          "can_edit_metadata": true,
+          "is_hidden": false,
+          "members_only_policy": "allow",
+          "auto_fill_enabled": true,
+          "created_at": "2026-10-04T00:00:00Z",
+          "updated_at": "2026-10-04T00:00:00Z"
+        }
+      ]
+    }
+  },
+  "GET /auto-fill both": {
+    "status": 200,
+    "body": {
+      "singers": [
+        {
+          "id": "channel",
+          "name": "channel",
+          "metadata_source": "manual",
+          "can_edit_metadata": true,
+          "is_hidden": false,
+          "members_only_policy": "allow",
+          "auto_fill_enabled": true,
+          "created_at": "2026-10-04T00:00:00Z",
+          "updated_at": "2026-10-04T00:00:00Z"
+        }
+      ]
+    }
+  },
+  "GET /auto-fill editor": {
+    "status": 200,
+    "body": {
+      "singers": [
+        {
+          "id": "channel",
+          "name": "channel",
+          "metadata_source": "manual",
+          "can_edit_metadata": true,
+          "is_hidden": false,
+          "members_only_policy": "allow",
+          "auto_fill_enabled": true,
+          "created_at": "2026-10-04T00:00:00Z",
+          "updated_at": "2026-10-04T00:00:00Z"
+        }
+      ]
+    }
+  },
+  "GET /auto-fill restricted": {
+    "status": 403,
+    "body": {
+      "error": "この操作を行う権限がありません"
+    }
+  },
+  "GET /auto-fill viewer": {
+    "status": 403,
+    "body": {
+      "error": "この操作を行う権限がありません"
+    }
+  },
+  "GET /channel ": {
+    "status": 200,
+    "body": {
+      "id": "channel",
+      "name": "channel",
+      "metadata_source": "manual",
+      "can_edit_metadata": true,
+      "is_hidden": false,
+      "created_at": "2026-10-04T00:00:00Z",
+      "updated_at": "2026-10-04T00:00:00Z",
+      "stream_count": 0,
+      "performance_count": 0
+    }
+  },
+  "GET /channel admin": {
+    "status": 200,
+    "body": {
+      "id": "channel",
+      "name": "channel",
+      "metadata_source": "manual",
+      "can_edit_metadata": true,
+      "is_hidden": false,
+      "members_only_policy": "allow",
+      "auto_fill_enabled": true,
+      "created_at": "2026-10-04T00:00:00Z",
+      "updated_at": "2026-10-04T00:00:00Z",
+      "stream_count": 0,
+      "performance_count": 0
+    }
+  },
+  "GET /channel both": {
+    "status": 200,
+    "body": {
+      "id": "channel",
+      "name": "channel",
+      "metadata_source": "manual",
+      "can_edit_metadata": true,
+      "is_hidden": false,
+      "members_only_policy": "allow",
+      "auto_fill_enabled": true,
+      "created_at": "2026-10-04T00:00:00Z",
+      "updated_at": "2026-10-04T00:00:00Z",
+      "stream_count": 0,
+      "performance_count": 0
+    }
+  },
+  "GET /channel editor": {
+    "status": 200,
+    "body": {
+      "id": "channel",
+      "name": "channel",
+      "metadata_source": "manual",
+      "can_edit_metadata": true,
+      "is_hidden": false,
+      "members_only_policy": "allow",
+      "auto_fill_enabled": true,
+      "created_at": "2026-10-04T00:00:00Z",
+      "updated_at": "2026-10-04T00:00:00Z",
+      "stream_count": 0,
+      "performance_count": 0
+    }
+  },
+  "GET /channel restricted": {
+    "status": 200,
+    "body": {
+      "id": "channel",
+      "name": "channel",
+      "metadata_source": "manual",
+      "can_edit_metadata": true,
+      "is_hidden": false,
+      "created_at": "2026-10-04T00:00:00Z",
+      "updated_at": "2026-10-04T00:00:00Z",
+      "stream_count": 0,
+      "performance_count": 0
+    }
+  },
+  "GET /channel viewer": {
+    "status": 200,
+    "body": {
+      "id": "channel",
+      "name": "channel",
+      "metadata_source": "manual",
+      "can_edit_metadata": true,
+      "is_hidden": false,
+      "created_at": "2026-10-04T00:00:00Z",
+      "updated_at": "2026-10-04T00:00:00Z",
+      "stream_count": 0,
+      "performance_count": 0
+    }
+  },
+  "GET /channel/performances ": {
+    "status": 200,
+    "body": {
+      "singer": {
+        "id": "channel",
+        "name": "channel",
+        "metadata_source": "manual",
+        "can_edit_metadata": true,
+        "is_hidden": false,
+        "created_at": "2026-10-04T00:00:00Z",
+        "updated_at": "2026-10-04T00:00:00Z"
+      },
+      "performances": [],
+      "pagination": {
+        "page": 1,
+        "limit": 20,
+        "total": 0,
+        "total_pages": 0
+      }
+    }
+  },
+  "GET /channel/performances admin": {
+    "status": 200,
+    "body": {
+      "singer": {
+        "id": "channel",
+        "name": "channel",
+        "metadata_source": "manual",
+        "can_edit_metadata": true,
+        "is_hidden": false,
+        "created_at": "2026-10-04T00:00:00Z",
+        "updated_at": "2026-10-04T00:00:00Z"
+      },
+      "performances": [],
+      "pagination": {
+        "page": 1,
+        "limit": 20,
+        "total": 0,
+        "total_pages": 0
+      }
+    }
+  },
+  "GET /channel/performances both": {
+    "status": 200,
+    "body": {
+      "singer": {
+        "id": "channel",
+        "name": "channel",
+        "metadata_source": "manual",
+        "can_edit_metadata": true,
+        "is_hidden": false,
+        "created_at": "2026-10-04T00:00:00Z",
+        "updated_at": "2026-10-04T00:00:00Z"
+      },
+      "performances": [],
+      "pagination": {
+        "page": 1,
+        "limit": 20,
+        "total": 0,
+        "total_pages": 0
+      }
+    }
+  },
+  "GET /channel/performances editor": {
+    "status": 200,
+    "body": {
+      "singer": {
+        "id": "channel",
+        "name": "channel",
+        "metadata_source": "manual",
+        "can_edit_metadata": true,
+        "is_hidden": false,
+        "created_at": "2026-10-04T00:00:00Z",
+        "updated_at": "2026-10-04T00:00:00Z"
+      },
+      "performances": [],
+      "pagination": {
+        "page": 1,
+        "limit": 20,
+        "total": 0,
+        "total_pages": 0
+      }
+    }
+  },
+  "GET /channel/performances restricted": {
+    "status": 200,
+    "body": {
+      "singer": {
+        "id": "channel",
+        "name": "channel",
+        "metadata_source": "manual",
+        "can_edit_metadata": true,
+        "is_hidden": false,
+        "created_at": "2026-10-04T00:00:00Z",
+        "updated_at": "2026-10-04T00:00:00Z"
+      },
+      "performances": [],
+      "pagination": {
+        "page": 1,
+        "limit": 20,
+        "total": 0,
+        "total_pages": 0
+      }
+    }
+  },
+  "GET /channel/performances viewer": {
+    "status": 200,
+    "body": {
+      "singer": {
+        "id": "channel",
+        "name": "channel",
+        "metadata_source": "manual",
+        "can_edit_metadata": true,
+        "is_hidden": false,
+        "created_at": "2026-10-04T00:00:00Z",
+        "updated_at": "2026-10-04T00:00:00Z"
+      },
+      "performances": [],
+      "pagination": {
+        "page": 1,
+        "limit": 20,
+        "total": 0,
+        "total_pages": 0
+      }
+    }
+  },
+  "GET /channel/streams?hidden=all\u0026processed=true ": {
+    "status": 200,
+    "body": {
+      "streams": [],
+      "pagination": {
+        "page": 1,
+        "limit": 20,
+        "total": 0,
+        "total_pages": 0
+      }
+    }
+  },
+  "GET /channel/streams?hidden=all\u0026processed=true admin": {
+    "status": 200,
+    "body": {
+      "streams": [],
+      "pagination": {
+        "page": 1,
+        "limit": 20,
+        "total": 0,
+        "total_pages": 0
+      }
+    }
+  },
+  "GET /channel/streams?hidden=all\u0026processed=true both": {
+    "status": 200,
+    "body": {
+      "streams": [],
+      "pagination": {
+        "page": 1,
+        "limit": 20,
+        "total": 0,
+        "total_pages": 0
+      }
+    }
+  },
+  "GET /channel/streams?hidden=all\u0026processed=true editor": {
+    "status": 200,
+    "body": {
+      "streams": [],
+      "pagination": {
+        "page": 1,
+        "limit": 20,
+        "total": 0,
+        "total_pages": 0
+      }
+    }
+  },
+  "GET /channel/streams?hidden=all\u0026processed=true restricted": {
+    "status": 200,
+    "body": {
+      "streams": [],
+      "pagination": {
+        "page": 1,
+        "limit": 20,
+        "total": 0,
+        "total_pages": 0
+      }
+    }
+  },
+  "GET /channel/streams?hidden=all\u0026processed=true viewer": {
+    "status": 200,
+    "body": {
+      "streams": [],
+      "pagination": {
+        "page": 1,
+        "limit": 20,
+        "total": 0,
+        "total_pages": 0
+      }
+    }
+  },
+  "GET /search?q=channel ": {
+    "status": 200,
+    "body": [
+      {
+        "id": "channel",
+        "name": "channel",
+        "metadata_source": "manual",
+        "can_edit_metadata": true,
+        "is_hidden": false,
+        "created_at": "2026-10-04T00:00:00Z",
+        "updated_at": "2026-10-04T00:00:00Z"
+      }
+    ]
+  },
+  "GET /search?q=channel admin": {
+    "status": 200,
+    "body": [
+      {
+        "id": "channel",
+        "name": "channel",
+        "metadata_source": "manual",
+        "can_edit_metadata": true,
+        "is_hidden": false,
+        "created_at": "2026-10-04T00:00:00Z",
+        "updated_at": "2026-10-04T00:00:00Z"
+      }
+    ]
+  },
+  "GET /search?q=channel both": {
+    "status": 200,
+    "body": [
+      {
+        "id": "channel",
+        "name": "channel",
+        "metadata_source": "manual",
+        "can_edit_metadata": true,
+        "is_hidden": false,
+        "created_at": "2026-10-04T00:00:00Z",
+        "updated_at": "2026-10-04T00:00:00Z"
+      }
+    ]
+  },
+  "GET /search?q=channel editor": {
+    "status": 200,
+    "body": [
+      {
+        "id": "channel",
+        "name": "channel",
+        "metadata_source": "manual",
+        "can_edit_metadata": true,
+        "is_hidden": false,
+        "created_at": "2026-10-04T00:00:00Z",
+        "updated_at": "2026-10-04T00:00:00Z"
+      }
+    ]
+  },
+  "GET /search?q=channel restricted": {
+    "status": 200,
+    "body": [
+      {
+        "id": "channel",
+        "name": "channel",
+        "metadata_source": "manual",
+        "can_edit_metadata": true,
+        "is_hidden": false,
+        "created_at": "2026-10-04T00:00:00Z",
+        "updated_at": "2026-10-04T00:00:00Z"
+      }
+    ]
+  },
+  "GET /search?q=channel viewer": {
+    "status": 200,
+    "body": [
+      {
+        "id": "channel",
+        "name": "channel",
+        "metadata_source": "manual",
+        "can_edit_metadata": true,
+        "is_hidden": false,
+        "created_at": "2026-10-04T00:00:00Z",
+        "updated_at": "2026-10-04T00:00:00Z"
+      }
+    ]
+  },
+  "GET ?group=organization\u0026include_hidden=true ": {
+    "status": 200,
+    "body": {
+      "groups": [
+        {
+          "organization": "",
+          "display_name": "",
+          "singers": [
+            {
+              "id": "channel",
+              "name": "channel",
+              "metadata_source": "manual",
+              "can_edit_metadata": true,
+              "is_hidden": false,
+              "created_at": "2026-10-04T00:00:00Z",
+              "updated_at": "2026-10-04T00:00:00Z"
+            }
+          ]
+        }
+      ],
+      "total": 1
+    }
+  },
+  "GET ?group=organization\u0026include_hidden=true admin": {
+    "status": 200,
+    "body": {
+      "groups": [
+        {
+          "organization": "",
+          "display_name": "",
+          "singers": [
+            {
+              "id": "channel",
+              "name": "channel",
+              "metadata_source": "manual",
+              "can_edit_metadata": true,
+              "is_hidden": false,
+              "members_only_policy": "allow",
+              "auto_fill_enabled": true,
+              "created_at": "2026-10-04T00:00:00Z",
+              "updated_at": "2026-10-04T00:00:00Z"
+            }
+          ]
+        }
+      ],
+      "hidden": [
+        {
+          "id": "channel",
+          "name": "channel",
+          "metadata_source": "manual",
+          "can_edit_metadata": true,
+          "is_hidden": false,
+          "members_only_policy": "allow",
+          "auto_fill_enabled": true,
+          "created_at": "2026-10-04T00:00:00Z",
+          "updated_at": "2026-10-04T00:00:00Z"
+        }
+      ],
+      "total": 2
+    }
+  },
+  "GET ?group=organization\u0026include_hidden=true both": {
+    "status": 200,
+    "body": {
+      "groups": [
+        {
+          "organization": "",
+          "display_name": "",
+          "singers": [
+            {
+              "id": "channel",
+              "name": "channel",
+              "metadata_source": "manual",
+              "can_edit_metadata": true,
+              "is_hidden": false,
+              "members_only_policy": "allow",
+              "auto_fill_enabled": true,
+              "created_at": "2026-10-04T00:00:00Z",
+              "updated_at": "2026-10-04T00:00:00Z"
+            }
+          ]
+        }
+      ],
+      "hidden": [
+        {
+          "id": "channel",
+          "name": "channel",
+          "metadata_source": "manual",
+          "can_edit_metadata": true,
+          "is_hidden": false,
+          "members_only_policy": "allow",
+          "auto_fill_enabled": true,
+          "created_at": "2026-10-04T00:00:00Z",
+          "updated_at": "2026-10-04T00:00:00Z"
+        }
+      ],
+      "total": 2
+    }
+  },
+  "GET ?group=organization\u0026include_hidden=true editor": {
+    "status": 200,
+    "body": {
+      "groups": [
+        {
+          "organization": "",
+          "display_name": "",
+          "singers": [
+            {
+              "id": "channel",
+              "name": "channel",
+              "metadata_source": "manual",
+              "can_edit_metadata": true,
+              "is_hidden": false,
+              "members_only_policy": "allow",
+              "auto_fill_enabled": true,
+              "created_at": "2026-10-04T00:00:00Z",
+              "updated_at": "2026-10-04T00:00:00Z"
+            }
+          ]
+        }
+      ],
+      "hidden": [
+        {
+          "id": "channel",
+          "name": "channel",
+          "metadata_source": "manual",
+          "can_edit_metadata": true,
+          "is_hidden": false,
+          "members_only_policy": "allow",
+          "auto_fill_enabled": true,
+          "created_at": "2026-10-04T00:00:00Z",
+          "updated_at": "2026-10-04T00:00:00Z"
+        }
+      ],
+      "total": 2
+    }
+  },
+  "GET ?group=organization\u0026include_hidden=true restricted": {
+    "status": 200,
+    "body": {
+      "groups": [
+        {
+          "organization": "",
+          "display_name": "",
+          "singers": [
+            {
+              "id": "channel",
+              "name": "channel",
+              "metadata_source": "manual",
+              "can_edit_metadata": true,
+              "is_hidden": false,
+              "created_at": "2026-10-04T00:00:00Z",
+              "updated_at": "2026-10-04T00:00:00Z"
+            }
+          ]
+        }
+      ],
+      "total": 1
+    }
+  },
+  "GET ?group=organization\u0026include_hidden=true viewer": {
+    "status": 200,
+    "body": {
+      "groups": [
+        {
+          "organization": "",
+          "display_name": "",
+          "singers": [
+            {
+              "id": "channel",
+              "name": "channel",
+              "metadata_source": "manual",
+              "can_edit_metadata": true,
+              "is_hidden": false,
+              "created_at": "2026-10-04T00:00:00Z",
+              "updated_at": "2026-10-04T00:00:00Z"
+            }
+          ]
+        }
+      ],
+      "total": 1
+    }
+  },
+  "GET ?include_hidden=true ": {
+    "status": 200,
+    "body": {
+      "singers": [
+        {
+          "id": "channel",
+          "name": "channel",
+          "metadata_source": "manual",
+          "can_edit_metadata": true,
+          "is_hidden": false,
+          "created_at": "2026-10-04T00:00:00Z",
+          "updated_at": "2026-10-04T00:00:00Z"
+        }
+      ],
+      "pagination": {
+        "page": 1,
+        "limit": 20,
+        "total": 1,
+        "total_pages": 1
+      }
+    }
+  },
+  "GET ?include_hidden=true admin": {
+    "status": 200,
+    "body": {
+      "singers": [
+        {
+          "id": "channel",
+          "name": "channel",
+          "metadata_source": "manual",
+          "can_edit_metadata": true,
+          "is_hidden": false,
+          "members_only_policy": "allow",
+          "auto_fill_enabled": true,
+          "created_at": "2026-10-04T00:00:00Z",
+          "updated_at": "2026-10-04T00:00:00Z"
+        }
+      ],
+      "pagination": {
+        "page": 1,
+        "limit": 20,
+        "total": 1,
+        "total_pages": 1
+      },
+      "hidden_total": 0
+    }
+  },
+  "GET ?include_hidden=true both": {
+    "status": 200,
+    "body": {
+      "singers": [
+        {
+          "id": "channel",
+          "name": "channel",
+          "metadata_source": "manual",
+          "can_edit_metadata": true,
+          "is_hidden": false,
+          "members_only_policy": "allow",
+          "auto_fill_enabled": true,
+          "created_at": "2026-10-04T00:00:00Z",
+          "updated_at": "2026-10-04T00:00:00Z"
+        }
+      ],
+      "pagination": {
+        "page": 1,
+        "limit": 20,
+        "total": 1,
+        "total_pages": 1
+      },
+      "hidden_total": 0
+    }
+  },
+  "GET ?include_hidden=true editor": {
+    "status": 200,
+    "body": {
+      "singers": [
+        {
+          "id": "channel",
+          "name": "channel",
+          "metadata_source": "manual",
+          "can_edit_metadata": true,
+          "is_hidden": false,
+          "members_only_policy": "allow",
+          "auto_fill_enabled": true,
+          "created_at": "2026-10-04T00:00:00Z",
+          "updated_at": "2026-10-04T00:00:00Z"
+        }
+      ],
+      "pagination": {
+        "page": 1,
+        "limit": 20,
+        "total": 1,
+        "total_pages": 1
+      },
+      "hidden_total": 0
+    }
+  },
+  "GET ?include_hidden=true restricted": {
+    "status": 200,
+    "body": {
+      "singers": [
+        {
+          "id": "channel",
+          "name": "channel",
+          "metadata_source": "manual",
+          "can_edit_metadata": true,
+          "is_hidden": false,
+          "created_at": "2026-10-04T00:00:00Z",
+          "updated_at": "2026-10-04T00:00:00Z"
+        }
+      ],
+      "pagination": {
+        "page": 1,
+        "limit": 20,
+        "total": 1,
+        "total_pages": 1
+      }
+    }
+  },
+  "GET ?include_hidden=true viewer": {
+    "status": 200,
+    "body": {
+      "singers": [
+        {
+          "id": "channel",
+          "name": "channel",
+          "metadata_source": "manual",
+          "can_edit_metadata": true,
+          "is_hidden": false,
+          "created_at": "2026-10-04T00:00:00Z",
+          "updated_at": "2026-10-04T00:00:00Z"
+        }
+      ],
+      "pagination": {
+        "page": 1,
+        "limit": 20,
+        "total": 1,
+        "total_pages": 1
+      }
+    }
+  },
+  "POST  ": {
+    "status": 401,
+    "body": {
+      "error": "ログインが必要です"
+    }
+  },
+  "POST  admin": {
+    "status": 400,
+    "body": {
+      "error": "チャンネルID、handle、またはURLは必須です"
+    }
+  },
+  "POST  both": {
+    "status": 400,
+    "body": {
+      "error": "チャンネルID、handle、またはURLは必須です"
+    }
+  },
+  "POST  editor": {
+    "status": 400,
+    "body": {
+      "error": "チャンネルID、handle、またはURLは必須です"
+    }
+  },
+  "POST  restricted": {
+    "status": 403,
+    "body": {
+      "error": "この操作を行う権限がありません"
+    }
+  },
+  "POST  viewer": {
+    "status": 403,
+    "body": {
+      "error": "この操作を行う権限がありません"
+    }
+  },
+  "PUT /channel ": {
+    "status": 401,
+    "body": {
+      "error": "ログインが必要です"
+    }
+  },
+  "PUT /channel admin": {
+    "status": 200,
+    "body": {
+      "id": "channel",
+      "name": "updated",
+      "metadata_source": "manual",
+      "can_edit_metadata": true,
+      "is_hidden": false,
+      "created_at": "2026-10-04T00:00:00Z",
+      "updated_at": "2026-10-04T00:00:00Z"
+    }
+  },
+  "PUT /channel both": {
+    "status": 200,
+    "body": {
+      "id": "channel",
+      "name": "updated",
+      "metadata_source": "manual",
+      "can_edit_metadata": true,
+      "is_hidden": false,
+      "created_at": "2026-10-04T00:00:00Z",
+      "updated_at": "2026-10-04T00:00:00Z"
+    }
+  },
+  "PUT /channel editor": {
+    "status": 200,
+    "body": {
+      "id": "channel",
+      "name": "updated",
+      "metadata_source": "manual",
+      "can_edit_metadata": true,
+      "is_hidden": false,
+      "created_at": "2026-10-04T00:00:00Z",
+      "updated_at": "2026-10-04T00:00:00Z"
+    }
+  },
+  "PUT /channel restricted": {
+    "status": 403,
+    "body": {
+      "error": "この操作を行う権限がありません"
+    }
+  },
+  "PUT /channel viewer": {
+    "status": 403,
+    "body": {
+      "error": "この操作を行う権限がありません"
+    }
+  },
+  "PUT /channel/auto-fill ": {
+    "status": 401,
+    "body": {
+      "error": "ログインが必要です"
+    }
+  },
+  "PUT /channel/auto-fill admin": {
+    "status": 200,
+    "body": {
+      "auto_fill_enabled": true,
+      "id": "channel"
+    }
+  },
+  "PUT /channel/auto-fill both": {
+    "status": 200,
+    "body": {
+      "auto_fill_enabled": true,
+      "id": "channel"
+    }
+  },
+  "PUT /channel/auto-fill editor": {
+    "status": 200,
+    "body": {
+      "auto_fill_enabled": true,
+      "id": "channel"
+    }
+  },
+  "PUT /channel/auto-fill restricted": {
+    "status": 403,
+    "body": {
+      "error": "この操作を行う権限がありません"
+    }
+  },
+  "PUT /channel/auto-fill viewer": {
+    "status": 403,
+    "body": {
+      "error": "この操作を行う権限がありません"
+    }
+  },
+  "PUT /channel/members-policy ": {
+    "status": 401,
+    "body": {
+      "error": "ログインが必要です"
+    }
+  },
+  "PUT /channel/members-policy admin": {
+    "status": 200,
+    "body": {
+      "id": "channel",
+      "members_only_policy": "allow"
+    }
+  },
+  "PUT /channel/members-policy both": {
+    "status": 200,
+    "body": {
+      "id": "channel",
+      "members_only_policy": "allow"
+    }
+  },
+  "PUT /channel/members-policy editor": {
+    "status": 200,
+    "body": {
+      "id": "channel",
+      "members_only_policy": "allow"
+    }
+  },
+  "PUT /channel/members-policy restricted": {
+    "status": 403,
+    "body": {
+      "error": "この操作を行う権限がありません"
+    }
+  },
+  "PUT /channel/members-policy viewer": {
+    "status": 403,
+    "body": {
+      "error": "この操作を行う権限がありません"
+    }
+  },
+  "PUT /channel/organization ": {
+    "status": 401,
+    "body": {
+      "error": "ログインが必要です"
+    }
+  },
+  "PUT /channel/organization admin": {
+    "status": 200,
+    "body": {
+      "id": "channel",
+      "organization": ""
+    }
+  },
+  "PUT /channel/organization both": {
+    "status": 200,
+    "body": {
+      "id": "channel",
+      "organization": ""
+    }
+  },
+  "PUT /channel/organization editor": {
+    "status": 200,
+    "body": {
+      "id": "channel",
+      "organization": ""
+    }
+  },
+  "PUT /channel/organization restricted": {
+    "status": 403,
+    "body": {
+      "error": "この操作を行う権限がありません"
+    }
+  },
+  "PUT /channel/organization viewer": {
+    "status": 403,
+    "body": {
+      "error": "この操作を行う権限がありません"
+    }
+  },
+  "PUT /channel/visibility ": {
+    "status": 401,
+    "body": {
+      "error": "ログインが必要です"
+    }
+  },
+  "PUT /channel/visibility admin": {
+    "status": 200,
+    "body": {
+      "id": "channel",
+      "is_hidden": true
+    }
+  },
+  "PUT /channel/visibility both": {
+    "status": 200,
+    "body": {
+      "id": "channel",
+      "is_hidden": true
+    }
+  },
+  "PUT /channel/visibility editor": {
+    "status": 200,
+    "body": {
+      "id": "channel",
+      "is_hidden": true
+    }
+  },
+  "PUT /channel/visibility restricted": {
+    "status": 403,
+    "body": {
+      "error": "この操作を行う権限がありません"
+    }
+  },
+  "PUT /channel/visibility viewer": {
+    "status": 403,
+    "body": {
+      "error": "この操作を行う権限がありません"
+    }
+  }
+}

@@ -75,7 +75,7 @@ func TestBatchFillPersistsActualSkippedStreams(t *testing.T) {
 				wantDone = 0
 				wantIDs = []string{"batch123456"}
 			}
-			if got.ID != id || got.Status != "done" || got.StreamsTotal != 1 || got.StreamsDone != wantDone || !reflect.DeepEqual(got.SkippedStreamIDs, wantIDs) || got.FinishedAt == nil || got.StartedByName != nil || got.SingerID != nil {
+			if got.ID != id || got.Status != "done" || got.StreamsTotal != 1 || got.StreamsDone != wantDone || !reflect.DeepEqual(got.SkippedStreamIDs, wantIDs) || got.FinishedAt == nil || got.StartedByName != nil || got.ChannelID != nil {
 				t.Fatalf("処理した配信の履歴: %+v", got)
 			}
 			if tc.skipped && !strings.Contains(got.Message, "飛ばした配信 1") {
@@ -123,7 +123,7 @@ func TestBatchFillProgressColumnsAndNulls(t *testing.T) {
 		t.Fatalf("Scan: %+v %v", runs, err)
 	}
 	r := runs[0]
-	if r.StreamsTotal != 10 || r.StreamsDone != 9 || r.SongsCreated != 2 || r.SongsReview != 3 || r.SongsGap != 4 || r.AIAsked != 5 || !reflect.DeepEqual(r.SkippedStreamIDs, []string{"first", "second"}) || r.FinishedAt != nil || r.StartedByName != nil || r.SingerID != nil {
+	if r.StreamsTotal != 10 || r.StreamsDone != 9 || r.SongsCreated != 2 || r.SongsReview != 3 || r.SongsGap != 4 || r.AIAsked != 5 || !reflect.DeepEqual(r.SkippedStreamIDs, []string{"first", "second"}) || r.FinishedAt != nil || r.StartedByName != nil || r.ChannelID != nil {
 		t.Fatalf("保存・Scan の列: %+v", r)
 	}
 	if err := repo.UpdateProgress(id, 10, 9, 2, 3, 4, 5, nil); err != nil {

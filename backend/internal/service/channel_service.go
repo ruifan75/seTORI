@@ -13,35 +13,35 @@ import (
 )
 
 var (
-	ErrSingerMetadataManagedByHolodex = errors.New("Holodex 登録済みチャンネルは手動編集できません")
-	ErrSingerNameRequired             = errors.New("チャンネル名は必須です")
+	ErrChannelMetadataManagedByHolodex = errors.New("Holodex 登録済みチャンネルは手動編集できません")
+	ErrChannelNameRequired             = errors.New("チャンネル名は必須です")
 	// ErrInvalidMembersOnlyPolicy は方針の値が不正。DB エラーと区別して 400 を返すために要る。
 	ErrInvalidMembersOnlyPolicy = errors.New("不明な方針です")
 )
 
-type SingerService struct {
-	singerRepo *repository.SingerRepository
-	streamRepo *repository.StreamRepository
-	perfRepo   *repository.PerformanceRepository
+type ChannelService struct {
+	channelRepo *repository.ChannelRepository
+	streamRepo  *repository.StreamRepository
+	perfRepo    *repository.PerformanceRepository
 }
 
-func NewSingerService(
-	singerRepo *repository.SingerRepository,
+func NewChannelService(
+	channelRepo *repository.ChannelRepository,
 	streamRepo *repository.StreamRepository,
 	perfRepo *repository.PerformanceRepository,
-) *SingerService {
-	return &SingerService{
-		singerRepo: singerRepo,
-		streamRepo: streamRepo,
-		perfRepo:   perfRepo,
+) *ChannelService {
+	return &ChannelService{
+		channelRepo: channelRepo,
+		streamRepo:  streamRepo,
+		perfRepo:    perfRepo,
 	}
 }
 
 // GetAll はすべての歌手を取得する。includeHidden は content:edit を持つ場合のみ true を渡す。
-func (s *SingerService) GetAll(page, limit int, sort, dir string, includeHidden, includeOperational bool) (*dto.SingerListResponse, error) {
+func (s *ChannelService) GetAll(page, limit int, sort, dir string, includeHidden, includeOperational bool) (*dto.ChannelListResponse, error) {
 	offset := (page - 1) * limit
 
-	singers, total, hidden, err := s.singerRepo.FindAll(limit, offset, sort, dir, includeHidden)
+	channels, total, hidden, err := s.channelRepo.FindAll(limit, offset, sort, dir, includeHidden)
 	if err != nil {
 		return nil, fmt.Errorf("get singers: %w", err)
 	}
@@ -51,15 +51,15 @@ func (s *SingerService) GetAll(page, limit int, sort, dir string, includeHidden,
 	if err != nil {
 		return nil, err
 	}
-	singerResponses := make([]dto.SingerResponse, len(singers))
-	for i, singer := range singers {
-		singerResponses[i] = s.toSingerResponseFor(singer, includeOperational, counts)
+	channelResponses := make([]dto.ChannelResponse, len(channels))
+	for i, channel := range channels {
+		channelResponses[i] = s.toChannelResponseFor(channel, includeOperational, counts)
 	}
 
 	totalPages := (total + limit - 1) / limit
 
-	resp := &dto.SingerListResponse{
-		Singers: singerResponses,
+	resp := &dto.ChannelListResponse{
+		Channels: channelResponses,
 		Pagination: dto.PaginationResponse{
 			Page:       page,
 			Limit:      limit,
@@ -75,16 +75,16 @@ func (s *SingerService) GetAll(page, limit int, sort, dir string, includeHidden,
 
 // GetGrouped は事務所別のチャンネル一覧を返す（ページングなし）。
 // 所属なしのチャンネルは最後の「所属なし」グループにまとめる。
-func (s *SingerService) GetGrouped(includeHidden, includeOperational bool) (*dto.SingerGroupListResponse, error) {
-	singers, err := s.singerRepo.FindAllGrouped()
+func (s *ChannelService) GetGrouped(includeHidden, includeOperational bool) (*dto.ChannelGroupListResponse, error) {
+	channels, err := s.channelRepo.FindAllGrouped()
 	if err != nil {
 		return nil, fmt.Errorf("get singers grouped: %w", err)
 	}
 	// 非表示は事務所の組へ混ぜず、別の区として名前順で返す（issue #65）。
 	// **権限が無ければ引かない** ── viewer には非表示の行がそもそも届かないこと。
-	var hiddenSingers []models.Singer
+	var hiddenChannels []models.Channel
 	if includeHidden {
-		if hiddenSingers, err = s.singerRepo.FindHiddenByName(); err != nil {
+		if hiddenChannels, err = s.channelRepo.FindHiddenByName(); err != nil {
 			return nil, fmt.Errorf("get hidden singers: %w", err)
 		}
 	}
@@ -101,28 +101,28 @@ func (s *SingerService) GetGrouped(includeHidden, includeOperational bool) (*dto
 	// Holodex の Independents のように無所属を意味する分類（is_unaffiliated）。
 	// 別の事実なので値は潰さないが、見る側にとっては同じ「事務所に属さない人たち」なので
 	// 空文字の組にまとめる。SQL 側で末尾に固めてあるので隣接判定のままで足りる。
-	groups := []dto.SingerGroupResponse{}
-	for _, singer := range singers {
+	groups := []dto.ChannelGroupResponse{}
+	for _, channel := range channels {
 		org, display := "", ""
-		if eff := singer.EffectiveOrganization(); eff.Valid && !singer.OrganizationUnaffil {
+		if eff := channel.EffectiveOrganization(); eff.Valid && !channel.OrganizationUnaffil {
 			org = strings.TrimSpace(eff.String)
 			display = org // organizations に行が無い場合の保険
-			if singer.OrganizationName.Valid {
-				display = singer.OrganizationName.String
+			if channel.OrganizationName.Valid {
+				display = channel.OrganizationName.String
 			}
 		}
 		if len(groups) == 0 || groups[len(groups)-1].Organization != org {
-			groups = append(groups, dto.SingerGroupResponse{Organization: org, DisplayName: display})
+			groups = append(groups, dto.ChannelGroupResponse{Organization: org, DisplayName: display})
 		}
 		last := &groups[len(groups)-1]
-		last.Singers = append(last.Singers, s.toSingerResponseFor(singer, includeOperational, counts))
+		last.Channels = append(last.Channels, s.toChannelResponseFor(channel, includeOperational, counts))
 	}
 
-	resp := &dto.SingerGroupListResponse{Groups: groups, Total: len(singers) + len(hiddenSingers)}
+	resp := &dto.ChannelGroupListResponse{Groups: groups, Total: len(channels) + len(hiddenChannels)}
 	if includeHidden {
-		hiddenResponses := make([]dto.SingerResponse, len(hiddenSingers))
-		for i, singer := range hiddenSingers {
-			hiddenResponses[i] = s.toSingerResponseFor(singer, includeOperational, counts)
+		hiddenResponses := make([]dto.ChannelResponse, len(hiddenChannels))
+		for i, channel := range hiddenChannels {
+			hiddenResponses[i] = s.toChannelResponseFor(channel, includeOperational, counts)
 		}
 		resp.Hidden = &hiddenResponses
 	}
@@ -132,8 +132,8 @@ func (s *SingerService) GetGrouped(includeHidden, includeOperational bool) (*dto
 // SetOrganizationOverride は Holodex の分類を手動で上書きする（空文字で解除）。
 // Holodex の値は残るので、解除すれば最新の同期結果に戻る。
 // 見つからなければ (false, nil) を返す。
-func (s *SingerService) SetOrganizationOverride(id, org string) (bool, error) {
-	found, err := s.singerRepo.SetOrganizationOverride(id, org)
+func (s *ChannelService) SetOrganizationOverride(id, org string) (bool, error) {
+	found, err := s.channelRepo.SetOrganizationOverride(id, org)
 	if err != nil {
 		return false, fmt.Errorf("set organization override: %w", err)
 	}
@@ -142,8 +142,8 @@ func (s *SingerService) SetOrganizationOverride(id, org string) (bool, error) {
 
 // SetHidden はチャンネル一覧での表示/非表示を切り替える。
 // 見つからなければ (false, nil) を返す。
-func (s *SingerService) SetHidden(id string, hidden bool) (bool, error) {
-	found, err := s.singerRepo.SetHidden(id, hidden)
+func (s *ChannelService) SetHidden(id string, hidden bool) (bool, error) {
+	found, err := s.channelRepo.SetHidden(id, hidden)
 	if err != nil {
 		return false, fmt.Errorf("set singer hidden: %w", err)
 	}
@@ -151,13 +151,13 @@ func (s *SingerService) SetHidden(id string, hidden bool) (bool, error) {
 }
 
 // SetAutoFill は自動処理の対象かを切り替える。戻り値は対象が存在したか。
-func (s *SingerService) SetAutoFill(id string, enabled bool) (bool, error) {
-	return s.singerRepo.SetAutoFill(id, enabled)
+func (s *ChannelService) SetAutoFill(id string, enabled bool) (bool, error) {
+	return s.channelRepo.SetAutoFill(id, enabled)
 }
 
 // ListAutoFillTargets は自動処理が有効なチャンネルを返す（運用の一覧用）。
-func (s *SingerService) ListAutoFillTargets() ([]dto.SingerResponse, error) {
-	singers, err := s.singerRepo.FindAutoFillTargets()
+func (s *ChannelService) ListAutoFillTargets() ([]dto.ChannelResponse, error) {
+	channels, err := s.channelRepo.FindAutoFillTargets()
 	if err != nil {
 		return nil, fmt.Errorf("list auto fill targets: %w", err)
 	}
@@ -165,9 +165,9 @@ func (s *SingerService) ListAutoFillTargets() ([]dto.SingerResponse, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := make([]dto.SingerResponse, len(singers))
-	for i, sg := range singers {
-		out[i] = s.toSingerResponseFor(sg, true, counts)
+	out := make([]dto.ChannelResponse, len(channels))
+	for i, sg := range channels {
+		out[i] = s.toChannelResponseFor(sg, true, counts)
 	}
 	return out, nil
 }
@@ -177,48 +177,48 @@ func (s *SingerService) ListAutoFillTargets() ([]dto.SingerResponse, error) {
 // **チャンネル単位なのは、配信主に訊いたときの答えがそうだから。** 「会限の歌単を
 // 公開してよいか」への答えはほぼ「全部いい」か「全部だめ」で、配信ごとではない。
 // 配信単位の restriction_override は、その方針からの例外を書くために残してある。
-func (s *SingerService) SetMembersOnlyPolicy(id, policy string) (bool, error) {
+func (s *ChannelService) SetMembersOnlyPolicy(id, policy string) (bool, error) {
 	switch policy {
 	case "", MembersOnlyAllow, MembersOnlyDeny:
 	default:
 		return false, fmt.Errorf("%w: %s", ErrInvalidMembersOnlyPolicy, policy)
 	}
-	return s.singerRepo.SetMembersOnlyPolicy(id, policy)
+	return s.channelRepo.SetMembersOnlyPolicy(id, policy)
 }
 
 // Search は歌手を検索する。
-func (s *SingerService) Search(query string, limit int) ([]dto.SingerResponse, error) {
+func (s *ChannelService) Search(query string, limit int) ([]dto.ChannelResponse, error) {
 	if limit <= 0 {
 		limit = 10
 	}
 
-	singers, err := s.singerRepo.Search(query, limit)
+	channels, err := s.channelRepo.Search(query, limit)
 	if err != nil {
 		return nil, fmt.Errorf("search singers: %w", err)
 	}
 
-	singerResponses := make([]dto.SingerResponse, len(singers))
-	for i, singer := range singers {
-		singerResponses[i] = s.toSingerResponse(singer)
+	channelResponses := make([]dto.ChannelResponse, len(channels))
+	for i, channel := range channels {
+		channelResponses[i] = s.toChannelResponse(channel)
 	}
 
-	return singerResponses, nil
+	return channelResponses, nil
 }
 
 // GetByID は歌手の詳細を取得する。
 // includeOperational を立てると、会限の方針など運用の内部情報も載せる（content:edit 用）。
-func (s *SingerService) GetByID(id string, includeOperational bool, access repository.ViewerAccess) (*dto.SingerDetailResponse, error) {
-	singer, err := s.singerRepo.FindByID(id)
+func (s *ChannelService) GetByID(id string, includeOperational bool, access repository.ViewerAccess) (*dto.ChannelDetailResponse, error) {
+	channel, err := s.channelRepo.FindByID(id)
 	if err != nil {
 		return nil, fmt.Errorf("get singer: %w", err)
 	}
-	if singer == nil {
+	if channel == nil {
 		return nil, nil
 	}
 
 	// 統計データを取得する
-	streamCount, _ := s.singerRepo.GetStreamCount(id)
-	performanceCount, _ := s.singerRepo.GetPerformanceCount(id, access)
+	streamCount, _ := s.channelRepo.GetStreamCount(id)
+	performanceCount, _ := s.channelRepo.GetPerformanceCount(id, access)
 
 	// **本数もここで引く。** 詳細だけ counts を渡さずにいたため、方針を設定する
 	// Picker の表示条件（会限を 1 本以上持つ）が常に偽になり、画面から設定できなかった。
@@ -226,51 +226,51 @@ func (s *SingerService) GetByID(id string, includeOperational bool, access repos
 	if err != nil {
 		return nil, err
 	}
-	singerResp := s.toSingerResponseFor(*singer, includeOperational, counts)
+	channelResp := s.toChannelResponseFor(*channel, includeOperational, counts)
 
-	return &dto.SingerDetailResponse{
-		SingerResponse:   singerResp,
+	return &dto.ChannelDetailResponse{
+		ChannelResponse:  channelResp,
 		StreamCount:      streamCount,
 		PerformanceCount: performanceCount,
 	}, nil
 }
 
 // UpdateManualMetadata updates metadata for channels that are not managed by Holodex.
-func (s *SingerService) UpdateManualMetadata(id string, req *dto.UpdateSingerRequest) (*dto.SingerResponse, error) {
-	singer, err := s.singerRepo.FindByID(id)
+func (s *ChannelService) UpdateManualMetadata(id string, req *dto.UpdateChannelRequest) (*dto.ChannelResponse, error) {
+	channel, err := s.channelRepo.FindByID(id)
 	if err != nil {
 		return nil, fmt.Errorf("get singer: %w", err)
 	}
-	if singer == nil {
+	if channel == nil {
 		return nil, nil
 	}
-	if singer.MetadataSource == "" {
-		singer.MetadataSource = "holodex"
+	if channel.MetadataSource == "" {
+		channel.MetadataSource = "holodex"
 	}
-	if singer.MetadataSource == "holodex" {
-		return nil, ErrSingerMetadataManagedByHolodex
+	if channel.MetadataSource == "holodex" {
+		return nil, ErrChannelMetadataManagedByHolodex
 	}
 
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
-		return nil, ErrSingerNameRequired
+		return nil, ErrChannelNameRequired
 	}
 
-	singer.Name = name
-	singer.EnglishName = nullableTrimmedString(req.EnglishName)
-	singer.PhotoURL = nullableTrimmedString(req.PhotoURL)
+	channel.Name = name
+	channel.EnglishName = nullableTrimmedString(req.EnglishName)
+	channel.PhotoURL = nullableTrimmedString(req.PhotoURL)
 	// 事務所はここでは扱わない。PUT /api/channels/{id}/organization（上書き）が唯一の窓口。
 
-	if err := s.singerRepo.UpdateManualMetadata(singer); err != nil {
+	if err := s.channelRepo.UpdateManualMetadata(channel); err != nil {
 		return nil, fmt.Errorf("update singer metadata: %w", err)
 	}
 
-	resp := s.toSingerResponse(*singer)
+	resp := s.toChannelResponse(*channel)
 	return &resp, nil
 }
 
 // GetStreams は歌手が参加した歌枠を取得する（絞り込み対応）。
-func (s *SingerService) GetStreams(singerID string, page, limit int, processedFilter, hiddenFilter *bool, isEditor bool) (*dto.StreamListResponse, error) {
+func (s *ChannelService) GetStreams(channelID string, page, limit int, processedFilter, hiddenFilter *bool, isEditor bool) (*dto.StreamListResponse, error) {
 	offset := (page - 1) * limit
 
 	// 絞り込み条件を組み立てる
@@ -279,7 +279,7 @@ func (s *SingerService) GetStreams(singerID string, page, limit int, processedFi
 		HiddenFilter:  hiddenFilter,
 	}
 
-	streams, total, err := s.streamRepo.FindBySingerID(singerID, limit, offset, filter)
+	streams, total, err := s.streamRepo.FindByChannelID(channelID, limit, offset, filter)
 	if err != nil {
 		return nil, fmt.Errorf("get streams: %w", err)
 	}
@@ -293,7 +293,7 @@ func (s *SingerService) GetStreams(singerID string, page, limit int, processedFi
 	if err != nil {
 		return nil, fmt.Errorf("get stream tags: %w", err)
 	}
-	participants, _, err := s.streamRepo.GetSingersForStreams(streamIDs)
+	participants, _, err := s.streamRepo.GetChannelsForStreams(streamIDs)
 	if err != nil {
 		return nil, fmt.Errorf("get stream singers: %w", err)
 	}
@@ -316,20 +316,20 @@ func (s *SingerService) GetStreams(singerID string, page, limit int, processedFi
 }
 
 // GetPerformances は歌手のすべての歌唱記録を取得する。
-func (s *SingerService) GetPerformances(singerID string, page, limit int, sort, dir string, access repository.ViewerAccess) (*dto.SingerPerformanceListResponse, error) {
+func (s *ChannelService) GetPerformances(channelID string, page, limit int, sort, dir string, access repository.ViewerAccess) (*dto.ChannelPerformanceListResponse, error) {
 	offset := (page - 1) * limit
 
 	// 先に歌手情報を取得する
-	singer, err := s.singerRepo.FindByID(singerID)
+	channel, err := s.channelRepo.FindByID(channelID)
 	if err != nil {
 		return nil, fmt.Errorf("get singer: %w", err)
 	}
-	if singer == nil {
+	if channel == nil {
 		return nil, nil
 	}
 
 	// 歌手ページは発見面。秘匿された配信の歌唱は出さない。
-	performances, total, err := s.perfRepo.FindBySingerID(singerID, limit, offset, sort, dir, access)
+	performances, total, err := s.perfRepo.FindBySingerID(channelID, limit, offset, sort, dir, access)
 	if err != nil {
 		return nil, fmt.Errorf("get performances: %w", err)
 	}
@@ -342,8 +342,8 @@ func (s *SingerService) GetPerformances(singerID string, page, limit int, sort, 
 
 	totalPages := (total + limit - 1) / limit
 
-	return &dto.SingerPerformanceListResponse{
-		Singer:       s.toSingerResponse(*singer),
+	return &dto.ChannelPerformanceListResponse{
+		Channel:      s.toChannelResponse(*channel),
 		Performances: perfResponses,
 		Pagination: dto.PaginationResponse{
 			Page:       page,
@@ -354,74 +354,74 @@ func (s *SingerService) GetPerformances(singerID string, page, limit int, sort, 
 	}, nil
 }
 
-// toSingerResponse は Model を DTO に変換する。
-func (s *SingerService) toSingerResponse(singer models.Singer) dto.SingerResponse {
-	resp := dto.SingerResponse{
-		ID:              singer.ID,
-		Name:            singer.Name,
-		MetadataSource:  singer.MetadataSource,
-		CanEditMetadata: singer.MetadataSource != "holodex",
-		IsHidden:        singer.IsHidden,
-		CreatedAt:       singer.CreatedAt,
-		UpdatedAt:       singer.UpdatedAt,
+// toChannelResponse は Model を DTO に変換する。
+func (s *ChannelService) toChannelResponse(channel models.Channel) dto.ChannelResponse {
+	resp := dto.ChannelResponse{
+		ID:              channel.ID,
+		Name:            channel.Name,
+		MetadataSource:  channel.MetadataSource,
+		CanEditMetadata: channel.MetadataSource != "holodex",
+		IsHidden:        channel.IsHidden,
+		CreatedAt:       channel.CreatedAt,
+		UpdatedAt:       channel.UpdatedAt,
 	}
 	if resp.MetadataSource == "" {
 		resp.MetadataSource = "holodex"
 		resp.CanEditMetadata = false
 	}
 
-	if singer.EnglishName.Valid {
-		resp.EnglishName = &singer.EnglishName.String
+	if channel.EnglishName.Valid {
+		resp.EnglishName = &channel.EnglishName.String
 	}
-	if singer.PhotoURL.Valid {
-		resp.PhotoURL = &singer.PhotoURL.String
+	if channel.PhotoURL.Valid {
+		resp.PhotoURL = &channel.PhotoURL.String
 	}
-	if singer.Organization.Valid {
-		resp.OrganizationHolodex = &singer.Organization.String
+	if channel.Organization.Valid {
+		resp.OrganizationHolodex = &channel.Organization.String
 	}
-	if singer.OrganizationOverride.Valid {
-		resp.OrganizationOverride = &singer.OrganizationOverride.String
+	if channel.OrganizationOverride.Valid {
+		resp.OrganizationOverride = &channel.OrganizationOverride.String
 	}
 
-	if eff := singer.EffectiveOrganization(); eff.Valid {
+	if eff := channel.EffectiveOrganization(); eff.Valid {
 		key := eff.String
 		resp.Organization = &key
 		// 「所属なし」を意味する分類（Independents など）は事務所名として出さない。
 		// バッジに出すと、見出しが「所属なし」なのにバッジは別名という矛盾になる。
-		if !singer.OrganizationUnaffil {
+		if !channel.OrganizationUnaffil {
 			// 表示名は organizations 側。取り込み直後などで行が無い場合は key を出す
 			// （空欄にすると「所属なし」に見えてしまうため）。
 			name := key
-			if singer.OrganizationName.Valid {
-				name = singer.OrganizationName.String
+			if channel.OrganizationName.Valid {
+				name = channel.OrganizationName.String
 			}
 			resp.OrganizationName = &name
 		}
 	}
 
 	// **方針は載せない。** 「配信主に訊いたか」「断られたか」は運用の内部情報で、
-	// Singer の GET は未認証で通る。載せると第三者が一覧をページングして
+	// Channel の GET は未認証で通る。載せると第三者が一覧をページングして
 	// 「どのチャンネルに訊いて断られたか」を集められる。
-	// 編集画面へ返すのは toSingerResponseFor（includeOperational=true）。
+	// 編集画面へ返すのは toChannelResponseFor（includeOperational=true）。
 	return resp
 }
 
-// toSingerResponseFor は権限に応じて運用の内部情報を足す。
+// toChannelResponseFor は権限に応じて運用の内部情報を足す。
 //
 // **counts を省略しないこと。** nil map の読み取りは 0 を返し、0 は omitempty で
 // 応答から消えるので、「会限を持たないチャンネル」と区別が付かない。実際それで
 // 詳細の Picker が出なくなっていた。
-func (s *SingerService) toSingerResponseFor(singer models.Singer, includeOperational bool, counts map[string]int) dto.SingerResponse {
-	resp := s.toSingerResponse(singer)
+func (s *ChannelService) toChannelResponseFor(channel models.Channel, includeOperational bool, counts map[string]int) dto.ChannelResponse {
+	resp := s.toChannelResponse(channel)
 	if !includeOperational {
 		return resp
 	}
-	if singer.MembersOnlyPolicy.Valid {
-		p := singer.MembersOnlyPolicy.String
+	if channel.MembersOnlyPolicy.Valid {
+		p := channel.MembersOnlyPolicy.String
 		resp.MembersOnlyPolicy = &p
 	}
-	resp.MembersOnlyStreamCount = counts[singer.ID]
-	enabled := singer.AutoFillEnabled
+	resp.MembersOnlyStreamCount = counts[channel.ID]
+	enabled := channel.AutoFillEnabled
 	resp.AutoFillEnabled = &enabled
 	return resp
 }
@@ -429,11 +429,11 @@ func (s *SingerService) toSingerResponseFor(singer models.Singer, includeOperati
 // membersOnlyCounts は所有者ごとの会限本数を引く（権限が無ければ引かない）。
 // **権限が無いときにクエリごと省く**のは、応答に載らない値のために
 // 未認証のリクエストで毎回 1 クエリ走らせないため。
-func (s *SingerService) membersOnlyCounts(includeOperational bool, onlyIDs ...string) (map[string]int, error) {
+func (s *ChannelService) membersOnlyCounts(includeOperational bool, onlyIDs ...string) (map[string]int, error) {
 	if !includeOperational {
 		return nil, nil
 	}
-	counts, err := s.singerRepo.CountMembersOnlyByOwner(onlyIDs...)
+	counts, err := s.channelRepo.CountMembersOnlyByOwner(onlyIDs...)
 	if err != nil {
 		return nil, fmt.Errorf("count members only streams: %w", err)
 	}
@@ -459,7 +459,7 @@ func nullableTrimmedString(value *string) sql.NullString {
 // 載せる／載せないの判断は 2 か所に要る。片方だけ直すと権限の穴になる。
 //
 // isEditor は処理済みフラグを載せるか（content:edit のときだけ）。
-func (s *SingerService) toStreamResponse(stream models.Stream, tags []models.StreamTag, participants []models.Singer, isEditor bool) dto.StreamResponse {
+func (s *ChannelService) toStreamResponse(stream models.Stream, tags []models.StreamTag, participants []models.Channel, isEditor bool) dto.StreamResponse {
 	var processed *bool
 	if isEditor {
 		processed = &stream.IsProcessed
@@ -493,16 +493,16 @@ func (s *SingerService) toStreamResponse(stream models.Stream, tags []models.Str
 	}
 
 	// 参加者を変換する
-	resp.Participants = make([]dto.SingerResponse, len(participants))
-	for i, singer := range participants {
-		resp.Participants[i] = s.toSingerResponse(singer)
+	resp.Participants = make([]dto.ChannelResponse, len(participants))
+	for i, channel := range participants {
+		resp.Participants[i] = s.toChannelResponse(channel)
 	}
 
 	return resp
 }
 
 // toPerformanceResponse は歌唱を DTO に変換する。
-func (s *SingerService) toPerformanceResponse(perf repository.PerformanceWithDetails) dto.SongPerformanceResponse {
+func (s *ChannelService) toPerformanceResponse(perf repository.PerformanceWithDetails) dto.SongPerformanceResponse {
 	resp := dto.SongPerformanceResponse{
 		IsRestricted:   perf.IsRestricted,
 		ID:             perf.ID,
@@ -541,9 +541,9 @@ func (s *SingerService) toPerformanceResponse(perf repository.PerformanceWithDet
 	}
 
 	// 歌手を変換する
-	resp.Singers = make([]dto.SingerResponse, len(perf.Singers))
+	resp.Singers = make([]dto.ChannelResponse, len(perf.Singers))
 	for i, singer := range perf.Singers {
-		resp.Singers[i] = s.toSingerResponse(singer)
+		resp.Singers[i] = s.toChannelResponse(singer)
 	}
 
 	return resp

@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import SingerSearchInput from '../../components/SingerSearchInput';
+import ChannelSearchInput from '../../components/ChannelSearchInput';
 import Tag from '../../components/ui/Tag';
 
 import type { StreamDetailModel } from './useStreamDetail';
@@ -90,30 +90,30 @@ export default function StreamInfoCard({ model }: { model: StreamDetailModel }) 
 
         {/* Participants + 編集アイコン */}
         <div className="flex flex-wrap items-center gap-2 mt-4">
-          {stream.participants?.map((singer) => (
+          {stream.participants?.map((channel) => (
             <div
-              key={singer.id}
+              key={channel.id}
               className="flex items-center gap-2 px-3 py-1 bg-gray-100 rounded-full text-sm"
             >
               {/* リンクは名前と画像だけに掛ける。チップ全体を包むと、
                   「参加チャンネルから外す」の ✕ を押したときにチャンネルページへ飛ぶ */}
               <Link
-                to={`/channels/${singer.id}`}
+                to={`/channels/${channel.id}`}
                 className="flex items-center gap-2 text-gray-700 hover:text-indigo-600 transition-colors"
-                title={`${singer.name} のチャンネルページを開く`}
+                title={`${channel.name} のチャンネルページを開く`}
               >
-                {singer.photo_url && (
+                {channel.photo_url && (
                   <img
-                    src={singer.photo_url}
-                    alt={singer.name}
+                    src={channel.photo_url}
+                    alt={channel.name}
                     className="w-5 h-5 rounded-full"
                     onError={(e) => {
                       e.currentTarget.onerror = null;
-                      e.currentTarget.src = `https://holodex.net/statics/channelImg/${singer.id}/50.png`;
+                      e.currentTarget.src = `https://holodex.net/statics/channelImg/${channel.id}/50.png`;
                     }}
                   />
                 )}
-                <span>{singer.name}</span>
+                <span>{channel.name}</span>
               </Link>
               {canEdit && participantAddOpen && (
                 <button
@@ -121,7 +121,7 @@ export default function StreamInfoCard({ model }: { model: StreamDetailModel }) 
                     quickSaveStream({
                       participant_ids: (stream.participants ?? [])
                         .map((p) => p.id)
-                        .filter((pid) => pid !== singer.id),
+                        .filter((pid) => pid !== channel.id),
                     })
                   }
                   className="text-gray-400 hover:text-red-600 transition-colors"
@@ -151,11 +151,11 @@ export default function StreamInfoCard({ model }: { model: StreamDetailModel }) 
         </div>
         {canEdit && participantAddOpen && (
           <div className="mt-2">
-            <SingerSearchInput
+            <ChannelSearchInput
               excludeIds={stream.participants?.map((p) => p.id) ?? []}
-              onSelectSinger={(singer) =>
+              onSelectChannel={(channel) =>
                 quickSaveStream({
-                  participant_ids: [...(stream.participants?.map((p) => p.id) ?? []), singer.id],
+                  participant_ids: [...(stream.participants?.map((p) => p.id) ?? []), channel.id],
                 })
               }
               placeholder="参加チャンネル名を入力して追加..."

@@ -214,7 +214,7 @@ Holodex の `topic_id = "membersonly"` は候補の絞り込みに使えるが�
 → 当時の結論は「**Holodex は候補抽出に、`availability` は判定に**」だったが、
 実測で `availability` は Holodex の取りこぼしを 1 件も拾えず、2026-09-14 に外した（PR #66）。
 判定は**3 段**（下ほど強い）── `members_only` タグ（検出）→
-`singers.members_only_policy`（チャンネル単位の方針）→ `restriction_override`
+`channels.members_only_policy`（チャンネル単位の方針）→ `restriction_override`
 （その配信だけの例外）。実装は `EffectiveRestrictedExpr` に 1 か所だけ置く
 （issue #4 / #32、`STREAM_VISIBILITY.md`）。
 

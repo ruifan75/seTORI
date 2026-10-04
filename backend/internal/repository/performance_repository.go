@@ -32,7 +32,7 @@ type PerformanceWithDetails struct {
 	// 一覧系まで JOIN を広げていないのは、そこでは使われないため。
 	ItunesID sql.NullInt64           `json:"itunes_id"`
 	Tags     []models.PerformanceTag `json:"tags"`
-	Singers  []models.Singer         `json:"singers"`
+	Singers  []models.Channel        `json:"singers"`
 	// IsRestricted は**その歌唱が載っている配信が秘匿か**。
 	//
 	// `restricted:view` を持つ人には秘匿の歌唱も返るが、**見えるだけでは
@@ -134,7 +134,7 @@ func (r *PerformanceRepository) attachTagsAndSingers(performances []PerformanceW
 		       s.id, s.name, s.english_name, s.photo_url,
 		       COALESCE(s.organization_override, s.organization), o.display_name,
 		       COALESCE(o.is_unaffiliated, FALSE), s.metadata_source, s.created_at, s.updated_at
-		FROM singers s
+		FROM channels s
 		LEFT JOIN organizations o ON COALESCE(s.organization_override, s.organization) = o.key
 		JOIN performance_singers ps ON s.id = ps.singer_id
 		WHERE ps.performance_id = ANY($1::uuid[])
@@ -144,10 +144,10 @@ func (r *PerformanceRepository) attachTagsAndSingers(performances []PerformanceW
 	}
 	defer singerRows.Close()
 
-	singersByPerf := make(map[uuid.UUID][]models.Singer, len(performances))
+	singersByPerf := make(map[uuid.UUID][]models.Channel, len(performances))
 	for singerRows.Next() {
 		var perfID uuid.UUID
-		var s models.Singer
+		var s models.Channel
 		if err := singerRows.Scan(&perfID, &s.ID, &s.Name, &s.EnglishName, &s.PhotoURL,
 			&s.Organization, &s.OrganizationName, &s.OrganizationUnaffil,
 			&s.MetadataSource, &s.CreatedAt, &s.UpdatedAt); err != nil {
@@ -455,10 +455,10 @@ func (r *PerformanceRepository) SetTags(performanceID uuid.UUID, tagIDs []string
 }
 
 // GetSingers は歌唱の歌手をすべて取得する。
-func (r *PerformanceRepository) GetSingers(performanceID uuid.UUID) ([]models.Singer, error) {
+func (r *PerformanceRepository) GetSingers(performanceID uuid.UUID) ([]models.Channel, error) {
 	query := `
 		SELECT s.id, s.name, s.english_name, s.photo_url, COALESCE(s.organization_override, s.organization), o.display_name, COALESCE(o.is_unaffiliated, FALSE), s.metadata_source, s.created_at, s.updated_at
-		FROM singers s
+		FROM channels s
 		LEFT JOIN organizations o ON COALESCE(s.organization_override, s.organization) = o.key
 		JOIN performance_singers ps ON s.id = ps.singer_id
 		WHERE ps.performance_id = $1`
@@ -469,9 +469,9 @@ func (r *PerformanceRepository) GetSingers(performanceID uuid.UUID) ([]models.Si
 	}
 	defer rows.Close()
 
-	var singers []models.Singer
+	var singers []models.Channel
 	for rows.Next() {
-		var s models.Singer
+		var s models.Channel
 		err := rows.Scan(&s.ID, &s.Name, &s.EnglishName, &s.PhotoURL, &s.Organization, &s.OrganizationName, &s.OrganizationUnaffil, &s.MetadataSource, &s.CreatedAt, &s.UpdatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("scan singer: %w", err)
@@ -875,7 +875,7 @@ const MembersOnlyTagID = "members_only"
 // 集約は NULL を返すので、外側の COALESCE が FALSE（＝許可されていない）にする。
 func allOwnersAllowExpr(alias string) string {
 	return "COALESCE((SELECT bool_and(COALESCE(eg.members_only_policy, '') = 'allow')" +
-		" FROM stream_singers eo JOIN singers eg ON eg.id = eo.singer_id" +
+		" FROM stream_channels eo JOIN channels eg ON eg.id = eo.channel_id" +
 		" WHERE eo.stream_id = " + alias + ".id AND eo.is_owner), FALSE)"
 }
 
@@ -883,7 +883,7 @@ func NotRestricted(alias string) string {
 	// 判定は 3 段。**下ほど強い**：
 	//
 	//	1. 配信が会限か（members_only タグ。自動でも人でも付く）
-	//	2. そのチャンネルの方針（singers.members_only_policy。配信主に訊いた結果）
+	//	2. そのチャンネルの方針（channels.members_only_policy。配信主に訊いた結果）
 	//	3. その配信だけの例外（restriction_override。人が個別に決めたもの）
 	//
 	// 2 を挟むのは、**公開可否がチャンネル単位の判断だから**。配信主に訊けば
@@ -1107,7 +1107,7 @@ func (r *PerformanceRepository) FindRandom(limit int, excludedSongIDs []string, 
 // PresetFilter はプリセットプレイリストの抽出条件。
 // 定義そのものは service.Presets にあり、ここは「条件をどう SQL にするか」だけを持つ。
 type PresetFilter struct {
-	SingerID    string   // このチャンネルが歌っている歌唱だけ（空なら問わない）
+	SingerID    string   // この歌った人の歌唱だけ（空なら問わない）
 	IncludeTags []string // いずれかの配信タグを持つ配信の歌唱だけ（空なら問わない）
 	ExcludeTags []string // いずれかの配信タグを持つ配信は除く
 	MultiSinger bool     // その歌唱を 2 人以上で歌っている（コラボ）

@@ -60,10 +60,10 @@ func TestRestrictionReviewTruthTablePostgres(t *testing.T) {
    ), fixture_owners AS (%s), stream_stream_tags AS (
     SELECT 'abc'::text stream_id,'members_only'::text tag_id WHERE %t
     UNION ALL SELECT 'other','members_only'
-   ), stream_singers AS (
-    SELECT 'abc'::text stream_id,id singer_id,is_owner FROM fixture_owners
+   ), stream_channels AS (
+    SELECT 'abc'::text stream_id,id channel_id,is_owner FROM fixture_owners
     UNION ALL SELECT 'other','decoy',TRUE
-   ), singers AS (
+   ), channels AS (
     SELECT id,policy members_only_policy FROM fixture_owners
     UNION ALL SELECT 'decoy','allow'
    ) `, restrictionFixtureBool(override.value), restrictionFixtureBool(basis.value), owner.rows, detected)

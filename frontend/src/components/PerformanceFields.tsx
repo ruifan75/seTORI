@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import SongSearchInput from './SongSearchInput';
-import SingerSearchInput from './SingerSearchInput';
+import ChannelSearchInput from './ChannelSearchInput';
 import ArtistSearchInput from './ArtistSearchInput';
 import FieldProvenance from './FieldProvenance';
 import { playerGetCurrentTime, playerSeekTo } from './youtubePlayerControl';
@@ -8,7 +8,7 @@ import { usePlayerScope } from './playerScope';
 import { usePlayerTime } from './usePlayerTime';
 import TimestampTweaker from './TimestampTweaker';
 import { formatTimeInput, formatDuration } from '../utils/timeFormat';
-import type { ArtistAliasProposal, FieldChange, Singer, Song } from '../api/types';
+import type { ArtistAliasProposal, FieldChange, Channel, Song } from '../api/types';
 import { itunesApi } from '../api/client';
 
 // 歌唱 1 件の編集欄（曲・アーティスト・時間・タグ・ボーカル）。
@@ -66,10 +66,10 @@ interface Props {
   // 既存曲への紐付けを解除する（＝新しい曲として登録し直す）
   onClearSong?: () => void;
   performanceTags: PerformanceTagOption[];
-  participants: Singer[];
-  channelOwner?: Singer | null;
+  participants: Channel[];
+  channelOwner?: Channel | null;
   // 参加者に居ない歌手を選んだとき、配信の参加者へ足す（編集画面のみ）
-  onAddParticipant?: (singer: Singer) => void;
+  onAddParticipant?: (singer: Channel) => void;
   showToast?: (message: string, type?: 'success' | 'error' | 'info') => void;
 }
 
@@ -197,13 +197,13 @@ export default function PerformanceFields({
   // 選択済みなのに参加者に居ない歌手も足す ── 落とすと、値は送られるのに
   // 画面には出ないという最悪の形になる（外すことも確認することもできない）
   const vocalOptions = useMemo(() => {
-    const byId = new Map<string, Singer>();
+    const byId = new Map<string, Channel>();
     if (channelOwner) byId.set(channelOwner.id, channelOwner);
     for (const singer of participants) {
       if (!byId.has(singer.id)) byId.set(singer.id, singer);
     }
     for (const id of value.singerIds) {
-      if (!byId.has(id)) byId.set(id, { id, name: id } as Singer);
+      if (!byId.has(id)) byId.set(id, { id, name: id } as Channel);
     }
     return Array.from(byId.values());
   }, [participants, channelOwner, value.singerIds]);
@@ -608,8 +608,8 @@ export default function PerformanceFields({
                       </div>
                       {(searchingSinger || vocalOptions.length === 0) && (
                         <div className="mt-2">
-                          <SingerSearchInput
-                            onSelectSinger={(singer) => {
+                          <ChannelSearchInput
+                            onSelectChannel={(singer) => {
                               if (!value.singerIds.includes(singer.id)) {
                                 onChange({ singerIds: [...value.singerIds, singer.id] });
                               }

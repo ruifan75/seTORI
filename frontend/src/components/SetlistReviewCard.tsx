@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { MissingSongPayload, Singer, Song, Suggestion } from '../api/types';
+import type { MissingSongPayload, Channel, Song, Suggestion } from '../api/types';
 import PerformanceFields, {
   type PerformanceFieldValues,
   type PerformanceTagOption,
@@ -57,9 +57,9 @@ export default function SetlistReviewCard({
   onReject,
 }: {
   suggestion: Suggestion;
-  participants: Singer[];
-  channelOwner?: Singer | null;
-  onAddParticipant?: (singer: Singer) => void;
+  participants: Channel[];
+  channelOwner?: Channel | null;
+  onAddParticipant?: (singer: Channel) => void;
   performanceTags: PerformanceTagOption[];
   expanded: boolean;
   // 編集中の値は親が持つ。生コメントの ＋ から直接書き換えられるようにするため

@@ -30,7 +30,7 @@ func TestStreamSearchMatchesLegacyPostgres(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	mustExec(`INSERT INTO singers(id,name,is_hidden,members_only_policy) VALUES
+	mustExec(`INSERT INTO channels(id,name,is_hidden,members_only_policy) VALUES
  ('owner','所有者',TRUE,'allow'),('guest','参加者',TRUE,NULL),
  ('voice-a','歌った人A',FALSE,NULL),('voice-b','歌った人B',FALSE,NULL);
  INSERT INTO songs(id,name,original_artist) VALUES ('00000000-0000-0000-0000-000000000001','検証曲','原曲');`)
@@ -54,9 +54,9 @@ func TestStreamSearchMatchesLegacyPostgres(t *testing.T) {
 		if f.all == 0 {
 			continue
 		}
-		mustExec(`INSERT INTO stream_singers(stream_id,singer_id,is_owner) VALUES($1,'owner',$2)`, f.id, !f.noOwner)
+		mustExec(`INSERT INTO stream_channels(stream_id,channel_id,is_owner) VALUES($1,'owner',$2)`, f.id, !f.noOwner)
 		if f.all&1 != 0 {
-			mustExec(`INSERT INTO stream_singers(stream_id,singer_id,is_owner) VALUES($1,'guest',$2)`, f.id, f.guestOwner && !f.noOwner)
+			mustExec(`INSERT INTO stream_channels(stream_id,channel_id,is_owner) VALUES($1,'guest',$2)`, f.id, f.guestOwner && !f.noOwner)
 		}
 		mustExec(`INSERT INTO stream_stream_tags(stream_id,tag_id) VALUES($1,'singing')`, f.id)
 		if f.all&4 != 0 {

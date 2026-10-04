@@ -15,7 +15,7 @@ func TestPreparationQueryScope(t *testing.T) {
 	}
 	const want = `SELECT s.id, s.title, s.is_hidden, s.is_processed, s.chapter_raw
  FROM streams s WHERE s.is_hidden = FALSE AND s.is_processed = FALSE
- AND EXISTS (SELECT 1 FROM stream_singers ss WHERE ss.stream_id = s.id AND ss.singer_id = $1 AND ss.is_owner = TRUE)
+ AND EXISTS (SELECT 1 FROM stream_channels ss WHERE ss.stream_id = s.id AND ss.channel_id = $1 AND ss.is_owner = TRUE)
  AND NOT EXISTS (SELECT 1 FROM stream_stream_tags mt WHERE mt.stream_id = s.id AND mt.tag_id = 'members_only')
  AND s.restriction_override IS DISTINCT FROM TRUE
  ORDER BY s.stream_date ASC, s.id ASC`
@@ -59,7 +59,7 @@ func (s *preparationScopeStmt) Query(args []driver.Value) (driver.Rows, error) {
 }
 func TestPreparationRecheckSQLAndArguments(t *testing.T) {
 	const want = `SELECT EXISTS (SELECT 1 FROM streams s WHERE s.is_hidden = FALSE AND s.is_processed = FALSE
- AND EXISTS (SELECT 1 FROM stream_singers ss WHERE ss.stream_id = s.id AND ss.singer_id = $1 AND ss.is_owner = TRUE)
+ AND EXISTS (SELECT 1 FROM stream_channels ss WHERE ss.stream_id = s.id AND ss.channel_id = $1 AND ss.is_owner = TRUE)
  AND NOT EXISTS (SELECT 1 FROM stream_stream_tags mt WHERE mt.stream_id = s.id AND mt.tag_id = 'members_only')
  AND s.restriction_override IS DISTINCT FROM TRUE AND s.id = $2)`
 	for _, value := range []bool{false, true} {

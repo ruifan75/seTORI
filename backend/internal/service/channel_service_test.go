@@ -6,10 +6,10 @@ import (
 	"github.com/ruifan75/setori/internal/models"
 )
 
-func TestToSingerResponseCanEditMetadata(t *testing.T) {
-	svc := &SingerService{}
+func TestToChannelResponseCanEditMetadata(t *testing.T) {
+	svc := &ChannelService{}
 
-	holodex := svc.toSingerResponse(models.Singer{
+	holodex := svc.toChannelResponse(models.Channel{
 		ID:             "UC_holodex",
 		Name:           "Holodex Channel",
 		MetadataSource: "holodex",
@@ -18,7 +18,7 @@ func TestToSingerResponseCanEditMetadata(t *testing.T) {
 		t.Fatal("Holodex sourced singer should not be manually editable")
 	}
 
-	youtube := svc.toSingerResponse(models.Singer{
+	youtube := svc.toChannelResponse(models.Channel{
 		ID:             "UC_youtube",
 		Name:           "YouTube Channel",
 		MetadataSource: "youtube",

@@ -9,12 +9,12 @@ import (
 // 小さい fixture の速さを一般化しない。専用 schema に 10,000 配信を作り、発行 SQL の実行計画を記録する。
 func TestStreamTagFilterPlans(t *testing.T) {
 	db := reviewTestDB(t)
-	if _, err := db.Exec(`INSERT INTO singers(id,name,is_hidden) VALUES ('plan','計画',false);
+	if _, err := db.Exec(`INSERT INTO channels(id,name,is_hidden) VALUES ('plan','計画',false);
  INSERT INTO streams(id,title,stream_date,is_hidden) SELECT 'plan_'||g,'配信'||g,'2026-01-01'::timestamptz+g*interval '1 minute',false FROM generate_series(1,10000) g;
- INSERT INTO stream_singers(stream_id,singer_id,is_owner) SELECT id,'plan',true FROM streams;
+ INSERT INTO stream_channels(stream_id,channel_id,is_owner) SELECT id,'plan',true FROM streams;
  INSERT INTO stream_stream_tags(stream_id,tag_id) SELECT id,'singing' FROM streams;
  INSERT INTO stream_stream_tags(stream_id,tag_id) SELECT id,'3d' FROM streams WHERE substring(id from 6)::int % 2=0;
- ANALYZE streams; ANALYZE stream_singers; ANALYZE singers; ANALYZE stream_stream_tags;`); err != nil {
+ ANALYZE streams; ANALYZE stream_channels; ANALYZE singers; ANALYZE stream_stream_tags;`); err != nil {
 		t.Fatal(err)
 	}
 	for _, tags := range [][]string{{}, {"singing"}, {"singing", "3d"}} {

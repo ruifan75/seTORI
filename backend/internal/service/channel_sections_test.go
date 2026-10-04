@@ -25,7 +25,7 @@ func TestGetGroupedFetchesHiddenOnlyWithPermission(t *testing.T) {
 		{true, true},
 	} {
 		db, rec := newSectionDB(t)
-		svc := &SingerService{singerRepo: repository.NewSingerRepository(db)}
+		svc := &ChannelService{channelRepo: repository.NewChannelRepository(db)}
 		resp, err := svc.GetGrouped(tc.includeHidden, false)
 		if err != nil {
 			t.Fatalf("includeHidden=%v: %v", tc.includeHidden, err)

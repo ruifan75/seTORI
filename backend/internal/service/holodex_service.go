@@ -31,7 +31,7 @@ type HolodexService struct {
 	youtubeClient        *youtube.Client
 	itunesClient         *itunes.Client
 	streamRepo           *repository.StreamRepository
-	singerRepo           *repository.SingerRepository
+	channelRepo          *repository.ChannelRepository
 	perfRepo             *repository.PerformanceRepository
 	songRepo             *repository.SongRepository
 	songItunesRepo       *repository.SongItunesRepository
@@ -66,7 +66,7 @@ func NewHolodexService(
 	youtubeAPIKey string,
 	groqAPIKey string,
 	streamRepo *repository.StreamRepository,
-	singerRepo *repository.SingerRepository,
+	channelRepo *repository.ChannelRepository,
 	editorToken string,
 ) *HolodexService {
 	var aiClient *ai.Client
@@ -79,7 +79,7 @@ func NewHolodexService(
 		youtubeClient: youtube.NewClient(youtubeAPIKey),
 		itunesClient:  itunes.NewClient(),
 		streamRepo:    streamRepo,
-		singerRepo:    singerRepo,
+		channelRepo:   channelRepo,
 		editorToken:   editorToken,
 		aiClient:      aiClient,
 	}
@@ -166,13 +166,13 @@ func streamTagIDForHolodexTopic(topicID string) string {
 }
 
 // SyncChannelInfo はチャンネル情報だけを同期し、配信は同期しない。
-func (s *HolodexService) SyncChannelInfo(channelInput string) (*models.Singer, error) {
+func (s *HolodexService) SyncChannelInfo(channelInput string) (*models.Channel, error) {
 	lookup := youtube.ParseChannelLookup(channelInput)
 	var holodexErr error
 	if lookup.ID != "" {
-		singer, err := s.syncHolodexChannelInfo(lookup.ID)
+		channelInfo, err := s.syncHolodexChannelInfo(lookup.ID)
 		if err == nil {
-			return singer, nil
+			return channelInfo, nil
 		}
 		if !holodex.IsNotFound(err) {
 			return nil, err
@@ -186,9 +186,9 @@ func (s *HolodexService) SyncChannelInfo(channelInput string) (*models.Singer, e
 			return nil, fmt.Errorf("get channel from YouTube: %w", err)
 		}
 
-		singer, err := s.syncHolodexChannelInfo(channel.ID)
+		channelInfo, err := s.syncHolodexChannelInfo(channel.ID)
 		if err == nil {
-			return singer, nil
+			return channelInfo, nil
 		}
 		if !holodex.IsNotFound(err) {
 			return nil, err
@@ -199,7 +199,7 @@ func (s *HolodexService) SyncChannelInfo(channelInput string) (*models.Singer, e
 		return s.syncYouTubeChannelInfoFromChannel(channel)
 	}
 
-	singer, err := s.syncYouTubeChannelInfo(channelInput)
+	channelInfo, err := s.syncYouTubeChannelInfo(channelInput)
 	if err != nil {
 		if holodexErr != nil {
 			return nil, fmt.Errorf("get channel from Holodex: %v; YouTube fallback: %w", holodexErr, err)
@@ -207,25 +207,25 @@ func (s *HolodexService) SyncChannelInfo(channelInput string) (*models.Singer, e
 		return nil, fmt.Errorf("get channel from YouTube: %w", err)
 	}
 
-	return singer, nil
+	return channelInfo, nil
 }
 
-func (s *HolodexService) syncHolodexChannelInfo(channelID string) (*models.Singer, error) {
+func (s *HolodexService) syncHolodexChannelInfo(channelID string) (*models.Channel, error) {
 	channel, err := s.client.GetChannel(channelID)
 	if err != nil {
 		return nil, fmt.Errorf("get channel: %w", err)
 	}
 
 	// 人がチャンネルを名指しして追加した経路（POST /api/channels）なので、新規でも一覧に出す。
-	singer := s.singerFromHolodexChannel(channel)
-	if err := s.singerRepo.Upsert(singer, repository.SingerRequested); err != nil {
+	channelInfo := s.channelFromHolodexChannel(channel)
+	if err := s.channelRepo.Upsert(channelInfo, repository.ChannelRequested); err != nil {
 		return nil, fmt.Errorf("upsert singer: %w", err)
 	}
 
-	return singer, nil
+	return channelInfo, nil
 }
 
-func (s *HolodexService) syncYouTubeChannelInfo(channelInput string) (*models.Singer, error) {
+func (s *HolodexService) syncYouTubeChannelInfo(channelInput string) (*models.Channel, error) {
 	channel, err := s.getYouTubeChannel(channelInput)
 	if err != nil {
 		return nil, err
@@ -250,58 +250,58 @@ func (s *HolodexService) getYouTubeChannel(channelInput string) (*youtube.Channe
 	return channel, nil
 }
 
-func (s *HolodexService) syncYouTubeChannelInfoFromChannel(channel *youtube.Channel) (*models.Singer, error) {
+func (s *HolodexService) syncYouTubeChannelInfoFromChannel(channel *youtube.Channel) (*models.Channel, error) {
 	name := strings.TrimSpace(channel.Snippet.Title)
 	if name == "" {
 		name = channel.ID
 	}
 
-	singer := &models.Singer{
+	channelInfo := &models.Channel{
 		ID:             channel.ID,
 		Name:           name,
 		MetadataSource: "youtube",
 	}
 	if photoURL := youtube.BestThumbnailURL(channel); photoURL != "" {
-		singer.PhotoURL = sql.NullString{String: photoURL, Valid: true}
+		channelInfo.PhotoURL = sql.NullString{String: photoURL, Valid: true}
 	}
-	if existing, err := s.singerRepo.FindByID(channel.ID); err != nil {
+	if existing, err := s.channelRepo.FindByID(channel.ID); err != nil {
 		return nil, fmt.Errorf("find existing singer: %w", err)
 	} else if existing != nil {
-		singer.EnglishName = existing.EnglishName
-		singer.Organization = existing.Organization
-		if !singer.PhotoURL.Valid {
-			singer.PhotoURL = existing.PhotoURL
+		channelInfo.EnglishName = existing.EnglishName
+		channelInfo.Organization = existing.Organization
+		if !channelInfo.PhotoURL.Valid {
+			channelInfo.PhotoURL = existing.PhotoURL
 		}
 	}
 
 	// Holodex に無いチャンネルの退避経路。入口は同じ POST /api/channels なので人の意図がある。
-	if err := s.singerRepo.Upsert(singer, repository.SingerRequested); err != nil {
+	if err := s.channelRepo.Upsert(channelInfo, repository.ChannelRequested); err != nil {
 		return nil, fmt.Errorf("upsert singer: %w", err)
 	}
 
-	logger.Infof("channel info synced from YouTube fallback: %s (%s)", singer.ID, singer.Name)
-	return singer, nil
+	logger.Infof("channel info synced from YouTube fallback: %s (%s)", channelInfo.ID, channelInfo.Name)
+	return channelInfo, nil
 }
 
-func (s *HolodexService) singerFromHolodexChannel(channel *holodex.Channel) *models.Singer {
-	singer := &models.Singer{
+func (s *HolodexService) channelFromHolodexChannel(channel *holodex.Channel) *models.Channel {
+	channelInfo := &models.Channel{
 		ID:             channel.ID,
 		Name:           channel.Name,
 		MetadataSource: "holodex",
 	}
 	if channel.EnglishName != "" {
-		singer.EnglishName = sql.NullString{String: channel.EnglishName, Valid: true}
+		channelInfo.EnglishName = sql.NullString{String: channel.EnglishName, Valid: true}
 	}
 	// YouTube のアバターを優先する
 	photoURL := s.getChannelPhotoURL(channel.ID, channel.Photo)
 	if photoURL != "" {
-		singer.PhotoURL = sql.NullString{String: photoURL, Valid: true}
+		channelInfo.PhotoURL = sql.NullString{String: photoURL, Valid: true}
 	}
 	if org := strings.TrimSpace(channel.Org); org != "" {
-		singer.Organization = sql.NullString{String: org, Valid: true}
+		channelInfo.Organization = sql.NullString{String: org, Valid: true}
 	}
 
-	return singer
+	return channelInfo
 }
 
 // SyncChannel はチャンネルのすべての配信を同期する。
@@ -315,8 +315,8 @@ func (s *HolodexService) SyncChannel(channelID string, limit int, forceUpdate bo
 	}
 
 	// 同期対象として名指しされたチャンネル本人なので、新規でも一覧に出す。
-	singer := s.singerFromHolodexChannel(channel)
-	if err := s.singerRepo.Upsert(singer, repository.SingerRequested); err != nil {
+	channelInfo := s.channelFromHolodexChannel(channel)
+	if err := s.channelRepo.Upsert(channelInfo, repository.ChannelRequested); err != nil {
 		return nil, fmt.Errorf("upsert singer: %w", err)
 	}
 
@@ -525,54 +525,54 @@ func (s *HolodexService) syncVideo(video holodex.Video, channelID string, forceU
 		ownerID = video.ChannelID
 	}
 	// 所有者と同期対象のチャンネルが違う（＝コラボで、別のチャンネルが主催）場合、
-	// stream_singers には singers への外部キーがあるため、先に所有者チャンネルを upsert する。
+	// stream_channels には channels への外部キーがあるため、先に所有者チャンネルを upsert する。
 	// （自チャンネル同期では所有者を SyncChannel/SyncVideo で先に upsert 済み。情報量の少ない一覧データで上書きしないよう省略）
 	// 同期を頼まれたのはこのチャンネルではなく、コラボの主催として付いてきただけなので、
-	// 新規なら非表示で作る（stream_singers の FK を満たすのが目的）。
+	// 新規なら非表示で作る（stream_channels の FK を満たすのが目的）。
 	if ownerID != channelID && video.Channel != nil && video.Channel.ID == ownerID {
-		s.singerRepo.Upsert(s.singerFromHolodexChannel(video.Channel), repository.SingerDiscovered)
+		s.channelRepo.Upsert(s.channelFromHolodexChannel(video.Channel), repository.ChannelDiscovered)
 	}
 
 	// mentions を処理して参加者を同期する
 	// 言及されたチャンネルをすべて先に同期し、この配信の参加者に設定する
-	singerIDs := []string{ownerID} // チャンネル所有者は必ず含める
+	participantIDs := []string{ownerID} // チャンネル所有者は必ず含める
 
 	for _, mention := range video.Mentions {
-		// 言及されたチャンネルを Singer として同期する
-		singer := &models.Singer{
+		// 言及されたチャンネルを Channel として同期する
+		channelInfo := &models.Channel{
 			ID:   mention.ID,
 			Name: mention.Name,
 		}
 		if mention.EnglishName != "" {
-			singer.EnglishName = sql.NullString{String: mention.EnglishName, Valid: true}
+			channelInfo.EnglishName = sql.NullString{String: mention.EnglishName, Valid: true}
 		}
 		// YouTube のアバターを優先する
 		mentionPhoto := s.getChannelPhotoURL(mention.ID, mention.Photo)
 		if mentionPhoto != "" {
-			singer.PhotoURL = sql.NullString{String: mentionPhoto, Valid: true}
+			channelInfo.PhotoURL = sql.NullString{String: mentionPhoto, Valid: true}
 		}
 		if org := strings.TrimSpace(mention.Org); org != "" {
-			singer.Organization = sql.NullString{String: org, Valid: true}
+			channelInfo.Organization = sql.NullString{String: org, Valid: true}
 		}
 		// mention は「配信に言及されていた」だけで、こちらが追いたいチャンネルとは限らない。
 		// 新規なら非表示で作る（既存の表示設定は Upsert が触らない）。
-		s.singerRepo.Upsert(singer, repository.SingerDiscovered)
+		s.channelRepo.Upsert(channelInfo, repository.ChannelDiscovered)
 
 		// 参加者一覧へ追加する（重複は避ける）
 		found := false
-		for _, id := range singerIDs {
+		for _, id := range participantIDs {
 			if id == mention.ID {
 				found = true
 				break
 			}
 		}
 		if !found {
-			singerIDs = append(singerIDs, mention.ID)
+			participantIDs = append(participantIDs, mention.ID)
 		}
 	}
 
 	// この配信の全参加者を設定する
-	if err := s.streamRepo.SetSingers(video.ID, singerIDs, ownerID); err != nil {
+	if err := s.streamRepo.SetChannels(video.ID, participantIDs, ownerID); err != nil {
 		// エラーを記録するが同期は止めない
 		fmt.Printf("set stream singers error: %v\n", err)
 	}
@@ -604,24 +604,24 @@ func (s *HolodexService) SyncVideo(videoID string) (*dto.SyncHolodexResponse, er
 		channelID = video.Channel.ID
 
 		// チャンネル情報を同期する
-		singer := &models.Singer{
+		channelInfo := &models.Channel{
 			ID:   video.Channel.ID,
 			Name: video.Channel.Name,
 		}
 		if video.Channel.EnglishName != "" {
-			singer.EnglishName = sql.NullString{String: video.Channel.EnglishName, Valid: true}
+			channelInfo.EnglishName = sql.NullString{String: video.Channel.EnglishName, Valid: true}
 		}
 		// YouTube のアバターを優先する
 		channelPhoto := s.getChannelPhotoURL(video.Channel.ID, video.Channel.Photo)
 		if channelPhoto != "" {
-			singer.PhotoURL = sql.NullString{String: channelPhoto, Valid: true}
+			channelInfo.PhotoURL = sql.NullString{String: channelPhoto, Valid: true}
 		}
 		if org := strings.TrimSpace(video.Channel.Org); org != "" {
-			singer.Organization = sql.NullString{String: org, Valid: true}
+			channelInfo.Organization = sql.NullString{String: org, Valid: true}
 		}
 		// 名指しされたのは動画 1 本で、その所有者が誰かは結果として分かるだけ。
 		// 自チャンネルなら既存行なので影響は無く、他人のチャンネルなら非表示で作る。
-		s.singerRepo.Upsert(singer, repository.SingerDiscovered)
+		s.channelRepo.Upsert(channelInfo, repository.ChannelDiscovered)
 	}
 
 	result := &dto.SyncHolodexResponse{
@@ -658,9 +658,9 @@ func (s *HolodexService) LoadHolodexSongs(videoID string) (*dto.LoadHolodexSongs
 	}
 
 	// チャンネル所有者の情報を取得する
-	var channelOwner dto.SingerResponse
+	var channelOwner dto.ChannelResponse
 	if video.Channel != nil {
-		channelOwner = dto.SingerResponse{
+		channelOwner = dto.ChannelResponse{
 			ID:   video.Channel.ID,
 			Name: video.Channel.Name,
 		}
@@ -676,13 +676,13 @@ func (s *HolodexService) LoadHolodexSongs(videoID string) (*dto.LoadHolodexSongs
 	}
 
 	// すべての参加者を集める（チャンネル所有者 + mentions）
-	participants := []dto.SingerResponse{channelOwner}
-	allSingerIDs := []string{channelOwner.ID}
+	participants := []dto.ChannelResponse{channelOwner}
+	participantIDs := []string{channelOwner.ID}
 
 	for _, mention := range video.Mentions {
 		// 重複を避ける
 		found := false
-		for _, id := range allSingerIDs {
+		for _, id := range participantIDs {
 			if id == mention.ID {
 				found = true
 				break
@@ -692,7 +692,7 @@ func (s *HolodexService) LoadHolodexSongs(videoID string) (*dto.LoadHolodexSongs
 			continue
 		}
 
-		participant := dto.SingerResponse{
+		participant := dto.ChannelResponse{
 			ID:   mention.ID,
 			Name: mention.Name,
 		}
@@ -706,7 +706,7 @@ func (s *HolodexService) LoadHolodexSongs(videoID string) (*dto.LoadHolodexSongs
 			participant.Organization = &org
 		}
 		participants = append(participants, participant)
-		allSingerIDs = append(allSingerIDs, mention.ID)
+		participantIDs = append(participantIDs, mention.ID)
 	}
 
 	// 楽曲データを変換する
@@ -718,7 +718,7 @@ func (s *HolodexService) LoadHolodexSongs(videoID string) (*dto.LoadHolodexSongs
 			StartSeconds:   song.Start,
 			EndSeconds:     song.End,
 			Tags:           []string{},
-			SingerIDs:      allSingerIDs, // 既定はすべての参加者
+			SingerIDs:      participantIDs, // 既定はすべての参加者
 		}
 		if song.ArtURL != "" {
 			songs[i].ArtURL = &song.ArtURL
@@ -1140,10 +1140,10 @@ func (s *HolodexService) SyncSetoriToHolodex(streamID string) (*dto.SyncHolodexR
 
 	// channel name がなければ DB から取得する
 	if (channelName == "" || channelEnglishName == "") && channelID != "" {
-		if s.singerRepo != nil {
-			if singer, err := s.singerRepo.FindByID(channelID); err == nil && singer != nil {
-				channelName = singer.Name
-				channelEnglishName = singer.EnglishName.String
+		if s.channelRepo != nil {
+			if channelInfo, err := s.channelRepo.FindByID(channelID); err == nil && channelInfo != nil {
+				channelName = channelInfo.Name
+				channelEnglishName = channelInfo.EnglishName.String
 			}
 		}
 	}

@@ -13,17 +13,17 @@ import type {
   StreamListResponse,
   StreamDetailResponse,
   UpdateStreamRequest,
-  Singer,
-  SingerListResponse,
-  SingerGroupListResponse,
+  Channel,
+  ChannelListResponse,
+  ChannelGroupListResponse,
   Organization,
   OrganizationListResponse,
   CreateOrganizationRequest,
   UpdateOrganizationRequest,
-  SingerDetailResponse,
-  SingerPerformanceListResponse,
-  CreateSingerResponse,
-  UpdateSingerRequest,
+  ChannelDetailResponse,
+  ChannelPerformanceListResponse,
+  CreateChannelResponse,
+  UpdateChannelRequest,
   SyncHolodexRequest,
   SyncHolodexResponse,
   SongSuggestion,
@@ -296,7 +296,7 @@ export const streamApi = {
 
 // ========== チャンネル API ==========
 
-export const singerApi = {
+export const channelApi = {
   // includeHidden は content:edit を持つ場合のみ有効（無ければサーバー側で無視される）
   list: async (
     page = 1,
@@ -304,7 +304,7 @@ export const singerApi = {
     sort?: string,
     dir?: string,
     includeHidden = false
-  ): Promise<SingerListResponse> => {
+  ): Promise<ChannelListResponse> => {
     const params = new URLSearchParams({ page: String(page), limit: String(limit) });
     if (sort) params.set('sort', sort);
     if (dir) params.set('dir', dir);
@@ -314,19 +314,19 @@ export const singerApi = {
   },
 
   // 事務所別（ページングなし）
-  listGrouped: async (includeHidden = false): Promise<SingerGroupListResponse> => {
+  listGrouped: async (includeHidden = false): Promise<ChannelGroupListResponse> => {
     const params = new URLSearchParams({ group: 'organization' });
     if (includeHidden) params.set('include_hidden', 'true');
     const { data } = await api.get(`/api/channels?${params}`);
     return data;
   },
 
-  get: async (id: string): Promise<SingerDetailResponse> => {
+  get: async (id: string): Promise<ChannelDetailResponse> => {
     const { data } = await api.get(`/api/channels/${id}`);
     return data;
   },
 
-  search: async (query: string, limit = 10): Promise<Singer[]> => {
+  search: async (query: string, limit = 10): Promise<Channel[]> => {
     const params = new URLSearchParams({ q: query, limit: String(limit) });
     const { data } = await api.get(`/api/channels/search?${params}`);
     return data;
@@ -346,7 +346,7 @@ export const singerApi = {
     return data;
   },
 
-  getPerformances: async (id: string, page = 1, limit = 20, sort?: string, dir?: string): Promise<SingerPerformanceListResponse> => {
+  getPerformances: async (id: string, page = 1, limit = 20, sort?: string, dir?: string): Promise<ChannelPerformanceListResponse> => {
     const params = new URLSearchParams({ page: String(page), limit: String(limit) });
     if (sort) params.set('sort', sort);
     if (dir) params.set('dir', dir);
@@ -354,13 +354,13 @@ export const singerApi = {
     return data;
   },
 
-  // singer を追加する（Holodex を優先し、見つからなければ YouTube Data API へフォールバック）
-  create: async (channelInput: string): Promise<CreateSingerResponse> => {
+  // チャンネルを追加する（Holodex を優先し、見つからなければ YouTube Data API へフォールバック）
+  create: async (channelInput: string): Promise<CreateChannelResponse> => {
     const { data } = await api.post('/api/channels', { id: channelInput });
     return data;
   },
 
-  update: async (id: string, req: UpdateSingerRequest): Promise<Singer> => {
+  update: async (id: string, req: UpdateChannelRequest): Promise<Channel> => {
     const { data } = await api.put(`/api/channels/${id}`, req);
     return data;
   },
@@ -386,7 +386,7 @@ export const singerApi = {
   },
 
   // 自動処理が有効なチャンネルの一覧（content:edit）。
-  listAutoFill: async (): Promise<{ singers: Singer[] }> => {
+  listAutoFill: async (): Promise<{ singers: Channel[] }> => {
     const { data } = await api.get('/api/channels/auto-fill');
     return data;
   },
@@ -437,8 +437,8 @@ export const taskApi = {
     const { data } = await api.get(`/api/tasks/${id}`);
     return data;
   },
-  prepare: async (singerId: string): Promise<{ task_id: string }> => {
-    const { data } = await api.post('/api/streams/prepare', null, { params: { singer_id: singerId } });
+  prepare: async (channelId: string): Promise<{ task_id: string }> => {
+    const { data } = await api.post('/api/streams/prepare', null, { params: { singer_id: channelId } });
     return data;
   },
   cancel: async (id: string): Promise<void> => { await api.post(`/api/tasks/${id}/cancel`); },
@@ -668,17 +668,17 @@ export const chapterApi = {
 
 
 // 一括セットリスト作成。歌唱（performances）を直接作るので、実行記録と撤回がある。
-// singerIds は対象チャンネル（空なら全部）。既定はそのチャンネルが**所有する**配信で、
+// channelIds は対象チャンネル（空なら全部）。既定はそのチャンネルが**所有する**配信で、
 // includeCollabs を立てるとゲスト参加した配信も含む。
 export const batchFillApi = {
   start: async (
     mode: string,
-    singerIds: string[] = [],
+    channelIds: string[] = [],
     includeCollabs = false
   ): Promise<{ run_id: string; message: string }> => {
     const { data } = await api.post('/api/streams/batch-fill', {
       mode,
-      singer_ids: singerIds,
+      singer_ids: channelIds,
       include_collabs: includeCollabs,
     });
     return data;
@@ -710,16 +710,16 @@ export const batchFillApi = {
 export const batchAnalyzeApi = {
   // 一括プレ分析を開始（背景ジョブ・singleton）
   // mode: unanalyzed（未分析のみ）/ unprocessed（未処理すべて）/ refresh（コメント再取得）/ reanalyze（すべて再分析）
-  // singerId: 対象チャンネル（空なら全チャンネル）
+  // channelId: 対象チャンネル（空なら全チャンネル）
   // hidden: ''/'false'（非表示を除く・既定）/ 'true'（非表示だけ）/ 'all'（両方）
   start: async (
     mode: string,
-    singerId?: string,
+    channelId?: string,
     hidden?: 'all' | 'true' | 'false'
   ): Promise<{ message: string }> => {
     const { data } = await api.post('/api/streams/batch-analyze', {
       mode,
-      singer_id: singerId ?? '',
+      singer_id: channelId ?? '',
       hidden: hidden ?? '',
     });
     return data;
@@ -1219,8 +1219,8 @@ export const searchApi = {
     vocalistId?: string;
     streamTags?: string[];
     performanceTags?: string[];
-    // 旧クライアント互換: singerId は participantId として送信する。
-    singerId?: string;
+    // チャンネルの単値指定も participant_id として送信する。
+    channelId?: string;
     page?: number;
     limit?: number;
   }): Promise<StreamListResponse> => {
@@ -1232,8 +1232,8 @@ export const searchApi = {
     if (opts.ownerId) params.set('owner_id', opts.ownerId);
     if (opts.participantIds && opts.participantIds.length > 0) {
       params.set('participant_ids', opts.participantIds.join(','));
-    } else if (opts.participantId || opts.singerId) {
-      params.set('participant_id', opts.participantId || opts.singerId!);
+    } else if (opts.participantId || opts.channelId) {
+      params.set('participant_id', opts.participantId || opts.channelId!);
     }
     if (opts.vocalistIds && opts.vocalistIds.length > 0) {
       params.set('vocalist_ids', opts.vocalistIds.join(','));

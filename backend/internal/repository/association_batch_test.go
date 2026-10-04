@@ -201,7 +201,7 @@ func perfAssociationScenario(q map[string]string, source, view string, n int) ([
 		}
 		if i%3 == 0 {
 			singerRows = append(singerRows, []driver.Value{id.String(), "vocalist", "歌った人", nil, nil, "org", "事務所", false, "manual", now, now})
-			p.Singers = []models.Singer{{ID: "vocalist", Name: "歌った人", Organization: sql.NullString{String: "org", Valid: true}, OrganizationName: sql.NullString{String: "事務所", Valid: true}, MetadataSource: "manual", CreatedAt: now, UpdatedAt: now}}
+			p.Singers = []models.Channel{{ID: "vocalist", Name: "歌った人", Organization: sql.NullString{String: "org", Valid: true}, OrganizationName: sql.NullString{String: "事務所", Valid: true}, MetadataSource: "manual", CreatedAt: now, UpdatedAt: now}}
 		}
 		want = append(want, p)
 	}

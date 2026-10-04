@@ -77,7 +77,7 @@ type UpdateSongRequest struct {
 
 // ========== 歌手 ==========
 
-type SingerResponse struct {
+type ChannelResponse struct {
 	ID          string  `json:"id"`
 	Name        string  `json:"name"`
 	EnglishName *string `json:"english_name,omitempty"`
@@ -107,21 +107,21 @@ type SingerResponse struct {
 	UpdatedAt              time.Time `json:"updated_at"`
 }
 
-type SingerListResponse struct {
-	Singers    []SingerResponse   `json:"singers"`
+type ChannelListResponse struct {
+	Channels   []ChannelResponse  `json:"singers"`
 	Pagination PaginationResponse `json:"pagination"`
 	// HiddenTotal は非表示チャンネルの総数（非表示を含めて引いたときだけ）。
 	// 並びは表示中が先なので、区の見出しに出す件数として使う（issue #65）。
 	HiddenTotal *int `json:"hidden_total,omitempty"`
 }
 
-// SingerGroupResponse は事務所ごとにまとめたチャンネル。
+// ChannelGroupResponse は事務所ごとにまとめたチャンネル。
 // Organization が空文字の組は「所属なし（個人勢）」を表し、一覧では最後に置く。
 // DisplayName は見出しに出す名前（所属なしの組では空）。
-type SingerGroupResponse struct {
-	Organization string           `json:"organization"`
-	DisplayName  string           `json:"display_name"`
-	Singers      []SingerResponse `json:"singers"`
+type ChannelGroupResponse struct {
+	Organization string            `json:"organization"`
+	DisplayName  string            `json:"display_name"`
+	Channels     []ChannelResponse `json:"singers"`
 }
 
 // ========== 事務所 ==========
@@ -131,7 +131,7 @@ type OrganizationResponse struct {
 	DisplayName    string    `json:"display_name"`
 	SortOrder      int       `json:"sort_order"`
 	IsUnaffiliated bool      `json:"is_unaffiliated"`
-	SingerCount    int       `json:"singer_count"`
+	ChannelCount   int       `json:"singer_count"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 }
@@ -157,37 +157,37 @@ type UpdateOrganizationRequest struct {
 	IsUnaffiliated bool   `json:"is_unaffiliated"`
 }
 
-// UpdateSingerOrganizationRequest は Holodex の分類の手動上書き。
+// UpdateChannelOrganizationRequest は Holodex の分類の手動上書き。
 // 空文字（または省略）で上書きを解除し、Holodex の値に戻す。
-// メタデータ更新（UpdateSingerRequest）と分けているのは、これが Holodex の
+// メタデータ更新（UpdateChannelRequest）と分けているのは、これが Holodex の
 // メタデータではなく seTORI 側の判断で、Holodex 管理チャンネルでも設定できる必要があるため。
-type UpdateSingerOrganizationRequest struct {
+type UpdateChannelOrganizationRequest struct {
 	Organization string `json:"organization"`
 }
 
-// SingerGroupListResponse は事務所別のチャンネル一覧。
+// ChannelGroupListResponse は事務所別のチャンネル一覧。
 // グループを跨いだページ送りは意味を成さないので、ページングせず全件返す。
-type SingerGroupListResponse struct {
+type ChannelGroupListResponse struct {
 	// Groups は**表示中の**チャンネルを事務所ごとに。
-	Groups []SingerGroupResponse `json:"groups"`
+	Groups []ChannelGroupResponse `json:"groups"`
 	// Hidden は非表示チャンネルを名前順で（content:edit のときだけ。issue #65）。
 	// 事務所の組へ混ぜないのは、組のほとんどが非表示だけになって表示中が埋もれるため。
 	// nil は閲覧者向けの省略。編集者には 0 件でも [] を返すので件数を表示できる。
-	Hidden *[]SingerResponse `json:"hidden,omitempty"`
+	Hidden *[]ChannelResponse `json:"hidden,omitempty"`
 	// Total は Groups と Hidden の合計。
 	Total int `json:"total"`
 }
 
-// UpdateSingerVisibilityRequest はチャンネルの非表示切り替え。
-// 名前などのメタデータ更新（UpdateSingerRequest）と分けているのは、
+// UpdateChannelVisibilityRequest はチャンネルの非表示切り替え。
+// 名前などのメタデータ更新（UpdateChannelRequest）と分けているのは、
 // メタデータは Holodex 管理チャンネルでは編集できない一方、
 // 非表示は seTORI 側の都合なのでどのチャンネルでも切り替えられるため。
-// UpdateSingerMembersPolicyRequest は会限セットリストの公開可否。
+// UpdateChannelMembersPolicyRequest は会限セットリストの公開可否。
 //
 // **ポインタにするのは「フィールドが無い」と「明示的な空文字」を分けるため。**
 // 値型だと `{}` や項目名の typo が decode に成功し、既存の allow / deny を
 // 黙って未確認へ戻してしまう（deny では「訊いて断られた」という記録が消える）。
-type UpdateSingerMembersPolicyRequest struct {
+type UpdateChannelMembersPolicyRequest struct {
 	Policy *string `json:"members_only_policy"`
 }
 
@@ -205,30 +205,30 @@ type UpdateAutoFillSettingsRequest struct {
 	IncludeCollabs *bool `json:"include_collabs"`
 }
 
-// UpdateSingerAutoFillRequest は自動処理の対象かの切り替え。
+// UpdateChannelAutoFillRequest は自動処理の対象かの切り替え。
 // **ポインタにするのは「項目が無い」と「false」を分けるため**
 // （members-policy と同じ理由。`{}` が黙って無効化するのを防ぐ）。
-type UpdateSingerAutoFillRequest struct {
+type UpdateChannelAutoFillRequest struct {
 	Enabled *bool `json:"auto_fill_enabled"`
 }
 
-type UpdateSingerVisibilityRequest struct {
+type UpdateChannelVisibilityRequest struct {
 	IsHidden bool `json:"is_hidden"`
 }
 
-type SingerDetailResponse struct {
-	SingerResponse
+type ChannelDetailResponse struct {
+	ChannelResponse
 	StreamCount      int `json:"stream_count"`
 	PerformanceCount int `json:"performance_count"`
 }
 
-type SingerPerformanceListResponse struct {
-	Singer       SingerResponse            `json:"singer"`
+type ChannelPerformanceListResponse struct {
+	Channel      ChannelResponse           `json:"singer"`
 	Performances []SongPerformanceResponse `json:"performances"`
 	Pagination   PaginationResponse        `json:"pagination"`
 }
 
-type CreateSingerRequest struct {
+type CreateChannelRequest struct {
 	ID           string  `json:"id"` // YouTube Channel ID / @handle / URL
 	Name         string  `json:"name,omitempty"`
 	EnglishName  *string `json:"english_name,omitempty"`
@@ -236,15 +236,15 @@ type CreateSingerRequest struct {
 	Organization *string `json:"organization,omitempty"`
 }
 
-type CreateSingerResponse struct {
+type CreateChannelResponse struct {
 	Message string `json:"message"`
 	ID      string `json:"id"`
 	Name    string `json:"name"`
 }
 
-// UpdateSingerRequest は Holodex 管理でないチャンネルのメタデータ更新。
-// 事務所は含まない（UpdateSingerOrganizationRequest が唯一の窓口）。
-type UpdateSingerRequest struct {
+// UpdateChannelRequest は Holodex 管理でないチャンネルのメタデータ更新。
+// 事務所は含まない（UpdateChannelOrganizationRequest が唯一の窓口）。
+type UpdateChannelRequest struct {
 	Name        string  `json:"name"`
 	EnglishName *string `json:"english_name,omitempty"`
 	PhotoURL    *string `json:"photo_url,omitempty"`
@@ -265,8 +265,8 @@ type StreamResponse struct {
 	DurationSeconds *int32              `json:"duration_seconds,omitempty"`
 	ThumbnailURL    *string             `json:"thumbnail_url,omitempty"`
 	Tags            []StreamTagResponse `json:"tags"`
-	Participants    []SingerResponse    `json:"participants"`
-	ChannelOwner    *SingerResponse     `json:"channel_owner,omitempty"` // チャンネル所有者
+	Participants    []ChannelResponse   `json:"participants"`
+	ChannelOwner    *ChannelResponse    `json:"channel_owner,omitempty"` // チャンネル所有者
 	// IsProcessed は**運用の状態**（セットリストを作り終えたか）。
 	// `content:edit` のときだけ載せる ── 閲覧者には意味が無く、
 	// 「まだ手を付けていない配信」の一覧を外から作れてしまう。
@@ -386,7 +386,7 @@ type PerformanceResponse struct {
 	OrderIndex     int                      `json:"order_index"`
 	Tags           []PerformanceTagResponse `json:"tags"`
 	CustomTags     []string                 `json:"custom_tags"`
-	Singers        []SingerResponse         `json:"singers"`
+	Singers        []ChannelResponse        `json:"singers"`
 	YouTubeURL     string                   `json:"youtube_url"`
 	CreatedAt      time.Time                `json:"created_at"`
 	// 終了時間の由来と確認状態（docs/DATA_COMPLETION.md）。
@@ -423,7 +423,7 @@ type SongPerformanceResponse struct {
 	EndSeconds     int                      `json:"end_seconds"`
 	Tags           []PerformanceTagResponse `json:"tags"`
 	CustomTags     []string                 `json:"custom_tags"`
-	Singers        []SingerResponse         `json:"singers"`
+	Singers        []ChannelResponse        `json:"singers"`
 	YouTubeURL     string                   `json:"youtube_url"`
 	CreatedAt      time.Time                `json:"created_at"`
 	// 終了時間の由来と確認状態（docs/DATA_COMPLETION.md）。
@@ -533,9 +533,9 @@ type ArtistAliasProposal struct {
 type BatchFillStatus struct {
 	Running bool   `json:"running"`
 	Mode    string `json:"mode,omitempty"`
-	// SingerIDs は対象チャンネル（空なら全部）。IncludeCollabs が false なら
+	// ChannelIDs は対象チャンネル（空なら全部）。IncludeCollabs が false なら
 	// そのチャンネルが所有する配信だけが対象。
-	SingerIDs      []string `json:"singer_ids,omitempty"`
+	ChannelIDs     []string `json:"singer_ids,omitempty"`
 	IncludeCollabs bool     `json:"include_collabs,omitempty"`
 	RunID          string   `json:"run_id,omitempty"`
 	Phase          string   `json:"phase,omitempty"` // scan / ai / write
@@ -593,13 +593,13 @@ type AnalyzeStats struct {
 
 // BatchAnalyzeStatus 未処理配信の一括分析ジョブの進捗
 type BatchAnalyzeStatus struct {
-	Running  bool   `json:"running"`
-	Mode     string `json:"mode,omitempty"`
-	SingerID string `json:"singer_id,omitempty"` // 対象を絞ったチャンネル（空なら全チャンネル）
-	Hidden   string `json:"hidden,omitempty"`    // 非表示配信の扱い（false/true/all）。画面に何が走っているか出すため
-	Total    int    `json:"total"`
-	Done     int    `json:"done"`
-	Failed   int    `json:"failed"`
+	Running   bool   `json:"running"`
+	Mode      string `json:"mode,omitempty"`
+	ChannelID string `json:"singer_id,omitempty"` // 対象を絞ったチャンネル（空なら全チャンネル）
+	Hidden    string `json:"hidden,omitempty"`    // 非表示配信の扱い（false/true/all）。画面に何が走っているか出すため
+	Total     int    `json:"total"`
+	Done      int    `json:"done"`
+	Failed    int    `json:"failed"`
 	// MarkedProcessed は「曲が無かったので処理済みにした」件数（非表示のみ）。
 	// **黙って状態を変えない**ために数える ── 画面に出ないと、いつの間にか
 	// 処理済みが増えていて理由が分からなくなる。
@@ -614,8 +614,8 @@ type BatchAnalyzeStatus struct {
 
 // BatchAnalyzeRequest 一括分析の開始リクエスト
 type BatchAnalyzeRequest struct {
-	Mode     string `json:"mode"`      // unanalyzed / unprocessed / refresh / reanalyze
-	SingerID string `json:"singer_id"` // 対象チャンネル（空なら全チャンネル）
+	Mode      string `json:"mode"`      // unanalyzed / unprocessed / refresh / reanalyze
+	ChannelID string `json:"singer_id"` // 対象チャンネル（空なら全チャンネル）
 	// Hidden は非表示配信の扱い。語彙は GET /api/channels/{id}/streams?hidden= と揃える。
 	//
 	//	""/"false" … 非表示を除く（既定。従来の挙動）
@@ -669,11 +669,11 @@ type SongSuggestion struct {
 
 // LoadHolodexSongsResponse は Holodex 楽曲の読み込みレスポンス。
 type LoadHolodexSongsResponse struct {
-	StreamID     string           `json:"stream_id"`
-	StreamTitle  string           `json:"stream_title"`
-	ChannelOwner SingerResponse   `json:"channel_owner"` // チャンネル所有者
-	Participants []SingerResponse `json:"participants"`  // すべての参加者（チャンネル所有者を含む）
-	Songs        []SongSuggestion `json:"songs"`
+	StreamID     string            `json:"stream_id"`
+	StreamTitle  string            `json:"stream_title"`
+	ChannelOwner ChannelResponse   `json:"channel_owner"` // チャンネル所有者
+	Participants []ChannelResponse `json:"participants"`  // すべての参加者（チャンネル所有者を含む）
+	Songs        []SongSuggestion  `json:"songs"`
 }
 
 // CreatePerformancesRequest は歌唱記録の作成リクエスト。
@@ -1145,7 +1145,7 @@ type GlobalSearchResponse struct {
 	VideoRegistered bool               `json:"video_registered"`
 	Songs           []SongResponse     `json:"songs"`
 	Streams         []SearchStreamItem `json:"streams"`
-	Singers         []SingerResponse   `json:"singers"`
+	Channels        []ChannelResponse  `json:"singers"`
 	Artists         []ArtistResponse   `json:"artists"`
 	StreamTags      []SearchTagItem    `json:"stream_tags"`
 	PerformanceTags []SearchTagItem    `json:"performance_tags"`

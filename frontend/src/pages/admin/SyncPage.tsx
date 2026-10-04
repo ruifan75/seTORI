@@ -2,7 +2,7 @@ import { invalidateTaskResults, TASK_LABELS, TASK_PHASE_LABELS } from '../../uti
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { holodexApi, batchAnalyzeApi, batchFillApi, singerApi, autoFillApi, nonSingingApi, restrictionReviewApi, streamApi, taskApi } from '../../api/client';
+import { holodexApi, batchAnalyzeApi, batchFillApi, channelApi, autoFillApi, nonSingingApi, restrictionReviewApi, streamApi, taskApi } from '../../api/client';
 import { useToast } from '../../components/ui/ToastContext';
 import { useAuthStore, hasPermission, PERM } from '../../store/auth';
 import { formatSeconds } from '../../components/usePerformanceTiming';
@@ -37,7 +37,7 @@ export default function SyncPage() {
   const [videoId, setVideoId] = useState('');
   const [syncMode, setSyncMode] = useState<'new' | 'all'>('new');
   const [batchMode, setBatchMode] = useState<string>('unanalyzed');
-  const [batchSingerId, setBatchSingerId] = useState<string>(''); // '' = 全チャンネル
+  const [batchChannelId, setBatchChannelId] = useState<string>(''); // '' = 全チャンネル
   // 非表示配信の扱い。既定は従来どおり「除く」──通常運用で雑談・ゲーム配信を
   // 毎回 AI にかけないため。非表示を回すのは抽出規則を変えた後の棚卸しという別の作業。
   const [batchHidden, setBatchHidden] = useState<'all' | 'true' | 'false'>('false');
@@ -47,19 +47,19 @@ export default function SyncPage() {
   // 選択用のチャンネル一覧（名前順）。
   // 一覧で非表示にしたチャンネルも同期対象には出す（隠したいのは一覧の場所だけで、
   // 配信の取り込みまで止めたいわけではないため）。
-  const { data: singerList } = useQuery({
+  const { data: channelList } = useQuery({
     queryKey: ['singers-for-batch'],
-    queryFn: () => singerApi.list(1, 300, 'name', 'asc', true),
+    queryFn: () => channelApi.list(1, 300, 'name', 'asc', true),
     staleTime: 5 * 60 * 1000,
   });
-  const singers = singerList?.singers ?? [];
+  const channels = channelList?.singers ?? [];
 
   // 一括分析：実行中は 3 秒ごとに進捗をポーリング
   // 一括セットリスト作成（歌唱を直接作るので、プレ分析とは別物）
   const [fillMode, setFillMode] = useState('unprocessed');
   // 対象チャンネルは複数選べる。既定は「そのチャンネルが所有する配信だけ」で、
   // ゲスト参加した他人の配信まで巻き込まないようにしてある。
-  const [fillSingerIds, setFillSingerIds] = useState<string[]>([]);
+  const [fillChannelIds, setFillChannelIds] = useState<string[]>([]);
   const [fillIncludeCollabs, setFillIncludeCollabs] = useState(false);
   // 「入力元に無い」の内訳を開いている実行（一度に 1 つ）
   const [openGapRun, setOpenGapRun] = useState<string | null>(null);
@@ -88,7 +88,7 @@ export default function SyncPage() {
     refetchInterval: fillStatus?.running ? 5000 : false,
   });
   const startFillMutation = useMutation({
-    mutationFn: () => batchFillApi.start(fillMode, fillSingerIds, fillIncludeCollabs),
+    mutationFn: () => batchFillApi.start(fillMode, fillChannelIds, fillIncludeCollabs),
     onSuccess: () => {
       showToast('一括セットリスト作成を開始しました', 'success');
       queryClient.invalidateQueries({ queryKey: ['batch-fill-status'] });
@@ -116,7 +116,7 @@ export default function SyncPage() {
   });
 
   const startBatchMutation = useMutation({
-    mutationFn: () => batchAnalyzeApi.start(batchMode, batchSingerId, batchHidden),
+    mutationFn: () => batchAnalyzeApi.start(batchMode, batchChannelId, batchHidden),
     onSuccess: () => {
       showToast('一括分析を開始しました（バックグラウンドで実行されます）', 'success');
       queryClient.invalidateQueries({ queryKey: ['batch-analyze-status'] });
@@ -344,13 +344,13 @@ export default function SyncPage() {
           </label>
           <select
             id="batch-singer"
-            value={batchSingerId}
-            onChange={(e) => setBatchSingerId(e.target.value)}
+            value={batchChannelId}
+            onChange={(e) => setBatchChannelId(e.target.value)}
             disabled={batchStatus?.running}
             className="w-full max-w-md px-3 py-2 text-sm border border-gray-300 rounded-lg bg-white focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400 disabled:opacity-50"
           >
             <option value="">すべてのチャンネル</option>
-            {singers.map((sg) => (
+            {channels.map((sg) => (
               <option key={sg.id} value={sg.id}>
                 {sg.name}
               </option>
@@ -394,7 +394,7 @@ export default function SyncPage() {
               一括分析中（{BATCH_MODES.find((m) => m.value === batchStatus.mode)?.label ?? batchStatus.mode}
               {batchStatus.hidden === 'true' ? ' / 非表示だけ' : batchStatus.hidden === 'all' ? ' / 非表示も含む' : ''}
               {batchStatus.singer_id
-                ? ` / ${singers.find((sg) => sg.id === batchStatus.singer_id)?.name ?? batchStatus.singer_id}`
+                ? ` / ${channels.find((sg) => sg.id === batchStatus.singer_id)?.name ?? batchStatus.singer_id}`
                 : ' / 全チャンネル'}
               ）{' '}
               {batchStatus.done + batchStatus.failed + (batchStatus.deferred ?? 0)}/{batchStatus.total}
@@ -473,14 +473,14 @@ export default function SyncPage() {
             <select
               multiple
               size={5}
-              value={fillSingerIds}
+              value={fillChannelIds}
               onChange={(e) =>
-                setFillSingerIds(Array.from(e.target.selectedOptions, (o) => o.value))
+                setFillChannelIds(Array.from(e.target.selectedOptions, (o) => o.value))
               }
               disabled={fillStatus?.running}
               className="border border-gray-300 rounded-lg px-3 py-2 min-w-56 max-sm:min-w-0 max-sm:w-full"
             >
-              {singers.map((sg) => (
+              {channels.map((sg) => (
                 <option key={sg.id} value={sg.id}>{sg.name}</option>
               ))}
             </select>
@@ -490,10 +490,10 @@ export default function SyncPage() {
               type="checkbox"
               checked={fillIncludeCollabs}
               onChange={(e) => setFillIncludeCollabs(e.target.checked)}
-              disabled={fillStatus?.running || fillSingerIds.length === 0}
+              disabled={fillStatus?.running || fillChannelIds.length === 0}
               className="accent-indigo-600"
             />
-            <span className={fillSingerIds.length === 0 ? 'text-gray-400' : 'text-gray-700'}>
+            <span className={fillChannelIds.length === 0 ? 'text-gray-400' : 'text-gray-700'}>
               ゲスト参加した配信も含む
             </span>
           </label>
@@ -579,7 +579,7 @@ export default function SyncPage() {
                             {/* 複数チャンネルはカンマ区切りで記録されている */}
                             {run.singer_id
                               .split(',')
-                              .map((id) => singers.find((sg) => sg.id === id)?.name ?? id)
+                              .map((id) => channels.find((sg) => sg.id === id)?.name ?? id)
                               .join('・')}
                           </span>
                         )}
@@ -734,12 +734,12 @@ function AutoFillTargets() {
     // ログインした sync:run だけの利用者に見えてしまう
     // （応答には会限の方針と本数も入っている）。
     queryKey: ['autoFillTargets', canEdit],
-    queryFn: singerApi.listAutoFill,
+    queryFn: channelApi.listAutoFill,
     enabled: canEdit && authStatus !== 'loading',
   });
 
   const stop = useMutation({
-    mutationFn: (id: string) => singerApi.setAutoFill(id, false),
+    mutationFn: (id: string) => channelApi.setAutoFill(id, false),
     onSuccess: (_d, id) => {
       queryClient.invalidateQueries({ queryKey: ['autoFillTargets'] }); // prefix 一致で権限別の鍵も拾う
       queryClient.invalidateQueries({ queryKey: ['singer', id] });
@@ -1023,10 +1023,10 @@ function BackgroundTasks() {
   const authStatus = useAuthStore((st) => st.status);
   const completedTasks = useRef(new Set<string>());
   const [openTask, setOpenTask] = useState<string | null>(null);
-  const [prepareSinger, setPrepareSinger] = useState('');
-  const { data: prepareSingers } = useQuery({ queryKey: ['singers-for-prepare'], queryFn: () => singerApi.list(1, 300, 'name', 'asc', true), enabled: canEdit });
+  const [prepareChannel, setPrepareChannel] = useState('');
+  const { data: prepareChannels } = useQuery({ queryKey: ['singers-for-prepare'], queryFn: () => channelApi.list(1, 300, 'name', 'asc', true), enabled: canEdit });
   const prepare = useMutation({
-    mutationFn: () => taskApi.prepare(prepareSinger),
+    mutationFn: () => taskApi.prepare(prepareChannel),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['tasks'] }); showToast('準備を開始しました', 'success'); },
     onError: (err: Error) => showToast(err.message, 'error'),
   });
@@ -1066,11 +1066,11 @@ function BackgroundTasks() {
       <h2 className="text-xl font-bold text-gray-900 mb-2">背景処理</h2>
       <div className="mb-4 space-y-2">
         <p className="text-sm text-gray-600">同期後の準備：所有する表示中・未処理の配信の章節を取得し、コメントを取り直してプレ分析します。会限・秘匿の配信は対象外です。各取得・解析前に状態を確認します。歌唱の保存は編集画面で確認して行います。</p>
-        <label className="text-sm max-sm:block">対象チャンネル <select value={prepareSinger} onChange={(e) => setPrepareSinger(e.target.value)} className="border rounded px-2 py-1 max-sm:block max-sm:w-full">
+        <label className="text-sm max-sm:block">対象チャンネル <select value={prepareChannel} onChange={(e) => setPrepareChannel(e.target.value)} className="border rounded px-2 py-1 max-sm:block max-sm:w-full">
           <option value="">チャンネルを選択</option>
-          {prepareSingers?.singers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          {prepareChannels?.singers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select></label>
-        <button onClick={() => prepare.mutate()} disabled={!prepareSinger || prepare.isPending} className="ml-2 max-sm:ml-0 px-3 py-1.5 bg-indigo-600 text-white rounded disabled:opacity-50">同期後の準備を開始</button>
+        <button onClick={() => prepare.mutate()} disabled={!prepareChannel || prepare.isPending} className="ml-2 max-sm:ml-0 px-3 py-1.5 bg-indigo-600 text-white rounded disabled:opacity-50">同期後の準備を開始</button>
       </div>
       <p className="text-gray-500 mb-4 text-sm">
         yt-dlp を使う一括取得です。どちらも時間がかかり、YouTube に BOT 判定されると全件失敗します

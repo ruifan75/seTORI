@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import { performanceApi, songApi, streamApi, suggestionApi, tagApi } from '../../api/client';
 import type {
   MissingSongPayload,
-  Singer,
+  Channel,
   Suggestion,
   SuggestionGroup,
   SuggestionKind,
@@ -321,7 +321,7 @@ function GroupCard({
   const [openId, setOpenId] = useState<string | null>(null);
   // 検索で足したゲスト歌手。配信の参加者一覧（サーバー由来）には居ないので
   // ここで抱えておかないと、選んだ本人が候補に並ばず外せなくなる
-  const [extraSingers, setExtraSingers] = useState<Singer[]>([]);
+  const [extraSingers, setExtraSingers] = useState<Channel[]>([]);
   // 審査カードの編集値は親が持つ。生コメントの ＋ から直接書き換えるため
   const [drafts, setDrafts] = useState<Record<string, PerformanceFieldValues>>({});
   const draftOf = (s: Suggestion) => drafts[s.id] ?? toFieldValues(s.id, s.payload!);

@@ -38,7 +38,7 @@ type PrepareService struct {
 func NewPrepareService(streams preparationStreams, chapters preparationChapters, batch preparationBatch, fill preparationFill, tasks *TaskRunService) *PrepareService {
 	return &PrepareService{streams, chapters, batch, fill, tasks}
 }
-func (s *PrepareService) Start(singerID string, by *uuid.UUID) (*TaskRun, error) {
+func (s *PrepareService) Start(channelID string, by *uuid.UUID) (*TaskRun, error) {
 	if !s.fill.Reserve() {
 		return nil, ErrBatchFillAlreadyRunning
 	}
@@ -46,23 +46,23 @@ func (s *PrepareService) Start(singerID string, by *uuid.UUID) (*TaskRun, error)
 		s.fill.Release()
 		return nil, ErrBatchAlreadyRunning
 	}
-	run, err := s.tasks.Start(TaskStreamPrepare, map[string]string{"singer_id": singerID}, by)
+	run, err := s.tasks.Start(TaskStreamPrepare, map[string]string{"singer_id": channelID}, by)
 	if err != nil {
 		s.batch.Release()
 		s.fill.Release()
 		return nil, err
 	}
-	go s.execute(singerID, run)
+	go s.execute(channelID, run)
 	return run, nil
 }
-func (s *PrepareService) execute(singerID string, run *TaskRun) {
+func (s *PrepareService) execute(channelID string, run *TaskRun) {
 	defer s.fill.Release()
 	defer s.batch.Release()
 	status, message := "failed", "準備が完了しませんでした"
 	defer func() { run.Finish(status, message) }()
 	cancelled := func() bool { return run.Cancelled() || s.batch.Cancelled() || s.fill.Cancelled() }
-	eligible := func(id string) (bool, error) { return s.streams.PreparationStreamEligible(singerID, id) }
-	streams, err := s.streams.FindPreparationStreams(singerID)
+	eligible := func(id string) (bool, error) { return s.streams.PreparationStreamEligible(channelID, id) }
+	streams, err := s.streams.FindPreparationStreams(channelID)
 	if err != nil {
 		message = "対象の取得に失敗しました: " + err.Error()
 		return

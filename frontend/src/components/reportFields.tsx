@@ -5,9 +5,9 @@ import { parseSeconds } from './usePerformanceTiming';
 import { formatTimeInput } from '../utils/timeFormat';
 import SongSearchInput from './SongSearchInput';
 import ArtistSearchInput from './ArtistSearchInput';
-import SingerSearchInput from './SingerSearchInput';
+import ChannelSearchInput from './ChannelSearchInput';
 import type { Draft } from './usePerformanceReport';
-import type { Singer } from '../api/types';
+import type { Channel } from '../api/types';
 
 // 報告画面の入力部品。**デスクトップとスマホで同じものを使う。**
 // 外殻（横並び / タブ切り替え）は別でも、ここが割れると片方だけ挙動が変わる。
@@ -363,16 +363,16 @@ export function VocalPicker({
   onToggle,
 }: {
   selected: string[];
-  participants: Singer[];
-  channelOwner?: Singer;
-  current: Singer[];
+  participants: Channel[];
+  channelOwner?: Channel;
+  current: Channel[];
   canCreate: boolean;
   onToggle: (id: string) => void;
 }) {
   const [searching, setSearching] = useState(false);
-  const [extraSingers, setExtraSingers] = useState<Singer[]>([]);
+  const [extraSingers, setExtraSingers] = useState<Channel[]>([]);
   const options = useMemo(() => {
-    const byId = new Map<string, Singer>();
+    const byId = new Map<string, Channel>();
     if (channelOwner) byId.set(channelOwner.id, channelOwner);
     for (const s of participants) if (!byId.has(s.id)) byId.set(s.id, s);
     for (const s of current) if (!byId.has(s.id)) byId.set(s.id, s);
@@ -380,7 +380,7 @@ export function VocalPicker({
     return [...byId.values()];
   }, [participants, channelOwner, current, extraSingers]);
 
-  const selectSinger = (singer: Singer) => {
+  const selectSinger = (singer: Channel) => {
     setExtraSingers((items) => (items.some((item) => item.id === singer.id) ? items : [...items, singer]));
     if (!selected.includes(singer.id)) onToggle(singer.id);
     setSearching(false);
@@ -430,8 +430,8 @@ export function VocalPicker({
       )}
       {(searching || options.length === 0) && (
         <div className={options.length > 0 ? 'mt-2' : ''}>
-          <SingerSearchInput
-            onSelectSinger={selectSinger}
+          <ChannelSearchInput
+            onSelectChannel={selectSinger}
             excludeIds={selected}
             allowCreate={canCreate}
             placeholder={canCreate ? '名前で検索／@handle・Channel ID・URLで新規追加' : 'チャンネル名で検索'}

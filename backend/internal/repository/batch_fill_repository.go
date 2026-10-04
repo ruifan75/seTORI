@@ -25,7 +25,7 @@ func NewBatchFillRepository(db *sql.DB) *BatchFillRepository {
 type BatchFillRun struct {
 	ID           uuid.UUID `json:"id"`
 	Mode         string    `json:"mode"`
-	SingerID     *string   `json:"singer_id,omitempty"`
+	ChannelID    *string   `json:"singer_id,omitempty"`
 	Status       string    `json:"status"`
 	StreamsTotal int       `json:"streams_total"`
 	StreamsDone  int       `json:"streams_done"`
@@ -62,11 +62,11 @@ type BatchOrigin struct {
 }
 
 // CreateRun は実行を開始し、その ID を返す。
-func (r *BatchFillRepository) CreateRun(mode string, singerID *string, startedBy *uuid.UUID) (uuid.UUID, error) {
+func (r *BatchFillRepository) CreateRun(mode string, channelID *string, startedBy *uuid.UUID) (uuid.UUID, error) {
 	var id uuid.UUID
 	err := r.db.QueryRow(`
-		INSERT INTO batch_fill_runs (mode, singer_id, started_by) VALUES ($1, $2, $3) RETURNING id`,
-		mode, singerID, startedBy).Scan(&id)
+		INSERT INTO batch_fill_runs (mode, channel_id, started_by) VALUES ($1, $2, $3) RETURNING id`,
+		mode, channelID, startedBy).Scan(&id)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("create batch fill run: %w", err)
 	}
@@ -189,7 +189,7 @@ func (r *BatchFillRepository) ListRuns(limit int) ([]BatchFillRun, error) {
 		limit = 20
 	}
 	rows, err := r.db.Query(`
-		SELECT b.id, b.mode, b.singer_id, b.status, b.streams_total, b.streams_done,
+		SELECT b.id, b.mode, b.channel_id, b.status, b.streams_total, b.streams_done,
 		       b.songs_created, b.songs_review, b.songs_gap, b.skipped_stream_ids, b.ai_asked, b.message,
 		       b.started_at, b.finished_at, u.username
 		FROM batch_fill_runs b
@@ -203,7 +203,7 @@ func (r *BatchFillRepository) ListRuns(limit int) ([]BatchFillRun, error) {
 	var out []BatchFillRun
 	for rows.Next() {
 		var b BatchFillRun
-		if err := rows.Scan(&b.ID, &b.Mode, &b.SingerID, &b.Status, &b.StreamsTotal, &b.StreamsDone,
+		if err := rows.Scan(&b.ID, &b.Mode, &b.ChannelID, &b.Status, &b.StreamsTotal, &b.StreamsDone,
 			&b.SongsCreated, &b.SongsReview, &b.SongsGap, (*pq.StringArray)(&b.SkippedStreamIDs), &b.AIAsked, &b.Message,
 			&b.StartedAt, &b.FinishedAt, &b.StartedByName); err != nil {
 			return nil, fmt.Errorf("scan batch fill run: %w", err)

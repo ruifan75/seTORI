@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { holodexApi, searchApi } from '../api/client';
 import type { CSSProperties } from 'react';
-import type { SearchTagItem, Singer } from '../api/types';
+import type { SearchTagItem, Channel } from '../api/types';
 import { useAuthStore, hasPermission, PERM } from '../store/auth';
 import { useToast } from './ui/ToastContext';
 
@@ -36,9 +36,9 @@ export default function GlobalSearch({
   const [open, setOpen] = useState(false);
   const [expanded, setExpanded] = useState(autoFocus);
   const [titleQuery, setTitleQuery] = useState('');
-  const [owner, setOwner] = useState<Singer | null>(null);
-  const [participants, setParticipants] = useState<Singer[]>([]);
-  const [vocalists, setVocalists] = useState<Singer[]>([]);
+  const [owner, setOwner] = useState<Channel | null>(null);
+  const [participants, setParticipants] = useState<Channel[]>([]);
+  const [vocalists, setVocalists] = useState<Channel[]>([]);
   const [streamTags, setStreamTags] = useState<SearchTagItem[]>([]);
   const [performanceTags, setPerformanceTags] = useState<SearchTagItem[]>([]);
   const [focusedTokenKey, setFocusedTokenKey] = useState<string | null>(null);
@@ -68,13 +68,13 @@ export default function GlobalSearch({
   const { data: filteredResults, isFetching: filtersFetching } = useQuery({
     queryKey: [
       'global-filter-preview', titleQuery, owner?.id,
-      participants.map((singer) => singer.id).join(','), vocalists.map((singer) => singer.id).join(','),
+      participants.map((channel) => channel.id).join(','), vocalists.map((singer) => singer.id).join(','),
       streamTags.map((tag) => tag.id).join(','), performanceTags.map((tag) => tag.id).join(','),
     ],
     queryFn: () => searchApi.searchStreams({
       q: titleQuery,
       ownerId: owner?.id,
-      participantIds: participants.map((singer) => singer.id),
+      participantIds: participants.map((channel) => channel.id),
       vocalistIds: vocalists.map((singer) => singer.id),
       streamTags: streamTags.map((tag) => tag.id),
       performanceTags: performanceTags.map((tag) => tag.id),
@@ -125,7 +125,7 @@ export default function GlobalSearch({
     const effectiveTitle = titleQuery || fallbackTitle.trim();
     if (effectiveTitle) params.set('q', effectiveTitle);
     if (owner) params.set('channel', owner.id);
-    if (participants.length) params.set('participants', participants.map((singer) => singer.id).join(','));
+    if (participants.length) params.set('participants', participants.map((channel) => channel.id).join(','));
     if (vocalists.length) params.set('vocalists', vocalists.map((singer) => singer.id).join(','));
     if (streamTags.length) params.set('tags', streamTags.map((tag) => tag.id).join(','));
     if (performanceTags.length) params.set('performance_tags', performanceTags.map((tag) => tag.id).join(','));
@@ -140,13 +140,13 @@ export default function GlobalSearch({
     window.setTimeout(() => inputRef.current?.focus(), 0);
   };
 
-  const addSingerToken = (singer: Singer, role: 'owner' | 'participant' | 'vocalist') => {
-    if (role === 'owner') setOwner(singer);
+  const addChannelToken = (channel: Channel, role: 'owner' | 'participant' | 'vocalist') => {
+    if (role === 'owner') setOwner(channel);
     if (role === 'participant') {
-      setParticipants((current) => current.some((item) => item.id === singer.id) ? current : [...current, singer]);
+      setParticipants((current) => current.some((item) => item.id === channel.id) ? current : [...current, channel]);
     }
     if (role === 'vocalist') {
-      setVocalists((current) => current.some((item) => item.id === singer.id) ? current : [...current, singer]);
+      setVocalists((current) => current.some((item) => item.id === channel.id) ? current : [...current, channel]);
     }
     focusForNextToken();
   };
@@ -205,12 +205,12 @@ export default function GlobalSearch({
       remove: () => setOwner(null),
     });
   }
-  participants.forEach((singer) => activeTokens.push({
-    key: `participant-${singer.id}`,
-    label: `参加: ${singer.name}`,
-    title: `参加チャンネル: ${singer.name}`,
+  participants.forEach((channel) => activeTokens.push({
+    key: `participant-${channel.id}`,
+    label: `参加: ${channel.name}`,
+    title: `参加チャンネル: ${channel.name}`,
     className: 'border-sky-200 bg-sky-50 text-sky-800',
-    remove: () => setParticipants((items) => items.filter((item) => item.id !== singer.id)),
+    remove: () => setParticipants((items) => items.filter((item) => item.id !== channel.id)),
   }));
   vocalists.forEach((singer) => activeTokens.push({
     key: `vocalist-${singer.id}`,
@@ -413,27 +413,27 @@ export default function GlobalSearch({
           {debounced && !data?.video_id && (
             <div className="border-b py-1">
               <div className="px-3 pb-1 pt-2 text-xs font-medium text-gray-400">条件として追加</div>
-              {data?.singers.map((singer) => (
-                <div key={singer.id}>
-                  {owner?.id !== singer.id && (
-                    <button type="button" onClick={() => addSingerToken(singer, 'owner')} className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-indigo-50">
-                      {singer.photo_url && <img src={singer.photo_url} alt="" className="h-7 w-7 shrink-0 rounded-full object-cover" />}
+              {data?.singers.map((channel) => (
+                <div key={channel.id}>
+                  {owner?.id !== channel.id && (
+                    <button type="button" onClick={() => addChannelToken(channel, 'owner')} className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-indigo-50">
+                      {channel.photo_url && <img src={channel.photo_url} alt="" className="h-7 w-7 shrink-0 rounded-full object-cover" />}
                       <span className="w-16 shrink-0 text-xs font-medium text-indigo-600">配信元</span>
-                      <span className="truncate text-sm text-gray-900">{singer.name}</span>
+                      <span className="truncate text-sm text-gray-900">{channel.name}</span>
                     </button>
                   )}
-                  {!participants.some((item) => item.id === singer.id) && (
-                    <button type="button" onClick={() => addSingerToken(singer, 'participant')} className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-sky-50">
+                  {!participants.some((item) => item.id === channel.id) && (
+                    <button type="button" onClick={() => addChannelToken(channel, 'participant')} className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-sky-50">
                       <span className="h-7 w-7 shrink-0" />
                       <span className="w-16 shrink-0 text-xs font-medium text-sky-600">参加</span>
-                      <span className="truncate text-sm text-gray-900">{singer.name}</span>
+                      <span className="truncate text-sm text-gray-900">{channel.name}</span>
                     </button>
                   )}
-                  {!vocalists.some((item) => item.id === singer.id) && (
-                    <button type="button" onClick={() => addSingerToken(singer, 'vocalist')} className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-emerald-50">
+                  {!vocalists.some((item) => item.id === channel.id) && (
+                    <button type="button" onClick={() => addChannelToken(channel, 'vocalist')} className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-emerald-50">
                       <span className="h-7 w-7 shrink-0" />
                       <span className="w-16 shrink-0 text-xs font-medium text-emerald-600">ボーカル</span>
-                      <span className="truncate text-sm text-gray-900">{singer.name}</span>
+                      <span className="truncate text-sm text-gray-900">{channel.name}</span>
                     </button>
                   )}
                 </div>
