@@ -31,7 +31,7 @@ const channelColumns = `s.id, s.name, s.english_name, s.photo_url,
 	s.metadata_source, s.is_hidden, s.members_only_policy, s.auto_fill_enabled,
 	s.created_at, s.updated_at`
 
-// channelFrom は singers と organizations を結んだ FROM 句。
+// channelFrom は channels と organizations を結んだ FROM 句。
 // 事務所は任意なので LEFT JOIN（所属なしのチャンネルを落とさない）。
 const channelFrom = `FROM channels s LEFT JOIN organizations o ON ` + effectiveOrg + ` = o.key`
 

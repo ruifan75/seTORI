@@ -37,7 +37,7 @@ Holodex の分類もタイトルキーワード規則も自動判定であり、
 `performance_repository` に `is_hidden = FALSE` が 8 か所あり、これらはすべて
 「曲・タグ・歌手からの逆引き」「ランダム」「プリセット」を濾すもの。
 ほかに `song_repository` / `artist_repository` / `stream_repository` /
-`singer_repository`（配信数・歌唱数の統計）/ `tag_repository`（タグ件数）も見ている。
+`channel_repository`（配信数・歌唱数の統計）/ `tag_repository`（タグ件数）も見ている。
 
 ### 止めないもの — **認可境界ではない**
 

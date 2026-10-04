@@ -83,21 +83,21 @@ export function createStreamSetlistActions(context: Context) {
       // 編集モードを開始し、既存のセットリストを自動で読み込む
       if (stream) {
         // 参加チャンネルの候補一覧を設定する（歌唱に参加したすべての歌手を含む）
-        const allSingers = new Map<string, Channel>();
+        const allChannels = new Map<string, Channel>();
 
         // 先に stream.participants を追加する
-        (stream.participants || []).forEach(p => allSingers.set(p.id, p));
+        (stream.participants || []).forEach(p => allChannels.set(p.id, p));
 
         // 続けてすべての performance の歌手を追加する
         if (stream.performances.length > 0) {
           stream.performances.forEach(perf => {
             perf.singers.forEach(singer => {
-              allSingers.set(singer.id, singer);
+              allChannels.set(singer.id, singer);
             });
           });
         }
 
-        setParticipants(Array.from(allSingers.values()));
+        setParticipants(Array.from(allChannels.values()));
 
         // 既存のセットリストを読み込む
         if (stream.performances.length > 0) {

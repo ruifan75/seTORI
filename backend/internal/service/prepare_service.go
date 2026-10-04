@@ -26,7 +26,7 @@ type preparationFill interface {
 }
 
 // PrepareService は入力を更新する前に一括分析・一括作成の両方を予約する。
-// 準備は全チャンネルで 1 本まで。他 singer でも共有の解析入力へ同時に書かない。
+// 準備は全チャンネルで 1 本まで。別のチャンネルでも共有の解析入力へ同時に書かない。
 type PrepareService struct {
 	streams  preparationStreams
 	chapters preparationChapters

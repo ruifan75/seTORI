@@ -421,21 +421,21 @@ func (s *StreamService) toStreamResponse(stream models.Stream, tags []models.Str
 
 	// 参加者を変換する
 	resp.Participants = make([]dto.ChannelResponse, len(participants))
-	for i, singer := range participants {
+	for i, channel := range participants {
 		resp.Participants[i] = dto.ChannelResponse{
-			ID:        singer.ID,
-			Name:      singer.Name,
-			CreatedAt: singer.CreatedAt,
-			UpdatedAt: singer.UpdatedAt,
+			ID:        channel.ID,
+			Name:      channel.Name,
+			CreatedAt: channel.CreatedAt,
+			UpdatedAt: channel.UpdatedAt,
 		}
-		if singer.EnglishName.Valid {
-			resp.Participants[i].EnglishName = &singer.EnglishName.String
+		if channel.EnglishName.Valid {
+			resp.Participants[i].EnglishName = &channel.EnglishName.String
 		}
-		if singer.PhotoURL.Valid {
-			resp.Participants[i].PhotoURL = &singer.PhotoURL.String
+		if channel.PhotoURL.Valid {
+			resp.Participants[i].PhotoURL = &channel.PhotoURL.String
 		}
-		if singer.Organization.Valid {
-			resp.Participants[i].Organization = &singer.Organization.String
+		if channel.Organization.Valid {
+			resp.Participants[i].Organization = &channel.Organization.String
 		}
 	}
 

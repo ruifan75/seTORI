@@ -97,8 +97,8 @@ export default function StreamPerformanceList({ model }: { model: StreamDetailMo
           <tbody className="bg-white divide-y divide-gray-200">
             {stream.performances.map((perf, index) => {
               const rowTrack = toRowTrack(perf);
-              const channelCount = perf.singers?.length || 0;
-              const showCount = channelCount > 3;
+              const singerCount = perf.singers?.length || 0;
+              const showCount = singerCount > 3;
               // 歌手を並べ替える：チャンネル所有者を優先
               const sortedSingers = perf.singers?.sort((a, b) => {
                 if (channelOwner && a.id === channelOwner.id) return -1;
@@ -170,9 +170,9 @@ export default function StreamPerformanceList({ model }: { model: StreamDetailMo
                       ))}
                     </div>
                   </td>
-                  {/* Channel avatars */}
+                  {/* Singer avatars */}
                   <td className="px-4 py-4">
-                    {channelCount === 0 ? (
+                    {singerCount === 0 ? (
                       <span className="text-sm text-gray-400">なし</span>
                     ) : (
                       <div className="flex items-center relative h-8">
@@ -208,7 +208,7 @@ export default function StreamPerformanceList({ model }: { model: StreamDetailMo
                               .join(', ')}
                             className="relative -ml-2 w-8 h-8 rounded-full bg-gray-300 border-2 border-white flex items-center justify-center text-xs font-bold text-gray-700 cursor-pointer hover:bg-gray-400 transition-colors"
                           >
-                            +{channelCount - 3}
+                            +{singerCount - 3}
                           </button>
                         )}
                       </div>
