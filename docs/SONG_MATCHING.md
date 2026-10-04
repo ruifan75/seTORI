@@ -609,12 +609,11 @@ go run ./cmd/setoribench -mode stored -nofilter # FilterSongsWith を丸ごと�
 `-nofilter` は `FilterSongsWith` を**丸ごと飛ばす**デバッグ用の口
 （除外キーワードだけでなく構造フィルタも切れる）。
 
-> ⚠️ **どちらのモードも現在の production と一致しない。** ベンチは `-nofilter` が無ければ
-> 全 mode に `filterKW` / `keepKW` を渡すが、production の grouped / two_stage は
-> `filterScopeForPath` によって**辞書を渡さない**（PR #13。`Week End` が辞書に当たって
-> 消えたため）。したがって下の「フィルタ有効」列は **2026-08-13 時点の historical baseline**
-> であって「本番の姿」ではなく、差の 286 件も現行の本番における辞書の寄与ではない。
-> ベンチ側を production に合わせるのは issue #14。
+> 下の「フィルタ有効」列は **2026-08-13 時点の historical baseline**。当時のベンチは
+> 全 mode に辞書と keep を渡していた。issue #14 以降は production と
+> `FilterScopeForPath` を共有し、辞書は実際に regex で抽出したときだけ適用する。
+> `stored` は辞書を重ねず、既定では構造フィルタを通す。現在のコマンドを実行しても
+> 当時のフィルタ設定の再現にはならず、下の差の 286 件も現行の本番における辞書の寄与ではない。
 
 測ったときの手元 DB：楽曲 820・別名義を持つアーティスト 10・歌唱 4268・
 否定の記録 43（曲 16 / 歌手 27）。評価対象は performances と comment_raw の
