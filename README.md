@@ -204,7 +204,7 @@ cd frontend && npm run build                          # dist/ に出力
 
 ## API 一覧
 
-すべての API は `/api` をプレフィックスとし、JSON を返却します。エラー形式は `{"error": "..."}` です。
+API は原則 `/api` をプレフィックスとし、JSON を返却します（`/health`、CSV・ダンプの出力などは例外）。エラー形式は原則 `{"error": "..."}` です。
 
 | Method | Path | 説明 |
 |--------|------|------|
@@ -243,19 +243,19 @@ cd frontend && npm run build                          # dist/ に出力
 | POST | `/api/ai/normalize` | AI による曲名一括正規化 |
 | GET | `/api/itunes/search` · `/api/itunes/{id}` | iTunes 検索 / 照会 |
 
-上記以外にも 100 以上のエンドポイントがあります。全体は `internal/handler/router.go` の
-`setupRoutes()`（登録）と `requiredPermission()`（必要な権限）を参照してください。主なグループ：
+全端点のメソッド・パス・必要な権限・主な入出力と、秘匿による違いは
+[API ドキュメント](./docs/API.md) を参照してください。ルートと文書の過不足は Go テストで検査します。主なグループ：
 
 | プレフィックス | 概要 | 認可 |
 |---|---|---|
 | `/api/auth/*` | ログイン / ログアウト / 自分の情報 / OAuth 連携 | 公開（一部は要ログイン） |
-| `/api/playlists/*` | プレイリストの CRUD・並び替え・公開範囲 | 要ログイン（権限は不要）＋行単位で所有者判定 |
+| `/api/playlists/*` | プレイリストの CRUD・並び替え・公開範囲 | 公開 GET あり。個人の操作は要ログイン＋所有者判定 |
 | `/api/shared/playlists/{slug}` | 限定公開の共有リンク | 公開 |
 | `/api/suggestions/*` | 修正提案の投稿・取り下げ・レビュー・一括反映 | 投稿は要ログイン、レビューは `content:edit` |
 | `/api/backups/*` | バックアップ・リストア・Google Drive 連携 | `backup:manage` |
 | `/api/settings/integrations` | 外部サービスの API キー | `users:manage` |
 | `/api/users` · `/api/roles` · `/api/permissions` | ユーザー・ロール・権限 | `users:manage` |
-| `/api/ai-providers/*` | OpenAI 互換プロバイダーの登録と failover 順 | `users:manage` |
+| `/api/ai-providers/*` | OpenAI 互換プロバイダーの登録と failover 順 | `ai:manage` |
 | `/api/logs` | ログ閲覧・レベル変更 | `logs:view` |
 
 ---
@@ -318,7 +318,7 @@ ParsedSong[]  (comment_songs、未重複排除)
 
 **アーキテクチャ**
 - `StreamDetailPage.tsx` が 2900 行を超えており、コンポーネント分割が急務
-- API ドキュメントなし（Swagger / OpenAPI）
+- OpenAPI / Swagger 形式は未整備（[日本語の API ドキュメント](./docs/API.md) はあり）
 - テストは `pkg` 配下と一部 service にとどまり、カバレッジは低い
 - middleware フレームワークなし（CORS / logging は手動処理）
 
