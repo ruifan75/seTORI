@@ -133,19 +133,19 @@ func (s *BatchAnalyzeService) Release() {
 	s.status.Running = false
 }
 func (s *BatchAnalyzeService) Cancelled() bool { return s.isCancelled() }
-func (s *BatchAnalyzeService) RunPrepared(streams []models.Stream, task *TaskRun, stop func() bool) error {
+func (s *BatchAnalyzeService) RunPrepared(streams []models.Stream, task *TaskRun, stop func() bool, eligible func(string) (bool, error)) error {
 	s.mu.Lock()
 	s.task = task
 	s.stop = stop
 	s.status = dto.BatchAnalyzeStatus{Running: true, Mode: BatchModeRefresh, Hidden: "false"}
 	s.mu.Unlock()
 	hidden := false
-	return s.runStreams(BatchModeRefresh, "", &hidden, streams, task)
+	return s.runStreams(BatchModeRefresh, "", &hidden, streams, task, eligible)
 }
 func (s *BatchAnalyzeService) run(mode, singerID string, hidden *bool) {
-	_ = s.runStreams(mode, singerID, hidden, nil, nil)
+	_ = s.runStreams(mode, singerID, hidden, nil, nil, nil)
 }
-func (s *BatchAnalyzeService) runStreams(mode, singerID string, hidden *bool, streams []models.Stream, task *TaskRun) error {
+func (s *BatchAnalyzeService) runStreams(mode, singerID string, hidden *bool, streams []models.Stream, task *TaskRun, eligible func(string) (bool, error)) error {
 	defer func() {
 		s.mu.Lock()
 		// 準備の予約は所有者が最後に解放する。ここで解くと完了記録前に別処理が始まる。
@@ -186,6 +186,20 @@ func (s *BatchAnalyzeService) runStreams(mode, singerID string, hidden *bool, st
 		if s.isCancelled() {
 			return nil
 		}
+		// 準備の対象は開始時の一覧だけでは決めない。外部への再取得前にも確認する。
+		if eligible != nil {
+			ok, err := eligible(stream.ID)
+			if err != nil {
+				task.Fail(stream.ID, "対象の再検査: "+err.Error())
+				s.update(func(st *dto.BatchAnalyzeStatus) { st.Failed++; st.FailedIDs = append(st.FailedIDs, stream.ID) })
+				continue
+			}
+			if !ok {
+				task.Skip()
+				s.update(func(st *dto.BatchAnalyzeStatus) { st.Deferred++ })
+				continue
+			}
+		}
 		s.update(func(st *dto.BatchAnalyzeStatus) { st.Current = stream.Title })
 
 		// refresh モード：先にコメントを再取得（内容が変わればハッシュが変わり、
@@ -220,7 +234,7 @@ func (s *BatchAnalyzeService) runStreams(mode, singerID string, hidden *bool, st
 		if emptyByDesign {
 			logger.Infof("[batch-analyze] %s: コメントが 0 件でした（取得は成功。分析は行いません）", stream.ID)
 		} else {
-			outcome, songs, reason = s.processOneDetailed(stream.ID, forceStart)
+			outcome, songs, reason = s.processOneWithScope(stream.ID, forceStart, eligible)
 		}
 
 		// **非表示 × 曲が出ない → 処理済みにする**（issue #42）。
@@ -258,6 +272,11 @@ func (s *BatchAnalyzeService) runStreams(mode, singerID string, hidden *bool, st
 			}
 		}
 
+		// 準備では再取得と解析を同じ 1 件として記録する。再取得が失敗した回を
+		// task_runs と一括の進捗で別の結果にしない（保存済み入力の解析は続ける）。
+		if task != nil && refreshReason != "" {
+			outcome = batchOutcomeFailed
+		}
 		switch outcome {
 		case batchOutcomeDone:
 			s.update(func(st *dto.BatchAnalyzeStatus) { st.Done++ })
@@ -267,6 +286,8 @@ func (s *BatchAnalyzeService) runStreams(mode, singerID string, hidden *bool, st
 			// 同じ実行の中で待っても無駄なので（変換は数時間、BOT 判定は
 			// cookie を入れるまで直らない）、次の実行に任せる。
 			logger.Infof("[batch-analyze] %s: live chat 待ちのため見送り（次回やり直します）", stream.ID)
+			s.update(func(st *dto.BatchAnalyzeStatus) { st.Deferred++ })
+		case batchOutcomeIneligible:
 			s.update(func(st *dto.BatchAnalyzeStatus) { st.Deferred++ })
 		default:
 			if s.isCancelled() {
@@ -284,7 +305,7 @@ func (s *BatchAnalyzeService) runStreams(mode, singerID string, hidden *bool, st
 				task.Fail(stream.ID, refreshReason)
 			case emptyByDesign:
 				task.Skip()
-			case outcome == batchOutcomeDeferred:
+			case outcome == batchOutcomeDeferred || outcome == batchOutcomeIneligible:
 				task.Skip()
 			case outcome == batchOutcomeDone && songs >= 0:
 				task.Succeed()
@@ -312,6 +333,7 @@ const (
 	batchOutcomeFailed batchOutcome = iota
 	batchOutcomeDone
 	batchOutcomeDeferred
+	batchOutcomeIneligible // 待機・再取得・冷却中に準備の対象から外れた
 )
 
 // processOne は1配信を分析する。AI 劣化（warning あり）は冷却待ち後に force で再試行。
@@ -323,11 +345,24 @@ func (s *BatchAnalyzeService) processOne(videoID string, forceStart bool) (batch
 	return outcome, songs
 }
 func (s *BatchAnalyzeService) processOneDetailed(videoID string, forceStart bool) (batchOutcome, int, string) {
+	return s.processOneWithScope(videoID, forceStart, nil)
+}
+func (s *BatchAnalyzeService) processOneWithScope(videoID string, forceStart bool, eligible func(string) (bool, error)) (batchOutcome, int, string) {
 	force := forceStart
 	reason := "分析が完了しませんでした"
 	for attempt := 1; attempt <= batchMaxAttempts; attempt++ {
 		if s.isCancelled() {
 			return batchOutcomeFailed, 0, reason
+		}
+		// コメント再取得後と各再試行前に確認する。解析側も live chat を外部取得しうる。
+		if eligible != nil {
+			ok, err := eligible(videoID)
+			if err != nil {
+				return batchOutcomeFailed, 0, "対象の再検査: " + err.Error()
+			}
+			if !ok {
+				return batchOutcomeIneligible, 0, ""
+			}
 		}
 
 		// 一括プレ分析は抽出までにとどめる。**この経路では**照合の AI 判定を行わない
@@ -346,11 +381,11 @@ func (s *BatchAnalyzeService) processOneDetailed(videoID string, forceStart bool
 				return batchOutcomeDeferred, 0, ""
 			}
 			// キャッシュ命中以外は保存できたことまで確かめる。非空でもDBへの
-			// 保存失敗はありうる。成功の結果と取り違えないよう曲数を -1 にする。
+			// 保存失敗はありうる。成功の結果と取り違えないよう失敗として返す。
 			// cache は書き込まないのが正常なので、Saved=false を失敗に数えない。
 			if resp.Stats == nil || (!resp.Stats.Saved && resp.Stats.Path != "cache") {
 				logger.Warnf("[batch-analyze] %s: 抽出結果を保存できませんでした（処理済みにはしません）", videoID)
-				return batchOutcomeDone, -1, "抽出結果を保存できませんでした"
+				return batchOutcomeFailed, -1, "抽出結果を保存できませんでした"
 			}
 			return batchOutcomeDone, len(resp.Songs), ""
 		}

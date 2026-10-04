@@ -1048,7 +1048,7 @@ function BackgroundTasks() {
     <div className="bg-white rounded-lg shadow-sm border p-6">
       <h2 className="text-xl font-bold text-gray-900 mb-2">背景処理</h2>
       <div className="mb-4 space-y-2">
-        <p className="text-sm text-gray-600">同期後の準備：所有する表示中・未処理の配信の章節を取得し、コメントを取り直してプレ分析します。歌唱の保存は編集画面で確認して行います。</p>
+        <p className="text-sm text-gray-600">同期後の準備：所有する表示中・未処理の配信の章節を取得し、コメントを取り直してプレ分析します。会限・秘匿の配信は対象外です。各取得・解析前に状態を確認します。歌唱の保存は編集画面で確認して行います。</p>
         <label className="text-sm">対象チャンネル <select value={prepareSinger} onChange={(e) => setPrepareSinger(e.target.value)} className="border rounded px-2 py-1">
           <option value="">チャンネルを選択</option>
           {prepareSingers?.singers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}

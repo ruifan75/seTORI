@@ -8,6 +8,7 @@ import (
 
 type preparationStreams interface {
 	FindPreparationStreams(string) ([]models.Stream, error)
+	PreparationStreamEligible(string, string) (bool, error)
 }
 type preparationChapters interface {
 	RefreshChapters(string) ([]Chapter, error)
@@ -16,7 +17,7 @@ type preparationBatch interface {
 	Reserve() bool
 	Release()
 	Cancelled() bool
-	RunPrepared([]models.Stream, *TaskRun, func() bool) error
+	RunPrepared([]models.Stream, *TaskRun, func() bool, func(string) (bool, error)) error
 }
 type preparationFill interface {
 	Reserve() bool
@@ -60,6 +61,7 @@ func (s *PrepareService) execute(singerID string, run *TaskRun) {
 	status, message := "failed", "準備が完了しませんでした"
 	defer func() { run.Finish(status, message) }()
 	cancelled := func() bool { return run.Cancelled() || s.batch.Cancelled() || s.fill.Cancelled() }
+	eligible := func(id string) (bool, error) { return s.streams.PreparationStreamEligible(singerID, id) }
 	streams, err := s.streams.FindPreparationStreams(singerID)
 	if err != nil {
 		message = "対象の取得に失敗しました: " + err.Error()
@@ -74,6 +76,15 @@ func (s *PrepareService) execute(singerID string, run *TaskRun) {
 		if cancelled() {
 			status, message = "cancelled", "停止しました（処理中の取得は完了しています）"
 			return
+		}
+		ok, err := eligible(stream.ID)
+		if err != nil {
+			run.Fail(stream.ID, "対象の再検査: "+err.Error())
+			continue
+		}
+		if !ok {
+			run.Skip()
+			continue
 		}
 		if _, ok := decodeChapters(stream.ChapterRaw); ok {
 			run.Skip()
@@ -93,7 +104,7 @@ func (s *PrepareService) execute(singerID string, run *TaskRun) {
 		message = "段階の保存に失敗しました: " + err.Error()
 		return
 	}
-	if err := s.batch.RunPrepared(streams, run, s.fill.Cancelled); err != nil {
+	if err := s.batch.RunPrepared(streams, run, s.fill.Cancelled, eligible); err != nil {
 		message = "プレ分析: " + err.Error()
 		return
 	}

@@ -21,6 +21,7 @@ type prepareFixture struct {
 	batchReserved, fillReserved bool
 	batchRelease, fillRelease   int
 	block, released             chan struct{}
+	scope                       func(string, string) (bool, error)
 }
 
 func (f *prepareFixture) FindPreparationStreams(id string) ([]models.Stream, error) {
@@ -29,6 +30,12 @@ func (f *prepareFixture) FindPreparationStreams(id string) ([]models.Stream, err
 		<-f.block
 	}
 	return f.streams, nil
+}
+func (f *prepareFixture) PreparationStreamEligible(owner, id string) (bool, error) {
+	if f.scope != nil {
+		return f.scope(owner, id)
+	}
+	return true, nil
 }
 func (f *prepareFixture) RefreshChapters(id string) ([]Chapter, error) {
 	f.events = append(f.events, "chapter:"+id)
@@ -57,13 +64,19 @@ func (s prepareBatch) Release() {
 	}
 }
 func (s prepareBatch) Cancelled() bool { return false }
-func (s prepareBatch) RunPrepared(streams []models.Stream, run *TaskRun, stop func() bool) error {
+func (s prepareBatch) RunPrepared(streams []models.Stream, run *TaskRun, stop func() bool, eligible func(string) (bool, error)) error {
 	s.f.events = append(s.f.events, "analysis")
 	if run != s.f.run && s.f.run != nil {
 		return errors.New("different task")
 	}
-	for range streams {
-		run.Succeed()
+	for _, stream := range streams {
+		if ok, err := eligible(stream.ID); err != nil {
+			run.Fail(stream.ID, err.Error())
+		} else if !ok {
+			run.Skip()
+		} else {
+			run.Succeed()
+		}
 	}
 	return nil
 }
@@ -268,7 +281,7 @@ func TestPreparedAnalysisRecordsMissingInputAndEmptySeparately(t *testing.T) {
 				t.Fatal("reserve")
 			}
 			defer b.Release()
-			if err := b.RunPrepared([]models.Stream{{ID: "video"}}, run, nil); err != nil {
+			if err := b.RunPrepared([]models.Stream{{ID: "video"}}, run, nil, nil); err != nil {
 				t.Fatal(err)
 			}
 			run.Finish("done", "")
@@ -306,7 +319,7 @@ func TestPreparedAnalysisSeparatesCacheFromUnsavedResults(t *testing.T) {
 	}{
 		{"cache", "cache", false, false, batchOutcomeDone, 1},
 		{"saved", "grouped", true, false, batchOutcomeDone, 1},
-		{"unsaved nonempty", "grouped", false, false, batchOutcomeDone, -1},
+		{"unsaved nonempty", "grouped", false, false, batchOutcomeFailed, -1},
 		{"chat pending", "grouped", false, true, batchOutcomeDeferred, 0},
 	} {
 		t.Run(x.name, func(t *testing.T) {
@@ -319,5 +332,163 @@ func TestPreparedAnalysisSeparatesCacheFromUnsavedResults(t *testing.T) {
 				t.Fatal("保存失敗を伝えない", reason)
 			}
 		})
+	}
+}
+
+// 外部コメント取得と live chat を取りうる解析を、実際の BatchAnalyzeService 経由で検査する。
+type scopedPreparationComments struct {
+	events       *[]string
+	refresh      func()
+	refreshError error
+	analyze      func() error
+}
+
+func (s scopedPreparationComments) RefreshCommentRaw(id string) (int, error) {
+	*s.events = append(*s.events, "refresh:"+id)
+	if s.refresh != nil {
+		s.refresh()
+	}
+	return 1, s.refreshError
+}
+func (s scopedPreparationComments) AnalyzeCommentsForBatch(id string, force bool) (*dto.AnalyzeCommentsResponse, error) {
+	*s.events = append(*s.events, "analyze:"+id)
+	if s.analyze != nil {
+		if err := s.analyze(); err != nil {
+			return nil, err
+		}
+	}
+	return &dto.AnalyzeCommentsResponse{Stats: &dto.AnalyzeStats{Saved: true, Path: "grouped"}}, nil
+}
+func TestPreparationRechecksBeforeEveryStage(t *testing.T) {
+	for _, scenario := range []string{"before-chapter", "before-refresh", "after-refresh", "retry", "query-error"} {
+		t.Run(scenario, func(t *testing.T) {
+			db, d := newTaskDB(t)
+			tasks := NewTaskRunService(repository.NewTaskRunRepository(db))
+			run, err := tasks.Start(TaskStreamPrepare, nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			events := []string{}
+			checks := 0
+			valid := true
+			comments := scopedPreparationComments{events: &events}
+			f := &prepareFixture{streams: []models.Stream{{ID: "video"}}}
+			f.scope = func(owner, id string) (bool, error) {
+				if owner != "owner" || id != "video" {
+					t.Errorf("再検査の対象=%s,%s", owner, id)
+				}
+				checks++
+				if scenario == "query-error" {
+					return false, errors.New("DB unavailable")
+				}
+				if scenario == "before-chapter" {
+					valid = false
+				}
+				if scenario == "before-refresh" && checks >= 2 {
+					valid = false
+				}
+				return valid, nil
+			}
+			if scenario == "after-refresh" {
+				comments.refresh = func() { valid = false }
+			}
+			if scenario == "retry" {
+				comments.analyze = func() error { valid = false; return ErrCommentRawChanged }
+			}
+			batch := &BatchAnalyzeService{commentService: comments}
+			if !batch.Reserve() {
+				t.Fatal("reserve")
+			}
+			svc := NewPrepareService(f, f, batch, prepareFill{f}, tasks)
+			svc.execute("owner", run)
+			want := []string{}
+			chapters := []string{"list:owner"}
+			done := "[2 2 0 2 0]"
+			status := "done"
+			if scenario != "before-chapter" && scenario != "query-error" {
+				chapters = append(chapters, "chapter:video")
+				done = "[2 2 1 1 0]"
+			}
+			if scenario == "after-refresh" {
+				want = []string{"refresh:video"}
+			}
+			if scenario == "retry" {
+				want = []string{"refresh:video", "analyze:video"}
+			}
+			if scenario == "query-error" {
+				done = "[2 2 0 0 2]"
+				status = "failed"
+			}
+			if !reflect.DeepEqual(events, want) || !reflect.DeepEqual(f.events, chapters) {
+				t.Fatalf("対象外の外部取得/解析: comments=%v chapters=%v", events, f.events)
+			}
+			if got := fmt.Sprint(d.lastExec("UPDATE task_runs SET total")[1:6]); got != done {
+				t.Fatalf("進捗=%s want%s", got, done)
+			}
+			if got := d.lastExec("UPDATE task_runs SET status")[1]; got != status {
+				t.Fatalf("status=%v", got)
+			}
+			if !batch.Reserve() {
+				t.Fatal("枠が戻らない")
+			}
+			batch.Release()
+			again, err := tasks.Start(TaskStreamPrepare, nil, nil)
+			if err != nil {
+				t.Fatal("taskの枠が戻らない", err)
+			}
+			again.Finish("done", "")
+		})
+	}
+}
+func TestPreparedUnsavedResultsAreFailuresInBothCounters(t *testing.T) {
+	db, d := newTaskDB(t)
+	tasks := NewTaskRunService(repository.NewTaskRunRepository(db))
+	run, err := tasks.Start(TaskStreamPrepare, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch := &BatchAnalyzeService{commentService: analyzedComments{&dto.AnalyzeCommentsResponse{Songs: []dto.CommentSong{{}}, Stats: &dto.AnalyzeStats{Path: "grouped"}}}}
+	if !batch.Reserve() {
+		t.Fatal("reserve")
+	}
+	defer batch.Release()
+	if err := batch.RunPrepared([]models.Stream{{ID: "video"}}, run, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	run.Finish("failed", "")
+	st := batch.Status()
+	if st.Done != 0 || st.Failed != 1 || !reflect.DeepEqual(st.FailedIDs, []string{"video"}) {
+		t.Fatalf("一括の保存失敗が成功に数えられた: %+v", st)
+	}
+	if got := fmt.Sprint(d.lastExec("UPDATE task_runs SET total")[1:6]); got != "[0 1 0 0 1]" {
+		t.Fatal("task側の記録", got)
+	}
+}
+
+func TestPreparedRefreshFailureIsNotCountedAsSuccess(t *testing.T) {
+	db, d := newTaskDB(t)
+	tasks := NewTaskRunService(repository.NewTaskRunRepository(db))
+	run, err := tasks.Start(TaskStreamPrepare, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := []string{}
+	batch := &BatchAnalyzeService{commentService: scopedPreparationComments{events: &events, refreshError: errors.New("YouTube unavailable")}}
+	if !batch.Reserve() {
+		t.Fatal("reserve")
+	}
+	defer batch.Release()
+	if err := batch.RunPrepared([]models.Stream{{ID: "video"}}, run, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	run.Finish("failed", "")
+	if !reflect.DeepEqual(events, []string{"refresh:video", "analyze:video"}) {
+		t.Fatal("既存入力の解析は続ける", events)
+	}
+	if st := batch.Status(); st.Done != 0 || st.Failed != 1 {
+		t.Fatalf("再取得失敗を成功に数えた: %+v", st)
+	}
+	if got := fmt.Sprint(d.lastExec("UPDATE task_runs SET total")[1:6]); got != "[0 1 0 0 1]" {
+		t.Fatal(got)
 	}
 }

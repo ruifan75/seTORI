@@ -43,7 +43,11 @@ func TestSweepMarkingConditions(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				b := &BatchAnalyzeService{commentService: analyzedComments{&dto.AnalyzeCommentsResponse{Songs: tc.songs, Stats: &dto.AnalyzeStats{Path: tc.path, Saved: false}}}}
 				outcome, songs := b.processOne("video", false)
-				if outcome != batchOutcomeDone || songs != tc.want {
+				wantOutcome := batchOutcomeDone
+				if tc.want < 0 {
+					wantOutcome = batchOutcomeFailed
+				}
+				if outcome != wantOutcome || songs != tc.want {
 					t.Fatalf("outcome=%v songs=%d want%d", outcome, songs, tc.want)
 				}
 			})
