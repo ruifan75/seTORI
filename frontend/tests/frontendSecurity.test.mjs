@@ -999,3 +999,32 @@ test('reading import completion cannot update the next viewer', async () => {
     assert.equal(f.toasts.length, 0); assert.equal(f.calls.length, 0);
   } finally { f.close(); }
 });
+
+// 起動時は store.token がまだ null でも、client は保存済み Bearer を送る。
+// 私有 API でその Bearer の失効が判明したあとに、先に処理された /me の
+// 成功応答が遅れて届いても、その認証結果を復活させない。
+for (const verified of [false, true]) test(`a private API 401 during bootstrap invalidates its Bearer before a late /me success (verified=${verified})`, async () => {
+  const f = authFixture();
+  try {
+    if (verified) await f.login();
+    f.localStorage.setItem('setori_token', 'saved-token');
+    const validation = f.store.getState().init(), me = await f.lastRequest();
+    const identities = f.api.authApi.oauthIdentities().catch(error => error), request = await f.lastRequest();
+    assert.equal(f.store.getState().token, verified ? 'token-owner' : null, 'store still contains the previous bootstrap state');
+    assert.equal(request.config.headers.get('Authorization'), 'Bearer saved-token');
+    const player = runtime({ '../queryClient': f.viewer }).load('store/player.ts').usePlayerStore;
+    player.getState().playTracks([{ videoId: 'private', songName: 'synthetic-private' }]);
+    f.viewer.queryClient.setQueryData(['private-bootstrap'], ['synthetic-private']);
+    f.respond(request, { error: 'expired' }, 401);
+    assert.equal((await identities).response.status, 401);
+    assert.equal(f.store.getState().status, 'anonymous', 'a current Bearer 401 invalidates unverified bootstrap too');
+    assert.equal(f.localStorage.getItem('setori_token'), null);
+    assert.equal(f.viewer.queryClient.getQueryData(['private-bootstrap']), undefined);
+    assert.equal(player.getState().queue.length, 0);
+    f.respond(me, user()); await validation;
+    assert.equal(f.store.getState().user, null, 'a delayed old /me cannot restore the expired session');
+    const publicRead = f.api.songApi.get('public'), anonymous = await f.lastRequest();
+    assert.equal(anonymous.config.headers.has('Authorization'), false);
+    f.respond(anonymous, { id: 'public' }); await publicRead;
+  } finally { f.close(); }
+});

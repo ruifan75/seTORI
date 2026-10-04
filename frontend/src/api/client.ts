@@ -143,8 +143,8 @@ api.interceptors.request.use((config) => {
 }, undefined, { synchronous: true });
 
 // セッション失効（401）時に呼ばれるハンドラ。auth store が登録する。
-let onUnauthorized: (() => void) | null = null;
-export function setUnauthorizedHandler(fn: (() => void) | null) {
+let onUnauthorized: ((token: string) => void) | null = null;
+export function setUnauthorizedHandler(fn: ((token: string) => void) | null) {
   onUnauthorized = fn;
 }
 
@@ -172,7 +172,7 @@ api.interceptors.response.use(
     // /me の 401 も auth store が検証の世代と token を照合してから扱う。
     if (error.response?.status === 401 && !isSessionAuthentication(error.config ?? {})
       && authToken && error.config?.headers.get('Authorization') === `Bearer ${authToken}`) {
-      onUnauthorized?.();
+      onUnauthorized?.(authToken);
     }
     // バックエンドから返されたエラーメッセージを取り出す
     if (error.response?.data?.error) {

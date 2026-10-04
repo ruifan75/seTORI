@@ -173,10 +173,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 }));
 
-// セッション失効（バックエンドが 401 を返した）時は自動でログアウト状態にする
-setUnauthorizedHandler(() => {
-  const token = useAuthStore.getState().token;
-  if (!token) return; // 起動時の未検証 token は init が処理する
+// client が現在の Bearer と照合した token を失効させる。起動時は store.token が
+// まだ null、または前の token のままでも、送信済み Bearer の 401 を扱う必要がある。
+// 明示的な新 login の世代は進めず、失効した旧視点だけを捨てる。
+setUnauthorizedHandler((token) => {
   forgetStoredToken(token);
   clearLocalSession((partial) => useAuthStore.setState(partial));
 });
