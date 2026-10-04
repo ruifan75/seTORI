@@ -357,7 +357,7 @@ function SingerCard({
   return (
     <div className="relative">
       <Link
-        to={`/singers/${singer.id}`}
+        to={`/channels/${singer.id}`}
         className={`bg-white rounded-lg shadow-sm border p-4 hover:shadow-md transition-shadow flex items-center gap-4 ${
           singer.is_hidden ? 'opacity-60' : ''
         }`}

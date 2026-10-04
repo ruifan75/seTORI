@@ -31,7 +31,7 @@ Holodex は Re:AcT を `ReAcT`（コロン無し）で返すが、公式表記�
 非表示チャンネルの歌唱は、既存の歌枠ページ・楽曲ページ・プレイリストから既にリンクされている。
 ページごと塞ぐと、そこから飛んだ先が 404 になる。利用者から見える現象は
 「隠されている」ではなく「データが消えた」で、実際にはデータは全部残っているのに
-壊れたように見える。同じ理由で名前検索（`/api/singers/search`）にも残す
+壊れたように見える。同じ理由で名前検索（`/api/channels/search`）にも残す
 ── 名前で探すのは「そのチャンネルを見に行く」意図の操作で、
 そこで隠すと辿り着く唯一の手段を塞ぐことになる。
 
@@ -79,7 +79,7 @@ mention 先）である。後者は追いたくて登録したわけではない
 
 | origin | 経路 | 新規行の `is_hidden` |
 |---|---|---|
-| `SingerRequested` | `POST /api/singers`（人がチャンネルを追加）、`SyncChannel`（同期対象として名指し） | `false` |
+| `SingerRequested` | `POST /api/channels`（人がチャンネルを追加）、`SyncChannel`（同期対象として名指し） | `false` |
 | `SingerDiscovered` | `syncVideo` の所有者・mention、`SyncVideo` の動画所有者 | `true` |
 
 bool ではなく型にしてあるのは、`Upsert(singer, true)` ではどちらの意味か読めないため。
@@ -101,7 +101,7 @@ origin を足したあともこれは変わらない。既存行の `is_hidden` 
 - 配信 1 本を同期し直しても、削除して作り直した 1 件以外の 148 行は変化なし
 
 **この非対称は意図的である。** 「一覧に出したい」は人が明示する操作
-（一覧のカードの目のアイコン、`PUT /api/singers/{id}/visibility`）であって、
+（一覧のカードの目のアイコン、`PUT /api/channels/{id}/visibility`）であって、
 同じ ID をもう一度追加することではない。既に非表示で存在するチャンネルを
 追加し直しても表示に戻らないが、`content:edit` を持つ利用者の一覧には
 `include_hidden` で**常に**含まれている（「非表示」の区に、薄字＋バッジで）ので、
@@ -180,7 +180,7 @@ Holodex が正しく更新しても永久に受け取れなくなる。2 列に�
 | 列 | 書く人 |
 |---|---|
 | `organization` | Holodex 同期だけ（外部の事実） |
-| `organization_override` | `PUT /api/singers/{id}/organization` だけ（こちらの判断） |
+| `organization_override` | `PUT /api/channels/{id}/organization` だけ（こちらの判断） |
 
 そのため `UpdateManualMetadata`（チャンネル情報の編集モーダル）は
 **organization を書かない**。同じ列を 2 経路が別の意味で更新すると、
@@ -264,16 +264,16 @@ UPDATE singers SET organization = 'ReAcT' WHERE organization = 'Re:AcT';
 
 | メソッド | パス | 権限 | 備考 |
 |---|---|---|---|
-| GET | `/api/singers?group=organization` | 公開 | 事務所別。**ページングなし**（グループを跨ぐページ送りは意味を成さない） |
-| GET | `/api/singers?include_hidden=true` | `content:edit` で有効 | 権限が無ければ黙って無視 |
-| PUT | `/api/singers/{id}/visibility` | `content:edit` | メタデータ更新と分離（Holodex 管理チャンネルでも切り替えられる必要があるため） |
-| PUT | `/api/singers/{id}/organization` | `content:edit` | Holodex の分類の上書き。空文字で解除。同じ理由でメタデータ更新と分離 |
+| GET | `/api/channels?group=organization` | 公開 | 事務所別。**ページングなし**（グループを跨ぐページ送りは意味を成さない） |
+| GET | `/api/channels?include_hidden=true` | `content:edit` で有効 | 権限が無ければ黙って無視 |
+| PUT | `/api/channels/{id}/visibility` | `content:edit` | メタデータ更新と分離（Holodex 管理チャンネルでも切り替えられる必要があるため） |
+| PUT | `/api/channels/{id}/organization` | `content:edit` | Holodex の分類の上書き。空文字で解除。同じ理由でメタデータ更新と分離 |
 | GET | `/api/organizations` | 公開 | 一覧の見出しと編集画面の選択肢に要る |
 | POST | `/api/organizations` | `content:edit` | key 省略時は display_name を key にする |
 | PUT | `/api/organizations/{key}` | `content:edit` | 表示名と並び順のみ。**key は変更不可** |
 | DELETE | `/api/organizations/{key}` | `content:edit` | 所属チャンネルがあれば 409 |
 
-`PUT /api/singers/{id}/visibility` を `PUT /api/singers/{id}` と分けたのは、
+`PUT /api/channels/{id}/visibility` を `PUT /api/channels/{id}` と分けたのは、
 後者が Holodex 管理チャンネルの編集を拒否するため。表示・非表示は Holodex の
 メタデータではなく seTORI 側の都合なので、どのチャンネルでも切り替えられる必要がある。
 
@@ -282,7 +282,7 @@ UPDATE singers SET organization = 'ReAcT' WHERE organization = 'Re:AcT';
 
 ## 画面
 
-- `/singers` … 既定は**事務所別**。名前順の通し一覧は「一覧」に切り替える（`?view=list`）。
+- `/channels` … 既定は**事務所別**。名前順の通し一覧は「一覧」に切り替える（`?view=list`）。
   一覧側は従来どおり並び替えとページングが効く
 - `content:edit` の一覧は**表示中 / 非表示の 2 区**に分け、表示中を先に出す（issue #65）。
   混ぜて並べていた頃は、手元で 152 件中 151 件が非表示、事務所の組 19 個のうち 18 個が
@@ -294,7 +294,7 @@ UPDATE singers SET organization = 'ReAcT' WHERE organization = 'Re:AcT';
     2 ページ目以降で区が割れる）。事務所順を選んでも先に 2 区へ割れる。
     非表示の総数は `hidden_total`
   - 閲覧者には非表示の行がそもそも届かない（`hidden` は引きもしない）。見出しの件数も出ない
-- `/singers/:id` … 非表示チャンネルには「一覧で非表示」バッジ。閲覧者にも出す
+- `/channels/:id` … 非表示チャンネルには「一覧で非表示」バッジ。閲覧者にも出す
   （ページが開けている理由を説明するため）。切り替えは目のアイコン
 - `/admin/organizations` … 表示名と並び順の編集、手動追加、削除。
   `display_name === key` の行には「未設定」と出す（自動作成されたまま

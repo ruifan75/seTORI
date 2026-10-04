@@ -216,7 +216,7 @@ func (s *HolodexService) syncHolodexChannelInfo(channelID string) (*models.Singe
 		return nil, fmt.Errorf("get channel: %w", err)
 	}
 
-	// 人がチャンネルを名指しして追加した経路（POST /api/singers）なので、新規でも一覧に出す。
+	// 人がチャンネルを名指しして追加した経路（POST /api/channels）なので、新規でも一覧に出す。
 	singer := s.singerFromHolodexChannel(channel)
 	if err := s.singerRepo.Upsert(singer, repository.SingerRequested); err != nil {
 		return nil, fmt.Errorf("upsert singer: %w", err)
@@ -274,7 +274,7 @@ func (s *HolodexService) syncYouTubeChannelInfoFromChannel(channel *youtube.Chan
 		}
 	}
 
-	// Holodex に無いチャンネルの退避経路。入口は同じ POST /api/singers なので人の意図がある。
+	// Holodex に無いチャンネルの退避経路。入口は同じ POST /api/channels なので人の意図がある。
 	if err := s.singerRepo.Upsert(singer, repository.SingerRequested); err != nil {
 		return nil, fmt.Errorf("upsert singer: %w", err)
 	}

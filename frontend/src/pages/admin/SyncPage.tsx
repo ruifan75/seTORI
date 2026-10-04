@@ -782,7 +782,7 @@ function AutoFillTargets() {
         <ul className="divide-y border rounded-lg">
           {targets.map((sg) => (
             <li key={sg.id} className="flex items-center justify-between gap-3 px-4 py-2">
-              <Link to={`/singers/${sg.id}`} className="text-indigo-600 hover:underline truncate">
+              <Link to={`/channels/${sg.id}`} className="text-indigo-600 hover:underline truncate">
                 {sg.name}
               </Link>
               <button

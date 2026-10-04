@@ -309,7 +309,7 @@ export const singerApi = {
     if (sort) params.set('sort', sort);
     if (dir) params.set('dir', dir);
     if (includeHidden) params.set('include_hidden', 'true');
-    const { data } = await api.get(`/api/singers?${params}`);
+    const { data } = await api.get(`/api/channels?${params}`);
     return data;
   },
 
@@ -317,18 +317,18 @@ export const singerApi = {
   listGrouped: async (includeHidden = false): Promise<SingerGroupListResponse> => {
     const params = new URLSearchParams({ group: 'organization' });
     if (includeHidden) params.set('include_hidden', 'true');
-    const { data } = await api.get(`/api/singers?${params}`);
+    const { data } = await api.get(`/api/channels?${params}`);
     return data;
   },
 
   get: async (id: string): Promise<SingerDetailResponse> => {
-    const { data } = await api.get(`/api/singers/${id}`);
+    const { data } = await api.get(`/api/channels/${id}`);
     return data;
   },
 
   search: async (query: string, limit = 10): Promise<Singer[]> => {
     const params = new URLSearchParams({ q: query, limit: String(limit) });
-    const { data } = await api.get(`/api/singers/search?${params}`);
+    const { data } = await api.get(`/api/channels/search?${params}`);
     return data;
   },
 
@@ -342,7 +342,7 @@ export const singerApi = {
     const params = new URLSearchParams({ page: String(page), limit: String(limit) });
     if (processed) params.set('processed', processed);
     if (hidden) params.set('hidden', hidden);
-    const { data } = await api.get(`/api/singers/${id}/streams?${params}`);
+    const { data } = await api.get(`/api/channels/${id}/streams?${params}`);
     return data;
   },
 
@@ -350,44 +350,44 @@ export const singerApi = {
     const params = new URLSearchParams({ page: String(page), limit: String(limit) });
     if (sort) params.set('sort', sort);
     if (dir) params.set('dir', dir);
-    const { data } = await api.get(`/api/singers/${id}/performances?${params}`);
+    const { data } = await api.get(`/api/channels/${id}/performances?${params}`);
     return data;
   },
 
   // singer を追加する（Holodex を優先し、見つからなければ YouTube Data API へフォールバック）
   create: async (channelInput: string): Promise<CreateSingerResponse> => {
-    const { data } = await api.post('/api/singers', { id: channelInput });
+    const { data } = await api.post('/api/channels', { id: channelInput });
     return data;
   },
 
   update: async (id: string, req: UpdateSingerRequest): Promise<Singer> => {
-    const { data } = await api.put(`/api/singers/${id}`, req);
+    const { data } = await api.put(`/api/channels/${id}`, req);
     return data;
   },
 
   // Holodex の事務所分類の手動上書き（空文字で解除して Holodex の値に戻す）。
   // Holodex 管理チャンネルでも設定できる（seTORI 側の判断であってメタデータではないため）
   setOrganization: async (id: string, organization: string): Promise<{ id: string; organization: string }> => {
-    const { data } = await api.put(`/api/singers/${id}/organization`, { organization });
+    const { data } = await api.put(`/api/channels/${id}/organization`, { organization });
     return data;
   },
 
   // チャンネル一覧での表示/非表示（Holodex 管理チャンネルでも切り替えられる）
   setHidden: async (id: string, isHidden: boolean): Promise<{ id: string; is_hidden: boolean }> => {
-    const { data } = await api.put(`/api/singers/${id}/visibility`, { is_hidden: isHidden });
+    const { data } = await api.put(`/api/channels/${id}/visibility`, { is_hidden: isHidden });
     return data;
   },
 
   // 自動処理（定期同期＋コメント解析＋歌単作成）の対象かを切り替える。
   // 立てても最後の確認（is_processed）は自動では付かない。
   setAutoFill: async (id: string, enabled: boolean): Promise<{ id: string; auto_fill_enabled: boolean }> => {
-    const { data } = await api.put(`/api/singers/${id}/auto-fill`, { auto_fill_enabled: enabled });
+    const { data } = await api.put(`/api/channels/${id}/auto-fill`, { auto_fill_enabled: enabled });
     return data;
   },
 
   // 自動処理が有効なチャンネルの一覧（content:edit）。
   listAutoFill: async (): Promise<{ singers: Singer[] }> => {
-    const { data } = await api.get('/api/singers/auto-fill');
+    const { data } = await api.get('/api/channels/auto-fill');
     return data;
   },
 
@@ -402,7 +402,7 @@ export const singerApi = {
   ): Promise<{ id: string; members_only_policy: string }> => {
     // 項目名は members_only_policy。バックエンドは項目が無いと 400 を返す
     // （`{}` を「未確認へ戻す」と読まないため）ので、必ず値を入れて送る。
-    const { data } = await api.put(`/api/singers/${id}/members-policy`, {
+    const { data } = await api.put(`/api/channels/${id}/members-policy`, {
       members_only_policy: policy,
     });
     return data;

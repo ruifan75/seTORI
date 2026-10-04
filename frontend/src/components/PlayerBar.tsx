@@ -707,7 +707,7 @@ export default function PlayerBar() {
                     {track.singers.map((s, i) => (
                       <span key={s.id}>
                         {i > 0 && '、'}
-                        <Link to={`/singers/${s.id}`} onClick={() => setExpanded(false)} className="hover:text-indigo-300">
+                        <Link to={`/channels/${s.id}`} onClick={() => setExpanded(false)} className="hover:text-indigo-300">
                           {s.name}
                         </Link>
                       </span>
@@ -945,7 +945,7 @@ export default function PlayerBar() {
                     {track.singers.map((s, i) => (
                       <span key={s.id}>
                         {i > 0 && '、'}
-                        <Link to={`/singers/${s.id}`} className="hover:text-indigo-600" title={s.name}>
+                        <Link to={`/channels/${s.id}`} className="hover:text-indigo-600" title={s.name}>
                           {s.name}
                         </Link>
                       </span>

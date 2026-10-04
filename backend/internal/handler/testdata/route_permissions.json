@@ -686,6 +686,90 @@
     "analysis": false
   },
   {
+    "pattern": "GET /api/channels",
+    "handler": "handleListSingers",
+    "permission": "",
+    "login": false,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/channels/search",
+    "handler": "handleSearchSingers",
+    "permission": "",
+    "login": false,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/channels/{id}",
+    "handler": "handleGetSinger",
+    "permission": "",
+    "login": false,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/channels/{id}/streams",
+    "handler": "handleGetSingerStreams",
+    "permission": "",
+    "login": false,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/channels/{id}/performances",
+    "handler": "handleGetSingerPerformances",
+    "permission": "",
+    "login": false,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/channels",
+    "handler": "handleCreateSinger",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "PUT /api/channels/{id}",
+    "handler": "handleUpdateSinger",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "PUT /api/channels/{id}/visibility",
+    "handler": "handleUpdateSingerVisibility",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "PUT /api/channels/{id}/members-policy",
+    "handler": "handleUpdateSingerMembersPolicy",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "PUT /api/channels/{id}/auto-fill",
+    "handler": "handleUpdateSingerAutoFill",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/channels/auto-fill",
+    "handler": "handleListAutoFillTargets",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "PUT /api/channels/{id}/organization",
+    "handler": "handleUpdateSingerOrganization",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
     "pattern": "GET /api/singers",
     "handler": "handleListSingers",
     "permission": "",

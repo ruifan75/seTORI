@@ -11,7 +11,7 @@ const navItems = [
   { path: '/songs', label: '楽曲一覧' },
   { path: '/artists', label: 'アーティスト' },
   { path: '/streams', label: '配信一覧' },
-  { path: '/singers', label: 'チャンネル一覧' },
+  { path: '/channels', label: 'チャンネル一覧' },
   { path: '/playlists', label: 'プレイリスト' },
 ];
 

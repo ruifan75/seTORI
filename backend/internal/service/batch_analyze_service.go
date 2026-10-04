@@ -451,7 +451,7 @@ func hiddenLabel(hidden *bool) string {
 }
 
 // ParseHiddenFilter は API の hidden パラメータを絞り込みへ変換する。
-// 語彙は GET /api/singers/{id}/streams?hidden= と同じ：
+// 語彙は GET /api/channels/{id}/streams?hidden= と同じ：
 // ""/"false"=非表示を除く（既定）、"true"=非表示だけ、"all"=両方。
 //
 // **知らない値は既定へ倒さずエラーにする。** ここは読み取りではなく、

@@ -98,7 +98,7 @@ export default function StreamInfoCard({ model }: { model: StreamDetailModel }) 
               {/* リンクは名前と画像だけに掛ける。チップ全体を包むと、
                   「参加チャンネルから外す」の ✕ を押したときにチャンネルページへ飛ぶ */}
               <Link
-                to={`/singers/${singer.id}`}
+                to={`/channels/${singer.id}`}
                 className="flex items-center gap-2 text-gray-700 hover:text-indigo-600 transition-colors"
                 title={`${singer.name} のチャンネルページを開く`}
               >

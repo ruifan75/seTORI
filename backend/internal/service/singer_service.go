@@ -259,7 +259,7 @@ func (s *SingerService) UpdateManualMetadata(id string, req *dto.UpdateSingerReq
 	singer.Name = name
 	singer.EnglishName = nullableTrimmedString(req.EnglishName)
 	singer.PhotoURL = nullableTrimmedString(req.PhotoURL)
-	// 事務所はここでは扱わない。PUT /api/singers/{id}/organization（上書き）が唯一の窓口。
+	// 事務所はここでは扱わない。PUT /api/channels/{id}/organization（上書き）が唯一の窓口。
 
 	if err := s.singerRepo.UpdateManualMetadata(singer); err != nil {
 		return nil, fmt.Errorf("update singer metadata: %w", err)

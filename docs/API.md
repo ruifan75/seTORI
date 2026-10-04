@@ -123,9 +123,30 @@ system role の削除・使用中ロールの削除などは 400。組み込み�
 
 ## チャンネル・事務所
 
-表示上は「チャンネル」。既存 API の `/singers` と JSON の `singers` は変えていない。
+チャンネルの API は `/api/channels`。JSON の `singers` / `singer_ids` などは変えない。
+旧 `/api/singers` は全端点で同じハンドラ・認可・応答を返す別名として **1 リリースだけ**維持する。
+**この変更の初回デプロイの次のリリース**で旧 API を削除する（issue #62 第 2 段）。
+画面 URL は `/channels` / `/channels/:id`。旧 `/singers` / `/singers/:id` は
+クエリとハッシュを保って新 URL へリダイレクトする（ブックマーク用の画面リダイレクトは残す）。
 一覧の `include_hidden=true` は `content:edit` が無ければ無視する。
 方針・会限本数・自動処理設定は編集者だけに返す。
+
+| メソッド | パス | 必要な権限 | 何をするか | 主な入力 | 応答の要点 |
+|---|---|---|---|---|---|
+| `GET` | `/api/channels` | 未ログイン可 | チャンネルを一覧する | Q: `page, limit, sort, dir, include_hidden, group=organization` | 通常 `{singers, pagination, hidden_total?}`。事務所別は `{groups, hidden?, total}`（ページングなし） |
+| `GET` | `/api/channels/search` | 未ログイン可 | 名前・英語名でチャンネルを探す | Q: `q, limit`（既定 10） | チャンネルの配列。非表示も含む。空の q は `[]` |
+| `GET` | `/api/channels/{id}` | 未ログイン可 | チャンネル詳細を見る | — | チャンネル＋`stream_count, performance_count`。秘匿：歌唱数を制限。非表示でも開ける |
+| `GET` | `/api/channels/{id}/streams` | 未ログイン可 | 参加した配信を一覧する | Q: `page, limit, hidden=false/true/all`（既定 false）、`processed=all/true/false`（編集者のみ適用） | `{streams, pagination}`。秘匿でも配信メタデータは残す |
+| `GET` | `/api/channels/{id}/performances` | 未ログイン可 | 歌った曲を一覧する | Q: `page, limit, sort, dir` | `{singer, performances, pagination}`。秘匿：歌唱・件数を制限 |
+| `POST` | `/api/channels` | `content:edit` | チャンネル情報を取得して登録する | B: `id`（チャンネル ID / @handle / URL） | 201 / `{message, id, name}`。配信は同期しない |
+| `PUT` | `/api/channels/{id}` | `content:edit` | 手動管理チャンネルのメタデータを更新する | B: `name, english_name, photo_url` | チャンネル。Holodex 管理なら 403 |
+| `PUT` | `/api/channels/{id}/visibility` | `content:edit` | 一覧での表示・非表示を替える | B: `is_hidden` | `{id, is_hidden}` |
+| `PUT` | `/api/channels/{id}/members-policy` | `content:edit` | 会限セットリストの公開方針を設定する | B: `members_only_policy=allow/deny/空文字`（必須。空文字は未確認） | `{id, members_only_policy}`。公開可否に影響 |
+| `PUT` | `/api/channels/{id}/organization` | `content:edit` | 所属を手動指定する | B: `organization`（事務所 key。空文字で上書き解除） | `{id, organization}`。Holodex 管理でも可 |
+| `PUT` | `/api/channels/{id}/auto-fill` | `content:edit` | 自動処理の対象を切り替える | B: `auto_fill_enabled`（必須の bool） | `{id, auto_fill_enabled}` |
+| `GET` | `/api/channels/auto-fill` | `content:edit` | 自動処理の対象チャンネルを見る | — | `{singers: [チャンネル]}` |
+
+### 旧 API の互換別名（次のリリースで削除）
 
 | メソッド | パス | 必要な権限 | 何をするか | 主な入力 | 応答の要点 |
 |---|---|---|---|---|---|
@@ -141,6 +162,11 @@ system role の削除・使用中ロールの削除などは 400。組み込み�
 | `PUT` | `/api/singers/{id}/organization` | `content:edit` | 所属を手動指定する | B: `organization`（事務所 key。空文字で上書き解除） | `{id, organization}`。Holodex 管理でも可 |
 | `PUT` | `/api/singers/{id}/auto-fill` | `content:edit` | 自動処理の対象を切り替える | B: `auto_fill_enabled`（必須の bool） | `{id, auto_fill_enabled}` |
 | `GET` | `/api/singers/auto-fill` | `content:edit` | 自動処理の対象チャンネルを見る | — | `{singers: [チャンネル]}` |
+
+### 事務所
+
+| メソッド | パス | 必要な権限 | 何をするか | 主な入力 | 応答の要点 |
+|---|---|---|---|---|---|
 | `GET` | `/api/organizations` | 未ログイン可 | 事務所を一覧する | — | `{organizations: [{key, display_name, sort_order, is_unaffiliated, singer_count, …}]}` |
 | `POST` | `/api/organizations` | `content:edit` | 事務所を追加する | B: `display_name, key`（省略時は表示名）、`sort_order, is_unaffiliated` | 201 / 事務所。重複は 409 |
 | `PUT` | `/api/organizations/{key}` | `content:edit` | 事務所の表示名・順序・所属なし扱いを更新する | B: `display_name, sort_order, is_unaffiliated` | 事務所。key は変更しない |

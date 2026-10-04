@@ -616,7 +616,7 @@ type BatchAnalyzeStatus struct {
 type BatchAnalyzeRequest struct {
 	Mode     string `json:"mode"`      // unanalyzed / unprocessed / refresh / reanalyze
 	SingerID string `json:"singer_id"` // 対象チャンネル（空なら全チャンネル）
-	// Hidden は非表示配信の扱い。語彙は GET /api/singers/{id}/streams?hidden= と揃える。
+	// Hidden は非表示配信の扱い。語彙は GET /api/channels/{id}/streams?hidden= と揃える。
 	//
 	//	""/"false" … 非表示を除く（既定。従来の挙動）
 	//	"true"     … 非表示だけ

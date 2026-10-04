@@ -29,7 +29,7 @@ export default function StreamVocalistPopup({ model }: { model: StreamDetailMode
           {vocalistPopupSingers.map((singer) => (
             <Link
               key={singer.id}
-              to={`/singers/${singer.id}`}
+              to={`/channels/${singer.id}`}
               className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 transition-colors"
               onClick={() => setVocalistPopupSingers(null)}
             >

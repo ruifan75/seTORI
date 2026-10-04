@@ -230,9 +230,9 @@ API は原則 `/api` をプレフィックスとし、JSON を返却します（
 | POST | `/api/streams/{id}/comments/analyze` | コメントを楽曲に解析 |
 | POST | `/api/comments/backfill` | comment_songs を補完 |
 | **Singers** | | |
-| GET | `/api/singers` · `/search` · `/{id}` · `/{id}/streams` · `/{id}/performances` | 一覧/検索/詳細/配信/歌唱 |
-| POST | `/api/singers` | Holodex 同期によりチャンネル情報から新規追加。Holodex 未登録時は YouTube fallback |
-| PUT | `/api/singers/{id}` | Holodex 未登録（YouTube fallback）チャンネルの手動メタデータ更新 |
+| GET | `/api/channels` · `/search` · `/{id}` · `/{id}/streams` · `/{id}/performances` | 一覧/検索/詳細/配信/歌唱 |
+| POST | `/api/channels` | Holodex 同期によりチャンネル情報から新規追加。Holodex 未登録時は YouTube fallback |
+| PUT | `/api/channels/{id}` | Holodex 未登録（YouTube fallback）チャンネルの手動メタデータ更新 |
 | **Holodex Sync** | | |
 | POST | `/api/sync/holodex` | チャンネル全体を同期 |
 | POST | `/api/sync/holodex/video/{id}` | 単一動画を同期 |
