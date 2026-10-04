@@ -9,9 +9,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/ruifan75/setori/internal/dto"
-	"github.com/ruifan75/setori/internal/logger"
 	"github.com/ruifan75/setori/internal/models"
 	"github.com/ruifan75/setori/internal/repository"
+	"github.com/ruifan75/setori/internal/service"
 )
 
 // 楽曲の統合候補（照合が外れて新曲として登録されてしまったものの後始末）。
@@ -109,35 +109,14 @@ func toMergeCandidateSong(s models.Song, perfCount int, itunesIDs []int64, role 
 	}
 }
 
-// handleScanDuplicates は既存データを走査して同名の組を候補に積む（content:edit）。
-// 取り込み時の検出は「これから作る曲」しか見ないので、導入前からあった重複は
-// これを走らせないと誰にも気づかれない。
-func (r *Router) handleScanDuplicates(w http.ResponseWriter, req *http.Request) {
-	// ① 曲名キーが同じ組。確実で無料
-	added, err := r.songMatchService.ScanDuplicates()
-	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+// handleStartDuplicateScan は曲名キーと AI の走査を1実行として開始する（content:edit）。
+func (r *Router) handleStartDuplicateScan(w http.ResponseWriter, req *http.Request) {
+	run, ok := r.startTask(w, req, service.TaskDuplicateScan, map[string]any{})
+	if !ok {
 		return
 	}
-
-	// ② キーが違う組（邦題と原題、誤字、ローマ字）。①では原理的に見つからない。
-	//    AI 呼び出しが失敗しても①の結果は返す（走査全体を落とさない）。
-	byAI, aiErr := r.songMatchService.ScanDuplicatesWithAI(r.aiService)
-	if aiErr != nil {
-		logger.Warnf("[dup] AI 全件走査に失敗しました: %v", aiErr)
-	}
-
-	msg := fmt.Sprintf("%d 件の重複候補を追加しました（曲名キー %d / AI %d）", added+byAI, added, byAI)
-	if aiErr != nil {
-		msg = fmt.Sprintf("%d 件の重複候補を追加しました（曲名キーのみ。AI 走査は失敗: %v）", added, aiErr)
-	}
-	respondJSON(w, http.StatusOK, map[string]any{
-		"added":    added + byAI,
-		"by_key":   added,
-		"by_ai":    byAI,
-		"ai_error": aiErr != nil,
-		"message":  msg,
-	})
+	go run.Execute(func() (string, error) { return r.songMatchService.BackfillDuplicateCandidates(r.aiService, run) })
+	respondJSON(w, http.StatusAccepted, map[string]any{"task_id": run.ID, "message": "重複候補の走査を開始しました"})
 }
 
 // handleAdjudicateDuplicates は未判定の候補について AI の見立てを取る（content:edit）。

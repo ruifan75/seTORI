@@ -14,9 +14,11 @@ import (
 
 // 背景処理の種類（task_runs.kind）。
 const (
-	TaskChatEndBackfill = "chat_end_backfill"
-	TaskChapterBackfill = "chapter_backfill"
-	TaskStreamPrepare   = "stream_prepare"
+	TaskChatEndBackfill  = "chat_end_backfill"
+	TaskChapterBackfill  = "chapter_backfill"
+	TaskStreamPrepare    = "stream_prepare"
+	TaskReadingsBackfill = "readings_backfill"
+	TaskDuplicateScan    = "duplicate_scan"
 )
 
 // ErrTaskRunning は同じ種類、または準備と競合する backfill が既に走っていること。
@@ -206,4 +208,28 @@ func (t *TaskRun) Finish(status, message string) {
 	}
 	t.svc.release(t.kind)
 	logger.Infof("[task] %s 終了（%s）: %s", t.kind, status, message)
+}
+
+// Execute は予約済みの実行を完了させる。呼び出し側が goroutine で呼ぶ。
+// 一部失敗も failed にし、エラー・panic の場合も記録と枠の解放を試みる。
+func (t *TaskRun) Execute(work func() (string, error)) {
+	status, message := "failed", "処理が完了しませんでした"
+	defer func() {
+		if v := recover(); v != nil {
+			status, message = "failed", fmt.Sprintf("処理中に panic が発生しました: %v", v)
+		}
+		t.Finish(status, message)
+	}()
+	result, err := work()
+	message = result
+	if err != nil {
+		if message != "" {
+			message += " "
+		}
+		message += "失敗: " + err.Error()
+		return
+	}
+	if t.FailedCount() == 0 {
+		status = "done"
+	}
 }
