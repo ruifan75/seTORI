@@ -290,9 +290,17 @@ type StreamResponse struct {
 	HolodexUploadedAt *string `json:"holodex_uploaded_at,omitempty"`
 	// HolodexUploadUnknown は台帳の追跡開始より前から存在する配信。
 	// 台帳が空でも「送っていない」とは言えないことを画面へ伝える。**編集者だけ**。
-	HolodexUploadUnknown bool      `json:"holodex_upload_unknown,omitempty"`
-	CreatedAt            time.Time `json:"created_at"`
-	UpdatedAt            time.Time `json:"updated_at"`
+	HolodexUploadUnknown bool `json:"holodex_upload_unknown,omitempty"`
+	// RestrictionOverride は**人の裁定**（true＝伏せる / false＝公開してよい）。
+	// 未裁定と非編集者は nil（応答から消える）。`is_restricted` は実効値なので、
+	// それだけでは「チャンネルの方針で公開」と「この配信だけ公開と裁定」が区別できない。
+	// **編集者だけ**（運用の状態）。
+	RestrictionOverride *bool `json:"restriction_override,omitempty"`
+	// RestrictionNeedsReview は公開の裁定と現在の自動判定が食い違い、確認が必要な
+	// 配信（issue #26）。控えが無い旧裁定も含む。**編集者だけ**。
+	RestrictionNeedsReview bool      `json:"restriction_needs_review,omitempty"`
+	CreatedAt              time.Time `json:"created_at"`
+	UpdatedAt              time.Time `json:"updated_at"`
 }
 
 // NonSingingCandidate は「非表示だが現行規則で曲が出た」配信（issue #42）。
@@ -305,6 +313,22 @@ type NonSingingCandidate struct {
 	// 非表示を解くのは危ないので、判断材料として画面に出す。
 	AnalyzedAt *string  `json:"analyzed_at,omitempty"`
 	Tags       []string `json:"tags"`
+}
+
+// RestrictionReviewItem は公開の裁定と現在の会限判定が食い違う配信（issue #26）。
+type RestrictionReviewItem struct {
+	ID         string `json:"id"`
+	Title      string `json:"title"`
+	StreamDate string `json:"stream_date"`
+	// BasisUnknown は**裁定の時点の判定が分からない**（この仕組みより前の裁定）。
+	// 「知っていて公開した」のか「知らずに公開した」のか決められないので一覧に出している、
+	// と画面で言い分けるために使う。
+	BasisUnknown bool `json:"basis_unknown"`
+}
+
+type RestrictionReviewList struct {
+	Items []RestrictionReviewItem `json:"items"`
+	Total int                     `json:"total"`
 }
 
 type NonSingingCandidateList struct {

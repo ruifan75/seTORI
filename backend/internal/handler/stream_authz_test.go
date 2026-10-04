@@ -85,6 +85,10 @@ func TestStreamAnalysisEndpointsRequireContentEdit(t *testing.T) {
 		{"背景処理の一覧", http.MethodGet, "/api/tasks", auth.PermContentEdit, true},
 		{"背景処理の詳細", http.MethodGet, "/api/tasks/abc", auth.PermContentEdit, true},
 		{"近い名前の別ルート(tasks)", http.MethodGet, "/api/tasks-report", "", false},
+		// 裁定の見直し（issue #26）。GET は既定で公開に落ちるので明示が要る
+		{"裁定の見直しの一覧", http.MethodGet, "/api/restriction-review", auth.PermContentEdit, true},
+		{"裁定の見直しのサブパス", http.MethodGet, "/api/restriction-review/x", auth.PermContentEdit, true},
+		{"近い名前の別ルート(restriction-review)", http.MethodGet, "/api/restriction-review-report", "", false},
 
 		// 自動処理（定期実行）。設定の GET も content:edit ── ここに書かないと
 		// 「いつ・どれを自動で回しているか」と最後の実行結果が未ログインから読める

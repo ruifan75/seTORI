@@ -236,7 +236,7 @@ n=1 なら**そもそも補う必要が無い**。どちらの場合も補う理
 ### **辞書は AI 経路では使わない**（構造フィルタだけ通す）
 
 `FilterSongsWith` には 2 種類の判定が入っている。**AI 経路へ渡すのは構造のほうだけ**
-（`filterScopeForPath`）：
+（`FilterScopeForPath`）：
 
 | 判定 | 中身 | grouped / two_stage | regex |
 |---|---|---|---|
@@ -274,7 +274,10 @@ comment / chapter 両方のキャッシュが一斉に**失効する**。
 > つまり現状、**comment 側にも chapter 側にも完全な一括再構築口は無い**。
 >
 > `songmatch.RulesVersion` は同じ「version を混ぜる」手だが、**効き方が違う**。
-> あちらは起動時の再構築を前提にしているのに production では走っていない（issue #21）。
+> あちらはサーバーの起動時に全楽曲のキーを作り直す（`cmd/server/main.go` の
+> `RebuildKeys`）ので、上げれば次の起動で追随する。入力の取り直しが要る comment 側と違い、
+> 材料（曲名・アーティスト）が DB に全部あるから成り立つ。
+> （以前「production では走っていない」と書いていたのは誤り。issue #21）
 
 ---
 
@@ -401,9 +404,16 @@ go run ./cmd/setoribench -mode combined -cache /tmp/bench-combined.json
 go run ./cmd/setoribench -mode grouped  -cache /tmp/bench-grouped.json
 ```
 
-⚠️ キャッシュは stream ID だけをキーにしている。**モードごとに別のパスを渡すこと。**
-プロンプトを変えて測り直すときも同じで、前の版の結果を読むと
-「変えたのに何も変わらない」ように見える。
+キャッシュは stream ID をキーにし、mode と実際の抽出経路も記録する。別 mode の
+エントリは再利用せず、regex 退避を再利用したときも辞書を適用する。**モードごとに別の
+パスを渡すこと**（同じパスではエントリが上書きされる）。抽出経路の無い旧形式は
+警告して再抽出する。プロンプトを変えて測り直すときも別のパスを使う。
+
+辞書と keep の適用範囲は production の `FilterScopeForPath` と共有する（issue #14）。
+`grouped` / `ai`（production の `two_stage`）/ `combined` は辞書を重ねず、regex
+退避では適用する。`stored` は保存済みの後処理結果なので辞書を重ねない。
+構造フィルタは既定で有効で、`-struct=false` はその構造判定だけを外す。
+`-nofilter` は `FilterSongsWith` を飛ばすが、重複排除と妥当性検証は引き続き行う。
 
 抽出だけでなく**照合も測れる**（`-match`、既定 on）。詳細は
 [`SONG_MATCHING.md`](./SONG_MATCHING.md#継続して測るcmdsetoribench--match)。

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"mime/multipart"
 	"net/http"
 
@@ -44,9 +45,22 @@ const (
 // ── live chat は実測 12.5MB あり、本番（1 vCPU / 1GB）で毎回そのぶん
 // RSS を跳ねさせたくない。
 func openUpload(w http.ResponseWriter, req *http.Request, limit int64) (multipart.File, error) {
+	ct := req.Header.Get("Content-Type")
+	mediaType, params, err := mime.ParseMediaType(ct)
+	if err != nil || mediaType != "multipart/form-data" {
+		return nil, fmt.Errorf("multipart/form-data で送ってください（受け取った Content-Type: %q）", ct)
+	}
+	if params["boundary"] == "" {
+		return nil, fmt.Errorf("multipart/form-data の boundary が指定されていません（受け取った Content-Type: %q）", ct)
+	}
+
 	req.Body = http.MaxBytesReader(w, req.Body, limit)
 	if err := req.ParseMultipartForm(8 << 20); err != nil {
-		return nil, fmt.Errorf("ファイルを読み取れません（上限 %dMB を超えていないか確認してください）", limit>>20)
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			return nil, fmt.Errorf("ファイルを読み取れません（上限 %dMB を超えていないか確認してください）", limit>>20)
+		}
+		return nil, fmt.Errorf("multipart/form-data のファイルを読み取れません: %w", err)
 	}
 	f, hdr, err := req.FormFile("file")
 	if err != nil {

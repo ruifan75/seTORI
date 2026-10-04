@@ -3,6 +3,7 @@ import type {
   AutoFillSettings,
   NonSingingCandidate,
   TaskRun,
+  RestrictionReviewItem,
   AutoFillRunResult,
   SongListResponse,
   Song,
@@ -433,6 +434,16 @@ export const taskApi = {
   },
   startChatEndBackfill: async (concurrency = 3): Promise<{ task_id: string }> => {
     const { data } = await api.post('/api/chat-ends/backfill', null, { params: { concurrency } });
+    return data;
+  },
+};
+
+// ========== 秘匿の裁定の見直し API（issue #26） ==========
+// 公開の裁定と現在の会限判定が食い違う配信（旧裁定も含む）。解決は
+// streamApi.update の is_restricted ── 裁定を書き直すとその時点の判定が控えられ、一覧から消える。
+export const restrictionReviewApi = {
+  list: async (limit = 100): Promise<{ items: RestrictionReviewItem[]; total: number }> => {
+    const { data } = await api.get('/api/restriction-review', { params: { limit } });
     return data;
   },
 };
