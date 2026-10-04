@@ -25,6 +25,7 @@ import MyAccountPage from './pages/MyAccountPage';
 import PlaylistDetailPage from './pages/PlaylistDetailPage';
 import PresetPlaylistPage from './pages/PresetPlaylistPage';
 import SyncPage from './pages/admin/SyncPage';
+import VisibilityReviewPage from './pages/admin/VisibilityReviewPage';
 import SettingsPage from './pages/admin/SettingsPage';
 import LogsPage from './pages/admin/LogsPage';
 import UsersPage from './pages/admin/UsersPage';
@@ -88,6 +89,10 @@ function App() {
               <Route
                 path="my/account"
                 element={<RequirePermission><MyAccountPage /></RequirePermission>}
+              />
+              <Route
+                path="admin/visibility-review"
+                element={<RequirePermission permission={PERM.CONTENT_EDIT}><VisibilityReviewPage /></RequirePermission>}
               />
               <Route
                 path="admin/sync"
