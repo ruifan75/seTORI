@@ -168,35 +168,37 @@ function TagSection({
         ))}
       </div>
 
-      <form onSubmit={handleSubmit} className="flex gap-2 items-center">
+      <form onSubmit={handleSubmit} className="flex flex-col gap-2 sm:flex-row sm:items-center">
         <input
           type="text"
           value={newId}
           onChange={(e) => setNewId(e.target.value)}
           placeholder="ID（例: singing）"
-          className="w-36 px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+          className="w-full min-w-0 sm:w-36 px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
         />
         <input
           type="text"
           value={newDisplayName}
           onChange={(e) => setNewDisplayName(e.target.value)}
           placeholder="表示名（例: 歌枠）"
-          className="flex-1 px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+          className="w-full min-w-0 sm:w-auto sm:flex-1 px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
         />
-        <input
-          type="color"
-          value={newColor}
-          onChange={(e) => setNewColor(e.target.value)}
-          className="w-10 h-8 p-0.5 border border-gray-300 rounded-lg cursor-pointer"
-          title="色を選択"
-        />
-        <button
-          type="submit"
-          disabled={isAdding || !newId.trim() || !newDisplayName.trim()}
-          className="px-3 py-1.5 text-sm text-white font-medium rounded-lg transition-colors disabled:opacity-50 bg-indigo-600 hover:bg-indigo-700"
-        >
-          追加
-        </button>
+        <div className="flex items-center gap-2">
+          <input
+            type="color"
+            value={newColor}
+            onChange={(e) => setNewColor(e.target.value)}
+            className="w-10 h-8 p-0.5 border border-gray-300 rounded-lg cursor-pointer"
+            title="色を選択"
+          />
+          <button
+            type="submit"
+            disabled={isAdding || !newId.trim() || !newDisplayName.trim()}
+            className="px-3 py-1.5 text-sm text-white font-medium rounded-lg transition-colors disabled:opacity-50 bg-indigo-600 hover:bg-indigo-700"
+          >
+            追加
+          </button>
+        </div>
       </form>
     </div>
   );
@@ -335,15 +337,15 @@ function ProviderRow({ p, idx, total, onUpdate, onDelete, onMove }: {
           <span className="font-medium text-gray-900">{p.name}</span>
           {!p.enabled && <span className="text-xs text-gray-400">（無効）</span>}
         </div>
-        <div className="flex items-center gap-1 text-xs text-gray-500 pl-7">
-          <div className="flex items-center">
+        <div className="flex flex-wrap sm:flex-nowrap items-center gap-1 text-xs text-gray-500 sm:pl-7">
+          <div className="flex items-center max-sm:max-w-full">
             <input
               value={model}
               onChange={(e) => setModel(e.target.value)}
               onBlur={() => saveModel()}
               onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
               title="モデルを編集（Enter / フォーカスアウトで保存）"
-              className="w-48 px-1.5 py-0.5 font-mono text-gray-700 border border-gray-200 rounded-l focus:ring-1 focus:ring-indigo-400 focus:border-transparent"
+              className="w-48 max-sm:min-w-0 px-1.5 py-0.5 font-mono text-gray-700 border border-gray-200 rounded-l focus:ring-1 focus:ring-indigo-400 focus:border-transparent"
             />
             <ModelPicker
               fetcher={() => aiProviderApi.listModels(p.id)}
