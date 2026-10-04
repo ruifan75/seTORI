@@ -1004,6 +1004,7 @@ function AutoFillSchedule() {
 // （cookie を直して再実行すべきかの判断材料）。
 const TASK_LABELS: Record<string, string> = {
   chapter_backfill: 'チャプターの取得',
+  stream_prepare: '同期後の準備',
   chat_end_backfill: '拍手 end の埋め直し',
 };
 
@@ -1013,6 +1014,14 @@ function BackgroundTasks() {
   const canEdit = hasPermission(useAuthStore((st) => st.user), PERM.CONTENT_EDIT);
   const authStatus = useAuthStore((st) => st.status);
   const [openTask, setOpenTask] = useState<string | null>(null);
+  const [prepareSinger, setPrepareSinger] = useState('');
+  const { data: prepareSingers } = useQuery({ queryKey: ['singers-for-prepare'], queryFn: () => singerApi.list(1, 300, 'name', 'asc', true), enabled: canEdit });
+  const prepare = useMutation({
+    mutationFn: () => taskApi.prepare(prepareSinger),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['tasks'] }); showToast('準備を開始しました', 'success'); },
+    onError: (err: Error) => showToast(err.message, 'error'),
+  });
+  const cancel = useMutation({ mutationFn: taskApi.cancel, onSuccess: () => showToast('停止を要求しました。処理中の1件が終わると停止します', 'info'), onError: (err: Error) => showToast(err.message, 'error') });
 
   const { data: tasks, isError } = useQuery({
     queryKey: ['tasks', canEdit],
@@ -1038,6 +1047,14 @@ function BackgroundTasks() {
   return (
     <div className="bg-white rounded-lg shadow-sm border p-6">
       <h2 className="text-xl font-bold text-gray-900 mb-2">背景処理</h2>
+      <div className="mb-4 space-y-2">
+        <p className="text-sm text-gray-600">同期後の準備：所有する表示中・未処理の配信の章節を取得し、コメントを取り直してプレ分析します。歌唱の保存は編集画面で確認して行います。</p>
+        <label className="text-sm">対象チャンネル <select value={prepareSinger} onChange={(e) => setPrepareSinger(e.target.value)} className="border rounded px-2 py-1">
+          <option value="">チャンネルを選択</option>
+          {prepareSingers?.singers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+        </select></label>
+        <button onClick={() => prepare.mutate()} disabled={!prepareSinger || prepare.isPending} className="ml-2 px-3 py-1.5 bg-indigo-600 text-white rounded disabled:opacity-50">同期後の準備を開始</button>
+      </div>
       <p className="text-gray-500 mb-4 text-sm">
         yt-dlp を使う一括取得です。どちらも時間がかかり、YouTube に BOT 判定されると全件失敗します
         （そのときは管理→設定で cookies.txt を更新してから再実行）。一括セットリスト作成は
@@ -1087,12 +1104,14 @@ function BackgroundTasks() {
                         : 'text-red-600'
                   }
                 >
-                  {{ running: '実行中', done: '完了', failed: '失敗', interrupted: '中断' }[t.status] ?? t.status}
+                  {{ running: '実行中', done: '完了', failed: '失敗', interrupted: '中断', cancelled: '停止' }[t.status] ?? t.status}
                 </span>
                 <span className="text-gray-600">
                   {t.done}/{t.total}（成功 {t.succeeded}・見送り {t.skipped}・
                   <span className={t.failed > 0 ? 'text-red-600' : ''}>失敗 {t.failed}</span>）
                 </span>
+                {t.phase && <span>{t.phase === 'chapters' ? '章節取得' : 'プレ分析'}{typeof t.params.singer_id === 'string' && ` / ${t.params.singer_id}`}</span>}
+                {t.status === 'running' && t.kind === 'stream_prepare' && <button onClick={() => cancel.mutate(t.id)} disabled={cancel.isPending} className="underline">停止</button>}
                 {t.failures.length > 0 && (
                   <button
                     onClick={() => setOpenTask(openTask === t.id ? null : t.id)}

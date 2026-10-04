@@ -423,6 +423,11 @@ export const nonSingingApi = {
 // yt-dlp を起動する backfill。以前は投げっぱなしで log にしか出なかったので、
 // 実行ごとの進捗と失敗の理由を task_runs に残して読めるようにした。
 export const taskApi = {
+  prepare: async (singerId: string): Promise<{ task_id: string }> => {
+    const { data } = await api.post('/api/streams/prepare', null, { params: { singer_id: singerId } });
+    return data;
+  },
+  cancel: async (id: string): Promise<void> => { await api.post(`/api/tasks/${id}/cancel`); },
   list: async (limit = 10): Promise<TaskRun[]> => {
     const { data } = await api.get('/api/tasks', { params: { limit } });
     return data.tasks ?? [];

@@ -21,6 +21,8 @@ func TestStreamAnalysisEndpointsRequireContentEdit(t *testing.T) {
 		wantPerm  string
 		wantLogin bool
 	}{
+		{"準備の開始", http.MethodPost, "/api/streams/prepare", auth.PermContentEdit, true},
+		{"準備の停止", http.MethodPost, "/api/tasks/abc/cancel", auth.PermContentEdit, true},
 		// 外部フェッチを起こす GET（本題）
 		{"生コメント", http.MethodGet, "/api/streams/abc123/comments", auth.PermContentEdit, true},
 		{"チャプター（yt-dlp + cookie）", http.MethodGet, "/api/streams/abc123/chapters", auth.PermContentEdit, true},
