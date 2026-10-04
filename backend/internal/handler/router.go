@@ -51,9 +51,11 @@ type Router struct {
 	chatEndService       *service.ChatEndService
 	chapterService       *service.ChapterService
 	taskRunService       *service.TaskRunService
+	prepareService       *service.PrepareService
 	artistService        *service.ArtistService
 	batchAnalyzeService  *service.BatchAnalyzeService
 	batchFillService     *service.BatchFillService
+	visibilityReview     *repository.VisibilityReviewRepository
 	authService          *service.AuthService
 	// ログイン試行の絞り込み（総当たりと bcrypt による CPU 消費を止める）
 	loginLimiter      *loginLimiter
@@ -219,6 +221,8 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 		clientIPResolver:     ipResolver,
 	}
 
+	r.prepareService = service.NewPrepareService(streamRepo, chapterService, batchAnalyzeService, batchFillService, r.taskRunService)
+	r.visibilityReview = repository.NewVisibilityReviewRepository(db)
 	r.setupRoutes()
 	return r
 }
@@ -403,6 +407,11 @@ func (r *Router) setupRoutes() {
 
 	// 自動処理（定期実行）。設定・手動実行とも content:edit。
 	// 見直しが要る配信（非表示だが現行規則で曲が出た）。content:edit。
+	r.mux.HandleFunc("GET /api/visibility-review", r.handleVisibilityCandidates)
+	r.mux.HandleFunc("POST /api/visibility-review/preview", r.handleVisibilityPreview)
+	r.mux.HandleFunc("POST /api/visibility-review/runs/{id}/apply", r.handleVisibilityApply)
+	r.mux.HandleFunc("POST /api/visibility-review/runs/{id}/revert", r.handleVisibilityRevert)
+	r.mux.HandleFunc("GET /api/visibility-review/runs", r.handleVisibilityRuns)
 	r.mux.HandleFunc("GET /api/non-singing-candidates", r.handleListNonSingingCandidates)
 	r.mux.HandleFunc("GET /api/restriction-review", r.handleListRestrictionReview)
 	r.mux.HandleFunc("POST /api/non-singing-candidates/{id}/dismiss", r.handleDismissNonSingingCandidate)
@@ -454,6 +463,8 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("DELETE /api/streams/{id}/import/live-chat", r.handleDeleteImportedLiveChat)
 	r.mux.HandleFunc("POST /api/streams/{id}/chat-end-estimate", r.withAnalysisAccess(r.handleEstimateChatEnds))
 	r.mux.HandleFunc("POST /api/chat-ends/backfill", r.handleBackfillChatEnds)
+	r.mux.HandleFunc("POST /api/streams/prepare", r.handlePrepareStreams)
+	r.mux.HandleFunc("POST /api/tasks/{id}/cancel", r.handleCancelPreparation)
 	r.mux.HandleFunc("GET /api/tasks", r.handleListTasks)
 	r.mux.HandleFunc("GET /api/tasks/{id}", r.handleGetTask)
 
@@ -3816,7 +3827,7 @@ func requiredPermission(method, path string) (perm string, needsAuth bool) {
 	// /api/streams/batch-analyze-report のような別ルートを足したときに黙って
 	// 巻き込む（認可は ServeMux より前に path 文字列だけで決まるため）。
 	if isRouteOrSubpath(path, "/api/streams/batch-fill") ||
-		isRouteOrSubpath(path, "/api/streams/batch-analyze") {
+		isRouteOrSubpath(path, "/api/streams/batch-analyze") || isRouteOrSubpath(path, "/api/streams/prepare") {
 		return auth.PermContentEdit, true
 	}
 
@@ -3848,7 +3859,7 @@ func requiredPermission(method, path string) (perm string, needsAuth bool) {
 
 	// 見直しが要る配信の一覧も content:edit。**GET は既定で公開に落ちる**ので、
 	// 書かないと「非表示にしている配信の題名」が未ログインから読める。
-	if isRouteOrSubpath(path, "/api/non-singing-candidates") {
+	if isRouteOrSubpath(path, "/api/non-singing-candidates") || isRouteOrSubpath(path, "/api/visibility-review") {
 		return auth.PermContentEdit, true
 	}
 

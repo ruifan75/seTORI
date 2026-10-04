@@ -433,6 +433,11 @@ export const nonSingingApi = {
 // yt-dlp を起動する backfill。以前は投げっぱなしで log にしか出なかったので、
 // 実行ごとの進捗と失敗の理由を task_runs に残して読めるようにした。
 export const taskApi = {
+  prepare: async (singerId: string): Promise<{ task_id: string }> => {
+    const { data } = await api.post('/api/streams/prepare', null, { params: { singer_id: singerId } });
+    return data;
+  },
+  cancel: async (id: string): Promise<void> => { await api.post(`/api/tasks/${id}/cancel`); },
   list: async (limit = 10): Promise<TaskRun[]> => {
     const { data } = await api.get('/api/tasks', { params: { limit } });
     return data.tasks ?? [];
@@ -1610,4 +1615,24 @@ export const integrationSettingsApi = {
     const { data } = await api.put('/api/settings/integrations', body);
     return data;
   },
+};
+
+
+export interface VisibilityCandidate {
+  id: string; title: string; stream_date: string; duration_seconds: number; tags: string[];
+}
+export interface VisibilityReviewRun {
+  id: string; status: 'preview' | 'applied' | 'reverted'; item_count: number; reverted_count: number;
+  created_at: string; applied_at: string | null; reverted_at: string | null;
+}
+export const visibilityReviewApi = {
+  list: async (dismissed: boolean, offset: number): Promise<{ candidates: VisibilityCandidate[]; total: number }> => {
+    const { data } = await api.get('/api/visibility-review', { params: { dismissed, offset, limit: 100 } }); return data;
+  },
+  preview: async (ids: string[]): Promise<{ run_id: string; count: number }> => {
+    const { data } = await api.post('/api/visibility-review/preview', { stream_ids: ids }); return data;
+  },
+  apply: async (id: string): Promise<{ changed: number }> => { const { data } = await api.post(`/api/visibility-review/runs/${id}/apply`); return data; },
+  revert: async (id: string): Promise<{ reverted: number; skipped: number }> => { const { data } = await api.post(`/api/visibility-review/runs/${id}/revert`); return data; },
+  runs: async (): Promise<VisibilityReviewRun[]> => { const { data } = await api.get('/api/visibility-review/runs'); return data.runs; },
 };

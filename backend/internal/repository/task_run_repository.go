@@ -28,6 +28,7 @@ type TaskFailure struct {
 type TaskRun struct {
 	ID         uuid.UUID       `json:"id"`
 	Kind       string          `json:"kind"`
+	Phase      string          `json:"phase"`
 	Status     string          `json:"status"`
 	Total      int             `json:"total"`
 	Done       int             `json:"done"`
@@ -106,7 +107,7 @@ func (r *TaskRunRepository) MarkInterrupted() (int64, error) {
 
 const taskRunSelect = `
 	SELECT t.id, t.kind, t.status, t.total, t.done, t.succeeded, t.skipped, t.failed,
-	       t.params, t.failures, t.message, u.username, t.started_at, t.finished_at
+	       t.params, t.failures, t.message, u.username, t.started_at, t.finished_at, t.phase
 	FROM task_runs t
 	LEFT JOIN users u ON u.id = t.started_by`
 
@@ -114,7 +115,7 @@ func scanTaskRun(row interface{ Scan(...any) error }) (TaskRun, error) {
 	var t TaskRun
 	var failures []byte
 	if err := row.Scan(&t.ID, &t.Kind, &t.Status, &t.Total, &t.Done, &t.Succeeded, &t.Skipped, &t.Failed,
-		&t.Params, &failures, &t.Message, &t.StartedBy, &t.StartedAt, &t.FinishedAt); err != nil {
+		&t.Params, &failures, &t.Message, &t.StartedBy, &t.StartedAt, &t.FinishedAt, &t.Phase); err != nil {
 		return t, err
 	}
 	if err := json.Unmarshal(failures, &t.Failures); err != nil || t.Failures == nil {
@@ -154,4 +155,9 @@ func (r *TaskRunRepository) FindByID(id uuid.UUID) (*TaskRun, error) {
 		return nil, fmt.Errorf("find task run: %w", err)
 	}
 	return &t, nil
+}
+
+func (r *TaskRunRepository) SetPhase(id uuid.UUID, phase string) error {
+	_, err := r.db.Exec(`UPDATE task_runs SET phase = $2 WHERE id = $1`, id, phase)
+	return err
 }
