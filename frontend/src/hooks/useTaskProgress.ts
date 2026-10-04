@@ -19,7 +19,7 @@ export function useTaskProgress(kind: MaintenanceTaskKind, taskId: string | null
     const task = query.data;
     if (!task || task.status === 'running' || completed.current === task.id) return;
     completed.current = task.id;
-    invalidateTaskResults(client, task);
+    void invalidateTaskResults(client, task);
     void client.invalidateQueries({ queryKey: ['tasks'] });
   }, [query.data, client]);
   return { ...query, isRunning: query.data?.status === 'running' || (!!taskId && !query.data) };

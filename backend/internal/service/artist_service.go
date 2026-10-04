@@ -256,7 +256,7 @@ const readingSystemPrompt = `あなたは日本の音楽（J-POP・アニソン�
 [{"index":0,"reading":"よねづけんし","confidence":0.95}]`
 
 type readingSuggestion struct {
-	Index      int     `json:"index"`
+	Index      *int    `json:"index"`
 	Reading    string  `json:"reading"`
 	Confidence float64 `json:"confidence"`
 }
@@ -286,11 +286,24 @@ func (s *ArtistService) backfillBatch(kind string, names []string) (map[int]stri
 		return nil, fmt.Errorf("parse ai readings: %w", err)
 	}
 
+	if suggestions == nil {
+		return nil, fmt.Errorf("AI の読み候補が配列ではありません")
+	}
 	out := make(map[int]string)
+	seen := make(map[int]bool)
 	for _, sg := range suggestions {
+		// 欠落/null と有効な 0 を区別する。対象を特定できない応答は保存しない。
+		if sg.Index == nil {
+			return nil, fmt.Errorf("AI の読み候補に index がありません")
+		}
+		index := *sg.Index
+		if index < 0 || index >= len(names) || seen[index] {
+			return nil, fmt.Errorf("AI の読み候補の index が不正です: %d", index)
+		}
+		seen[index] = true
 		// 信頼度が低いもの・読みとして不正なものは採用しない
-		if sg.Confidence >= 0.6 && isKanaReading(sg.Reading) && sg.Index >= 0 && sg.Index < len(names) {
-			out[sg.Index] = strings.TrimSpace(sg.Reading)
+		if sg.Confidence >= 0.6 && isKanaReading(sg.Reading) {
+			out[index] = strings.TrimSpace(sg.Reading)
 		}
 	}
 	return out, nil

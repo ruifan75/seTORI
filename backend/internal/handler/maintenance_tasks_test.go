@@ -54,20 +54,21 @@ func (a *maintenanceAI) SimpleChat(_, _ string) (string, error) {
 func (a *maintenanceAI) count() int { a.mu.Lock(); defer a.mu.Unlock(); return a.calls }
 
 type maintenanceDB struct {
-	mu                   sync.Mutex
-	tasks                map[string]repository.TaskRun
-	bad                  []string
-	gate                 chan struct{}
-	entered              chan struct{}
-	gateOnce             sync.Once
-	failCreate           bool
-	failQuery, failPhase string
-	failSave             map[string]bool
-	existing             map[string]bool
-	saved                []string
-	queries              int
-	empty                bool
-	shortScan            bool
+	mu                     sync.Mutex
+	tasks                  map[string]repository.TaskRun
+	bad                    []string
+	gate                   chan struct{}
+	entered                chan struct{}
+	gateOnce               sync.Once
+	failCreate, failFinish bool
+	finishAttempts         int
+	failQuery, failPhase   string
+	failSave               map[string]bool
+	existing               map[string]bool
+	saved                  []string
+	queries                int
+	empty                  bool
+	shortScan              bool
 }
 
 func (d *maintenanceDB) Connect(context.Context) (driver.Conn, error) {
@@ -150,12 +151,35 @@ func (c *maintenanceConn) ExecContext(_ context.Context, q string, args []driver
 		if len(v) != 3 {
 			return nil, d.unexpected(q, args)
 		}
+		d.finishAttempts++
+		if d.failFinish {
+			return nil, errors.New("finish storage unavailable")
+		}
 		r := d.tasks[fmt.Sprint(v[0])]
 		r.Status = fmt.Sprint(v[1])
 		r.Message = fmt.Sprint(v[2])
 		now := time.Now()
 		r.FinishedAt = &now
 		d.tasks[r.ID.String()] = r
+	case "UPDATE task_runs SET status = 'interrupted', finished_at = NOW(), message = CASE WHEN message = '' THEN 'サーバーの再起動で中断されました' ELSE message END WHERE status = 'running'":
+		if len(v) != 0 {
+			return nil, d.unexpected(q, args)
+		}
+		var n int64
+		for id, r := range d.tasks {
+			if r.Status != "running" {
+				continue
+			}
+			r.Status = "interrupted"
+			now := time.Now()
+			r.FinishedAt = &now
+			if r.Message == "" {
+				r.Message = "サーバーの再起動で中断されました"
+			}
+			d.tasks[id] = r
+			n++
+		}
+		return driver.RowsAffected(n), nil
 	case "UPDATE task_runs SET phase = $2 WHERE id = $1":
 		if len(v) != 2 {
 			return nil, d.unexpected(q, args)

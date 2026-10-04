@@ -1044,7 +1044,7 @@ function BackgroundTasks() {
     for (const task of tasks ?? []) {
       if (task.status === 'running' || completedTasks.current.has(task.id)) continue;
       completedTasks.current.add(task.id);
-      invalidateTaskResults(queryClient, task);
+      void invalidateTaskResults(queryClient, task);
     }
   }, [tasks, queryClient]);
 

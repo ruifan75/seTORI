@@ -191,8 +191,8 @@ JSON配列のみ。説明文を付けないこと。
 各要素: {"a":番号,"b":番号,"why":"30字以内の理由"}`
 
 type dupScanPair struct {
-	A   int    `json:"a"`
-	B   int    `json:"b"`
+	A   *int   `json:"a"`
+	B   *int   `json:"b"`
 	Why string `json:"why"`
 }
 
@@ -240,6 +240,12 @@ func (s *SongMatchService) ScanDuplicatesWithAI(aiClient ai.Chatter, run *TaskRu
 		return 0, fmt.Errorf("AI の応答を解析できませんでした: %w", err)
 	}
 
+	if pairs == nil {
+		err := fmt.Errorf("AI の候補が配列ではありません")
+		run.Fail("AI 走査", err.Error())
+		return 0, err
+	}
+
 	// 曲名キー走査が1件、AI が返した組はそれぞれ1件。候補なしでも走査完了を1件残す。
 	if len(pairs) == 0 {
 		run.Succeed()
@@ -248,11 +254,16 @@ func (s *SongMatchService) ScanDuplicatesWithAI(aiClient ai.Chatter, run *TaskRu
 	run.SetTotal(1 + len(pairs))
 	added := 0
 	for _, p := range pairs {
-		if p.A < 0 || p.A >= len(songs) || p.B < 0 || p.B >= len(songs) || p.A == p.B {
-			run.Fail("AI 走査", fmt.Sprintf("無効な候補の曲番号: %d / %d", p.A, p.B))
+		if p.A == nil || p.B == nil {
+			run.Fail("AI 走査", "候補に曲番号がありません")
 			continue
 		}
-		a, b := songs[p.A], songs[p.B]
+		aIndex, bIndex := *p.A, *p.B
+		if aIndex < 0 || aIndex >= len(songs) || bIndex < 0 || bIndex >= len(songs) || aIndex == bIndex {
+			run.Fail("AI 走査", fmt.Sprintf("無効な候補の曲番号: %d / %d", aIndex, bIndex))
+			continue
+		}
+		a, b := songs[aIndex], songs[bIndex]
 		ok, err := s.matchRepo.RecordScanCandidate(a.ID, b.ID, 0.0, "ai_scan")
 		if err != nil {
 			logger.Warnf("[dup] 候補の記録に失敗: %v", err)

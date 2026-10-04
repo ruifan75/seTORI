@@ -19,10 +19,12 @@ export const TASK_STATUS_LABELS: Record<string, string> = {
 };
 
 // 一部失敗・中断でも保存できた行はあるので、すべての終了状態で取り直す。
-export function invalidateTaskResults(client: QueryClient, task: Pick<TaskRun, 'kind' | 'status'>) {
+export async function invalidateTaskResults(client: QueryClient, task: Pick<TaskRun, 'kind' | 'status'>) {
   if (task.status === 'running') return;
   const keys = task.kind === 'readings_backfill'
     ? ['readings-stats', 'artists', 'artist', 'songs', 'song', 'global-search']
     : task.kind === 'duplicate_scan' ? ['song-merge-candidates', 'song'] : [];
-  for (const key of keys) void client.invalidateQueries({ queryKey: [key] });
+  // キャッシュがまだ無い初回取得も止める。invalidate だけだと古い取得を再利用する。
+  await Promise.all(keys.map((key) => client.cancelQueries({ queryKey: [key] })));
+  await Promise.all(keys.map((key) => client.invalidateQueries({ queryKey: [key] })));
 }

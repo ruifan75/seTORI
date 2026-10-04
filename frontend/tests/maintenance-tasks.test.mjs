@@ -6,7 +6,7 @@ import vm from 'node:vm';
 import ts from 'typescript';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { QueryClient } from '@tanstack/react-query';
+import { QueryClient, QueryObserver } from '@tanstack/react-query';
 
 const require = createRequire(import.meta.url);
 function loadTS(path, dependencies = {}) {
@@ -131,7 +131,7 @@ for (const scenario of scenarios) {
   });
 
   for (const status of ['done', 'failed', 'interrupted', 'cancelled']) {
-    test(`${scenario.page}: ${status} invalidates results including inactive cached details`, () => {
+    test(`${scenario.page}: ${status} invalidates results including inactive cached details`, async () => {
       const f = pageFixture(scenario);
       try {
         for (const key of [...scenario.keys, ['tasks', true], ['settings']]) f.client.setQueryData(key, { total: 1 });
@@ -140,6 +140,7 @@ for (const scenario of scenarios) {
         for (const key of scenario.keys) assert.equal(f.client.getQueryState(key).isInvalidated, false);
         f.setTask(task(scenario.kind, status));
         f.render();
+        await new Promise((resolve) => setImmediate(resolve));
         for (const key of [...scenario.keys, ['tasks', true]]) assert.equal(f.client.getQueryState(key).isInvalidated, true, JSON.stringify(key));
         assert.equal(f.client.getQueryState(['settings']).isInvalidated, false);
       } finally { f.client.clear(); }
@@ -176,7 +177,7 @@ test('API clients keep the original endpoints and return task IDs without synchr
 });
 
 for (const scenario of scenarios) {
-  test(`SyncPage: background history shows ${scenario.kind} and refreshes its results`, () => {
+  test(`SyncPage: background history shows ${scenario.kind} and refreshes its results`, async () => {
     const f = pageFixture({ ...scenario, page: 'SyncPage' });
     try {
       for (const key of scenario.keys) f.client.setQueryData(key, { total: 1 });
@@ -188,7 +189,41 @@ for (const scenario of scenarios) {
       for (const key of scenario.keys) assert.equal(f.client.getQueryState(key).isInvalidated, false);
       f.setTask(task(scenario.kind, 'failed'));
       f.render();
+      await new Promise((resolve) => setImmediate(resolve));
       for (const key of scenario.keys) assert.equal(f.client.getQueryState(key).isInvalidated, true, JSON.stringify(key));
     } finally { f.client.clear(); }
+  });
+}
+
+// 実 QueryObserver が開始した取得を、開始画面と管理の履歴の終了 effect から取り直す。
+const refreshScenarios = [...scenarios, ...scenarios.map((scenario) => ({ ...scenario, page: 'SyncPage' }))];
+for (const scenario of refreshScenarios) for (const status of ['done', 'failed', 'interrupted', 'cancelled']) {
+  for (const cached of [false, true]) test(`${scenario.page}/${scenario.kind}: ${status} refreshes pending results (cached=${cached})`, async () => {
+    const f = pageFixture(scenario);
+    const before = { revision: 'before' }, after = { revision: 'after' };
+    const pendingQueries = scenario.keys.map((key) => {
+      let release, calls = 0;
+      const pending = new Promise((resolve) => { release = resolve; });
+      if (cached) f.client.setQueryData(key, before);
+      const observer = new QueryObserver(f.client, { queryKey: key, staleTime: 0,
+        queryFn: () => ++calls === 1 ? pending : Promise.resolve(after) });
+      const unsubscribe = observer.subscribe(() => {});
+      return { key, release, unsubscribe, calls: () => calls };
+    });
+    try {
+      for (const query of pendingQueries) assert.equal(query.calls(), 1);
+      f.setTask(task(scenario.kind, 'running')); f.render();
+      f.setTask(task(scenario.kind, status)); f.render();
+      await new Promise((resolve) => setImmediate(resolve));
+      for (const query of pendingQueries) query.release(before);
+      await new Promise((resolve) => setImmediate(resolve));
+      for (const query of pendingQueries) {
+        assert.equal(query.calls(), 2, `${JSON.stringify(query.key)}: 古い初回の取得を再利用した`);
+        assert.deepEqual(f.client.getQueryData(query.key), after, `${JSON.stringify(query.key)}: 完了前の結果が残った`);
+      }
+    } finally {
+      for (const query of pendingQueries) { query.release(before); query.unsubscribe(); }
+      f.client.clear();
+    }
   });
 }

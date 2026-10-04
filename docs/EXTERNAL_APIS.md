@@ -121,6 +121,8 @@
   3. **読み仮名の補完**：`POST /api/ai/backfill-readings`（曲名・アーティスト各 30 件）。
      背景処理 `readings_backfill` の開始応答は `202` と `task_id`。行ごとに保存成功・
      見送り（読みの提案なし／低信頼）・失敗（AI／保存）を記録する。
+     対象番号の欠落・範囲外・重複、または配列でない応答は、そのバッチを保存せず
+     失敗にする。別の正常なバッチは続ける。
   4. **重複楽曲の走査・判定**：`POST /api/songs/merge-candidates/scan`（登録曲を丸ごと見せる）、
      `scan` は曲名キー走査と AI 走査を背景処理 `duplicate_scan` にまとめ、`202` と
      `task_id` を返す。`POST /api/songs/merge-candidates/adjudicate` は同期のまま。
