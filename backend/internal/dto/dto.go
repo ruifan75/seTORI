@@ -115,6 +115,9 @@ type SingerResponse struct {
 type SingerListResponse struct {
 	Singers    []SingerResponse   `json:"singers"`
 	Pagination PaginationResponse `json:"pagination"`
+	// HiddenTotal は非表示チャンネルの総数（非表示を含めて引いたときだけ）。
+	// 並びは表示中が先なので、区の見出しに出す件数として使う（issue #65）。
+	HiddenTotal *int `json:"hidden_total,omitempty"`
 }
 
 // SingerGroupResponse は事務所ごとにまとめたチャンネル。
@@ -170,8 +173,14 @@ type UpdateSingerOrganizationRequest struct {
 // SingerGroupListResponse は事務所別のチャンネル一覧。
 // グループを跨いだページ送りは意味を成さないので、ページングせず全件返す。
 type SingerGroupListResponse struct {
+	// Groups は**表示中の**チャンネルを事務所ごとに。
 	Groups []SingerGroupResponse `json:"groups"`
-	Total  int                   `json:"total"`
+	// Hidden は非表示チャンネルを名前順で（content:edit のときだけ。issue #65）。
+	// 事務所の組へ混ぜないのは、組のほとんどが非表示だけになって表示中が埋もれるため。
+	// nil は閲覧者向けの省略。編集者には 0 件でも [] を返すので件数を表示できる。
+	Hidden *[]SingerResponse `json:"hidden,omitempty"`
+	// Total は Groups と Hidden の合計。
+	Total int `json:"total"`
 }
 
 // UpdateSingerVisibilityRequest はチャンネルの非表示切り替え。
