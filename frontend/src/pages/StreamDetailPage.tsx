@@ -24,6 +24,7 @@ import RawCommentsPanel from '../components/RawCommentsPanel';
 import SourceSongList from '../components/SourceSongList';
 import ArtistLinks from '../components/ArtistLinks';
 import { extractRawCommentTimestamps } from '../utils/rawCommentTimestamps';
+import { analysisFailureMessage } from '../utils/apiError';
 
 
 // 編集可能な配信情報
@@ -347,6 +348,8 @@ export default function StreamDetailPage() {
     mutationFn: (req: UpdateStreamRequest) => streamApi.update(id!, req),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['stream', id] });
+      // 裁定・タグ（members_only）・参加者はどれも見直し一覧（issue #26）の材料
+      queryClient.invalidateQueries({ queryKey: ['restriction-review'] });
     },
     onError: (err: Error) => {
       showToast(`更新エラー: ${err.message}`, 'error');
@@ -452,6 +455,7 @@ export default function StreamDetailPage() {
     mutationFn: () => holodexApi.syncVideo(id!),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['stream', id] });
+      queryClient.invalidateQueries({ queryKey: ['restriction-review'] });
       showToast(
         `同期完了: ${data.synced_count > 0 ? `${data.synced_count}件更新` : '変更なし'}`,
         'success'
@@ -647,7 +651,7 @@ export default function StreamDetailPage() {
       const mergeMsg = mergedCount > 0 ? `（${mergedCount}曲の重複を統合）` : '';
       showToast(`Holodexから${merged.length}曲を読み込みました${mergeMsg}`, 'success');
     } catch (error) {
-      showToast('Holodex分析に失敗しました', 'error');
+      showToast(analysisFailureMessage('Holodex分析', error), 'error');
       console.error('Holodex analysis failed:', error);
     } finally {
       setHolodexAnalyzeLoading(false);
@@ -680,7 +684,7 @@ export default function StreamDetailPage() {
       const mergeMsg = mergedCount > 0 ? `（${mergedCount}曲の重複を統合）` : '';
       showToast(`コメントから${merged.length}曲を読み込みました${mergeMsg}`, 'success');
     } catch (error) {
-      showToast('コメント分析に失敗しました', 'error');
+      showToast(analysisFailureMessage('コメント分析', error), 'error');
       console.error('Comment analysis failed:', error);
     } finally {
       setCommentAnalyzeLoading(false);
@@ -716,7 +720,7 @@ export default function StreamDetailPage() {
         showToast(`チャプターから${merged.length}曲を読み込みました`, 'success');
       }
     } catch (error) {
-      showToast('チャプター分析に失敗しました', 'error');
+      showToast(analysisFailureMessage('チャプター分析', error), 'error');
       console.error('Chapter analysis failed:', error);
     } finally {
       setChapterAnalyzeLoading(false);
@@ -1821,6 +1825,42 @@ export default function StreamDetailPage() {
                       <span className="text-sm font-medium text-gray-700">セットリスト非公開</span>
                       <span className="text-xs text-gray-500">歌唱を編集者だけに見せる（会限など、公開可否が未確認のもの）</span>
                     </label>
+                    {/* **公開の裁定と現在の会限判定が食い違う**（issue #26）。控えが無い旧裁定も
+                        含むため、検出と裁定の前後関係は断定しない。
+                        上書きはしない（裁定の意味が無くなる）── 食い違いを見せて人に決めさせる。
+                        どちらを押しても裁定を書き直すので、その時点の判定が控えられて消える。 */}
+                    {stream.restriction_needs_review ? (
+                      <div className="text-xs text-red-800 bg-red-50 border border-red-200 rounded px-2 py-1.5 space-y-1.5">
+                        <p>
+                          この配信は<strong>会限として検出されています</strong>が、セットリストを
+                          「公開してよい」という裁定が残っています。裁定時点の判定が不明な場合もあるため、公開可否を確認してください。
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => quickSaveStream({ is_restricted: true })}
+                            className="px-2 py-0.5 rounded bg-red-600 text-white hover:bg-red-700"
+                          >
+                            非公開にする
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => quickSaveStream({ is_restricted: false })}
+                            className="px-2 py-0.5 rounded border border-red-300 text-red-800 hover:bg-red-100"
+                          >
+                            公開のまま（確認済み）
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      stream.restriction_override !== undefined && (
+                        // 実効値だけでは「チャンネルの方針で公開」と「この配信だけ公開と裁定」が
+                        // 見分けられない。後者は方針を変えても動かないので、そう言っておく。
+                        <p className="text-xs text-gray-500">
+                          この配信だけ個別に「{stream.restriction_override ? '非公開' : '公開してよい'}」と裁定済みです（チャンネルの方針より優先）。
+                        </p>
+                      )
+                    )}
                     {/* **seTORI を伏せても Holodex のコピーは残りうる。** 向こうへは運用者の名義で
                         書き込んでおり、seTORI からは取り消せない。
 

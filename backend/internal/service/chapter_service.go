@@ -221,15 +221,19 @@ func (s *ChapterService) analyzeChapters(videoID string, force, adjudicate bool)
 
 // Backfill はチャプターをまだ取得していない配信を順に取りに行く（同時実行数に上限あり）。
 // 一括セットリスト作成の前に流しておくためのもの。
-func (s *ChapterService) Backfill(concurrency int) {
+//
+// 結果は run（task_runs）へ 1 件ずつ記録する（issue #22）。
+func (s *ChapterService) Backfill(concurrency int, run *TaskRun) {
 	ids, err := s.streamRepo.FindIDsWithoutChapterRaw()
 	if err != nil {
 		logger.Warnf("[chapter] backfill: list streams failed: %v", err)
+		run.Finish("failed", "対象の取得に失敗しました: "+err.Error())
 		return
 	}
 	if concurrency < 1 {
 		concurrency = 1
 	}
+	run.SetTotal(len(ids))
 	logger.Infof("[chapter] backfill を開始: %d 件 (concurrency=%d)", len(ids), concurrency)
 
 	sem := make(chan struct{}, concurrency)
@@ -242,10 +246,17 @@ func (s *ChapterService) Backfill(concurrency int) {
 			defer wg.Done()
 			defer func() { <-sem }()
 			chapters, err := s.RefreshChapters(id)
-			if err != nil {
+			switch {
+			case err != nil:
 				logger.Warnf("[chapter] backfill %s: %v", id, err)
-			} else if len(chapters) > 0 {
+				run.Fail(id, err.Error())
+			case len(chapters) > 0:
 				atomic.AddInt64(&withChapters, 1)
+				run.Succeed()
+			default:
+				// 取得できたが章節が無い。**失敗ではない**（`chapter_raw = []` として
+				// 記録済みで、次から対象に入らない）。成功に数える。
+				run.Succeed()
 			}
 			if n := atomic.AddInt64(&done, 1); n%10 == 0 || int(n) == len(ids) {
 				logger.Infof("[chapter] backfill の進捗: %d/%d", n, len(ids))
@@ -253,7 +264,8 @@ func (s *ChapterService) Backfill(concurrency int) {
 		}(id)
 	}
 	wg.Wait()
-	logger.Infof("[chapter] backfill が完了: %d 件中 %d 件にチャプターあり", len(ids), atomic.LoadInt64(&withChapters))
+	run.Finish("done", fmt.Sprintf("%d 件中 成功 %d（うちチャプターあり %d）・失敗 %d",
+		len(ids), len(ids)-run.FailedCount(), atomic.LoadInt64(&withChapters), run.FailedCount()))
 }
 
 // fetchChapters は yt-dlp に章節だけを出力させる。
@@ -263,7 +275,6 @@ func (s *ChapterService) Backfill(concurrency int) {
 func (s *ChapterService) fetchChapters(videoID string) ([]Chapter, error) {
 	args := []string{
 		"--skip-download",
-		"--no-warnings",
 		"--socket-timeout", "30",
 		// 映像フォーマットは 1 つも要らない。これが無いと、フォーマット一覧が空だった
 		// ときに yt-dlp は「Requested format is not available」で止まる（本番の
@@ -301,7 +312,7 @@ func (s *ChapterService) fetchChapters(videoID string) ([]Chapter, error) {
 
 	out := firstNonEmptyLine(stdout.String())
 	if out == "" || out == "NA" || out == "null" {
-		return []Chapter{}, nil // 章節の無い動画。これも結果なので空配列で保存する
+		return emptyChapterResult(stderr.String())
 	}
 
 	var raw []struct {
@@ -321,8 +332,20 @@ func (s *ChapterService) fetchChapters(videoID string) ([]Chapter, error) {
 		}
 		chapters = append(chapters, Chapter{Start: int(c.Start), End: int(c.End), Title: title})
 	}
+	if len(chapters) == 0 {
+		return emptyChapterResult(stderr.String())
+	}
 	sort.Slice(chapters, func(i, j int) bool { return chapters[i].Start < chapters[j].Start })
 	return chapters, nil
+}
+
+// 警告を消さず、空出力・NA・null・空配列を同じ基準で判定する。
+// 有効な章節が得られた場合は、補助取得の警告だけでは捨てない。
+func emptyChapterResult(stderr string) ([]Chapter, error) {
+	if isTransientFailure(stderr) {
+		return nil, fmt.Errorf("チャプターを取得できませんでした（一時的な失敗）: %s", ytdlpErrorLine(stderr))
+	}
+	return []Chapter{}, nil
 }
 
 // chaptersAsText は章節を 1 通のコメントに組み直す。

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import RestrictedBadge from '../components/RestrictedBadge';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { isAxiosError } from 'axios';
+import { apiErrorMessage } from '../utils/apiError';
 import { useParams, useSearchParams, Link, useNavigate } from 'react-router-dom';
 import { songApi, itunesApi, suggestionApi } from '../api/client';
 import type {
@@ -32,13 +32,6 @@ function formatTime(seconds: number): string {
     return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   }
   return `${m}:${s.toString().padStart(2, '0')}`;
-}
-
-function apiErrorMessage(error: unknown, fallback: string): string {
-  if (isAxiosError<{ message?: string; error?: string }>(error)) {
-    return error.response?.data?.message || error.response?.data?.error || fallback;
-  }
-  return error instanceof Error && error.message ? error.message : fallback;
 }
 
 // 楽曲検索入力コンポーネントの Props

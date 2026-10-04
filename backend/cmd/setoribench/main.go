@@ -17,8 +17,9 @@
 // AI を使うモードはローカル DB の ai_providers を使う。呼び出しは高コストなので -cache で
 // ディスクに保存し、-struct の on/off 再実行は同じ AI 結果を使い回す。
 //
-// ⚠️ キャッシュは stream ID だけをキーにしている。モードが違えば結果も違うので、
-// モードごとに別のパスを渡すこと。プロンプトを変えて測り直すときも同じで、
+// キャッシュは stream ID をキーにし、mode と実際の抽出経路も記録する。
+// モードの違うエントリは再利用しない。モードごとに別のパスを渡すこと。
+// 経路の無い旧形式は警告して再抽出する。プロンプトを変えて測り直すときも別パスで、
 // 前の版の結果を読むと「変えたのに何も変わらない」ように見える。
 //
 //	go run ./cmd/setoribench -mode ai       -cache /tmp/bench-ai.json
@@ -41,8 +42,10 @@
 // 抽出のルールやプロンプトを変えるときは **雑音（-ids）と取りこぼし（GT）の両方**を
 // 見ること。厳しくすれば雑音は減るが曲まで落ちる。片方だけ見ると改悪に気づけない。
 //
-// 抽出後は FilterSongsWith(structural) -> Dedup -> Validate を通し、抽出タイムスタンプを
+// 抽出後は経路に応じた FilterSongsWith(structural) -> Dedup -> Validate を通し、抽出タイムスタンプを
 // ground truth と start 近接で突き合わせて precision/recall を出す。
+// 辞書と keep は regex（AI 失敗時の退避を含む）だけで適用する。stored は保存済みの
+// 後処理結果なので辞書を重ねず、-nofilter で構造フィルタも外せる。
 //
 // grouped は AI 側で既に重複排除されているため、後段の DeduplicateSongs は
 // ほぼ素通りになる。両者の統合判断の差は、precision/recall と extracted 件数に表れる。
@@ -63,10 +66,18 @@ import (
 
 	"github.com/ruifan75/setori/internal/repository"
 	"github.com/ruifan75/setori/internal/service"
+	"github.com/ruifan75/setori/pkg/ai"
 	"github.com/ruifan75/setori/pkg/comment"
 )
 
 const matchThreshold = 20 // 秒: 抽出 start が GT start とこの範囲内なら「一致」とみなす
+
+// キャッシュにも実際の経路を残す。regex 退避を AI 成功と読み替えると辞書が外れる。
+type cachedExtraction struct {
+	Mode  string               `json:"mode"`
+	Path  string               `json:"path"`
+	Songs []comment.ParsedSong `json:"songs"`
+}
 
 type gtSong struct {
 	start  int
@@ -96,7 +107,7 @@ func benchCipher() *secrets.Cipher {
 func main() {
 	dbURL := flag.String("db", envOr("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/setori?sslmode=disable"), "database URL")
 	mode := flag.String("mode", "regex", "extraction mode: regex | ai | combined | grouped | stored (DB の comment_songs をそのまま評価)")
-	structural := flag.Bool("struct", true, "apply structural non-song filter (false = keyword-only baseline)")
+	structural := flag.Bool("struct", true, "apply structural non-song filter (keyword scope always follows the extraction path)")
 	noFilter := flag.Bool("nofilter", false, "skip FilterSongs entirely (stored の as-is 評価用)")
 	limit := flag.Int("limit", 0, "limit number of streams (0 = all)")
 	cachePath := flag.String("cache", "", "path to cache AI extraction JSON (avoids re-hitting the API)")
@@ -179,12 +190,14 @@ func main() {
 
 		// ---- 抽出（production と同じ経路）----
 		var parsed []comment.ParsedSong
+		path := "stored"
 		var usedRegexFallback bool
 		if *mode == "stored" {
 			parsed = loadStoredSongs(db, sid) // DB に保存済みの AI 分析結果をそのまま使う
 		} else {
-			_, cached := cacheGet(cache, sid)
-			parsed, usedRegexFallback = extract(*mode, sid, comments, aiSvc, cache)
+			_, cached := cacheGet(cache, sid, *mode)
+			parsed, path = extract(*mode, sid, comments, aiSvc, cache)
+			usedRegexFallback = usesAI(*mode) && path == "regex"
 			if usedRegexFallback {
 				aiFail++
 			}
@@ -203,14 +216,8 @@ func main() {
 			}
 		}
 
-		// ---- filter -> dedup -> validate（production と同じ後処理）----
-		// -nofilter のときは FilterSongs を通さず、抽出をそのまま評価（stored の as-is 計測用）。
-		filtered := parsed
-		if !*noFilter {
-			filtered = comment.FilterSongsWith(parsed, filterKW, keepKW, *structural)
-		}
-		deduped := comment.DeduplicateSongs(filtered)
-		valid := comment.ValidateSongs(deduped)
+		// ---- filter -> dedup -> validate（辞書の範囲は production と共有）----
+		valid := postprocess(parsed, path, filterKW, keepKW, *structural, *noFilter)
 
 		// 抽出したものを全部書き出す（GT の有無によらず）。
 		// プロンプトを変えた前後で「同じ配信から何が出てくるようになったか」を比べる用。
@@ -345,17 +352,16 @@ func usesAI(mode string) bool { return mode == "ai" || mode == "combined" || mod
 
 // extract は mode に応じて production と同じ抽出を行う。
 // ai / combined モードでは AI を呼び、失敗時は ParseComments に退避（parseComments と同じ挙動）。
-// cache があれば AI 結果を再利用し、無ければ呼び出して保存する。
-func extract(mode, sid string, comments []string, aiSvc *service.AIService, cache map[string][]comment.ParsedSong) (songs []comment.ParsedSong, usedRegexFallback bool) {
+// 同じ mode の cache があれば結果と経路を再利用し、無ければ呼び出して保存する。
+func extract(mode, sid string, comments []string, aiSvc ai.Chatter, cache map[string]cachedExtraction) (songs []comment.ParsedSong, path string) {
 	if !usesAI(mode) {
-		return comment.ParseComments(comments), false
+		return comment.ParseComments(comments), "regex"
 	}
-	if cache != nil {
-		if cached, ok := cache[sid]; ok {
-			return cached, false
-		}
+	if cached, ok := cacheGet(cache, sid, mode); ok {
+		return cached.Songs, cached.Path
 	}
 
+	path = mode
 	var err error
 	switch mode {
 	case "grouped":
@@ -368,16 +374,27 @@ func extract(mode, sid string, comments []string, aiSvc *service.AIService, cach
 		// Tags も埋めるため、タグ付与の正しさは -struct 併用で出力を目視すること。
 		songs, err = comment.ParseAndNormalizeWithAI(aiSvc, comments)
 	default:
+		path = "two_stage"
 		songs, err = comment.ParseCommentsWithAI(aiSvc, comments)
 	}
 	if err != nil {
 		songs = comment.ParseComments(comments)
-		usedRegexFallback = true
+		path = "regex"
 	}
 	if cache != nil {
-		cache[sid] = songs
+		cache[sid] = cachedExtraction{Mode: mode, Path: path, Songs: songs}
 	}
-	return songs, usedRegexFallback
+	return songs, path
+}
+
+// -nofilter は FilterSongs だけを外す。重複排除と妥当性検証は従来どおり通す。
+func postprocess(parsed []comment.ParsedSong, path string, filterKW, keepKW []string, structural, noFilter bool) []comment.ParsedSong {
+	filtered := parsed
+	if !noFilter {
+		dict, keep := service.FilterScopeForPath(path, filterKW, keepKW)
+		filtered = comment.FilterSongsWith(parsed, dict, keep, structural)
+	}
+	return comment.ValidateSongs(comment.DeduplicateSongs(filtered))
 }
 
 func bestGTMatch(start int, gt []gtSong, used []bool) int {
@@ -412,27 +429,28 @@ func firstLine(s string) string {
 	return s
 }
 
-func cacheGet(cache map[string][]comment.ParsedSong, sid string) ([]comment.ParsedSong, bool) {
-	if cache == nil {
-		return nil, false
-	}
+func cacheGet(cache map[string]cachedExtraction, sid, mode string) (cachedExtraction, bool) {
 	v, ok := cache[sid]
-	return v, ok
+	return v, ok && v.Mode == mode && v.Path != ""
 }
 
-func loadCache(path string) map[string][]comment.ParsedSong {
-	cache := map[string][]comment.ParsedSong{}
+func loadCache(path string) map[string]cachedExtraction {
+	cache := map[string]cachedExtraction{}
 	if path == "" {
 		return nil
 	}
 	b, err := os.ReadFile(path)
 	if err == nil {
-		json.Unmarshal(b, &cache)
+		if err := json.Unmarshal(b, &cache); err != nil {
+			// 旧形式には抽出経路が無く、AI 成功と regex 退避を区別できない。
+			fmt.Fprintf(os.Stderr, "warning: cache %s を読み込めません（旧形式は抽出経路が不明のため再抽出します）: %v\n", path, err)
+			return map[string]cachedExtraction{}
+		}
 	}
 	return cache
 }
 
-func saveCache(path string, cache map[string][]comment.ParsedSong) {
+func saveCache(path string, cache map[string]cachedExtraction) {
 	b, _ := json.MarshalIndent(cache, "", " ")
 	os.WriteFile(path, b, 0o644)
 }

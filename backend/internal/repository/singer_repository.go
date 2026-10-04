@@ -54,21 +54,16 @@ func hiddenClause(includeHidden bool, keyword string) string {
 }
 
 // FindAll はすべての歌手を取得する。includeHidden=false なら非表示チャンネルを除く。
-func (r *SingerRepository) FindAll(limit, offset int, sort, dir string, includeHidden bool) ([]models.Singer, int, error) {
+// hidden は（includeHidden のとき）非表示チャンネルの総数。一覧で区の見出しに出す。
+func (r *SingerRepository) FindAll(limit, offset int, sort, dir string, includeHidden bool) (singers []models.Singer, total, hidden int, err error) {
 	where := hiddenClause(includeHidden, "WHERE")
 
-	var total int
-	err := r.db.QueryRow("SELECT COUNT(*) FROM singers s" + where).Scan(&total)
+	err = r.db.QueryRow("SELECT COUNT(*), COUNT(*) FILTER (WHERE s.is_hidden) FROM singers s"+where).Scan(&total, &hidden)
 	if err != nil {
-		return nil, 0, fmt.Errorf("count singers: %w", err)
+		return nil, 0, 0, fmt.Errorf("count singers: %w", err)
 	}
 
-	// 既定は名前の五十音順。"organization" 指定で事務所順（名前を第2キー）。
-	// 事務所は表示名と並び順で並べる（key の文字列順ではない）。所属なしは最後。
-	order := nameSortOrderDir("s.name", "''", dir)
-	if sort == "organization" {
-		order = organizationGroupOrder(normDir(dir)) + ", " + nameSortOrder("s.name", "''")
-	}
+	order := singerListOrder(sort, dir, includeHidden)
 
 	query := `
 		SELECT ` + singerColumns + `
@@ -78,7 +73,52 @@ func (r *SingerRepository) FindAll(limit, offset int, sort, dir string, includeH
 
 	rows, err := r.db.Query(query, limit, offset)
 	if err != nil {
-		return nil, 0, fmt.Errorf("query singers: %w", err)
+		return nil, 0, 0, fmt.Errorf("query singers: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		s, err := scanSinger(rows)
+		if err != nil {
+			return nil, 0, 0, fmt.Errorf("scan singer: %w", err)
+		}
+		singers = append(singers, s)
+	}
+
+	return singers, total, hidden, rows.Err()
+}
+
+// singerListOrder は一覧（ページングあり）の並び順。
+//
+// 既定は名前の五十音順。"organization" 指定で事務所順（名前を第2キー）。
+// 事務所は表示名と並び順で並べる（key の文字列順ではない）。所属なしは最後。
+//
+// **非表示を含めるときは `is_hidden` を第 1 キーにする**（issue #65）。表示中を先に、
+// 非表示を後ろに。ページングがあるので画面側で分けると 2 ページ目以降で区が割れる。
+// 手元で 152 件中 151 件が非表示で、混ぜて並べると表示中の 1 件が埋もれていた。
+// 事務所順を選んだときも先に 2 区へ割れる（区の中で事務所順）。
+func singerListOrder(sort, dir string, includeHidden bool) string {
+	order := nameSortOrderDir("s.name", "''", dir)
+	if sort == "organization" {
+		order = organizationGroupOrder(normDir(dir)) + ", " + nameSortOrder("s.name", "''")
+	}
+	if includeHidden {
+		order = "s.is_hidden ASC, " + order
+	}
+	return order
+}
+
+// FindHiddenByName は非表示チャンネルを名前順で返す（事務所別表示の「非表示」区）。
+//
+// 事務所では組まない。非表示の区を事務所別にすると、畳んだ中がまた 18 段になる。
+// **呼び出し側が権限を確かめること**（content:edit のときだけ呼ぶ）。
+func (r *SingerRepository) FindHiddenByName() ([]models.Singer, error) {
+	rows, err := r.db.Query(`
+		SELECT ` + singerColumns + `
+		` + singerFrom + ` WHERE s.is_hidden
+		ORDER BY ` + nameSortOrder("s.name", "''"))
+	if err != nil {
+		return nil, fmt.Errorf("query hidden singers: %w", err)
 	}
 	defer rows.Close()
 
@@ -86,12 +126,11 @@ func (r *SingerRepository) FindAll(limit, offset int, sort, dir string, includeH
 	for rows.Next() {
 		s, err := scanSinger(rows)
 		if err != nil {
-			return nil, 0, fmt.Errorf("scan singer: %w", err)
+			return nil, fmt.Errorf("scan hidden singer: %w", err)
 		}
 		singers = append(singers, s)
 	}
-
-	return singers, total, nil
+	return singers, rows.Err()
 }
 
 // organizationGroupOrder は事務所グループの並び順を返す。
@@ -112,10 +151,14 @@ const unaffiliatedLast = `CASE WHEN ` + effectiveOrg + ` IS NULL OR COALESCE(o.i
 // FindAllGrouped は事務所別表示用に全件を「事務所 → 名前（五十音）」順で返す。
 // グループを跨ぐページ送りは意味を成さないため、ここではページングしない。
 // 所属なし（NULL）は最後にまとめる。
-func (r *SingerRepository) FindAllGrouped(includeHidden bool) ([]models.Singer, error) {
+//
+// **表示中のチャンネルだけを返す**（issue #65）。非表示は事務所の組へ混ぜず、
+// `FindHiddenByName` で別に引く ── 混ぜると事務所の組 19 個のうち 18 個が
+// 中身が全部非表示になり、表示中のものを探すのがいちばん難しくなっていた。
+func (r *SingerRepository) FindAllGrouped() ([]models.Singer, error) {
 	query := `
 		SELECT ` + singerColumns + `
-		` + singerFrom + hiddenClause(includeHidden, "WHERE") + `
+		` + singerFrom + hiddenClause(false, "WHERE") + `
 		ORDER BY ` + organizationGroupOrder("ASC") + `,
 			` + nameSortOrder("s.name", "''")
 	// 所属なし扱いの組は複数の key（NULL と Independents など）が混ざるが、

@@ -36,6 +36,20 @@ type AutoFillSettings struct {
 	// 取り直すと外部 API を 1 本につき 1 回叩くことになるので、日数で切る
 	// （古い配信に今さら歌単が貼られることは稀）。
 	RefreshDays int `json:"refresh_days"`
+	// IncludeCollabs は**参加しただけの配信（客串）も対象にする**か（issue #60）。
+	//
+	// 既定は所有者の配信だけ。本番で稀羽すうが参加者どまりの配信 52 本は、
+	// 全部人が手で歌単を作っていた ── 運用は客串も収めているのに、自動処理は
+	// 一度も触っていなかった。
+	//
+	// **取り直しと一括作成の両方に同じ値を渡す。** 片方だけ広げても成立しない
+	// ── 歌単は配信後に貼られることが多いのに、同期は新規のときしか取り直さないので、
+	// 取り直しが所有者のままだと一括作成は空の入力を見続ける。
+	//
+	// 客串の配信は歌手が複数居るので、一括作成は**全行を審査へ回す**
+	// （`hasMultipleSingers`）。誰が歌ったかを機械が決めることは無い。
+	// mention されただけの告知・企画枠も入るが、そちらも審査で落とせる。
+	IncludeCollabs bool `json:"include_collabs"`
 }
 
 // AutoFillLastRun は最後の実行の記録（設定とは別キー。上の注記）。
@@ -135,7 +149,7 @@ func (s *AutoFillService) saveSettings(settings AutoFillSettings) error {
 }
 
 // UpdateSettings は画面から変更できる項目だけを上書きする。
-func (s *AutoFillService) UpdateSettings(enabled bool, intervalHours, refreshDays int) (AutoFillSettings, error) {
+func (s *AutoFillService) UpdateSettings(enabled bool, intervalHours, refreshDays int, includeCollabs bool) (AutoFillSettings, error) {
 	clamp := func(v, min, max int) int {
 		if v < min {
 			return min
@@ -151,6 +165,7 @@ func (s *AutoFillService) UpdateSettings(enabled bool, intervalHours, refreshDay
 	// 何度も触ることになるため（上の IntervalHours の注記）。
 	settings.IntervalHours = clamp(intervalHours, 1, 24*7)
 	settings.RefreshDays = clamp(refreshDays, 1, 365)
+	settings.IncludeCollabs = includeCollabs
 	if err := s.saveSettings(settings); err != nil {
 		return settings, err
 	}
@@ -246,6 +261,11 @@ func (s *AutoFillService) RunOnce() (AutoFillResult, error) {
 		}
 	}()
 
+	// **設定は 1 回の実行で 1 度だけ読む。** 取り直しと一括作成に別々に読むと、
+	// 途中で設定を変えたとき「取り直しは所有者だけ・一括は客串も」のように
+	// 2 段がずれる（IncludeCollabs の注記）。
+	settings := s.GetSettings()
+
 	targets, err := s.singerRepo.FindAutoFillTargets()
 	if err != nil {
 		return res, fmt.Errorf("対象チャンネルの取得に失敗: %w", err)
@@ -297,7 +317,7 @@ func (s *AutoFillService) RunOnce() (AutoFillResult, error) {
 	for id := range justSynced {
 		syncedIDs = append(syncedIDs, id)
 	}
-	refreshed, refreshFailures := s.refreshComments(singerIDs, s.GetSettings().RefreshDays, syncedIDs)
+	refreshed, refreshFailures := s.refreshComments(singerIDs, settings.RefreshDays, syncedIDs, settings.IncludeCollabs)
 	res.Refreshed = refreshed
 	res.Failures += refreshFailures
 
@@ -309,7 +329,7 @@ func (s *AutoFillService) RunOnce() (AutoFillResult, error) {
 		return res, nil // defer が予約を解放する
 	}
 
-	runID, err := s.batchFill.StartReserved(BatchFillModeUnprocessed, singerIDs, false, nil)
+	runID, err := s.batchFill.StartReserved(BatchFillModeUnprocessed, singerIDs, settings.IncludeCollabs, nil)
 	if err != nil {
 		// StartReserved は失敗時に自分で予約を解放する。
 		reserved = false
@@ -340,8 +360,8 @@ func (s *AutoFillService) RunOnce() (AutoFillResult, error) {
 // （自動処理は既存の歌単に触らない）、取り直しは外部 API を叩く。
 // justSynced はこの実行の同期で入ってきた配信。**除外の判断は SQL 側**で行う
 // （新規というだけでは取得できた証拠にならないため。repository の注記）。
-func (s *AutoFillService) refreshComments(singerIDs []string, days int, justSynced []string) (refreshed, failures int) {
-	ids, err := s.streamRepo.FindStreamsNeedingCommentRefresh(singerIDs, days, justSynced)
+func (s *AutoFillService) refreshComments(singerIDs []string, days int, justSynced []string, includeCollabs bool) (refreshed, failures int) {
+	ids, err := s.streamRepo.FindStreamsNeedingCommentRefresh(singerIDs, days, justSynced, includeCollabs)
 	if err != nil {
 		logger.Warnf("[auto-fill] コメント取り直しの対象取得に失敗: %v", err)
 		return 0, 1

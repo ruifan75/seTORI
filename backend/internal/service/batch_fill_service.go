@@ -14,6 +14,19 @@ import (
 	"github.com/ruifan75/setori/pkg/songmatch"
 )
 
+// batchCommentAnalyzer は一括が使うコメント分析の入口。競合後の読み直しも同じ入口を通す。
+type batchCommentAnalyzer interface {
+	AnalyzeCommentsForBatch(string, bool) (*dto.AnalyzeCommentsResponse, error)
+}
+
+// 他の入力元も同じ読み込み契約で扱う。失敗・見送りと正常な 0 件を区別する。
+type batchHolodexAnalyzer interface {
+	AnalyzeHolodexSongsForBatch(string, bool) ([]dto.SongSuggestion, error)
+}
+type batchChapterAnalyzer interface {
+	AnalyzeChaptersForBatch(string) (*dto.AnalyzeCommentsResponse, error)
+}
+
 // BatchFillService は範囲を指定してセットリストを自動で埋めるジョブ（singleton）。
 //
 // 一括プレ分析（BatchAnalyzeService）とは性質が違う。あちらは
@@ -29,9 +42,9 @@ type BatchFillService struct {
 	streamRepo     *repository.StreamRepository
 	perfRepo       *repository.PerformanceRepository
 	runRepo        *repository.BatchFillRepository
-	commentService *CommentService
-	holodexService *HolodexService
-	chapterService *ChapterService
+	commentService batchCommentAnalyzer
+	holodexService batchHolodexAnalyzer
+	chapterService batchChapterAnalyzer
 	normalization  *NormalizationService
 	perfService    *PerformanceService
 	suggestions    *SuggestionService
@@ -95,9 +108,9 @@ func NewBatchFillService(
 	streamRepo *repository.StreamRepository,
 	perfRepo *repository.PerformanceRepository,
 	runRepo *repository.BatchFillRepository,
-	commentService *CommentService,
-	holodexService *HolodexService,
-	chapterService *ChapterService,
+	commentService batchCommentAnalyzer,
+	holodexService batchHolodexAnalyzer,
+	chapterService batchChapterAnalyzer,
 	normalization *NormalizationService,
 	perfService *PerformanceService,
 	suggestions *SuggestionService,
@@ -350,6 +363,11 @@ func (s *BatchFillService) run(runID uuid.UUID, mode string, singerIDs []string,
 
 	for _, stream := range streams {
 		if s.isCancelled() {
+			// 読み込みの途中で止めても、飛ばした配信と件数は履歴に残す。
+			if err := s.saveProgress(runID, len(streams), 0, 0, 0, 0); err != nil {
+				s.finish(runID, "failed", "中止時の進捗の保存に失敗しました: "+err.Error())
+				return
+			}
 			s.finish(runID, "cancelled", "キャンセルされました")
 			return
 		}
@@ -417,14 +435,22 @@ func (s *BatchFillService) run(runID uuid.UUID, mode string, singerIDs []string,
 			st.Gaps = gaps
 			st.AIAsked = asked
 		})
-		if err := s.runRepo.UpdateProgress(runID, len(streams), s.Status().Done, created, review, gaps, asked); err != nil {
-			logger.Warnf("[batch-fill] 進捗の保存に失敗: %v", err)
-		}
+		s.saveProgress(runID, len(streams), created, review, gaps, asked)
+	}
+	// **最後に必ず 1 回保存する。** 上のループは第 3 段に進んだ配信があるときしか
+	// 回らないので、対象が全部飛ばされた・全部 0 曲だった実行では一度も保存されず、
+	// 履歴が `streams_total = 0` のまま「完了」になっていた（issue #7）。
+	if err := s.saveProgress(runID, len(streams), created, review, gaps, asked); err != nil {
+		s.finish(runID, "failed", "進捗の保存に失敗しました: "+err.Error())
+		return
 	}
 
 	status, msg := "done", fmt.Sprintf("%d 曲を作成、%d 曲を審査へ", created, review)
 	if gaps > 0 {
 		msg += fmt.Sprintf("（入力元に無い既存 %d 曲）", gaps)
+	}
+	if skipped := len(s.Status().SkippedIDs); skipped > 0 {
+		msg += fmt.Sprintf("（入力元を確定できず飛ばした配信 %d）", skipped)
 	}
 	if s.isCancelled() {
 		status, msg = "cancelled", "キャンセルされました（途中まで反映済み）"
@@ -452,7 +478,8 @@ func (s *BatchFillService) loadRows(streamID string) ([]*fillRow, bool) {
 			holodexRows = append(holodexRows, suggestionToFillRow(streamID, sg))
 		}
 	} else {
-		logger.Warnf("[batch-fill] Holodex 読み込み失敗 (%s): %v", streamID, err)
+		logger.Warnf("[batch-fill] Holodex 読み込み失敗 (%s): %v。この配信は今回は扱いません", streamID, err)
+		return nil, false
 	}
 
 	resp, err := s.commentService.AnalyzeCommentsForBatch(streamID, false)
@@ -478,15 +505,23 @@ func (s *BatchFillService) loadRows(streamID string) ([]*fillRow, bool) {
 			return nil, false
 		}
 		resp = retry
-	case err != nil:
-		logger.Warnf("[batch-fill] コメント分析に失敗 (%s): %v", streamID, err)
+	case errors.Is(err, ErrNoStoredComments):
+		// コメントが無いことが確認できたので、他の入力元で続行する。
 		resp = nil
+	case err != nil:
+		logger.Warnf("[batch-fill] コメント分析に失敗 (%s): %v。この配信は今回は扱いません", streamID, err)
+		return nil, false
 	}
 	// **見送りは「コメントが無い」ではない。** live chat がまだ取得できないので
 	// 結論を出さなかった状態で、上の ErrCommentRawChanged と同じ危険がある ──
 	// 空のまま先へ進むと、Holodex に曲が無ければチャプターへ落ち、曲があっても
 	// コメント固有の差分を丸ごと落とす。**この配信ごと今回は扱わない。**
 	// 初回と読み直しの両方を見る（読み直しでも見送りになりうる）。
+	if resp != nil && resp.Warning != "" {
+		// 劣化結果から歌唱を作らず、復旧後に同じ入力を読み直す。
+		logger.Warnf("[batch-fill] コメント分析が劣化 (%s): %s。この配信は今回は扱いません", streamID, resp.Warning)
+		return nil, false
+	}
 	if resp != nil && resp.Deferred {
 		logger.Infof("[batch-fill] live chat 待ちのため見送り (%s)。この配信は今回は扱いません", streamID)
 		return nil, false
@@ -506,7 +541,10 @@ func (s *BatchFillService) loadRows(streamID string) ([]*fillRow, bool) {
 		//
 		// **全行を審査へ回す。** 章節から曲を切り出したのは AI の判定なので、
 		// コメントにしか無い行を自動で作らないのと同じ扱いにする。
-		chapterRows := s.loadChapterRows(streamID)
+		chapterRows, ok := s.loadChapterRows(streamID)
+		if !ok {
+			return nil, false
+		}
 		for _, c := range chapterRows {
 			c.addReview(reviewChapterOnly)
 		}
@@ -552,23 +590,29 @@ func (s *BatchFillService) loadRows(streamID string) ([]*fillRow, bool) {
 // loadChapterRows は保存済みのチャプターから作業単位を作る。
 // **yt-dlp は呼ばない**（AnalyzeChaptersForBatch の約束）。取得は
 // `POST /api/chapters/backfill` で先に済ませておく。
-func (s *BatchFillService) loadChapterRows(streamID string) []*fillRow {
+func (s *BatchFillService) loadChapterRows(streamID string) ([]*fillRow, bool) {
 	if s.chapterService == nil {
-		return nil
+		return nil, true
 	}
 	resp, err := s.chapterService.AnalyzeChaptersForBatch(streamID)
-	if err != nil || resp == nil {
+	if err != nil || resp == nil || resp.Warning != "" || resp.Deferred {
 		if err != nil {
 			logger.Warnf("[batch-fill] チャプター読み込み失敗 (%s): %v", streamID, err)
 		}
-		return nil
+		if resp != nil && resp.Warning != "" {
+			logger.Warnf("[batch-fill] チャプター分析が劣化 (%s): %s", streamID, resp.Warning)
+		}
+		if resp != nil && resp.Deferred {
+			logger.Infof("[batch-fill] チャプター分析を見送り (%s)", streamID)
+		}
+		return nil, false
 	}
 	s.normalization.ResolveForDisplay(resp.Songs)
 	rows := make([]*fillRow, 0, len(resp.Songs))
 	for _, cs := range resp.Songs {
 		rows = append(rows, chapterSongToFillRow(streamID, cs))
 	}
-	return rows
+	return rows, true
 }
 
 // hasCounterpart は同じ時間帯（±fillMatchWindow 秒）の行が入力元にあるか。
@@ -863,6 +907,17 @@ func (s *BatchFillService) update(f func(*dto.BatchFillStatus)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	f(&s.status)
+}
+
+// saveProgress は実行の進捗を履歴へ書く。処理済み件数と飛ばした配信は
+// メモリ上の状態から取る（第 1 段で数えたもの）。最後の保存に失敗した実行は完了にしない。
+func (s *BatchFillService) saveProgress(runID uuid.UUID, total, created, review, gaps, asked int) error {
+	st := s.Status()
+	if err := s.runRepo.UpdateProgress(runID, total, st.Done, created, review, gaps, asked, st.SkippedIDs); err != nil {
+		logger.Warnf("[batch-fill] 進捗の保存に失敗: %v", err)
+		return err
+	}
+	return nil
 }
 
 func (s *BatchFillService) finish(runID uuid.UUID, status, message string) {

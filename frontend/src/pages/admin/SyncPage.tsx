@@ -1,7 +1,7 @@
 import { Fragment, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { holodexApi, batchAnalyzeApi, batchFillApi, singerApi, autoFillApi, nonSingingApi } from '../../api/client';
+import { holodexApi, batchAnalyzeApi, batchFillApi, singerApi, autoFillApi, nonSingingApi, restrictionReviewApi, streamApi, taskApi } from '../../api/client';
 import { useToast } from '../../components/ui/ToastContext';
 import { useAuthStore, hasPermission, PERM } from '../../store/auth';
 import { formatSeconds } from '../../components/usePerformanceTiming';
@@ -62,6 +62,7 @@ export default function SyncPage() {
   const [fillIncludeCollabs, setFillIncludeCollabs] = useState(false);
   // 「入力元に無い」の内訳を開いている実行（一度に 1 つ）
   const [openGapRun, setOpenGapRun] = useState<string | null>(null);
+  const [openSkippedRun, setOpenSkippedRun] = useState<string | null>(null);
 
 
   const { data: fillStatus } = useQuery({
@@ -122,6 +123,7 @@ export default function SyncPage() {
     }),
     onSuccess: (data) => {
       const message = data.message || `同期完了: ${data.synced_count}件 (新規: ${data.new_streams.length}, 更新: ${data.updated.length})`;
+      queryClient.invalidateQueries({ queryKey: ['restriction-review'] });
       showToast(message, 'success');
     },
     onError: (err: Error) => {
@@ -132,6 +134,7 @@ export default function SyncPage() {
   const syncVideoMutation = useMutation({
     mutationFn: () => holodexApi.syncVideo(videoId),
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['restriction-review'] });
       showToast('動画の同期が完了しました', 'success');
     },
     onError: (err: Error) => {
@@ -160,6 +163,8 @@ export default function SyncPage() {
       <AutoFillTargets />
       <AutoFillSchedule />
       <NonSingingCandidates />
+      <RestrictionReview />
+      <BackgroundTasks />
 
       {/* Sync by Channel */}
       <div className="bg-white rounded-lg shadow-sm border p-6">
@@ -514,6 +519,10 @@ export default function SyncPage() {
               <span className="text-gray-600">
                 作成 {fillStatus.created} ／ 審査 {fillStatus.review}
                 {fillStatus.ai_asked > 0 && ` ／ AI ${fillStatus.ai_asked} 行`}
+                {/* 「扱った」に数えない配信。done/total だけだと飛ばしたことが見えない */}
+                {(fillStatus.skipped ?? 0) > 0 && (
+                  <span className="text-amber-700"> ／ 飛ばした {fillStatus.skipped}</span>
+                )}
               </span>
             </div>
           </div>
@@ -531,6 +540,9 @@ export default function SyncPage() {
                   <th className="py-2 pr-3">審査</th>
                   <th className="py-2 pr-3" title="DB にあるが、今回の入力元には出てこなかった歌唱">
                     入力元に無い
+                  </th>
+                  <th className="py-2 pr-3" title="入力元を確定できずに今回は扱わなかった配信（live chat 待ちなど）。次の実行で拾う">
+                    飛ばした
                   </th>
                   <th className="py-2 pr-3">状態</th>
                   <th className="py-2"></th>
@@ -573,6 +585,19 @@ export default function SyncPage() {
                           <span className="text-gray-300">—</span>
                         )}
                       </td>
+                      <td className="py-2 pr-3">
+                        {(run.skipped_stream_ids?.length ?? 0) > 0 ? (
+                          <button
+                            onClick={() => setOpenSkippedRun(openSkippedRun === run.id ? null : run.id)}
+                            className="text-amber-700 underline hover:text-amber-900"
+                            title="飛ばした配信を一覧する"
+                          >
+                            {run.skipped_stream_ids.length}
+                          </button>
+                        ) : (
+                          <span className="text-gray-300">—</span>
+                        )}
+                      </td>
                       <td className="py-2 pr-3 text-gray-500" title={run.message}>
                         {{ running: '実行中', done: '完了', cancelled: '中止', failed: '失敗', reverted: '撤回済み' }[run.status]}
                       </td>
@@ -591,8 +616,23 @@ export default function SyncPage() {
                     </tr>
                     {openGapRun === run.id && (
                       <tr className="border-b last:border-0">
-                        <td colSpan={7} className="py-2 pr-3 bg-gray-50">
+                        <td colSpan={8} className="py-2 pr-3 bg-gray-50">
                           <GapList runId={run.id} />
+                        </td>
+                      </tr>
+                    )}
+                    {openSkippedRun === run.id && (
+                      <tr className="border-b last:border-0">
+                        <td colSpan={8} className="py-2 pr-3 bg-gray-50">
+                          <ul className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
+                            {run.skipped_stream_ids.map((sid) => (
+                              <li key={sid}>
+                                <Link to={`/streams/${sid}`} className="text-indigo-600 hover:underline">
+                                  {sid}
+                                </Link>
+                              </li>
+                            ))}
+                          </ul>
                         </td>
                       </tr>
                     )}
@@ -769,8 +809,13 @@ function AutoFillSchedule() {
   const [refreshDays, setRefreshDays] = useState<number | null>(null);
 
   const save = useMutation({
-    mutationFn: (next: { enabled: boolean; interval: number; refreshDays: number }) =>
-      autoFillApi.updateSettings(next.enabled, next.interval, next.refreshDays),
+    mutationFn: (next: { enabled: boolean; interval: number; refreshDays: number; includeCollabs: boolean }) =>
+      autoFillApi.updateSettings({
+        enabled: next.enabled,
+        interval_hours: next.interval,
+        refresh_days: next.refreshDays,
+        include_collabs: next.includeCollabs,
+      }),
     onSuccess: (data) => {
       queryClient.setQueryData(['autoFillSettings', canEdit], data);
       // **サーバーが丸めた値を画面へ戻す。** ローカル state を残すと、
@@ -802,6 +847,8 @@ function AutoFillSchedule() {
 
   const effInterval = interval ?? settings?.interval_hours ?? 6;
   const effRefresh = refreshDays ?? settings?.refresh_days ?? 30;
+  // 客串の旗は即時保存（有効の旗と同じ）なので、ローカル state を持たない。
+  const effCollabs = settings?.include_collabs ?? false;
 
   return (
     <div className="bg-white rounded-lg shadow-sm border p-6">
@@ -827,12 +874,38 @@ function AutoFillSchedule() {
                 type="checkbox"
                 checked={settings?.enabled ?? false}
                 onChange={(e) =>
-                  save.mutate({ enabled: e.target.checked, interval: effInterval, refreshDays: effRefresh })
+                  save.mutate({
+                    enabled: e.target.checked,
+                    interval: effInterval,
+                    refreshDays: effRefresh,
+                    includeCollabs: effCollabs,
+                  })
                 }
                 disabled={save.isPending}
                 className="w-4 h-4 rounded border-gray-300"
               />
               定期実行を有効にする
+            </label>
+
+            <label
+              className="flex items-center gap-2 text-sm"
+              title="登録チャンネルがゲスト参加しただけの配信も対象にします。歌手が複数なので、歌単は全部審査へ回ります"
+            >
+              <input
+                type="checkbox"
+                checked={effCollabs}
+                onChange={(e) =>
+                  save.mutate({
+                    enabled: settings?.enabled ?? false,
+                    interval: effInterval,
+                    refreshDays: effRefresh,
+                    includeCollabs: e.target.checked,
+                  })
+                }
+                disabled={save.isPending}
+                className="w-4 h-4 rounded border-gray-300"
+              />
+              参加した配信（客串）も対象にする
             </label>
 
             <label className="flex items-center gap-2 text-sm">
@@ -863,7 +936,12 @@ function AutoFillSchedule() {
 
             <button
               onClick={() =>
-                save.mutate({ enabled: settings?.enabled ?? false, interval: effInterval, refreshDays: effRefresh })
+                save.mutate({
+                  enabled: settings?.enabled ?? false,
+                  interval: effInterval,
+                  refreshDays: effRefresh,
+                  includeCollabs: effCollabs,
+                })
               }
               disabled={save.isPending}
               className="px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
@@ -886,6 +964,14 @@ function AutoFillSchedule() {
           <p className="text-xs text-gray-400 mt-3">
             間隔を短くすると、配信直後で live chat がまだ取得できない配信を何度も処理し直します。
           </p>
+          {/* 客串は歌手が複数居るので、一括作成は誰が歌ったかを決めず全行を審査へ回す。
+              mention されただけの告知・企画枠も入るが、審査で落とせる */}
+          {effCollabs && (
+            <p className="text-xs text-gray-400 mt-1">
+              客串の配信は歌手が複数居るため、作った歌単は全部審査へ回ります。
+              mention されただけの告知や企画枠も対象に入るので、審査で落としてください。
+            </p>
+          )}
 
           {settings?.last_skipped_at && (
             <p className="text-sm text-amber-700 mt-3">
@@ -909,6 +995,226 @@ function AutoFillSchedule() {
   );
 }
 
+
+// BackgroundTasks は yt-dlp を起動する backfill の実行と記録（issue #22）。
+//
+// 以前は curl で叩いて投げっぱなし、進捗も失敗も log だけだった。log はメモリ上の
+// 直近 1000 件なので、長い実行は自分の進捗行で失敗行を押し流す。ここでは実行ごとに
+// 成功・見送り・失敗を分けて出し、**失敗の理由を後から引ける**ようにする
+// （cookie を直して再実行すべきかの判断材料）。
+const TASK_LABELS: Record<string, string> = {
+  chapter_backfill: 'チャプターの取得',
+  chat_end_backfill: '拍手 end の埋め直し',
+};
+
+function BackgroundTasks() {
+  const queryClient = useQueryClient();
+  const { showToast } = useToast();
+  const canEdit = hasPermission(useAuthStore((st) => st.user), PERM.CONTENT_EDIT);
+  const authStatus = useAuthStore((st) => st.status);
+  const [openTask, setOpenTask] = useState<string | null>(null);
+
+  const { data: tasks, isError } = useQuery({
+    queryKey: ['tasks', canEdit],
+    queryFn: () => taskApi.list(10),
+    enabled: canEdit && authStatus !== 'loading',
+    // 走っている間だけ追う
+    refetchInterval: (q) => (q.state.data?.some((t) => t.status === 'running') ? 3000 : false),
+  });
+
+  const start = useMutation({
+    mutationFn: (kind: 'chapter' | 'chat_end') =>
+      kind === 'chapter' ? taskApi.startChapterBackfill(3) : taskApi.startChatEndBackfill(3),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      showToast('開始しました', 'success');
+    },
+    // 409（同じ処理が実行中）もバックエンドの文言をそのまま出す
+    onError: (err: Error) => showToast(err.message, 'error'),
+  });
+
+  if (!canEdit) return null;
+
+  return (
+    <div className="bg-white rounded-lg shadow-sm border p-6">
+      <h2 className="text-xl font-bold text-gray-900 mb-2">背景処理</h2>
+      <p className="text-gray-500 mb-4 text-sm">
+        yt-dlp を使う一括取得です。どちらも時間がかかり、YouTube に BOT 判定されると全件失敗します
+        （そのときは管理→設定で cookies.txt を更新してから再実行）。一括セットリスト作成は
+        yt-dlp を呼ばないので、チャプターを入力元に使うなら<strong>先にここで取得</strong>しておきます。
+      </p>
+      <div className="flex flex-wrap gap-2 mb-4">
+        <button
+          onClick={() => start.mutate('chapter')}
+          disabled={start.isPending}
+          title="チャプターを未取得の配信について、yt-dlp で目次を取得します"
+          className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:border-indigo-300 disabled:opacity-50"
+        >
+          チャプターを取得
+        </button>
+        <button
+          onClick={() => start.mutate('chat_end')}
+          disabled={start.isPending}
+          title="解析済みの配信について、live chat の拍手から曲の終了時刻を埋め直します"
+          className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:border-indigo-300 disabled:opacity-50"
+        >
+          拍手 end を埋め直す
+        </button>
+      </div>
+
+      {isError ? (
+        <p className="text-red-600 text-sm">記録の取得に失敗しました。</p>
+      ) : (tasks?.length ?? 0) === 0 ? (
+        <p className="text-gray-400 text-sm">まだ実行の記録がありません。</p>
+      ) : (
+        <ul className="divide-y border rounded-lg text-sm">
+          {tasks!.map((t) => (
+            <li key={t.id} className="px-4 py-2">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <span className="font-medium text-gray-800">{TASK_LABELS[t.kind] ?? t.kind}</span>
+                <span className="text-gray-500">
+                  {new Date(t.started_at).toLocaleString('ja-JP', {
+                    month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
+                  })}
+                  {t.started_by_name && ` ${t.started_by_name}`}
+                </span>
+                <span
+                  className={
+                    t.status === 'running'
+                      ? 'text-indigo-700'
+                      : t.status === 'done'
+                        ? 'text-gray-600'
+                        : 'text-red-600'
+                  }
+                >
+                  {{ running: '実行中', done: '完了', failed: '失敗', interrupted: '中断' }[t.status] ?? t.status}
+                </span>
+                <span className="text-gray-600">
+                  {t.done}/{t.total}（成功 {t.succeeded}・見送り {t.skipped}・
+                  <span className={t.failed > 0 ? 'text-red-600' : ''}>失敗 {t.failed}</span>）
+                </span>
+                {t.failures.length > 0 && (
+                  <button
+                    onClick={() => setOpenTask(openTask === t.id ? null : t.id)}
+                    className="text-red-600 underline hover:text-red-800"
+                  >
+                    失敗の理由
+                  </button>
+                )}
+              </div>
+              {t.message && t.status !== 'running' && <div className="text-xs text-gray-400 mt-0.5">{t.message}</div>}
+              {openTask === t.id && (
+                <ul className="mt-2 space-y-0.5 text-xs bg-gray-50 rounded p-2 max-h-60 overflow-y-auto">
+                  {t.failures.map((f, i) => (
+                    <li key={i} className="flex gap-2">
+                      <Link to={`/streams/${f.target}`} className="text-indigo-600 hover:underline shrink-0">
+                        {f.target}
+                      </Link>
+                      <span className="text-gray-600 break-all">{f.reason}</span>
+                    </li>
+                  ))}
+                  {t.failed > t.failures.length && (
+                    <li className="text-gray-400">ほか {t.failed - t.failures.length} 件（記録は直近の {t.failures.length} 件まで）</li>
+                  )}
+                </ul>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// RestrictionReview は公開の裁定と現在の会限判定が食い違う配信（issue #26）。
+// 控えが無い旧裁定も含むため、検出と裁定の前後関係は断定しない。
+//
+// 人の裁定は自動判定に勝つので、配信者が後から会限へ変えても公開のまま、
+// 何の知らせも無かった。**自動で伏せ直さない**（裁定の意味が無くなる）──
+// 食い違いを並べて人に決めさせる。配信を開かなくても気付けるよう、ここに置く。
+//
+// どちらのボタンも裁定を書き直す。書き直した時点の判定が控えられるので一覧から消え、
+// 「公開のまま」を選んだときは、現在の自動判定を確認済みとして控える。
+function RestrictionReview() {
+  const queryClient = useQueryClient();
+  const { showToast } = useToast();
+  const canEdit = hasPermission(useAuthStore((st) => st.user), PERM.CONTENT_EDIT);
+  const authStatus = useAuthStore((st) => st.status);
+
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['restriction-review', canEdit],
+    queryFn: () => restrictionReviewApi.list(100),
+    enabled: canEdit && authStatus !== 'loading',
+  });
+
+  const decide = useMutation({
+    mutationFn: ({ id, restricted }: { id: string; restricted: boolean }) =>
+      streamApi.update(id, { is_restricted: restricted }),
+    onSuccess: (_data, { id, restricted }) => {
+      queryClient.invalidateQueries({ queryKey: ['restriction-review'] });
+      queryClient.invalidateQueries({ queryKey: ['stream', id] });
+      showToast(restricted ? '非公開にしました' : '公開のままにしました（確認済み）', 'success');
+    },
+    onError: (err: Error) => showToast(err.message, 'error'),
+  });
+
+  if (!canEdit) return null;
+  const items = data?.items ?? [];
+  // 該当が無いときは場所を取らない（ほとんどの時間は 0 件のはず）。
+  // 取得の失敗は 0 件と区別して出す。
+  if (!isLoading && !isError && items.length === 0) return null;
+
+  return (
+    <div className="bg-white rounded-lg shadow-sm border border-red-200 p-6">
+      <h2 className="text-xl font-bold text-gray-900 mb-2">公開の裁定を見直す配信</h2>
+      <p className="text-gray-500 mb-4 text-sm">
+        「公開してよい」という裁定が残る一方で、現在は<strong>会限として検出されている</strong>配信です。
+        裁定時点の判定が不明な以前の裁定も含みます。裁定は自動判定より優先されるので、
+        このままだとセットリストは<strong>公開のまま</strong>です。
+      </p>
+      {isLoading ? (
+        <p className="text-gray-400 text-sm">読み込み中...</p>
+      ) : isError ? (
+        <p className="text-red-600 text-sm">取得に失敗しました（該当が無いという意味ではありません）。</p>
+      ) : (
+        <ul className="divide-y border rounded-lg">
+          {items.map((item) => (
+            <li key={item.id} className="flex items-center justify-between gap-3 px-4 py-2">
+              <div className="min-w-0">
+                <Link to={`/streams/${item.id}`} className="text-indigo-600 hover:underline truncate block">
+                  {item.title}
+                </Link>
+                <div className="text-xs text-gray-400 flex flex-wrap items-center gap-2">
+                  <span>{new Date(item.stream_date).toLocaleDateString('ja-JP')}</span>
+                  {/* 控えが無い＝この仕組みより前の裁定。会限と知っていて公開したのかもしれない */}
+                  {item.basis_unknown && <span>裁定の時点の判定は不明（以前の裁定）</span>}
+                </div>
+              </div>
+              <div className="flex shrink-0 gap-2 text-xs">
+                <button
+                  type="button"
+                  disabled={decide.isPending}
+                  onClick={() => decide.mutate({ id: item.id, restricted: true })}
+                  className="px-2 py-1 rounded bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+                >
+                  非公開にする
+                </button>
+                <button
+                  type="button"
+                  disabled={decide.isPending}
+                  onClick={() => decide.mutate({ id: item.id, restricted: false })}
+                  className="px-2 py-1 rounded border text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                >
+                  公開のまま
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 // NonSingingCandidates は「非表示だが現行規則で曲が出た」配信の一覧。
 //
