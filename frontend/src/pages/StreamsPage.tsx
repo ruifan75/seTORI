@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import axios from 'axios';
 import { Link, useSearchParams } from 'react-router-dom';
 import { streamApi, tagApi } from '../api/client';
 import Loading from '../components/ui/Loading';
@@ -17,9 +18,10 @@ export default function StreamsPage() {
   // 選んだ配信タグ（URL の tag を複数）。**全部を持つ配信**に絞る（AND。issue #63）。
   // 既定は何も選ばない＝全部。「歌枠一覧」だった頃の見え方に寄せて singing を既定に
   // すると、全部を見る場所が無くなる。
-  const selectedTags = searchParams.getAll('tag');
+  // API と同じ条件をチップ・解除操作・キャッシュの鍵にも使う。
+  const selectedTags = [...new Set(searchParams.getAll('tag').map((tag) => tag.trim()).filter(Boolean))];
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ['streams', page, sort, dir, selectedTags],
     queryFn: () => streamApi.list(page, 20, sort, dir, selectedTags),
   });
@@ -109,7 +111,13 @@ export default function StreamsPage() {
         </div>
       )}
 
-      {isLoading ? (
+      {error ? (
+        <div role="alert" className="text-center py-12 text-red-700">
+          {axios.isAxiosError<{ error?: string }>(error)
+            ? error.response?.data?.error || '配信一覧を取得できませんでした'
+            : '配信一覧を取得できませんでした'}
+        </div>
+      ) : isLoading ? (
         <Loading />
       ) : (
         <>
