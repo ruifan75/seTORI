@@ -82,7 +82,7 @@ mention 先）である。後者は追いたくて登録したわけではない
 | `ChannelRequested` | `POST /api/channels`（人がチャンネルを追加）、`SyncChannel`（同期対象として名指し） | `false` |
 | `ChannelDiscovered` | `syncVideo` の所有者・mention、`SyncVideo` の動画所有者 | `true` |
 
-bool ではなく型にしてあるのは、`Upsert(singer, true)` ではどちらの意味か読めないため。
+bool ではなく型にしてあるのは、`Upsert(channel, true)` ではどちらの意味か読めないため。
 引数を省略可能にしていないのは、**新しい呼び出し元が origin を決めずには
 コンパイルできないようにする**ため（`docs/STREAM_VISIBILITY.md` の access mode と同じ考え方）。
 
@@ -251,10 +251,11 @@ mapping は**書き込み時**に効くので、設定を直しても既存行�
 
 `034` は一度 `UPDATE singers SET organization='Re:AcT'`（069 より前の表名）を含んでいたが、
 未リリースのうちに削除した。`035` に冪等な巻き戻しを入れてある。
+以下は `035` の SQL（069 より前に実行するため、表名は `singers`）。
 
 ```sql
 -- 034 を先に流した開発 DB のための行。新規構築では no-op
-UPDATE channels SET organization = 'ReAcT' WHERE organization = 'Re:AcT';
+UPDATE singers SET organization = 'ReAcT' WHERE organization = 'Re:AcT';
 ```
 
 `channels.organization` は Holodex の生の値を持つのが正しい状態で、

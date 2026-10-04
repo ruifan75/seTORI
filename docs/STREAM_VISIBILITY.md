@@ -33,7 +33,7 @@ Holodex の分類もタイトルキーワード規則も自動判定であり、
 ### 止めるもの — 「発見面」から消える
 
 一覧から外すだけではない。非表示配信の歌唱は**通常の発見面から消える**：
-曲ページ、歌手ページ、タグページ、ランダム再生、プリセット。
+曲ページ、チャンネルページ、タグページ、ランダム再生、プリセット。
 `performance_repository` に `is_hidden = FALSE` が 8 か所あり、これらはすべて
 「曲・タグ・歌手からの逆引き」「ランダム」「プリセット」を濾すもの。
 ほかに `song_repository` / `artist_repository` / `stream_repository` /
@@ -256,7 +256,7 @@ Holodex の `topic_id` は単値で `singing` と排他になるため取りこ�
 |---|---|
 | `SongRepository.GetPerformanceCount` / **`GetPerformanceCounts`**（複数形） | 曲詳細・曲一覧の件数 |
 | `SongRepository` の **`songListOrder`**（`sort=performances`） | 並び順から件数が推測できる |
-| `ChannelRepository.GetPerformanceCount` | 歌手の歌唱数 |
+| `ChannelRepository.GetPerformanceCount` | チャンネルページの歌唱数 |
 | **`ArtistRepository.FindSongsByArtist`** | アーティスト詳細の各曲件数と既定順 |
 | `TagRepository.SearchPerformanceTags` | 歌唱タグの使用件数 |
 | `StreamRepository.SearchStreams` の vocalist / 歌唱タグのサブクエリ | 「この配信でこの人が歌った」 |
@@ -369,14 +369,14 @@ ORDER BY p.start_seconds AND NOT COALESCE(...)
 |---|---|---|
 | 配信詳細の `performances` | 出ない（配信自体は 200） | 出る |
 | `GET /api/performances/{id}` | **404** | 200 |
-| 曲ページ / 歌手ページ / ランダム | 出ない | 出ない（発見面なので編集者にも出さない） |
+| 曲ページ / チャンネルページ / ランダム | 出ない | 出ない（発見面なので編集者にも出さない） |
 | 公開プレイリスト / 共有リンク | 出ない | 出ない |
 | `PUT` で秘匿を外す | 401 | 外せる（外すと未ログインにも出る） |
 
 ### 秘匿を入れるなら route の列挙では足りない
 
 上の表は例示で、**これを route 単位で塞いでも漏れる**。実際この表は
-2 回のレビューを経てもまだ増えた（global search と歌手配下一覧は 2 巡目で見つかった）。
+2 回のレビューを経てもまだ増えた（global search とチャンネル配下一覧は 2 巡目で見つかった）。
 
 ただし **route 単位が正しい場所もある。** `/comments` `/chapters` `/holodex-songs` のように
 **endpoint 全体が編集者専用**なら、いまの `requiredPermission` が正しい。
@@ -389,11 +389,11 @@ route の列挙が不適切なのは、**同じ endpoint の中で行ごとに�
 
 - `StreamService.GetByID` は `toStreamResponse` を呼んだ**後**に
   `FindByStreamID` の結果を `Performances` へ詰める。変換層で落としても歌唱は残る
-- `GET /api/search` は `SearchStreamItem` を直接組み立て、歌手配下一覧は
+- `GET /api/search` は `SearchStreamItem` を直接組み立て、チャンネル配下一覧は
   `ChannelService` の別の converter を使う。`StreamService.toStreamResponse` は共通点ではない
 - `PerformanceRepository` も、`queryPerformanceDetails` を通るのは `FindByID` /
   overlap / playlist / random / preset だけ。`FindByStreamID` `FindBySongID`
-  `FindByTagID` `FindByChannelID` はそれぞれ独自の query を持つ
+  `FindByTagID` `FindBySingerID` はそれぞれ独自の query を持つ（歌った人の検索）
 - DTO 変換の時点で落とすと、**`total` とページングを計算した後**なので、
   件数から存在が漏れ、空行も残る
 
@@ -406,7 +406,7 @@ PR #6 が解析結果でやったのと同じ考え方だが、通す場所は�
 非表示配信に歌唱を作る機能を足すときは、次の両方を決めること。
 
 - **発見面に出したいなら** `is_hidden` の解除まで含める。解除しないと
-  曲ページ・歌手統計・プリセットに出ないので、「登録済みなのに探しても見つからない」になる
+  曲ページ・チャンネル統計・プリセットに出ないので、「登録済みなのに探しても見つからない」になる
 - **伏せたままにしたいなら** `is_hidden` では足りない。上の表の経路を塞ぐ別の仕組みが要る（issue #4）
 
 ### 解析結果は編集者向けなので載せない
