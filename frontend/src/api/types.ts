@@ -250,6 +250,11 @@ export interface Stream {
   holodex_uploaded_at?: string;
   // 台帳の追跡開始より前から存在する配信。**台帳が空でも「送っていない」とは言えない**
   holodex_upload_unknown?: boolean;
+  // 人の裁定（true＝伏せる / false＝公開してよい）。未裁定なら無い。**content:edit のときだけ**。
+  // is_restricted は実効値なので、それだけでは「チャンネルの方針で公開」と区別できない
+  restriction_override?: boolean;
+  // 公開の裁定と現在の会限判定が食い違う（旧裁定も含む、issue #26）。**content:edit のときだけ**
+  restriction_needs_review?: boolean;
   holodex_timeline_songs?: SongSuggestion[];  // Holodex タイムライン データ
   comment_timeline_songs?: CommentSong[];     // コメント解析済みタイムライン（分析キャッシュ）
   // 解析を最後に走らせた時刻。updated_at は Holodex 同期でも動くので代用できない
@@ -489,6 +494,15 @@ export interface AnalyzeCommentsResponse {
 
 // 未処理配信の一括プレ分析ジョブの進捗
 /** 自動処理（定期実行）の設定。**content:edit のみ**。 */
+/** 公開の裁定と現在の会限判定が食い違う配信（旧裁定も含む、issue #26）。**content:edit のみ**。 */
+export interface RestrictionReviewItem {
+  id: string;
+  title: string;
+  stream_date: string;
+  /** 裁定の時点の判定が分からない（この仕組みより前の裁定） */
+  basis_unknown: boolean;
+}
+
 /** 「非表示だが現行規則で曲が出た」配信（issue #42）。**content:edit のみ**。 */
 export interface NonSingingCandidate {
   id: string;

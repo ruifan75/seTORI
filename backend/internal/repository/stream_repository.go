@@ -142,7 +142,8 @@ func scanStreamRow(row interface{ Scan(...any) error }) (models.Stream, error) {
 func (r *StreamRepository) FindByID(id string) (*models.Stream, error) {
 	query := `
 		SELECT id, title, stream_date, duration_seconds, thumbnail_url, holodex_data, holodex_hash, comment_raw, comment_songs, comment_songs_analyzed_at, chapter_raw, chapter_songs, is_processed, is_hidden, restriction_override, holodex_uploaded_at, holodex_upload_unknown, availability, playable_in_embed, availability_checked_at, created_at, updated_at,
-		       ` + EffectiveRestrictedExpr("streams") + ` AS is_restricted_effective
+		       ` + EffectiveRestrictedExpr("streams") + ` AS is_restricted_effective,
+		       ` + RestrictionNeedsReviewExpr("streams") + ` AS restriction_needs_review
 		FROM streams WHERE id = $1`
 
 	var s models.Stream
@@ -150,7 +151,8 @@ func (r *StreamRepository) FindByID(id string) (*models.Stream, error) {
 		&s.ID, &s.Title, &s.StreamDate, &s.DurationSeconds,
 		&s.ThumbnailURL, &s.HolodexData, &s.HolodexHash, &s.CommentRaw, &s.CommentSongs, &s.CommentSongsAnalyzedAt,
 		&s.ChapterRaw, &s.ChapterSongs, &s.IsProcessed, &s.IsHidden, &s.RestrictionOverride, &s.HolodexUploadedAt, &s.HolodexUploadUnknown,
-		&s.Availability, &s.PlayableInEmbed, &s.AvailabilityCheckedAt, &s.CreatedAt, &s.UpdatedAt, &s.IsRestrictedEffective)
+		&s.Availability, &s.PlayableInEmbed, &s.AvailabilityCheckedAt, &s.CreatedAt, &s.UpdatedAt, &s.IsRestrictedEffective,
+		&s.RestrictionNeedsReview)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -178,19 +180,49 @@ func (r *StreamRepository) Create(s *models.Stream) error {
 
 // UpdateMetadata は利用者が編集できる metadata フィールドだけを更新し、大きな JSONB（holodex_data / comment_*）には触れない。
 // 通常の情報更新で問題を含む可能性のある JSONB データを書き戻さないため。
-// restrictionOverride は人の裁定（NULL＝未裁定）。**検出の members_only タグは書かない** ──
-// 人が触った事実と、検出が言っていることは別の列に残す。
-func (r *StreamRepository) UpdateMetadata(id string, title string, streamDate time.Time, isProcessed, isHidden bool, restrictionOverride sql.NullBool) error {
+//
+// **秘匿の裁定（restriction_override）はここでは書かない**（`SetRestrictionOverride`）。
+// 裁定は自動判定の控えと対で書く必要があり、題名の編集のたびに書き戻すと
+// 控えが取り直されて、食い違いの警告が理由なく消える（issue #26）。
+func (r *StreamRepository) UpdateMetadata(id string, title string, streamDate time.Time, isProcessed, isHidden bool) error {
 	query := `
 		UPDATE streams
-		SET title = $2, stream_date = $3, is_processed = $4, is_hidden = $5, restriction_override = $6, updated_at = NOW()
+		SET title = $2, stream_date = $3, is_processed = $4, is_hidden = $5, updated_at = NOW()
 		WHERE id = $1
 		RETURNING updated_at`
 
 	var updatedAt time.Time
-	err := r.db.QueryRow(query, id, title, streamDate, isProcessed, isHidden, restrictionOverride).Scan(&updatedAt)
+	err := r.db.QueryRow(query, id, title, streamDate, isProcessed, isHidden).Scan(&updatedAt)
 	if err != nil {
 		return fmt.Errorf("update stream metadata: %w", err)
+	}
+	return nil
+}
+
+// SetRestrictionOverride は人の裁定を書き、**その時点の自動判定を控える**（issue #26）。
+//
+// 控えは SQL の中で計算する ── 呼び出し側が読んだ値を渡すと、読んでから書くまでの
+// 間に同期がタグを付けたとき、古い判定を控えてしまう（「安全条件は書くときに置く」）。
+// 自動判定の式は実効値と同じ `AutoRestrictedExpr` を使う。別に書くと、控えと
+// 現在値を比べる `RestrictionNeedsReviewExpr` が意味を失う。
+//
+// **タグと参加者を書いたあとに呼ぶこと。** 同じ要求で members_only を外して
+// 「公開してよい」にした場合、控えるべきは外したあとの判定（＝伏せない）で、
+// その後に同期がタグを付け直したら警告を出したい。先に呼ぶと外す前の判定
+// （＝伏せる）を控えるので、付け直しても「知っていて公開した」ことになる。
+//
+// 更新 0 件（配信が無い）は sql.ErrNoRows として返す。
+func (r *StreamRepository) SetRestrictionOverride(id string, restricted bool) error {
+	query := `
+		UPDATE streams AS st
+		SET restriction_override = $2, restriction_override_auto = (` + AutoRestrictedExpr("st") + `), updated_at = NOW()
+		WHERE st.id = $1
+		RETURNING st.updated_at`
+
+	var updatedAt time.Time
+	err := r.db.QueryRow(query, id, restricted).Scan(&updatedAt)
+	if err != nil {
+		return fmt.Errorf("set restriction override: %w", err)
 	}
 	return nil
 }
@@ -1233,6 +1265,45 @@ type NonSingingCandidate struct {
 	// 判断材料として画面に出す ── 古い結果を根拠に非表示を解くのは危ない。
 	AnalyzedAt sql.NullTime
 	Tags       []string
+}
+
+// RestrictionReviewRow は裁定の見直しが要る配信（issue #26）。
+type RestrictionReviewRow struct {
+	ID         string
+	Title      string
+	StreamDate time.Time
+	// BasisUnknown は裁定の時点の判定が控えられていない（この仕組みより前の裁定）。
+	BasisUnknown bool
+}
+
+// FindRestrictionReview は公開の裁定と現在の自動判定が食い違う配信を新しい順に返す
+// （issue #26）。控えが無い旧裁定も含む。条件は `RestrictionNeedsReviewExpr`
+// だけ ── 配信詳細の警告と同じ式なので、一覧に出るものと詳細で警告が出るものが
+// ずれない。
+//
+// **非表示の配信も含める。** 会限の配信は多くが非表示だが（本番 86 本中 78 本）、
+// 非表示は発見面から外すだけで、歌唱は直接の経路から読める（CLAUDE.md §2）。
+func (r *StreamRepository) FindRestrictionReview(limit int) ([]RestrictionReviewRow, error) {
+	rows, err := r.db.Query(`
+		SELECT st.id, st.title, st.stream_date, st.restriction_override_auto IS NULL
+		FROM streams st
+		WHERE `+RestrictionNeedsReviewExpr("st")+`
+		ORDER BY st.stream_date DESC, st.id
+		LIMIT $1`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("find restriction review: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]RestrictionReviewRow, 0)
+	for rows.Next() {
+		var row RestrictionReviewRow
+		if err := rows.Scan(&row.ID, &row.Title, &row.StreamDate, &row.BasisUnknown); err != nil {
+			return nil, fmt.Errorf("scan restriction review: %w", err)
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
 }
 
 // FindNonSingingCandidates は見直しが要る配信を返す。
