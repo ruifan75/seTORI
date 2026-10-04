@@ -21,6 +21,8 @@ func TestStreamAnalysisEndpointsRequireContentEdit(t *testing.T) {
 		wantPerm  string
 		wantLogin bool
 	}{
+		{"準備の開始", http.MethodPost, "/api/streams/prepare", auth.PermContentEdit, true},
+		{"準備の停止", http.MethodPost, "/api/tasks/abc/cancel", auth.PermContentEdit, true},
 
 		{"非表示見直しの一覧", http.MethodGet, "/api/visibility-review", auth.PermContentEdit, true},
 		{"非表示見直しの履歴", http.MethodGet, "/api/visibility-review/runs", auth.PermContentEdit, true},

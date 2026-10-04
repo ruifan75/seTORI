@@ -8,8 +8,14 @@ import (
 
 	"github.com/ruifan75/setori/internal/dto"
 	"github.com/ruifan75/setori/internal/logger"
+	"github.com/ruifan75/setori/internal/models"
 	"github.com/ruifan75/setori/internal/repository"
 )
+
+type batchComments interface {
+	RefreshCommentRaw(string) (int, error)
+	AnalyzeCommentsForBatch(string, bool) (*dto.AnalyzeCommentsResponse, error)
+}
 
 // BatchAnalyzeService は未処理配信の一括プレ分析ジョブ（singleton）。
 // 逐次で AnalyzeComments（抽出→AI正規化→拍手end→キャッシュ）を回す。
@@ -21,13 +27,15 @@ import (
 //     force=true（劣化キャッシュを無視）で再試行。規定回数失敗したら記録して先へ進む
 //   - キャッシュ済みの配信は AI を呼ばず秒で通過する（hash キャッシュ）
 type BatchAnalyzeService struct {
-	commentService *CommentService
+	commentService batchComments
 	streamRepo     *repository.StreamRepository
 
 	mu        sync.Mutex
 	running   bool
 	cancelled bool
 	status    dto.BatchAnalyzeStatus
+	task      *TaskRun
+	stop      func() bool
 }
 
 const (
@@ -92,8 +100,10 @@ func (s *BatchAnalyzeService) Status() dto.BatchAnalyzeStatus {
 
 func (s *BatchAnalyzeService) isCancelled() bool {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.cancelled
+	cancelled := s.cancelled || (s.task != nil && s.task.Cancelled())
+	stop := s.stop
+	s.mu.Unlock()
+	return cancelled || (stop != nil && stop())
 }
 
 func (s *BatchAnalyzeService) update(fn func(*dto.BatchAnalyzeStatus)) {
@@ -102,10 +112,46 @@ func (s *BatchAnalyzeService) update(fn func(*dto.BatchAnalyzeStatus)) {
 	fn(&s.status)
 }
 
+func (s *BatchAnalyzeService) Reserve() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.running {
+		return false
+	}
+	s.running = true
+	s.cancelled = false
+	s.status = dto.BatchAnalyzeStatus{Running: true, Mode: "reserved"}
+	return true
+}
+func (s *BatchAnalyzeService) Release() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.running = false
+	s.cancelled = false
+	s.task = nil
+	s.stop = nil
+	s.status.Running = false
+}
+func (s *BatchAnalyzeService) Cancelled() bool { return s.isCancelled() }
+func (s *BatchAnalyzeService) RunPrepared(streams []models.Stream, task *TaskRun, stop func() bool, eligible func(string) (bool, error)) error {
+	s.mu.Lock()
+	s.task = task
+	s.stop = stop
+	s.status = dto.BatchAnalyzeStatus{Running: true, Mode: BatchModeRefresh, Hidden: "false"}
+	s.mu.Unlock()
+	hidden := false
+	return s.runStreams(BatchModeRefresh, "", &hidden, streams, task, eligible)
+}
 func (s *BatchAnalyzeService) run(mode, singerID string, hidden *bool) {
+	_ = s.runStreams(mode, singerID, hidden, nil, nil, nil)
+}
+func (s *BatchAnalyzeService) runStreams(mode, singerID string, hidden *bool, streams []models.Stream, task *TaskRun, eligible func(string) (bool, error)) error {
 	defer func() {
 		s.mu.Lock()
-		s.running = false
+		// 準備の予約は所有者が最後に解放する。ここで解くと完了記録前に別処理が始まる。
+		if task == nil {
+			s.running = false
+		}
 		s.status.Running = false
 		s.status.Current = ""
 		if s.cancelled {
@@ -116,14 +162,18 @@ func (s *BatchAnalyzeService) run(mode, singerID string, hidden *bool) {
 			s.status.Message = "完了"
 		}
 		s.mu.Unlock()
-		logger.Infof("[batch-analyze] finished: done=%d failed=%d", s.status.Done, s.status.Failed)
+		st := s.Status()
+		logger.Infof("[batch-analyze] finished: done=%d failed=%d", st.Done, st.Failed)
 	}()
 
-	streams, err := s.streamRepo.FindStreamsForBatch(mode, singerID, hidden)
+	var err error
+	if streams == nil {
+		streams, err = s.streamRepo.FindStreamsForBatch(mode, singerID, hidden)
+	}
 	if err != nil {
 		logger.Warnf("[batch-analyze] list streams failed: %v", err)
 		s.update(func(st *dto.BatchAnalyzeStatus) { st.Message = "対象の取得に失敗しました" })
-		return
+		return err
 	}
 
 	// reanalyze は分析済みも作り直すため、最初から force でキャッシュを無視する。
@@ -134,7 +184,21 @@ func (s *BatchAnalyzeService) run(mode, singerID string, hidden *bool) {
 
 	for _, stream := range streams {
 		if s.isCancelled() {
-			return
+			return nil
+		}
+		// 準備の対象は開始時の一覧だけでは決めない。外部への再取得前にも確認する。
+		if eligible != nil {
+			ok, err := eligible(stream.ID)
+			if err != nil {
+				task.Fail(stream.ID, "対象の再検査: "+err.Error())
+				s.update(func(st *dto.BatchAnalyzeStatus) { st.Failed++; st.FailedIDs = append(st.FailedIDs, stream.ID) })
+				continue
+			}
+			if !ok {
+				task.Skip()
+				s.update(func(st *dto.BatchAnalyzeStatus) { st.Deferred++ })
+				continue
+			}
 		}
 		s.update(func(st *dto.BatchAnalyzeStatus) { st.Current = stream.Title })
 
@@ -148,6 +212,7 @@ func (s *BatchAnalyzeService) run(mode, singerID string, hidden *bool) {
 		// AI 劣化・取消・別処理が raw を書いた場合の失敗まで done に化ける
 		// （変換対象を絞れない）。分析する材料が無いのだから、呼ばないのが正しい。
 		emptyByDesign := false
+		refreshReason := ""
 		if mode == BatchModeRefresh {
 			n, err := s.commentService.RefreshCommentRaw(stream.ID)
 			switch {
@@ -158,17 +223,18 @@ func (s *BatchAnalyzeService) run(mode, singerID string, hidden *bool) {
 				// 扱うと、その入力が一度も分析されないまま処理済みになる。
 				logger.Infof("[batch-analyze] %s: 取得 0 件だったので保存済みのコメントで分析します", stream.ID)
 			case err != nil:
+				refreshReason = "コメント再取得: " + err.Error()
 				logger.Warnf("[batch-analyze] refresh comments failed (%s): %v（既存の raw で分析を続行）", stream.ID, err)
 			case n == 0:
 				emptyByDesign = true
 			}
 		}
 
-		outcome, songs := batchOutcomeDone, 0
+		outcome, songs, reason := batchOutcomeDone, 0, ""
 		if emptyByDesign {
 			logger.Infof("[batch-analyze] %s: コメントが 0 件でした（取得は成功。分析は行いません）", stream.ID)
 		} else {
-			outcome, songs = s.processOne(stream.ID, forceStart)
+			outcome, songs, reason = s.processOneWithScope(stream.ID, forceStart, eligible)
 		}
 
 		// **非表示 × 曲が出ない → 処理済みにする**（issue #42）。
@@ -206,6 +272,11 @@ func (s *BatchAnalyzeService) run(mode, singerID string, hidden *bool) {
 			}
 		}
 
+		// 準備では再取得と解析を同じ 1 件として記録する。再取得が失敗した回を
+		// task_runs と一括の進捗で別の結果にしない（保存済み入力の解析は続ける）。
+		if task != nil && refreshReason != "" {
+			outcome = batchOutcomeFailed
+		}
 		switch outcome {
 		case batchOutcomeDone:
 			s.update(func(st *dto.BatchAnalyzeStatus) { st.Done++ })
@@ -216,9 +287,11 @@ func (s *BatchAnalyzeService) run(mode, singerID string, hidden *bool) {
 			// cookie を入れるまで直らない）、次の実行に任せる。
 			logger.Infof("[batch-analyze] %s: live chat 待ちのため見送り（次回やり直します）", stream.ID)
 			s.update(func(st *dto.BatchAnalyzeStatus) { st.Deferred++ })
+		case batchOutcomeIneligible:
+			s.update(func(st *dto.BatchAnalyzeStatus) { st.Deferred++ })
 		default:
 			if s.isCancelled() {
-				return
+				return nil
 			}
 			s.update(func(st *dto.BatchAnalyzeStatus) {
 				st.Failed++
@@ -226,8 +299,28 @@ func (s *BatchAnalyzeService) run(mode, singerID string, hidden *bool) {
 			})
 		}
 
-		time.Sleep(batchStreamInterval)
+		if task != nil {
+			switch {
+			case refreshReason != "":
+				task.Fail(stream.ID, refreshReason)
+			case emptyByDesign:
+				task.Skip()
+			case outcome == batchOutcomeDeferred || outcome == batchOutcomeIneligible:
+				task.Skip()
+			case outcome == batchOutcomeDone && songs >= 0:
+				task.Succeed()
+			default:
+				if reason == "" {
+					reason = "抽出結果を保存できませんでした"
+				}
+				task.Fail(stream.ID, "プレ分析: "+reason)
+			}
+		}
+		if !s.sleepInterruptible(batchStreamInterval) {
+			return nil
+		}
 	}
+	return nil
 }
 
 // batchOutcome は 1 配信の処理結果。**完了・失敗の 2 値では足りない。**
@@ -240,6 +333,7 @@ const (
 	batchOutcomeFailed batchOutcome = iota
 	batchOutcomeDone
 	batchOutcomeDeferred
+	batchOutcomeIneligible // 待機・再取得・冷却中に準備の対象から外れた
 )
 
 // processOne は1配信を分析する。AI 劣化（warning あり）は冷却待ち後に force で再試行。
@@ -247,37 +341,53 @@ const (
 // 2 つ目の戻り値は抽出できた曲数（**成功したときだけ意味がある**）。
 // 「曲が 0 件だった」を「処理できなかった」と混ぜないために、outcome と分けて返す。
 func (s *BatchAnalyzeService) processOne(videoID string, forceStart bool) (batchOutcome, int) {
+	outcome, songs, _ := s.processOneDetailed(videoID, forceStart)
+	return outcome, songs
+}
+func (s *BatchAnalyzeService) processOneDetailed(videoID string, forceStart bool) (batchOutcome, int, string) {
+	return s.processOneWithScope(videoID, forceStart, nil)
+}
+func (s *BatchAnalyzeService) processOneWithScope(videoID string, forceStart bool, eligible func(string) (bool, error)) (batchOutcome, int, string) {
 	force := forceStart
+	reason := "分析が完了しませんでした"
 	for attempt := 1; attempt <= batchMaxAttempts; attempt++ {
 		if s.isCancelled() {
-			return batchOutcomeFailed, 0
+			return batchOutcomeFailed, 0, reason
+		}
+		// コメント再取得後と各再試行前に確認する。解析側も live chat を外部取得しうる。
+		if eligible != nil {
+			ok, err := eligible(videoID)
+			if err != nil {
+				return batchOutcomeFailed, 0, "対象の再検査: " + err.Error()
+			}
+			if !ok {
+				return batchOutcomeIneligible, 0, ""
+			}
 		}
 
 		// 一括プレ分析は抽出までにとどめる。**この経路では**照合の AI 判定を行わない
 		// ── 行うのは対話の analyze と、歌唱を作る batch-fill。
 		resp, err := s.commentService.AnalyzeCommentsForBatch(videoID, force)
+		if err != nil {
+			reason = err.Error()
+		} else if resp.Warning != "" {
+			reason = resp.Warning
+		}
 		if err == nil && resp.Warning == "" {
 			// **見送りを完了と混ぜない。** live chat が取れず結論を保留した回は
 			// キャッシュを書いていないので、完了に数えると再試行されないまま
 			// その配信の end が付かずに残る。
 			if resp.Deferred {
-				return batchOutcomeDeferred, 0
+				return batchOutcomeDeferred, 0, ""
 			}
-			// **0 曲のときだけ、保存できたことまで確かめる。** SaveCommentSongs の
-			// DB エラーはログだけで err にならないので、Saved を見ないと
-			// 「保存に失敗した回」も 0 曲として done になる ── そのまま処理済みに
-			// すると、キャッシュが無いまま refresh の対象（is_processed = FALSE）から
-			// 永久に外れる。曲数を -1 にして、標記の条件（songs == 0）に当てない。
-			//
-			// **Saved=false は障害の印ではない。** キャッシュ命中は仕様として
-			// false を返すので、曲数を見る前に評価すると正常な経路を毎回
-			// 警告として報告することになる。命中は必ず非空なので、
-			// 0 曲のときに限れば取り違えない。
-			if len(resp.Songs) == 0 && (resp.Stats == nil || !resp.Stats.Saved) {
+			// キャッシュ命中以外は保存できたことまで確かめる。非空でもDBへの
+			// 保存失敗はありうる。成功の結果と取り違えないよう失敗として返す。
+			// cache は書き込まないのが正常なので、Saved=false を失敗に数えない。
+			if resp.Stats == nil || (!resp.Stats.Saved && resp.Stats.Path != "cache") {
 				logger.Warnf("[batch-analyze] %s: 抽出結果を保存できませんでした（処理済みにはしません）", videoID)
-				return batchOutcomeDone, -1
+				return batchOutcomeFailed, -1, "抽出結果を保存できませんでした"
 			}
-			return batchOutcomeDone, len(resp.Songs)
+			return batchOutcomeDone, len(resp.Songs), ""
 		}
 		// **保存済みの入力が無いのは「分析して 0 曲」ではない。**
 		// 再試行しても遠隔へは行かない（一括は保存済みを処理する仕組み）ので、
@@ -285,7 +395,7 @@ func (s *BatchAnalyzeService) processOne(videoID string, forceStart bool) (batch
 		// 取り直しに失敗した配信が「処理済み」に見えてしまう。
 		if errors.Is(err, ErrNoStoredComments) {
 			logger.Warnf("[batch-analyze] %s: 保存済みのコメントがありません（取り直しに失敗した可能性）", videoID)
-			return batchOutcomeFailed, 0
+			return batchOutcomeFailed, 0, reason
 		}
 		// 分析中にコメントが差し替わっただけなら、待たずに読み直す。
 		// 90 秒の冷却は AI プロバイダーの劣化明けを待つためのもので、
@@ -294,7 +404,7 @@ func (s *BatchAnalyzeService) processOne(videoID string, forceStart bool) (batch
 			logger.Warnf("[batch-analyze] %s attempt %d: コメントが変わったので読み直します", videoID, attempt)
 			force = true
 			if attempt == batchMaxAttempts {
-				return batchOutcomeFailed, 0
+				return batchOutcomeFailed, 0, reason
 			}
 			continue
 		}
@@ -305,16 +415,16 @@ func (s *BatchAnalyzeService) processOne(videoID string, forceStart bool) (batch
 		}
 
 		if attempt == batchMaxAttempts {
-			return batchOutcomeFailed, 0
+			return batchOutcomeFailed, 0, reason
 		}
 		// 劣化結果がキャッシュに載っているため、次は force で作り直す。
 		// AI プロバイダーの冷却明けを待ってから再試行する。
 		force = true
 		if !s.sleepInterruptible(batchCooldownWait) {
-			return batchOutcomeFailed, 0
+			return batchOutcomeFailed, 0, reason
 		}
 	}
-	return batchOutcomeFailed, 0
+	return batchOutcomeFailed, 0, reason
 }
 
 // sleepInterruptible はキャンセルに反応しつつ待機する。継続可否を返す。

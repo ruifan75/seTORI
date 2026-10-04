@@ -1,6 +1,7 @@
 package service
 
 import (
+	"github.com/ruifan75/setori/internal/dto"
 	"strings"
 	"testing"
 )
@@ -27,19 +28,29 @@ func TestSweepMarkingConditions(t *testing.T) {
 		}
 	})
 
-	t.Run("0 曲のときだけ保存できたかを見る", func(t *testing.T) {
-		// SaveCommentSongs の DB エラーはログだけで err にならない。
-		// Saved を見ないと、キャッシュが無いまま処理済みになり
-		// refresh の対象（is_processed = FALSE）から永久に外れる。
-		//
-		// **ただし Saved=false は障害の印ではない** ── キャッシュ命中は
-		// 仕様として false を返す。曲数より先に評価すると、正常な経路を
-		// 毎回警告として報告することになる。
-		if !strings.Contains(svc, "if len(resp.Songs) == 0 && (resp.Stats == nil || !resp.Stats.Saved)") {
-			t.Error("保存確認が 0 曲のときに限られていない")
-		}
-		if !strings.Contains(svc, "return batchOutcomeDone, -1") {
-			t.Error("保存失敗を曲数 0 と区別していない")
+	t.Run("保存失敗は0曲と区別しキャッシュ命中は通す", func(t *testing.T) {
+		// ソースの字面ではなく、実際の一括処理の結果を確かめる。
+		// Saved=falseでもcacheなら正常、抽出結果を保存できなかった回は -1。
+		for _, tc := range []struct {
+			name, path string
+			songs      []dto.CommentSong
+			want       int
+		}{
+			{"0曲を保存できなかった", "grouped", []dto.CommentSong{}, -1},
+			{"非空を保存できなかった", "grouped", []dto.CommentSong{{}}, -1},
+			{"キャッシュ命中", "cache", []dto.CommentSong{{}}, 1},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				b := &BatchAnalyzeService{commentService: analyzedComments{&dto.AnalyzeCommentsResponse{Songs: tc.songs, Stats: &dto.AnalyzeStats{Path: tc.path, Saved: false}}}}
+				outcome, songs := b.processOne("video", false)
+				wantOutcome := batchOutcomeDone
+				if tc.want < 0 {
+					wantOutcome = batchOutcomeFailed
+				}
+				if outcome != wantOutcome || songs != tc.want {
+					t.Fatalf("outcome=%v songs=%d want%d", outcome, songs, tc.want)
+				}
+			})
 		}
 	})
 

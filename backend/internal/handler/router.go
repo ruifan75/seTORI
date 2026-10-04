@@ -51,6 +51,7 @@ type Router struct {
 	chatEndService       *service.ChatEndService
 	chapterService       *service.ChapterService
 	taskRunService       *service.TaskRunService
+	prepareService       *service.PrepareService
 	artistService        *service.ArtistService
 	batchAnalyzeService  *service.BatchAnalyzeService
 	batchFillService     *service.BatchFillService
@@ -220,6 +221,7 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 		clientIPResolver:     ipResolver,
 	}
 
+	r.prepareService = service.NewPrepareService(streamRepo, chapterService, batchAnalyzeService, batchFillService, r.taskRunService)
 	r.visibilityReview = repository.NewVisibilityReviewRepository(db)
 	r.setupRoutes()
 	return r
@@ -461,6 +463,8 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("DELETE /api/streams/{id}/import/live-chat", r.handleDeleteImportedLiveChat)
 	r.mux.HandleFunc("POST /api/streams/{id}/chat-end-estimate", r.handleEstimateChatEnds)
 	r.mux.HandleFunc("POST /api/chat-ends/backfill", r.handleBackfillChatEnds)
+	r.mux.HandleFunc("POST /api/streams/prepare", r.handlePrepareStreams)
+	r.mux.HandleFunc("POST /api/tasks/{id}/cancel", r.handleCancelPreparation)
 	r.mux.HandleFunc("GET /api/tasks", r.handleListTasks)
 	r.mux.HandleFunc("GET /api/tasks/{id}", r.handleGetTask)
 
@@ -3824,7 +3828,7 @@ func requiredPermission(method, path string) (perm string, needsAuth bool) {
 	// /api/streams/batch-analyze-report のような別ルートを足したときに黙って
 	// 巻き込む（認可は ServeMux より前に path 文字列だけで決まるため）。
 	if isRouteOrSubpath(path, "/api/streams/batch-fill") ||
-		isRouteOrSubpath(path, "/api/streams/batch-analyze") {
+		isRouteOrSubpath(path, "/api/streams/batch-analyze") || isRouteOrSubpath(path, "/api/streams/prepare") {
 		return auth.PermContentEdit, true
 	}
 
