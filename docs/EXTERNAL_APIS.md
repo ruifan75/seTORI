@@ -110,7 +110,7 @@
      `POST /api/streams/{id}/chapters/analyze`（`ChapterService` は `ExtractSongs` を共有する）、
      `POST /api/streams/{id}/holodex-songs/analyze`（`BatchAINormalization` と未決着の AI 照合）、
      および一括（`batch-analyze` / `batch-fill`）。
-     **AI 経路には除外キーワードの辞書を渡さない**（`filterScopeForPath`。
+     **AI 経路には除外キーワードの辞書を渡さない**（`FilterScopeForPath`。
      AI が既に `is_song` を判断しているため。regex 経路だけ辞書を使う）。
   3. **読み仮名の補完**：`POST /api/ai/backfill-readings`（曲名・アーティスト各 30 件）。
   4. **重複楽曲の走査・判定**：`POST /api/songs/merge-candidates/scan`（登録曲を丸ごと見せる）、

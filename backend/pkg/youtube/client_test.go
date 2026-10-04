@@ -1,6 +1,7 @@
 package youtube
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -171,5 +172,59 @@ func TestListVideoCommentsRequiresAPIKey(t *testing.T) {
 	_, err := NewClient("").ListVideoComments("6Pjm0GvbWsw")
 	if err == nil || !strings.Contains(err.Error(), "not configured") {
 		t.Fatalf("error = %v, want not configured", err)
+	}
+}
+
+// **「取れない」の明言と一時的な失敗を分ける**（issue #56）。後者まで
+// ErrCommentsUnavailable にすると、障害のあいだに触った配信が全部後回しになる。
+func TestListVideoCommentsClassifiesUnavailable(t *testing.T) {
+	cases := []struct {
+		name        string
+		status      int
+		body        string
+		unavailable bool
+	}{
+		{"404", http.StatusNotFound, `{"error":{"errors":[{"reason":"videoNotFound"}]}}`, true},
+		{"404・本文なし", http.StatusNotFound, ``, true},
+		{"403 commentsDisabled", http.StatusForbidden, `{"error":{"errors":[{"reason":"commentsDisabled"}]}}`, true},
+		{"403 quotaExceeded", http.StatusForbidden, `{"error":{"errors":[{"reason":"quotaExceeded"}]}}`, false},
+		// 会限・非公開。タグで既に外しているうえ、API キーの設定誤りでも返りうる
+		{"403 forbidden", http.StatusForbidden, `{"error":{"errors":[{"reason":"forbidden"}]}}`, false},
+		{"403 本文が読めない", http.StatusForbidden, `not json`, false},
+		{"500", http.StatusInternalServerError, `{"error":{"errors":[{"reason":"backendError"}]}}`, false},
+		{"400", http.StatusBadRequest, `{"error":{"errors":[{"reason":"commentsDisabled"}]}}`, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			client := NewClient("test-key")
+			client.httpClient = &http.Client{Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
+				return jsonResponse(tc.status, tc.body), nil
+			})}
+			_, err := client.ListVideoComments("abc")
+			if err == nil {
+				t.Fatal("エラーが返っていない")
+			}
+			if got := errors.Is(err, ErrCommentsUnavailable); got != tc.unavailable {
+				t.Errorf("ErrCommentsUnavailable = %v, want %v（err=%v）", got, tc.unavailable, err)
+			}
+		})
+	}
+}
+
+// **2 ページ目以降の 404 は一時的な失敗。** 1 ページ目が取れた以上コメント欄はある。
+func TestListVideoCommentsLaterPage404IsNotUnavailable(t *testing.T) {
+	client := NewClient("test-key")
+	client.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Query().Get("pageToken") == "" {
+			return jsonResponse(http.StatusOK, `{"nextPageToken":"p2","items":[]}`), nil
+		}
+		return jsonResponse(http.StatusNotFound, `{}`), nil
+	})}
+	_, err := client.ListVideoComments("abc")
+	if err == nil {
+		t.Fatal("エラーが返っていない")
+	}
+	if errors.Is(err, ErrCommentsUnavailable) {
+		t.Errorf("途中のページの 404 を「取れない」と判定している: %v", err)
 	}
 }

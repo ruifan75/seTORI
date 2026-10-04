@@ -118,6 +118,14 @@ export function invalidateChannelScopedQueries() {
     ['preset-items'],
     ['streams'],
     ['tag-streams'],
+    // #61：曲ページ・曲一覧（ホームの「人気の楽曲」を含む）・タグ別の歌唱・
+    // アーティストページの歌唱数も、一覧に出しているチャンネルで絞るようになった。
+    ['songs'],
+    ['song'],
+    ['tag-performances'],
+    ['artist'],
+    // ヘッダーの横断検索も曲の歌唱数と歌唱タグの件数を出す（staleTime 30 秒）。
+    ['global-search'],
   ]) {
     void queryClient.invalidateQueries({ queryKey: key });
   }

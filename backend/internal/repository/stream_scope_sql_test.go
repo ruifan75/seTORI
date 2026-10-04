@@ -68,6 +68,10 @@ func (s *recordingStmt) Query(args []driver.Value) (driver.Rows, error) {
 	if strings.Contains(s.query, "RETURNING st.updated_at") {
 		return &streamRestrictionValueRows{values: []driver.Value{time.Now()}}, nil
 	}
+	// GROUP BY の歌唱数は空の行集合を返す（単一の総件数とは列数が違う）。
+	if strings.Contains(s.query, "SELECT p.song_id, COUNT(*)") {
+		return &noRows{}, nil
+	}
 	if strings.Contains(s.query, "COUNT(*)") {
 		return &oneIntRow{}, nil
 	}
