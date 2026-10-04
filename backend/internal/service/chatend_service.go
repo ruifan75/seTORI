@@ -41,6 +41,10 @@ type AnalyzeResult struct {
 	Total   int `json:"total"`   // 対象になった曲数
 	Filled  int `json:"filled"`  // end が空だったので拍手 end で埋めた曲数
 	Changed int `json:"changed"` // 実際に書き換わった曲数（ChatEnd の記録だけの曲も含む）
+	// Outcome は live chat の取得結果（応答には出さない）。backfill が
+	// 「BOT 判定で取れなかった」を成功と数えないために要る（issue #22）
+	// ── 0 件埋まったのが「拍手が無かった」のか「取れなかった」のかは件数では分からない。
+	Outcome chatOutcome `json:"-"`
 }
 
 // AnalyzeStream は live chat をダウンロードし、拍手による終了時刻を検出して comment_songs の end を更新する。
@@ -67,9 +71,13 @@ func (s *ChatEndService) AnalyzeStream(videoID string) (AnalyzeResult, error) {
 	}
 
 	// この経路は拍手 end の付与そのものが目的で、到達できなければ 0 件になるだけ。
-	// 抽出結果のキャッシュは触らないので、到達可否で分岐する必要は無い。
-	songs, filled, changed, _ := s.DetectEndsForSongs(videoID, duration, songs)
-	res = AnalyzeResult{Total: len(songs), Filled: filled, Changed: changed}
+	// 一時的な取得失敗は具体的な原因を呼び出し元へ返し、実行記録に残す。
+	loaded := s.Probe(videoID)
+	songs, filled, changed, outcome := s.DetectEndsForSongsLoaded(loaded, videoID, duration, songs)
+	res = AnalyzeResult{Total: len(songs), Filled: filled, Changed: changed, Outcome: outcome}
+	if outcome == chatTransientError {
+		return res, loaded.err
+	}
 	// 既に end があった曲でも ChatEnd / EndDiff は保存する。値そのものは変えないが、
 	// コメントの end と拍手の end がずれている曲を UI で拾えるようにするため
 	// （filled だけを保存条件にしていた頃は、この差分が毎回捨てられていた）。
@@ -117,11 +125,11 @@ func usableLiveChatFile(path, videoID, label string) bool {
 // 取得と検証をここ 1 か所にまとめてあるのは、**呼び出し側が「取れたか」だけを見て
 // 先へ進めないようにする**ため。サイズは有効性の根拠にならない ── 十分に長くても
 // 中身が replay でなければ、パーサは全行を読み飛ばして「0 件・エラー無し」を返す。
-func (s *ChatEndService) loadChat(videoID string) ([]chatend.Event, chatOutcome) {
+func (s *ChatEndService) loadChat(videoID string) ([]chatend.Event, chatOutcome, error) {
 	chatPath, outcome, err := s.fetchLiveChat(videoID)
 	if err != nil {
 		logger.Warnf("[chatend] %s: live chat を利用できません: %v", videoID, err)
-		return nil, outcome
+		return nil, outcome, err
 	}
 
 	// **使えないファイルは必ず消す。** 消さずに transient を返すと、次回も同じ
@@ -133,13 +141,13 @@ func (s *ChatEndService) loadChat(videoID string) ([]chatend.Event, chatOutcome)
 	case err != nil:
 		logger.Warnf("[chatend] %s: live chat の解析に失敗。キャッシュを消して取り直します: %v", videoID, err)
 		_ = os.Remove(chatPath)
-		return nil, chatTransientError
+		return nil, chatTransientError, err
 	case !recognized:
 		logger.Warnf("[chatend] %s: live chat replay として読めませんでした。キャッシュを消して取り直します", videoID)
 		_ = os.Remove(chatPath)
-		return nil, chatTransientError
+		return nil, chatTransientError, ErrLiveChatUnreadable
 	}
-	return events, chatOK
+	return events, chatOK, nil
 }
 
 // Probe は live chat が使えるかだけを確かめる（曲目が要らない段階で呼ぶ）。
@@ -150,8 +158,8 @@ func (s *ChatEndService) loadChat(videoID string) ([]chatend.Event, chatOutcome)
 //
 // 成功時はファイルがディスクに載るので、後段の DetectEnds は再取得しない。
 func (s *ChatEndService) Probe(videoID string) ChatLoad {
-	events, outcome := s.loadChat(videoID)
-	return ChatLoad{events: events, outcome: outcome, loaded: true}
+	events, outcome, err := s.loadChat(videoID)
+	return ChatLoad{events: events, outcome: outcome, err: err, loaded: true}
 }
 
 // ChatLoad は取得・検証済みの live chat。**先行確認の結果を後段へ渡すためのもの。**
@@ -160,6 +168,7 @@ func (s *ChatEndService) Probe(videoID string) ChatLoad {
 type ChatLoad struct {
 	events  []chatend.Event
 	outcome chatOutcome
+	err     error // ログが消えても backfill の実行記録に原因を残す
 	loaded  bool
 }
 
@@ -283,15 +292,20 @@ func abs(x int) int {
 
 // Backfill は comment_songs を持つすべての歌枠で拍手 end を検出する（同時実行数に上限あり）。
 // 既存データの補完向け。ダウンロード済みの live chat はキャッシュを使うため、再実行は軽い。
-func (s *ChatEndService) Backfill(concurrency int) {
+//
+// 結果は run（task_runs）へ 1 件ずつ記録する（issue #22）。以前は log だけで、
+// 長い実行は自分の進捗行で失敗行を押し流していた。
+func (s *ChatEndService) Backfill(concurrency int, run *TaskRun) {
 	ids, err := s.streamRepo.FindIDsWithCommentSongs()
 	if err != nil {
 		logger.Warnf("[chatend] backfill: list streams failed: %v", err)
+		run.Finish("failed", "対象の取得に失敗しました: "+err.Error())
 		return
 	}
 	if concurrency < 1 {
 		concurrency = 1
 	}
+	run.SetTotal(len(ids))
 	logger.Infof("[chatend] backfill を開始: %d 件 (concurrency=%d)", len(ids), concurrency)
 
 	sem := make(chan struct{}, concurrency)
@@ -303,16 +317,36 @@ func (s *ChatEndService) Backfill(concurrency int) {
 		go func(id string) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			if _, err := s.AnalyzeStream(id); err != nil {
+			res, err := s.AnalyzeStream(id)
+			if err != nil {
 				logger.Warnf("[chatend] backfill %s: %v", id, err)
 			}
+			recordChatEndResult(run, id, res, err)
 			if n := atomic.AddInt64(&done, 1); n%10 == 0 || int(n) == len(ids) {
 				logger.Infof("[chatend] backfill の進捗: %d/%d", n, len(ids))
 			}
 		}(id)
 	}
 	wg.Wait()
-	logger.Infof("[chatend] backfill が完了: %d 件", len(ids))
+	run.Finish("done", "")
+}
+
+// recordChatEndResult は backfill の 1 件の結果を記録へ振り分ける。
+//
+// **取得できなかったものを成功に数えない。** BOT 判定・timeout・yt-dlp 未導入は
+// 「0 曲埋まった」と件数では区別できず、しかも backfill で最も見たい失敗
+// （cookie を直して再実行すべき対象）。replay がまだ無いものは失敗ではなく見送り。
+func recordChatEndResult(run *TaskRun, id string, res AnalyzeResult, err error) {
+	switch {
+	case err != nil:
+		run.Fail(id, err.Error())
+	case res.Outcome == chatTransientError:
+		run.Fail(id, "live chat を取得できませんでした（一時的な失敗。ログで理由を確認）")
+	case res.Outcome == chatNoReplay:
+		run.Skip()
+	default:
+		run.Succeed()
+	}
 }
 
 // fetchLiveChat は yt-dlp で live chat replay をダウンロードする（取得済みならキャッシュを使う）。

@@ -229,14 +229,14 @@ func (r *PerformanceRepository) FindBySongID(songID uuid.UUID, limit, offset int
 		SELECT COUNT(*)
 		FROM performances p
 		JOIN streams st ON p.stream_id = st.id
-		WHERE p.song_id = $1 AND TRUE`+access.discoverClause()+`
+		WHERE p.song_id = $1 AND `+ListedFor("st", access)+`
 	`, songID).Scan(&total)
 	if err != nil {
 		return nil, 0, fmt.Errorf("count performances: %w", err)
 	}
 
 	performances, err := r.queryPerformanceDetails(perfDetailSelect+`
-		WHERE p.song_id = $1 AND TRUE`+access.discoverClause()+`
+		WHERE p.song_id = $1 AND `+ListedFor("st", access)+`
 		ORDER BY st.stream_date DESC
 		LIMIT $2 OFFSET $3`, songID, limit, offset)
 	if err != nil {
@@ -253,7 +253,7 @@ func (r *PerformanceRepository) FindByTagID(tagID string, limit, offset int, acc
 		FROM performances p
 		JOIN streams st ON p.stream_id = st.id
 		JOIN performance_performance_tags ppt ON ppt.performance_id = p.id
-		WHERE ppt.tag_id = $1 AND TRUE`+access.discoverClause()+`
+		WHERE ppt.tag_id = $1 AND `+ListedFor("st", access)+`
 	`, tagID).Scan(&total)
 	if err != nil {
 		return nil, 0, fmt.Errorf("count performances by tag: %w", err)
@@ -261,7 +261,7 @@ func (r *PerformanceRepository) FindByTagID(tagID string, limit, offset int, acc
 
 	performances, err := r.queryPerformanceDetails(perfDetailSelect+`
 		JOIN performance_performance_tags ppt ON ppt.performance_id = p.id
-		WHERE ppt.tag_id = $1 AND TRUE`+access.discoverClause()+`
+		WHERE ppt.tag_id = $1 AND `+ListedFor("st", access)+`
 		ORDER BY st.stream_date DESC, p.order_index ASC
 		LIMIT $2 OFFSET $3`, tagID, limit, offset)
 	if err != nil {
@@ -828,8 +828,41 @@ const (
 // 同意は fail-closed で扱う ── 「誰か 1 人が allow なら公開」は、
 // データ異常や共同配信で意図せず公開する方向へ倒れる。
 func EffectiveRestrictedExpr(alias string) string {
-	return "COALESCE(" + alias + ".restriction_override, " +
-		MembersOnlyDetectedExpr(alias) + " AND NOT " + allOwnersAllowExpr(alias) + ")"
+	return "COALESCE(" + alias + ".restriction_override, " + AutoRestrictedExpr(alias) + ")"
+}
+
+// AutoRestrictedExpr は人の裁定を除いた**自動判定**（会限として検出され、かつ
+// 所有者全員が公開を許可しているわけではない）。`EffectiveRestrictedExpr` の
+// COALESCE の第 2 引数そのもので、裁定の時点の値を控えるときにも使う
+// （`SetRestrictionOverride`）。**ここを分けて書かないこと** ── 実効値と控えが
+// 別の式から作られると、控えと比べる食い違いの判定が意味を失う。
+//
+// 括弧で包まないのは `EffectiveRestrictedExpr` の文字列を変えないため
+// （`TestRestrictedExpressionsExact` が文字どおり固定している）。
+// 中に OR を含まないので、AND で繋ぐ側で優先順位がずれることは無い。
+func AutoRestrictedExpr(alias string) string {
+	return MembersOnlyDetectedExpr(alias) + " AND NOT " + allOwnersAllowExpr(alias)
+}
+
+// RestrictionNeedsReviewExpr は公開の裁定と現在の自動判定が食い違い、
+// 確認が必要な配信（issue #26）。控えが NULL の旧裁定では前後関係は不明。
+//
+//	restriction_override IS FALSE        … 人が「公開してよい」と決めた
+//	AND 自動判定が今は伏せる               … 会限として検出され、方針も allow ではない
+//	AND 裁定の時点では伏せる判定ではなかった（または分からない）
+//
+// **3 つ目が要る。** 会限と分かったうえで「この配信だけは公開してよい」と
+// 決めたものは正当な例外で、毎回警告すると警告そのものが読まれなくなる。
+// 分からない（NULL＝この仕組みより前の裁定）は**出す側へ倒す** ── 確認すれば
+// 控えが入って消えるが、出さなければ誰も気付かない。
+//
+// 逆向き（伏せると決めたあと自動判定が公開へ変わった）は出さない。
+// 伏せたままなのは安全側なので、知らせる理由が無い。
+// IS FALSE は未裁定（NULL）を FALSE にする。= FALSE だと式全体が NULL に
+// なりうるため、FindByID で bool に Scan できない。
+func RestrictionNeedsReviewExpr(alias string) string {
+	return alias + ".restriction_override IS FALSE AND " + AutoRestrictedExpr(alias) +
+		" AND " + alias + ".restriction_override_auto IS DISTINCT FROM TRUE"
 }
 
 // MembersOnlyDetectedExpr は「その配信が会限か」の**検出**。
@@ -915,6 +948,38 @@ func DiscoverableFor(alias string, access ViewerAccess) string {
 		return "TRUE"
 	}
 	return alias + ".is_hidden = FALSE AND " + NotRestricted(alias)
+}
+
+// ListedFor は発見面のうち、**チャンネルの表示にも従う**場所の条件
+// （`DiscoverableFor` ＋ 一覧に出しているチャンネルが参加者に居るか）。
+//
+// **使う場所**：曲ページの歌唱履歴と件数、曲一覧の歌唱数（ホームの「人気の楽曲」も
+// ここ）、タグ別の歌唱と件数、アーティストページの歌唱数（#61）。
+// 通さないと「歌唱 1 件」と出るのに開くと一覧に出していないチャンネルの配信、
+// という形になる ── `/streams`（#59）とおすすめ（#68）では既に出さないので、
+// 曲ページからだけ辿れる配信が残る。
+//
+// **`DiscoverableFor` 自体には混ぜない。** 混ぜると次の場所まで絞られる：
+//
+//   - 歌手ページ … 非表示チャンネルのページは未ログインでも開ける設計
+//     （CLAUDE.md §3）なので、自分の配信が 0 件のページになる
+//   - 統合候補の件数 … 統合の向きを件数で決めるので、非表示チャンネルの歌唱しか
+//     無い曲が 0 件に見えると、残すべきほうを消す方向へ誘導する
+//     （`mergeCandidateSelect` が秘匿で同じ理由を書いている）
+//
+// 配信検索（`SearchStreams`）も通さない。あちらは非表示の配信も意図的に含める
+// （CLAUDE.md §2）ので、`is_hidden` と同じ性質のこの軸だけ濾すのは筋が通らない。
+//
+// **`RestrictedView` では外す**（`DiscoverableFor` と同じ）。チャンネルの表示は
+// `is_hidden` と同じ「一覧の既定から外す」軸で、認可境界ではない。管理者に
+// 「歌唱があるのに 0 件に見える」を起こさないために両軸を外しているのと同じ理由。
+// 押し出す面（`promotedClause`）が権限で緩めないのは、そこから資料を管理する
+// ことが無いからで、こちらは資料を辿る面なので事情が違う。
+func ListedFor(alias string, access ViewerAccess) string {
+	if access == RestrictedView {
+		return "TRUE"
+	}
+	return DiscoverableFor(alias, access) + " AND " + VisibleChannelExpr(alias)
 }
 
 // restrictClause は WHERE / JOIN の条件へ足す文字列を返す。
