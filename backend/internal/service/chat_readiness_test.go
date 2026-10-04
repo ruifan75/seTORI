@@ -178,14 +178,14 @@ func TestSuspectLiveChatCacheIsRejected(t *testing.T) {
 	svc := NewChatEndService(nil, "yt-dlp-does-not-exist-for-this-test", dir)
 
 	// 途中で切れたファイル（codex の指摘そのもの：`{` だけ）
-	broken := filepath.Join(dir, "vid1.live_chat.json")
+	broken := filepath.Join(dir, "video000001.live_chat.json")
 	if err := os.WriteFile(broken, []byte("{"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	// yt-dlp は存在しないので取得は失敗するが、**キャッシュを信用していれば
 	// そこで chatOK を返して終わる**。返らないこと＝小さいファイルを弾いたこと。
-	_, outcome, err := svc.fetchLiveChat("vid1")
+	_, outcome, err := svc.fetchLiveChat("video000001")
 	if err == nil || outcome == chatOK {
 		t.Fatalf("壊れたキャッシュを採用してしまった (outcome=%v err=%v)", outcome, err)
 	}
@@ -196,14 +196,14 @@ func TestSuspectLiveChatCacheIsRejected(t *testing.T) {
 	// 正常系を巻き込んでいないこと。**中身も本物にする** ── 以前ここは
 	// `{"a":1}` を並べただけで、サイズは足りるが replay としては無効だった。
 	// つまりこのテスト自体が「長ければ中身が壊れていても通る」ことを実証していた。
-	good := filepath.Join(dir, "vid2.live_chat.json")
+	good := filepath.Join(dir, "video000002.live_chat.json")
 	record := `{"replayChatItemAction":{"videoOffsetTimeMsec":"1000","actions":[` +
 		`{"addChatItemAction":{"item":{"liveChatTextMessageRenderer":` +
 		`{"message":{"runs":[{"text":"888"}]}}}}}]}}` + "\n"
 	if err := os.WriteFile(good, []byte(strings.Repeat(record, 4)), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	path, outcome, err := svc.fetchLiveChat("vid2")
+	path, outcome, err := svc.fetchLiveChat("video000002")
 	if err != nil || outcome != chatOK || path != good {
 		t.Errorf("正常なキャッシュを使っていない (outcome=%v err=%v)", outcome, err)
 	}
@@ -211,11 +211,11 @@ func TestSuspectLiveChatCacheIsRejected(t *testing.T) {
 	// **サイズは有効性の根拠にならない。** 長さは足りるが replay ではないファイルは、
 	// パーサが全行を読み飛ばして「0 件・エラー無し」になる。これを結論にすると
 	// 壊れたキャッシュのまま確定するので、解析側で気付いて消す必要がある。
-	junk := filepath.Join(dir, "vid3.live_chat.json")
+	junk := filepath.Join(dir, "video000003.live_chat.json")
 	if err := os.WriteFile(junk, []byte(strings.Repeat(`{"a":1}`+"\n", 64)), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, outcome := svc.DetectEnds("vid3", 600, []int{0}); outcome != chatTransientError {
+	if _, outcome := svc.DetectEnds("video000003", 600, []int{0}); outcome != chatTransientError {
 		t.Errorf("中身が replay でないファイルを結論にしてしまった (outcome=%v)", outcome)
 	}
 	if _, statErr := os.Stat(junk); statErr == nil {
@@ -225,11 +225,11 @@ func TestSuspectLiveChatCacheIsRejected(t *testing.T) {
 	// **解析エラーでも消すこと。** 消さずに transient を返すと、次回も同じ
 	// キャッシュが採用されて「取り直す」が永久に起きない。
 	// 16MiB を超える 1 行は scanner error になる（バッファ上限）。
-	huge := filepath.Join(dir, "vid4.live_chat.json")
+	huge := filepath.Join(dir, "video000004.live_chat.json")
 	if err := os.WriteFile(huge, []byte(strings.Repeat("x", 17*1024*1024)), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, outcome := svc.DetectEnds("vid4", 600, []int{0}); outcome != chatTransientError {
+	if _, outcome := svc.DetectEnds("video000004", 600, []int{0}); outcome != chatTransientError {
 		t.Errorf("解析エラーを結論にしてしまった (outcome=%v)", outcome)
 	}
 	if _, statErr := os.Stat(huge); statErr == nil {

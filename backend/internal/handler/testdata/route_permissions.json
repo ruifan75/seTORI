@@ -1,0 +1,1360 @@
+[
+  {
+    "pattern": "GET /health",
+    "handler": "handleHealth",
+    "permission": "",
+    "login": false,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/version",
+    "handler": "handleVersion",
+    "permission": "",
+    "login": false,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/auth/login",
+    "handler": "handleLogin",
+    "permission": "",
+    "login": false,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/auth/logout",
+    "handler": "handleLogout",
+    "permission": "",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/auth/me",
+    "handler": "handleMe",
+    "permission": "",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/auth/oauth/providers",
+    "handler": "handleListOAuthProviders",
+    "permission": "",
+    "login": false,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/auth/oauth/identities",
+    "handler": "handleListMyIdentities",
+    "permission": "",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/auth/oauth/exchange",
+    "handler": "handleOAuthExchange",
+    "permission": "",
+    "login": false,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/auth/oauth/{provider}/start",
+    "handler": "handleOAuthStart",
+    "permission": "",
+    "login": false,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/auth/oauth/{provider}/callback",
+    "handler": "handleOAuthCallback",
+    "permission": "",
+    "login": false,
+    "analysis": false
+  },
+  {
+    "pattern": "DELETE /api/auth/oauth/{provider}",
+    "handler": "handleUnlinkOAuth",
+    "permission": "",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/users",
+    "handler": "handleListUsers",
+    "permission": "users:manage",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/users",
+    "handler": "handleCreateUser",
+    "permission": "users:manage",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "PUT /api/users/{id}",
+    "handler": "handleUpdateUser",
+    "permission": "users:manage",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "PUT /api/users/{id}/password",
+    "handler": "handleChangeUserPassword",
+    "permission": "users:manage",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "DELETE /api/users/{id}",
+    "handler": "handleDeleteUser",
+    "permission": "users:manage",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/users/{id}/revoke-sessions",
+    "handler": "handleRevokeUserSessions",
+    "permission": "users:manage",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/roles",
+    "handler": "handleListRoles",
+    "permission": "users:manage",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/roles",
+    "handler": "handleCreateRole",
+    "permission": "users:manage",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "PUT /api/roles/{id}",
+    "handler": "handleUpdateRole",
+    "permission": "users:manage",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "DELETE /api/roles/{id}",
+    "handler": "handleDeleteRole",
+    "permission": "users:manage",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/permissions",
+    "handler": "handleListPermissions",
+    "permission": "users:manage",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/activity/visit",
+    "handler": "handleRecordVisit",
+    "permission": "",
+    "login": false,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/activity/policy",
+    "handler": "handleActivityPolicy",
+    "permission": "",
+    "login": false,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/activity",
+    "handler": "handleListActivity",
+    "permission": "users:manage",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/activity/stats",
+    "handler": "handleActivityStats",
+    "permission": "users:manage",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/activity/users",
+    "handler": "handleUserActivitySummaries",
+    "permission": "users:manage",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/search",
+    "handler": "handleGlobalSearch",
+    "permission": "",
+    "login": false,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/streams/search",
+    "handler": "handleSearchStreams",
+    "permission": "",
+    "login": false,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/streams/batch-fill",
+    "handler": "handleStartBatchFill",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/streams/batch-fill/cancel",
+    "handler": "handleCancelBatchFill",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/streams/batch-fill/status",
+    "handler": "handleBatchFillStatus",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/streams/batch-fill/runs",
+    "handler": "handleListBatchFillRuns",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/streams/batch-fill/runs/{id}/revert",
+    "handler": "handleRevertBatchFill",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/streams/batch-fill/runs/{id}/gaps",
+    "handler": "handleListBatchFillGaps",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/streams/batch-analyze",
+    "handler": "handleStartBatchAnalyze",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/streams/batch-analyze/cancel",
+    "handler": "handleCancelBatchAnalyze",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/streams/batch-analyze/status",
+    "handler": "handleBatchAnalyzeStatus",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/songs",
+    "handler": "handleListSongs",
+    "permission": "",
+    "login": false,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/songs/{id}",
+    "handler": "handleGetSong",
+    "permission": "",
+    "login": false,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/songs/{id}/performances",
+    "handler": "handleGetSongPerformances",
+    "permission": "",
+    "login": false,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/songs",
+    "handler": "handleCreateSong",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "PUT /api/songs/{id}",
+    "handler": "handleUpdateSong",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "DELETE /api/songs/{id}",
+    "handler": "handleDeleteSong",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/songs/{id}/merge",
+    "handler": "handleMergeSong",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/songs/merge-candidates",
+    "handler": "handleListMergeCandidates",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/songs/merge-candidates/{id}/dismiss",
+    "handler": "handleDismissMergeCandidate",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/songs/merge-candidates/scan",
+    "handler": "handleScanDuplicates",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/songs/merge-candidates/adjudicate",
+    "handler": "handleAdjudicateDuplicates",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/songs/{id}/merge-candidates",
+    "handler": "handleGetSongMergeCandidates",
+    "permission": "",
+    "login": false,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/songs/identity-checks",
+    "handler": "handleListIdentityChecks",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/songs/identity-checks/delete",
+    "handler": "handleDeleteIdentityCheck",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/streams",
+    "handler": "handleListStreams",
+    "permission": "",
+    "login": false,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/streams/tag-counts",
+    "handler": "handleStreamTagCounts",
+    "permission": "",
+    "login": false,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/streams/{id}",
+    "handler": "handleGetStream",
+    "permission": "",
+    "login": false,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/streams",
+    "handler": "handleCreateStream",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "PUT /api/streams/{id}",
+    "handler": "handleUpdateStream",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/artists",
+    "handler": "handleListArtists",
+    "permission": "",
+    "login": false,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/artists/{id}",
+    "handler": "handleGetArtist",
+    "permission": "",
+    "login": false,
+    "analysis": false
+  },
+  {
+    "pattern": "PUT /api/artists/{id}",
+    "handler": "handleUpdateArtist",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/artists/{id}/merge",
+    "handler": "handleMergeArtist",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/ai/backfill-readings",
+    "handler": "handleBackfillReadings",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/readings/stats",
+    "handler": "handleReadingsStats",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/readings/export",
+    "handler": "handleExportReadings",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/readings/import",
+    "handler": "handleImportReadings",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/suggestions",
+    "handler": "handleCreateSuggestion",
+    "permission": "",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/suggestions",
+    "handler": "handleListSuggestions",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/suggestions/mine",
+    "handler": "handleListMySuggestions",
+    "permission": "",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/suggestions/count",
+    "handler": "handleCountSuggestions",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/suggestions/batch",
+    "handler": "handleBatchReviewSuggestions",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/suggestions/merge",
+    "handler": "handleMergeSuggestions",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/suggestions/settings",
+    "handler": "handleGetSuggestionSettings",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "PUT /api/suggestions/settings",
+    "handler": "handleUpdateSuggestionSettings",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/suggestions/{id}/approve",
+    "handler": "handleApproveSuggestion",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/suggestions/{id}/reject",
+    "handler": "handleRejectSuggestion",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "DELETE /api/suggestions/{id}",
+    "handler": "handleWithdrawSuggestion",
+    "permission": "",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/suggestions/{id}/undo-rejection",
+    "handler": "handleUndoRejection",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/settings/integrations",
+    "handler": "handleGetIntegrationSettings",
+    "permission": "users:manage",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "PUT /api/settings/integrations",
+    "handler": "handleUpdateIntegrationSettings",
+    "permission": "users:manage",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/playlists/public",
+    "handler": "handleListPublicPlaylists",
+    "permission": "",
+    "login": false,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/shared/playlists/{slug}",
+    "handler": "handleGetSharedPlaylist",
+    "permission": "",
+    "login": false,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/shared/playlists/{slug}/items",
+    "handler": "handleListSharedPlaylistItems",
+    "permission": "",
+    "login": false,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/playlists",
+    "handler": "handleListMyPlaylists",
+    "permission": "",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/playlists",
+    "handler": "handleCreatePlaylist",
+    "permission": "",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/playlists/{id}",
+    "handler": "handleGetPlaylist",
+    "permission": "",
+    "login": false,
+    "analysis": false
+  },
+  {
+    "pattern": "PUT /api/playlists/{id}",
+    "handler": "handleUpdatePlaylist",
+    "permission": "",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "DELETE /api/playlists/{id}",
+    "handler": "handleDeletePlaylist",
+    "permission": "",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/playlists/{id}/items",
+    "handler": "handleListPlaylistItems",
+    "permission": "",
+    "login": false,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/playlists/{id}/items",
+    "handler": "handleAddPlaylistItem",
+    "permission": "",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "DELETE /api/playlists/{id}/items/{performanceId}",
+    "handler": "handleRemovePlaylistItem",
+    "permission": "",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "PUT /api/playlists/{id}/order",
+    "handler": "handleReorderPlaylist",
+    "permission": "",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/presets",
+    "handler": "handleListPresets",
+    "permission": "",
+    "login": false,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/presets/followed",
+    "handler": "handleListFollowedPresets",
+    "permission": "",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/presets/{key}",
+    "handler": "handleGetPreset",
+    "permission": "",
+    "login": false,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/presets/{key}/items",
+    "handler": "handleListPresetItems",
+    "permission": "",
+    "login": false,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/presets/{key}/follow",
+    "handler": "handleFollowPreset",
+    "permission": "",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "DELETE /api/presets/{key}/follow",
+    "handler": "handleUnfollowPreset",
+    "permission": "",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/presets/{key}/add",
+    "handler": "handleAddPresetToPlaylist",
+    "permission": "",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/singers",
+    "handler": "handleListSingers",
+    "permission": "",
+    "login": false,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/singers/search",
+    "handler": "handleSearchSingers",
+    "permission": "",
+    "login": false,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/singers/{id}",
+    "handler": "handleGetSinger",
+    "permission": "",
+    "login": false,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/singers/{id}/streams",
+    "handler": "handleGetSingerStreams",
+    "permission": "",
+    "login": false,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/singers/{id}/performances",
+    "handler": "handleGetSingerPerformances",
+    "permission": "",
+    "login": false,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/singers",
+    "handler": "handleCreateSinger",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "PUT /api/singers/{id}",
+    "handler": "handleUpdateSinger",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "PUT /api/singers/{id}/visibility",
+    "handler": "handleUpdateSingerVisibility",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "PUT /api/singers/{id}/members-policy",
+    "handler": "handleUpdateSingerMembersPolicy",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "PUT /api/singers/{id}/auto-fill",
+    "handler": "handleUpdateSingerAutoFill",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/singers/auto-fill",
+    "handler": "handleListAutoFillTargets",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/non-singing-candidates",
+    "handler": "handleListNonSingingCandidates",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/restriction-review",
+    "handler": "handleListRestrictionReview",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/non-singing-candidates/{id}/dismiss",
+    "handler": "handleDismissNonSingingCandidate",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "DELETE /api/non-singing-candidates/{id}/dismiss",
+    "handler": "handleRestoreNonSingingCandidate",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/auto-fill/settings",
+    "handler": "handleGetAutoFillSettings",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "PUT /api/auto-fill/settings",
+    "handler": "handleUpdateAutoFillSettings",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/auto-fill/run",
+    "handler": "handleRunAutoFill",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "PUT /api/singers/{id}/organization",
+    "handler": "handleUpdateSingerOrganization",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/organizations",
+    "handler": "handleListOrganizations",
+    "permission": "",
+    "login": false,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/organizations",
+    "handler": "handleCreateOrganization",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "PUT /api/organizations/{key}",
+    "handler": "handleUpdateOrganization",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "DELETE /api/organizations/{key}",
+    "handler": "handleDeleteOrganization",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/sync/holodex",
+    "handler": "handleSyncHolodex",
+    "permission": "sync:run",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/sync/holodex/video/{id}",
+    "handler": "handleSyncHolodexVideo",
+    "permission": "sync:run",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/sync/holodex/to-holodex/{id}",
+    "handler": "handleSyncSetoriToHolodex",
+    "permission": "holodex:upload",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/streams/{id}/holodex-songs",
+    "handler": "handleLoadHolodexSongs",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": true
+  },
+  {
+    "pattern": "POST /api/streams/{id}/holodex-songs/analyze",
+    "handler": "handleAnalyzeHolodexSongs",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": true
+  },
+  {
+    "pattern": "POST /api/streams/{id}/estimate-end-times",
+    "handler": "handleEstimateEndTimes",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/artists/aliases",
+    "handler": "handleProposeArtistAlias",
+    "permission": "",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/streams/{id}/performances",
+    "handler": "handleCreatePerformances",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "DELETE /api/streams/{id}/performances",
+    "handler": "handleDeletePerformances",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/performances/{id}",
+    "handler": "handleGetPerformance",
+    "permission": "",
+    "login": false,
+    "analysis": false
+  },
+  {
+    "pattern": "PUT /api/performances/{id}",
+    "handler": "handleUpdatePerformance",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/streams/{id}/comments",
+    "handler": "handleGetComments",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": true
+  },
+  {
+    "pattern": "POST /api/streams/{id}/comments/sync-youtube",
+    "handler": "handleSyncYouTubeComments",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": true
+  },
+  {
+    "pattern": "POST /api/streams/{id}/comments/analyze",
+    "handler": "handleAnalyzeComments",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": true
+  },
+  {
+    "pattern": "POST /api/comments/backfill",
+    "handler": "handleBackfillCommentSongs",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/comments/backfill-hashes",
+    "handler": "handleBackfillCommentSongsHashes",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/streams/{id}/analyze-chat-ends",
+    "handler": "handleAnalyzeChatEnds",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": true
+  },
+  {
+    "pattern": "POST /api/streams/{id}/import/info-json",
+    "handler": "handleImportInfoJSON",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/streams/{id}/import/live-chat",
+    "handler": "handleImportLiveChat",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/streams/{id}/import/live-chat",
+    "handler": "handleGetImportedLiveChat",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": true
+  },
+  {
+    "pattern": "DELETE /api/streams/{id}/import/live-chat",
+    "handler": "handleDeleteImportedLiveChat",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/streams/{id}/chat-end-estimate",
+    "handler": "handleEstimateChatEnds",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": true
+  },
+  {
+    "pattern": "POST /api/chat-ends/backfill",
+    "handler": "handleBackfillChatEnds",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/tasks",
+    "handler": "handleListTasks",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/tasks/{id}",
+    "handler": "handleGetTask",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/streams/{id}/chapters",
+    "handler": "handleGetChapters",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": true
+  },
+  {
+    "pattern": "POST /api/streams/{id}/chapters/sync",
+    "handler": "handleSyncChapters",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": true
+  },
+  {
+    "pattern": "POST /api/streams/{id}/chapters/analyze",
+    "handler": "handleAnalyzeChapters",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": true
+  },
+  {
+    "pattern": "POST /api/chapters/backfill",
+    "handler": "handleBackfillChapters",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/filter-keywords",
+    "handler": "handleListFilterKeywords",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/filter-keywords",
+    "handler": "handleCreateFilterKeyword",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "DELETE /api/filter-keywords/{id}",
+    "handler": "handleDeleteFilterKeyword",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/stream-tags/{id}/streams",
+    "handler": "handleGetStreamsByTag",
+    "permission": "",
+    "login": false,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/performance-tags/{id}/performances",
+    "handler": "handleGetPerformancesByTag",
+    "permission": "",
+    "login": false,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/performances/random",
+    "handler": "handleRandomPerformances",
+    "permission": "",
+    "login": false,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/stream-tags",
+    "handler": "handleListStreamTags",
+    "permission": "",
+    "login": false,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/stream-tags",
+    "handler": "handleCreateStreamTag",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "DELETE /api/stream-tags/{id}",
+    "handler": "handleDeleteStreamTag",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/performance-tags",
+    "handler": "handleListPerformanceTags",
+    "permission": "",
+    "login": false,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/performance-tags",
+    "handler": "handleCreatePerformanceTag",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "DELETE /api/performance-tags/{id}",
+    "handler": "handleDeletePerformanceTag",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/tag-gaps",
+    "handler": "handleListTagGaps",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/tag-gaps/dismiss",
+    "handler": "handleDismissTagGap",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/tag-gaps/undismiss",
+    "handler": "handleUndismissTagGap",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/tag-keyword-rules",
+    "handler": "handleListTagKeywordRules",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/tag-keyword-rules",
+    "handler": "handleCreateTagKeywordRule",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "DELETE /api/tag-keyword-rules/{id}",
+    "handler": "handleDeleteTagKeywordRule",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/tag-rules/backfill",
+    "handler": "handleBackfillTagRules",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/ai/normalize",
+    "handler": "handleBatchAINormalization",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/ai-providers",
+    "handler": "handleListAIProviders",
+    "permission": "ai:manage",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/ai-providers",
+    "handler": "handleCreateAIProvider",
+    "permission": "ai:manage",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "PUT /api/ai-providers/{id}",
+    "handler": "handleUpdateAIProvider",
+    "permission": "ai:manage",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "DELETE /api/ai-providers/{id}",
+    "handler": "handleDeleteAIProvider",
+    "permission": "ai:manage",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/ai-providers/{id}/models",
+    "handler": "handleListAIProviderModels",
+    "permission": "ai:manage",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/ai-providers/models/preview",
+    "handler": "handlePreviewAIProviderModels",
+    "permission": "ai:manage",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/logs",
+    "handler": "handleGetLogs",
+    "permission": "logs:view",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "PUT /api/logs/level",
+    "handler": "handleSetLogLevel",
+    "permission": "logs:view",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/backups",
+    "handler": "handleBackupStatus",
+    "permission": "backup:manage",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/backups",
+    "handler": "handleCreateBackup",
+    "permission": "backup:manage",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "PUT /api/backups/settings",
+    "handler": "handleUpdateBackupSettings",
+    "permission": "backup:manage",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/backups/restore-upload",
+    "handler": "handleRestoreUpload",
+    "permission": "backup:manage",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/backups/{name}/download",
+    "handler": "handleDownloadBackup",
+    "permission": "backup:manage",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/backups/{name}/restore",
+    "handler": "handleRestoreBackup",
+    "permission": "backup:manage",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/backups/{name}/upload-drive",
+    "handler": "handleUploadBackupToDrive",
+    "permission": "backup:manage",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "DELETE /api/backups/{name}",
+    "handler": "handleDeleteBackup",
+    "permission": "backup:manage",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/backups/gdrive/auth/start",
+    "handler": "handleGDriveAuthStart",
+    "permission": "backup:manage",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/backups/gdrive/auth/poll",
+    "handler": "handleGDriveAuthPoll",
+    "permission": "backup:manage",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "DELETE /api/backups/gdrive",
+    "handler": "handleGDriveDisconnect",
+    "permission": "backup:manage",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/backups/gdrive/files",
+    "handler": "handleGDriveListFiles",
+    "permission": "backup:manage",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "DELETE /api/backups/gdrive/files/{id}",
+    "handler": "handleGDriveDeleteFile",
+    "permission": "backup:manage",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/backups/gdrive/files/{id}/restore",
+    "handler": "handleGDriveRestoreFile",
+    "permission": "backup:manage",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/itunes/search",
+    "handler": "handleItunesSearch",
+    "permission": "",
+    "login": false,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/itunes/{id}",
+    "handler": "handleItunesQueryByID",
+    "permission": "",
+    "login": false,
+    "analysis": false
+  }
+]

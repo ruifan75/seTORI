@@ -597,9 +597,8 @@ func (s *SuggestionService) approveSongSwap(sug *models.EditSuggestion, reviewer
 	}
 
 	if !force {
-		// 承認による内部適用。**要求者へ返す値ではない**ので全部見る
-		// （濾すと「承認したのに対象が見つからない」で失敗する）。
-		currentSong, label, err := s.swapper.SongLabelOf(sug.TargetID, repository.RestrictedView)
+		// 曲名の衝突は要求者へ返すので、現在の視界をもう一度確認する。
+		currentSong, label, err := s.swapper.SongLabelOf(sug.TargetID, actorAccess(SuggestionActor{User: reviewer}))
 		if err != nil {
 			return err
 		}
@@ -997,7 +996,7 @@ func (s *SuggestionService) Merge(req *dto.MergeSuggestionsRequest, reviewer *mo
 		return nil, invalid("反映する値がありません")
 	}
 
-	current, _, err := editor.GetEditableFields(targetID, repository.RestrictedView)
+	current, _, err := editor.GetEditableFields(targetID, actorAccess(SuggestionActor{User: reviewer}))
 	if err != nil {
 		return nil, err
 	}
@@ -1137,7 +1136,7 @@ func (s *SuggestionService) Approve(id uuid.UUID, reviewer *models.User, force b
 // ApproveWithEdits は承認時に審査担当が加えた修正を添えて反映する（perf.missing のみ）。
 // edits が nil なら Approve と同じ。
 func (s *SuggestionService) ApproveWithEdits(id uuid.UUID, reviewer *models.User, force bool, edits *dto.MissingSongPayload) error {
-	sug, err := s.repo.FindByID(id)
+	sug, err := s.repo.FindByIDForViewer(id, actorAccess(SuggestionActor{User: reviewer}))
 	if err != nil {
 		return err
 	}
@@ -1179,8 +1178,8 @@ func (s *SuggestionService) ApproveWithEdits(id uuid.UUID, reviewer *models.User
 	}
 
 	if !force {
-		// 承認は content:edit の経路なので、秘匿された対象も現在値を読む。
-		conflicts, err := s.detectConflicts(editor, sug, repository.RestrictedView)
+		// 衝突の現在値は応答に出るので、審査担当の視界で読む。
+		conflicts, err := s.detectConflicts(editor, sug, actorAccess(SuggestionActor{User: reviewer}))
 		if err != nil {
 			return err
 		}

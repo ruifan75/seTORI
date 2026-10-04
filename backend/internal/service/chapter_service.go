@@ -273,6 +273,9 @@ func (s *ChapterService) Backfill(concurrency int, run *TaskRun) {
 // `--print` を使うのは、動画情報の JSON 全体（数百 KB）を読まずに済ませるため。
 // 章節が無い動画では "NA" が返る。
 func (s *ChapterService) fetchChapters(videoID string) ([]Chapter, error) {
+	if err := validVideoID(videoID); err != nil {
+		return nil, err
+	}
 	args := []string{
 		"--skip-download",
 		"--socket-timeout", "30",

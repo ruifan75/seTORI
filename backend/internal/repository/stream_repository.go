@@ -1399,7 +1399,7 @@ func (r *StreamRepository) FindRestrictionReview(limit int) ([]RestrictionReview
 // dismissed=true なら「歌回ではないと判断した」ものを返す（取り消すため）。
 // **効き続けるものは見えて取り消せること**（CLAUDE.md §7.7）── 一覧から
 // 消えるだけで戻せないと、誤って却下した配信が二度と出てこない。
-func (r *StreamRepository) FindNonSingingCandidates(limit int, dismissed bool) ([]NonSingingCandidate, error) {
+func (r *StreamRepository) FindNonSingingCandidates(limit int, dismissed bool, access ViewerAccess) ([]NonSingingCandidate, error) {
 	if limit < 1 || limit > 500 {
 		limit = 100
 	}
@@ -1415,6 +1415,7 @@ func (r *StreamRepository) FindNonSingingCandidates(limit int, dismissed bool) (
 		                 FROM stream_stream_tags sst WHERE sst.stream_id = s.id), '{}')
 		FROM streams s
 		WHERE s.is_hidden
+		  AND `+NotRestrictedFor("s", access)+`
 		  AND jsonb_typeof(s.comment_songs) = 'array'
 		  AND jsonb_array_length(s.comment_songs) > 0
 		  AND `+exists+` (SELECT 1 FROM non_singing_checks c WHERE c.stream_id = s.id)
