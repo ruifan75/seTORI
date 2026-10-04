@@ -72,6 +72,9 @@ export default function SyncPage() {
       // 完了で両方のポーリングが止まる前に、見送り ID を含む最終履歴を取り直す。
       // 短い実行では running=true を観測しないこともあるので、遷移だけで判定しない。
       if (!status.running) {
+        // 初回の履歴取得中は invalidate だけではその取得が再利用される。
+        // 完了前の応答を採用しないよう、止めてから最終履歴を取り直す。
+        await queryClient.cancelQueries({ queryKey: ['batch-fill-runs'] });
         void queryClient.invalidateQueries({ queryKey: ['batch-fill-runs'] });
       }
       return status;

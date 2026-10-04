@@ -113,3 +113,28 @@ for (const action of ['cancelFill', 'cancelAnalyze']) {
     } finally { client.clear(); }
   });
 }
+
+for (const cached of [false, true]) {
+  test(`完了を取得した時点で古い履歴が取得中でも最終履歴を表示する（キャッシュ=${cached}）`, async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { staleTime: 0, retry: false } } });
+    const key = ['batch-fill-runs'];
+    const before = { runs: [{ id: 'run', status: 'running', skipped_stream_ids: [] }] };
+    const after = { runs: [{ id: 'run', status: 'done', skipped_stream_ids: ['batch123456'] }] };
+    if (cached) client.setQueryData(key, before);
+    let release;
+    const oldRequest = new Promise(resolve => { release = resolve; });
+    let fetches = 0;
+    const observer = new QueryObserver(client, { queryKey: key, queryFn: () => ++fetches === 1 ? oldRequest : Promise.resolve(after) });
+    const unsubscribe = observer.subscribe(() => {});
+    try {
+      assert.equal(fetches, 1, 'ページに入ったときの履歴取得を先に開始する');
+      const query = statusQuery(client, async () => stopped);
+      assert.strictEqual(await query.queryFn(), stopped);
+      // 最初の取得は完了前の DB を読んでいて、status より遅く届く。
+      release(before);
+      await new Promise(resolve => setImmediate(resolve));
+      assert.equal(fetches, 2, '完了前の取得とは別に最終履歴を取り直す');
+      assert.deepEqual(client.getQueryData(key), after, '遅い古い応答で完了後の履歴を上書きしない');
+    } finally { release(before); unsubscribe(); client.clear(); }
+  });
+}
