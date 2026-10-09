@@ -20,8 +20,8 @@ import (
 
 // 実際の Router -> 認証 -> 認可 -> ハンドラ -> service/repository を通す。
 // SQL の実行計画・秘匿条件の正しさは既存の repository 統合テストが担当する。
-// ここでは新旧で同じ応答・同じ SQL/引数が出ることと、成功/拒否の契約を固定する。
-func TestChannelAPIAliases(t *testing.T) {
+// ここでは新 API とその符号化パスの応答・SQL/引数、成功/拒否の契約を固定する。
+func TestChannelAPI(t *testing.T) {
 	cases := []struct {
 		method, suffix, body string
 		protected            bool
@@ -57,7 +57,7 @@ func TestChannelAPIAliases(t *testing.T) {
 			t.Run(tc.method+tc.suffix+"/"+user.token, func(t *testing.T) {
 				var wantBody string
 				var wantSQL []channelAliasCall
-				for i, prefix := range []string{"/api/channels", "/api/singers", "/api/%63hannels", "/api/%73ingers"} {
+				for i, prefix := range []string{"/api/channels", "/api/%63hannels"} {
 					fixture := &channelAliasDB{permissions: user.permissions}
 					db := sql.OpenDB(fixture)
 					defer db.Close()
@@ -206,42 +206,26 @@ func (r *channelAliasRows) Next(dest []driver.Value) error {
 }
 
 // 復号はセグメントごとに1回だけ行い、現れた / を区切りへ昇格させない。
-// 公開の詳細・歌唱と content:edit の自動処理設定が、新旧名で一致することを固定する。
+// 公開の詳細・歌唱と content:edit の自動処理設定の境界を固定する。
 // 大文字・近い名前は ServeMux が別のパスとして扱う。期待値は登録や認可実装から
 // 生成せず、パス解釈と権限の契約から指定する。実 Router で拒否時に
 // 認証以外の DB 操作へ進まないことも見る。
-func TestChannelAPIAliasPathBoundaries(t *testing.T) {
+func TestChannelAPIPathBoundaries(t *testing.T) {
 	cases := []struct {
 		method, path, normalized, pattern, permission string
 		success                                       int
 	}{
-		{"GET", "/api/singers/auto-fill", "/api/singers/auto-fill", "GET /api/singers/auto-fill", "content:edit", 200},
 		{"GET", "/api/channels/auto-fill", "/api/channels/auto-fill", "GET /api/channels/auto-fill", "content:edit", 200},
-		{"HEAD", "/api/%73ingers/%61uto-fill", "/api/singers/auto-fill", "GET /api/singers/auto-fill", "content:edit", 200},
-		{"GET", "/%61pi/%73ingers/auto%2Dfill", "/api/singers/auto-fill", "GET /api/singers/auto-fill", "content:edit", 200},
 		{"GET", "/%61pi/%63hannels/%61uto-fill", "/api/channels/auto-fill", "GET /api/channels/auto-fill", "content:edit", 200},
-		{"GET", "/api/singers%2Fauto-fill", "/api/singers%2Fauto-fill", "", "", 404},
 		{"GET", "/api/channels%2Fauto-fill", "/api/channels%2Fauto-fill", "", "", 404},
-		{"GET", "/api/singers/%2Fauto-fill", "/api/singers/%2Fauto-fill", "GET /api/singers/{id}", "", 200},
 		{"GET", "/api/channels/.%2fauto-fill", "/api/channels/.%2Fauto-fill", "GET /api/channels/{id}", "", 200},
-		{"GET", "/api/singers/auto-fill%2Fchild", "/api/singers/auto-fill%2Fchild", "GET /api/singers/{id}", "", 200},
 		{"GET", "/api/channels/auto-fill%2fchild", "/api/channels/auto-fill%2Fchild", "GET /api/channels/{id}", "", 200},
-		{"GET", "/api/singers/auto%252Dfill", "/api/singers/auto%2Dfill", "GET /api/singers/{id}", "", 200},
 		{"GET", "/api/channels/auto%252Dfill", "/api/channels/auto%2Dfill", "GET /api/channels/{id}", "", 200},
-		{"GET", "/api/singers-report/auto-fill", "/api/singers-report/auto-fill", "", "", 404},
 		{"GET", "/api/channels-report/auto-fill", "/api/channels-report/auto-fill", "", "", 404},
-		{"GET", "/api/%73ingers-report/auto-fill", "/api/singers-report/auto-fill", "", "", 404},
-		{"GET", "/api/singers/auto-fill-report", "/api/singers/auto-fill-report", "GET /api/singers/{id}", "", 200},
 		{"GET", "/api/channels/auto-fill-report", "/api/channels/auto-fill-report", "GET /api/channels/{id}", "", 200},
-		{"GET", "/api/SINGERS/auto-fill", "/api/SINGERS/auto-fill", "", "", 404},
 		{"GET", "/api/CHANNELS/auto-fill", "/api/CHANNELS/auto-fill", "", "", 404},
-		{"GET", "/api/%53INGERS/auto-fill", "/api/SINGERS/auto-fill", "", "", 404},
-		{"GET", "/api/singers/AUTO-FILL", "/api/singers/AUTO-FILL", "GET /api/singers/{id}", "", 200},
 		{"GET", "/api/channels/a%2Fb/performances", "/api/channels/a%2Fb/performances", "GET /api/channels/{id}/performances", "", 200},
-		{"GET", "/api/%73ingers/a%2Fb/performances", "/api/singers/a%2Fb/performances", "GET /api/singers/{id}/performances", "", 200},
-		{"PUT", "/api/%73ingers/channel/%76isibility", "/api/singers/channel/visibility", "PUT /api/singers/{id}/visibility", "content:edit", 200},
 		{"PUT", "/api/channels/channel%2Fchild/visibility", "/api/channels/channel%2Fchild/visibility", "PUT /api/channels/{id}/visibility", "content:edit", 200},
-		{"POST", "/api/%73ingers", "/api/singers", "POST /api/singers", "content:edit", 400},
 		{"POST", "/api/%63hannels", "/api/channels", "POST /api/channels", "content:edit", 400},
 	}
 	users := []struct {

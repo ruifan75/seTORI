@@ -89,7 +89,7 @@ func TestChannelSectionsRespectViewerAndEditor(t *testing.T) {
 	editor := &models.User{Permissions: []string{auth.PermContentEdit}}
 	for _, user := range []*models.User{nil, {Permissions: []string{}}, editor} {
 		canEdit := user == editor
-		grouped := sectionJSON(t, r, "/api/singers?group=organization&include_hidden=true", user)
+		grouped := sectionJSON(t, r, "/api/channels?group=organization&include_hidden=true", user)
 		var groups []struct {
 			Organization string          `json:"organization"`
 			Channels     json.RawMessage `json:"singers"`
@@ -119,7 +119,7 @@ func TestChannelSectionsRespectViewerAndEditor(t *testing.T) {
 		} else if _, exists := grouped["hidden"]; exists {
 			t.Fatal("閲覧者へ hidden 欄が届いた")
 		}
-		list := sectionJSON(t, r, "/api/singers?limit=20&include_hidden=true", user)
+		list := sectionJSON(t, r, "/api/channels?limit=20&include_hidden=true", user)
 		want := []string{"visible_a", "visible_i"}
 		if canEdit {
 			want = append(want, "hidden_a", "hidden_u", "hidden_e")
@@ -168,7 +168,7 @@ func TestChannelSectionsKeepOrderAcrossPages(t *testing.T) {
 		// limit=2 のページを連結して、可視性の区がページをまたいでも崩れないことを見る。
 		got := []string{}
 		for _, page := range []string{"1", "2", "3"} {
-			raw := sectionJSON(t, r, "/api/singers?include_hidden=true&limit=2&page="+page+"&"+tc.query, editor)
+			raw := sectionJSON(t, r, "/api/channels?include_hidden=true&limit=2&page="+page+"&"+tc.query, editor)
 			got = append(got, sectionIDs(t, raw["singers"])...)
 			var pagination struct {
 				Total int `json:"total"`
@@ -195,11 +195,11 @@ func TestChannelSectionsReturnEmptyHiddenToEditor(t *testing.T) {
 		t.Fatal(err)
 	}
 	editor := &models.User{Permissions: []string{auth.PermContentEdit}}
-	raw := sectionJSON(t, r, "/api/singers?group=organization&include_hidden=true", editor)
+	raw := sectionJSON(t, r, "/api/channels?group=organization&include_hidden=true", editor)
 	if string(raw["hidden"]) != "[]" {
 		t.Fatalf("非表示 0 件が省略され、画面の件数が消える: hidden=%s", raw["hidden"])
 	}
-	viewer := sectionJSON(t, r, "/api/singers?group=organization&include_hidden=true", nil)
+	viewer := sectionJSON(t, r, "/api/channels?group=organization&include_hidden=true", nil)
 	if _, exists := viewer["hidden"]; exists {
 		t.Fatal("閲覧者へ hidden 欄が届いた")
 	}

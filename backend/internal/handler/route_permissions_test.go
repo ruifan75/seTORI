@@ -196,7 +196,7 @@ func TestPermissionFamilyBoundaries(t *testing.T) {
 		{"/api/backups", "backup:manage", true}, {"/api/tasks", "content:edit", true},
 		{"/api/restriction-review", "content:edit", true}, {"/api/auto-fill", "content:edit", true},
 		{"/api/non-singing-candidates", "content:edit", true}, {"/api/streams/batch-fill", "content:edit", true},
-		{"/api/streams/batch-analyze", "content:edit", true}, {"/api/singers/auto-fill", "content:edit", true}, {"/api/channels/auto-fill", "content:edit", true},
+		{"/api/streams/batch-analyze", "content:edit", true}, {"/api/channels/auto-fill", "content:edit", true},
 	} {
 		for _, method := range []string{"GET", "HEAD"} {
 			for _, path := range []string{tc.path, tc.path + "/audit-subresource"} {

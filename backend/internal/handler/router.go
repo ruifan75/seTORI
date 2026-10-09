@@ -406,21 +406,6 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("GET /api/channels/auto-fill", r.handleListAutoFillTargets)
 	r.mux.HandleFunc("PUT /api/channels/{id}/organization", r.handleUpdateChannelOrganization)
 
-	// 旧 API は同じハンドラへの別名。初回デプロイから 1 リリース維持し、
-	// その次のリリースでこの登録と requiredPermission の別名変換を削除する（issue #62）。
-	r.mux.HandleFunc("GET /api/singers", r.handleListChannels)
-	r.mux.HandleFunc("GET /api/singers/search", r.handleSearchChannels)
-	r.mux.HandleFunc("GET /api/singers/{id}", r.handleGetChannel)
-	r.mux.HandleFunc("GET /api/singers/{id}/streams", r.handleGetChannelStreams)
-	r.mux.HandleFunc("GET /api/singers/{id}/performances", r.handleGetChannelPerformances)
-	r.mux.HandleFunc("POST /api/singers", r.handleCreateChannel)
-	r.mux.HandleFunc("PUT /api/singers/{id}", r.handleUpdateChannel)
-	r.mux.HandleFunc("PUT /api/singers/{id}/visibility", r.handleUpdateChannelVisibility)
-	r.mux.HandleFunc("PUT /api/singers/{id}/members-policy", r.handleUpdateChannelMembersPolicy)
-	r.mux.HandleFunc("PUT /api/singers/{id}/auto-fill", r.handleUpdateChannelAutoFill)
-	r.mux.HandleFunc("GET /api/singers/auto-fill", r.handleListAutoFillTargets)
-	r.mux.HandleFunc("PUT /api/singers/{id}/organization", r.handleUpdateChannelOrganization)
-
 	// 自動処理（定期実行）。設定・手動実行とも content:edit。
 	// 見直しが要る配信（非表示だが現行規則で曲が出た）。content:edit。
 	r.mux.HandleFunc("GET /api/visibility-review", r.handleVisibilityCandidates)
@@ -568,6 +553,14 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
+	// 1 リリースの API 別名は廃止済み（issue #101）。認可の既定値へ進むと
+	// 未ログインの POST/PUT が 401 になるため、廃止した名前空間は先に 404 を返す。
+	// 画面 URL の /singers リダイレクトとは別。符号化パスも authzPath で判断する。
+	if isRouteOrSubpath(authzPath(req.URL.EscapedPath()), "/api/singers") {
+		http.NotFound(w, req)
+		return
+	}
 
 	if req.Method == "OPTIONS" {
 		w.WriteHeader(http.StatusOK)
@@ -3817,13 +3810,6 @@ func viewerAccess(req *http.Request) repository.ViewerAccess {
 func requiredPermission(method, path string) (perm string, needsAuth bool) {
 	if method == http.MethodOptions {
 		return "", false
-	}
-
-	// authzPath が正規化したセグメントだけを扱う。旧 API は 1 リリースの別名。
-	// 初回デプロイの次のリリースで旧ルートとともに削除する（issue #62）。
-	// セグメント境界を守り、%2F をデコードし直さない。新旧で規則を共有する。
-	if isRouteOrSubpath(path, "/api/singers") {
-		path = "/api/channels" + strings.TrimPrefix(path, "/api/singers")
 	}
 
 	// 公開・認証のみ（特定権限不要）のエンドポイント
