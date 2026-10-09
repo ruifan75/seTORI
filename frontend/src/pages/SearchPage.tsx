@@ -1,24 +1,24 @@
 import { useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router-dom';
-import { searchApi, singerApi, tagApi } from '../api/client';
-import type { PerformanceTag, Singer, StreamTag } from '../api/types';
+import { searchApi, channelApi, tagApi } from '../api/client';
+import type { PerformanceTag, Channel, StreamTag } from '../api/types';
 import Loading from '../components/ui/Loading';
 import Pagination from '../components/ui/Pagination';
 import Tag from '../components/ui/Tag';
 
-interface SingerConditionProps {
+interface ChannelConditionProps {
   label: string;
-  singerIds: string[];
-  onSelect: (singer: Singer) => void;
-  onRemove: (singerId: string) => void;
+  channelIds: string[];
+  onSelect: (channel: Channel) => void;
+  onRemove: (channelId: string) => void;
   maxSelections?: number;
 }
 
-function SelectedSingerToken({ singerId, onRemove }: { singerId: string; onRemove: () => void }) {
-  const { data: singer } = useQuery({
-    queryKey: ['singer', singerId],
-    queryFn: () => singerApi.get(singerId),
+function SelectedChannelToken({ channelId, onRemove }: { channelId: string; onRemove: () => void }) {
+  const { data: channel } = useQuery({
+    queryKey: ['singer', channelId],
+    queryFn: () => channelApi.get(channelId),
   });
 
   return (
@@ -28,27 +28,27 @@ function SelectedSingerToken({ singerId, onRemove }: { singerId: string; onRemov
       className="inline-flex max-w-full items-center gap-1.5 border border-indigo-200 bg-indigo-50 px-2 py-1 text-xs text-indigo-800 rounded-full"
       title="解除"
     >
-      {singer?.photo_url && <img src={singer.photo_url} alt="" className="h-4 w-4 shrink-0 rounded-full object-cover" />}
-      <span className="truncate">{singer?.name || singerId}</span>
+      {channel?.photo_url && <img src={channel.photo_url} alt="" className="h-4 w-4 shrink-0 rounded-full object-cover" />}
+      <span className="truncate">{channel?.name || channelId}</span>
       <span aria-hidden="true">×</span>
     </button>
   );
 }
 
-function SingerCondition({ label, singerIds, onSelect, onRemove, maxSelections }: SingerConditionProps) {
+function ChannelCondition({ label, channelIds, onSelect, onRemove, maxSelections }: ChannelConditionProps) {
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
 
   const { data: candidates = [] } = useQuery({
     queryKey: ['singer-search', query],
-    queryFn: () => singerApi.search(query, 8),
+    queryFn: () => channelApi.search(query, 8),
     enabled: open && query.trim().length >= 1,
   });
-  const availableCandidates = candidates.filter((singer) => !singerIds.includes(singer.id));
-  const canAdd = maxSelections === undefined || singerIds.length < maxSelections;
+  const availableCandidates = candidates.filter((channel) => !channelIds.includes(channel.id));
+  const canAdd = maxSelections === undefined || channelIds.length < maxSelections;
 
-  const select = (singer: Singer) => {
-    onSelect(singer);
+  const select = (channel: Channel) => {
+    onSelect(channel);
     setQuery('');
     setOpen(false);
   };
@@ -58,8 +58,8 @@ function SingerCondition({ label, singerIds, onSelect, onRemove, maxSelections }
       <label className="mb-1.5 block text-xs font-medium text-gray-500">{label}</label>
       <div className="relative">
         <div className="flex min-h-10 flex-wrap items-center gap-1.5 border border-gray-300 bg-white px-2 py-1 rounded-lg focus-within:border-transparent focus-within:ring-2 focus-within:ring-indigo-500">
-          {singerIds.map((singerId) => (
-            <SelectedSingerToken key={singerId} singerId={singerId} onRemove={() => onRemove(singerId)} />
+          {channelIds.map((channelId) => (
+            <SelectedChannelToken key={channelId} channelId={channelId} onRemove={() => onRemove(channelId)} />
           ))}
           {canAdd && (
           <input
@@ -78,16 +78,16 @@ function SingerCondition({ label, singerIds, onSelect, onRemove, maxSelections }
         </div>
         {canAdd && open && query.trim() && (
           <div className="absolute left-0 right-0 top-full z-30 mt-1 max-h-64 overflow-y-auto border border-gray-200 bg-white shadow-lg rounded-lg">
-              {availableCandidates.map((singer) => (
+              {availableCandidates.map((channel) => (
                 <button
-                  key={singer.id}
+                  key={channel.id}
                   type="button"
                   onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => select(singer)}
+                  onClick={() => select(channel)}
                   className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-indigo-50"
                 >
-                  {singer.photo_url && <img src={singer.photo_url} alt="" className="h-7 w-7 shrink-0 rounded-full object-cover" />}
-                  <span className="truncate text-sm text-gray-900">{singer.name}</span>
+                  {channel.photo_url && <img src={channel.photo_url} alt="" className="h-7 w-7 shrink-0 rounded-full object-cover" />}
+                  <span className="truncate text-sm text-gray-900">{channel.name}</span>
                 </button>
               ))}
             {availableCandidates.length === 0 && <div className="px-3 py-3 text-sm text-gray-400">該当なし</div>}
@@ -245,24 +245,24 @@ export default function SearchPage() {
         </form>
 
         <div className="mt-4 grid gap-3 border-t border-gray-100 px-4 pt-4 sm:px-5 md:grid-cols-3">
-          <SingerCondition
+          <ChannelCondition
             label="配信元チャンネル"
-            singerIds={ownerId ? [ownerId] : []}
+            channelIds={ownerId ? [ownerId] : []}
             maxSelections={1}
-            onSelect={(singer) => updateParams({ channel: singer.id })}
+            onSelect={(channel) => updateParams({ channel: channel.id })}
             onRemove={() => updateParams({ channel: null })}
           />
-          <SingerCondition
+          <ChannelCondition
             label="参加チャンネル"
-            singerIds={participantIds}
-            onSelect={(singer) => updateParams({ participants: [...participantIds, singer.id].join(',') })}
-            onRemove={(singerId) => updateParams({ participants: participantIds.filter((id) => id !== singerId).join(',') })}
+            channelIds={participantIds}
+            onSelect={(channel) => updateParams({ participants: [...participantIds, channel.id].join(',') })}
+            onRemove={(channelId) => updateParams({ participants: participantIds.filter((id) => id !== channelId).join(',') })}
           />
-          <SingerCondition
+          <ChannelCondition
             label="ボーカル"
-            singerIds={vocalistIds}
-            onSelect={(singer) => updateParams({ vocalists: [...vocalistIds, singer.id].join(',') })}
-            onRemove={(singerId) => updateParams({ vocalists: vocalistIds.filter((id) => id !== singerId).join(',') })}
+            channelIds={vocalistIds}
+            onSelect={(channel) => updateParams({ vocalists: [...vocalistIds, channel.id].join(',') })}
+            onRemove={(channelId) => updateParams({ vocalists: vocalistIds.filter((id) => id !== channelId).join(',') })}
           />
         </div>
 
@@ -312,9 +312,9 @@ export default function SearchPage() {
             <section className="border-l-2 border-amber-200 px-4 py-2">
               <h2 className="mb-2 text-sm font-semibold text-gray-500">チャンネル</h2>
               <div className="space-y-1">
-                {globalResults.singers.map((singer) => (
-                  <Link key={singer.id} to={`/channels/${singer.id}`} className="block truncate text-sm text-indigo-600 hover:text-indigo-800">
-                    {singer.name}
+                {globalResults.singers.map((channel) => (
+                  <Link key={channel.id} to={`/channels/${channel.id}`} className="block truncate text-sm text-indigo-600 hover:text-indigo-800">
+                    {channel.name}
                   </Link>
                 ))}
               </div>

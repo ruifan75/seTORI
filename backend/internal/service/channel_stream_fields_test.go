@@ -12,8 +12,8 @@ import (
 // 同じ DTO を返すので「載せる／載せない」の判断が 2 か所に要り、片方だけ直すと
 // 権限の穴になる。StreamService 側だけを見張っていると、こちらを
 // 「常に載せる」に戻しても全テストが通ってしまうので、ここで固定する。
-func TestSingerToStreamResponseHidesOperationalState(t *testing.T) {
-	svc := &SingerService{}
+func TestChannelToStreamResponseHidesOperationalState(t *testing.T) {
+	svc := &ChannelService{}
 	stream := models.Stream{
 		ID:          "v1",
 		Title:       "t",

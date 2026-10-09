@@ -10,34 +10,34 @@ import (
 	"github.com/ruifan75/setori/internal/models"
 )
 
-type SingerRepository struct {
+type ChannelRepository struct {
 	db *sql.DB
 }
 
-func NewSingerRepository(db *sql.DB) *SingerRepository {
-	return &SingerRepository{db: db}
+func NewChannelRepository(db *sql.DB) *ChannelRepository {
+	return &ChannelRepository{db: db}
 }
 
 // effectiveOrg は表示・グループ分けに使う事務所キーの SQL 式。
 // 手動指定（organization_override）があればそれ、無ければ Holodex の値。
 const effectiveOrg = `COALESCE(s.organization_override, s.organization)`
 
-// singerColumns は歌手の全カラム（SELECT と scanSinger で対にして使う）。
+// channelColumns は歌手の全カラム（SELECT と scanChannel で対にして使う）。
 // organization は Holodex の値、organization_override は手動指定で、
-// JOIN しているのは実効値のほう。呼び出し側は必ず singerFrom で組み立てる。
-const singerColumns = `s.id, s.name, s.english_name, s.photo_url,
+// JOIN しているのは実効値のほう。呼び出し側は必ず channelFrom で組み立てる。
+const channelColumns = `s.id, s.name, s.english_name, s.photo_url,
 	s.organization, s.organization_override, o.display_name,
 	COALESCE(o.is_unaffiliated, FALSE),
 	s.metadata_source, s.is_hidden, s.members_only_policy, s.auto_fill_enabled,
 	s.created_at, s.updated_at`
 
-// singerFrom は singers と organizations を結んだ FROM 句。
+// channelFrom は channels と organizations を結んだ FROM 句。
 // 事務所は任意なので LEFT JOIN（所属なしのチャンネルを落とさない）。
-const singerFrom = `FROM singers s LEFT JOIN organizations o ON ` + effectiveOrg + ` = o.key`
+const channelFrom = `FROM channels s LEFT JOIN organizations o ON ` + effectiveOrg + ` = o.key`
 
-// scanSinger は singerColumns の並びで1行読む。
-func scanSinger(row interface{ Scan(...any) error }) (models.Singer, error) {
-	var s models.Singer
+// scanChannel は channelColumns の並びで1行読む。
+func scanChannel(row interface{ Scan(...any) error }) (models.Channel, error) {
+	var s models.Channel
 	err := row.Scan(&s.ID, &s.Name, &s.EnglishName, &s.PhotoURL,
 		&s.Organization, &s.OrganizationOverride, &s.OrganizationName, &s.OrganizationUnaffil,
 		&s.MetadataSource, &s.IsHidden, &s.MembersOnlyPolicy, &s.AutoFillEnabled,
@@ -55,19 +55,19 @@ func hiddenClause(includeHidden bool, keyword string) string {
 
 // FindAll はすべての歌手を取得する。includeHidden=false なら非表示チャンネルを除く。
 // hidden は（includeHidden のとき）非表示チャンネルの総数。一覧で区の見出しに出す。
-func (r *SingerRepository) FindAll(limit, offset int, sort, dir string, includeHidden bool) (singers []models.Singer, total, hidden int, err error) {
+func (r *ChannelRepository) FindAll(limit, offset int, sort, dir string, includeHidden bool) (channels []models.Channel, total, hidden int, err error) {
 	where := hiddenClause(includeHidden, "WHERE")
 
-	err = r.db.QueryRow("SELECT COUNT(*), COUNT(*) FILTER (WHERE s.is_hidden) FROM singers s"+where).Scan(&total, &hidden)
+	err = r.db.QueryRow("SELECT COUNT(*), COUNT(*) FILTER (WHERE s.is_hidden) FROM channels s"+where).Scan(&total, &hidden)
 	if err != nil {
 		return nil, 0, 0, fmt.Errorf("count singers: %w", err)
 	}
 
-	order := singerListOrder(sort, dir, includeHidden)
+	order := channelListOrder(sort, dir, includeHidden)
 
 	query := `
-		SELECT ` + singerColumns + `
-		` + singerFrom + where + `
+		SELECT ` + channelColumns + `
+		` + channelFrom + where + `
 		ORDER BY ` + order + `
 		LIMIT $1 OFFSET $2`
 
@@ -78,17 +78,17 @@ func (r *SingerRepository) FindAll(limit, offset int, sort, dir string, includeH
 	defer rows.Close()
 
 	for rows.Next() {
-		s, err := scanSinger(rows)
+		s, err := scanChannel(rows)
 		if err != nil {
 			return nil, 0, 0, fmt.Errorf("scan singer: %w", err)
 		}
-		singers = append(singers, s)
+		channels = append(channels, s)
 	}
 
-	return singers, total, hidden, rows.Err()
+	return channels, total, hidden, rows.Err()
 }
 
-// singerListOrder は一覧（ページングあり）の並び順。
+// channelListOrder は一覧（ページングあり）の並び順。
 //
 // 既定は名前の五十音順。"organization" 指定で事務所順（名前を第2キー）。
 // 事務所は表示名と並び順で並べる（key の文字列順ではない）。所属なしは最後。
@@ -97,7 +97,7 @@ func (r *SingerRepository) FindAll(limit, offset int, sort, dir string, includeH
 // 非表示を後ろに。ページングがあるので画面側で分けると 2 ページ目以降で区が割れる。
 // 手元で 152 件中 151 件が非表示で、混ぜて並べると表示中の 1 件が埋もれていた。
 // 事務所順を選んだときも先に 2 区へ割れる（区の中で事務所順）。
-func singerListOrder(sort, dir string, includeHidden bool) string {
+func channelListOrder(sort, dir string, includeHidden bool) string {
 	order := nameSortOrderDir("s.name", "''", dir)
 	if sort == "organization" {
 		order = organizationGroupOrder(normDir(dir)) + ", " + nameSortOrder("s.name", "''")
@@ -112,25 +112,25 @@ func singerListOrder(sort, dir string, includeHidden bool) string {
 //
 // 事務所では組まない。非表示の区を事務所別にすると、畳んだ中がまた 18 段になる。
 // **呼び出し側が権限を確かめること**（content:edit のときだけ呼ぶ）。
-func (r *SingerRepository) FindHiddenByName() ([]models.Singer, error) {
+func (r *ChannelRepository) FindHiddenByName() ([]models.Channel, error) {
 	rows, err := r.db.Query(`
-		SELECT ` + singerColumns + `
-		` + singerFrom + ` WHERE s.is_hidden
+		SELECT ` + channelColumns + `
+		` + channelFrom + ` WHERE s.is_hidden
 		ORDER BY ` + nameSortOrder("s.name", "''"))
 	if err != nil {
 		return nil, fmt.Errorf("query hidden singers: %w", err)
 	}
 	defer rows.Close()
 
-	var singers []models.Singer
+	var channels []models.Channel
 	for rows.Next() {
-		s, err := scanSinger(rows)
+		s, err := scanChannel(rows)
 		if err != nil {
 			return nil, fmt.Errorf("scan hidden singer: %w", err)
 		}
-		singers = append(singers, s)
+		channels = append(channels, s)
 	}
-	return singers, rows.Err()
+	return channels, rows.Err()
 }
 
 // organizationGroupOrder は事務所グループの並び順を返す。
@@ -155,10 +155,10 @@ const unaffiliatedLast = `CASE WHEN ` + effectiveOrg + ` IS NULL OR COALESCE(o.i
 // **表示中のチャンネルだけを返す**（issue #65）。非表示は事務所の組へ混ぜず、
 // `FindHiddenByName` で別に引く ── 混ぜると事務所の組 19 個のうち 18 個が
 // 中身が全部非表示になり、表示中のものを探すのがいちばん難しくなっていた。
-func (r *SingerRepository) FindAllGrouped() ([]models.Singer, error) {
+func (r *ChannelRepository) FindAllGrouped() ([]models.Channel, error) {
 	query := `
-		SELECT ` + singerColumns + `
-		` + singerFrom + hiddenClause(false, "WHERE") + `
+		SELECT ` + channelColumns + `
+		` + channelFrom + hiddenClause(false, "WHERE") + `
 		ORDER BY ` + organizationGroupOrder("ASC") + `,
 			` + nameSortOrder("s.name", "''")
 	// 所属なし扱いの組は複数の key（NULL と Independents など）が混ざるが、
@@ -170,25 +170,25 @@ func (r *SingerRepository) FindAllGrouped() ([]models.Singer, error) {
 	}
 	defer rows.Close()
 
-	var singers []models.Singer
+	var channels []models.Channel
 	for rows.Next() {
-		s, err := scanSinger(rows)
+		s, err := scanChannel(rows)
 		if err != nil {
 			return nil, fmt.Errorf("scan singer: %w", err)
 		}
-		singers = append(singers, s)
+		channels = append(channels, s)
 	}
 
-	return singers, nil
+	return channels, nil
 }
 
 // SetHidden はチャンネル一覧での表示/非表示を切り替える。
 // メタデータの更新経路（Update / UpdateManualMetadata）と分けているのは、
 // Holodex 管理チャンネルでもこのフラグだけは切り替えられる必要があるため。
 // 戻り値は対象が存在したか。
-func (r *SingerRepository) SetHidden(id string, hidden bool) (bool, error) {
+func (r *ChannelRepository) SetHidden(id string, hidden bool) (bool, error) {
 	res, err := r.db.Exec(
-		"UPDATE singers SET is_hidden = $2, updated_at = NOW() WHERE id = $1", id, hidden)
+		"UPDATE channels SET is_hidden = $2, updated_at = NOW() WHERE id = $1", id, hidden)
 	if err != nil {
 		return false, fmt.Errorf("set singer hidden: %w", err)
 	}
@@ -204,12 +204,12 @@ func (r *SingerRepository) SetHidden(id string, hidden bool) (bool, error) {
 // policy が空文字なら NULL（未確認）へ戻す。**NULL と 'deny' は実効的には同じ**
 // （どちらも伏せる）が、「まだ訊いていない」と「訊いて断られた」を区別するために分ける
 // ── 未確認のチャンネルを一覧したいときに要る。
-func (r *SingerRepository) SetMembersOnlyPolicy(id, policy string) (bool, error) {
+func (r *ChannelRepository) SetMembersOnlyPolicy(id, policy string) (bool, error) {
 	var val sql.NullString
 	if policy != "" {
 		val = sql.NullString{String: policy, Valid: true}
 	}
-	res, err := r.db.Exec(`UPDATE singers SET members_only_policy = $2, updated_at = NOW() WHERE id = $1`, id, val)
+	res, err := r.db.Exec(`UPDATE channels SET members_only_policy = $2, updated_at = NOW() WHERE id = $1`, id, val)
 	if err != nil {
 		return false, fmt.Errorf("set members only policy: %w", err)
 	}
@@ -226,20 +226,20 @@ func (r *SingerRepository) SetMembersOnlyPolicy(id, policy string) (bool, error)
 //
 // **一覧の SQL に相関サブクエリを足さない。** 1 回のクエリで全チャンネル分をまとめて引き、
 // 呼び出し側で突き合わせる ── 148 チャンネルに対して N+1 を作らないため。
-func (r *SingerRepository) CountMembersOnlyByOwner(onlyIDs ...string) (map[string]int, error) {
+func (r *ChannelRepository) CountMembersOnlyByOwner(onlyIDs ...string) (map[string]int, error) {
 	where := "ss.is_owner AND " + MembersOnlyDetectedExpr("s")
 	args := []any{}
 	if len(onlyIDs) > 0 {
-		where += " AND ss.singer_id = ANY($1)"
+		where += " AND ss.channel_id = ANY($1)"
 		args = append(args, pq.Array(onlyIDs))
 	}
 
 	rows, err := r.db.Query(`
-		SELECT ss.singer_id, COUNT(*)
-		FROM stream_singers ss
+		SELECT ss.channel_id, COUNT(*)
+		FROM stream_channels ss
 		JOIN streams s ON s.id = ss.stream_id
 		WHERE `+where+`
-		GROUP BY ss.singer_id`, args...)
+		GROUP BY ss.channel_id`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("count members only by owner: %w", err)
 	}
@@ -258,9 +258,9 @@ func (r *SingerRepository) CountMembersOnlyByOwner(onlyIDs ...string) (map[strin
 }
 
 // SetAutoFill は自動処理の対象かを切り替える。戻り値は対象が存在したか。
-func (r *SingerRepository) SetAutoFill(id string, enabled bool) (bool, error) {
+func (r *ChannelRepository) SetAutoFill(id string, enabled bool) (bool, error) {
 	res, err := r.db.Exec(
-		"UPDATE singers SET auto_fill_enabled = $2, updated_at = NOW() WHERE id = $1", id, enabled)
+		"UPDATE channels SET auto_fill_enabled = $2, updated_at = NOW() WHERE id = $1", id, enabled)
 	if err != nil {
 		return false, fmt.Errorf("set auto fill: %w", err)
 	}
@@ -277,10 +277,10 @@ func (r *SingerRepository) SetAutoFill(id string, enabled bool) (bool, error) {
 // **非表示チャンネルも含める。** `is_hidden` は一覧に載せるかどうかの旗で、
 // 処理してよいかとは別の軸（CLAUDE.md §2）。隠してあるチャンネルの歌単を
 // 作りたい、という組み合わせは普通にある。
-func (r *SingerRepository) FindAutoFillTargets() ([]models.Singer, error) {
+func (r *ChannelRepository) FindAutoFillTargets() ([]models.Channel, error) {
 	rows, err := r.db.Query(`
-		SELECT ` + singerColumns + `
-		` + singerFrom + `
+		SELECT ` + channelColumns + `
+		` + channelFrom + `
 		WHERE s.auto_fill_enabled
 		ORDER BY ` + nameSortOrder("s.name", "''"))
 	if err != nil {
@@ -288,15 +288,15 @@ func (r *SingerRepository) FindAutoFillTargets() ([]models.Singer, error) {
 	}
 	defer rows.Close()
 
-	var singers []models.Singer
+	var channels []models.Channel
 	for rows.Next() {
-		sg, err := scanSinger(rows)
+		sg, err := scanChannel(rows)
 		if err != nil {
 			return nil, fmt.Errorf("scan auto fill target: %w", err)
 		}
-		singers = append(singers, sg)
+		channels = append(channels, sg)
 	}
-	return singers, rows.Err()
+	return channels, rows.Err()
 }
 
 // SetOrganizationOverride は Holodex の分類を手動で上書きする（空文字なら上書きを解除）。
@@ -306,14 +306,14 @@ func (r *SingerRepository) FindAutoFillTargets() ([]models.Singer, error) {
 // これが Holodex のメタデータではなく seTORI 側の判断であり、
 // Holodex 管理チャンネルでも設定できる必要があるため。
 // 戻り値は対象が存在したか。
-func (r *SingerRepository) SetOrganizationOverride(id, org string) (bool, error) {
+func (r *ChannelRepository) SetOrganizationOverride(id, org string) (bool, error) {
 	override := sql.NullString{String: org, Valid: strings.TrimSpace(org) != ""}
 	if err := r.ensureOrganization(override); err != nil {
 		return false, err
 	}
 
 	res, err := r.db.Exec(
-		"UPDATE singers SET organization_override = $2, updated_at = NOW() WHERE id = $1",
+		"UPDATE channels SET organization_override = $2, updated_at = NOW() WHERE id = $1",
 		id, override)
 	if err != nil {
 		return false, fmt.Errorf("set organization override: %w", err)
@@ -326,12 +326,12 @@ func (r *SingerRepository) SetOrganizationOverride(id, org string) (bool, error)
 }
 
 // FindByID はチャンネル ID で歌手を取得する。
-func (r *SingerRepository) FindByID(id string) (*models.Singer, error) {
+func (r *ChannelRepository) FindByID(id string) (*models.Channel, error) {
 	query := `
-		SELECT ` + singerColumns + `
-		` + singerFrom + ` WHERE s.id = $1`
+		SELECT ` + channelColumns + `
+		` + channelFrom + ` WHERE s.id = $1`
 
-	s, err := scanSinger(r.db.QueryRow(query, id))
+	s, err := scanChannel(r.db.QueryRow(query, id))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -343,14 +343,14 @@ func (r *SingerRepository) FindByID(id string) (*models.Singer, error) {
 
 // ensureOrganization は書き込み前に事務所の行を用意する。
 //
-// singers.organization は organizations への FK なので、Holodex が今まで見たことのない
+// channels.organization は organizations への FK なので、Holodex が今まで見たことのない
 // org を返した瞬間に取り込みが FK 違反で落ちる。それを避けるため、書き込み経路の入口で
 // 必ず通す。表示名は key と同じもので作っておき、あとから管理画面で直す
 // （「知らない事務所だから取り込まない」は選ばない ─ 登録は止めず、人の確認は後で受ける）。
 //
 // 呼び出し側で忘れると本番で初めて落ちる種類の不具合なので、
 // service ではなくこのリポジトリの書き込みメソッド側に置いてある。
-func (r *SingerRepository) ensureOrganization(org sql.NullString) error {
+func (r *ChannelRepository) ensureOrganization(org sql.NullString) error {
 	key := strings.TrimSpace(org.String)
 	if !org.Valid || key == "" {
 		return nil
@@ -371,17 +371,17 @@ func (r *SingerRepository) ensureOrganization(org sql.NullString) error {
 // すべて Holodex 同期を通り、Upsert に集約されている。
 // 復活させるときは is_hidden の既定を決めること ── ここは列に入れていないので
 // DB default の false（＝一覧に出る）になる。同期経由で作るなら Upsert に
-// SingerOrigin を渡すほうが正しい。
-func (r *SingerRepository) Create(s *models.Singer) error {
+// ChannelOrigin を渡すほうが正しい。
+func (r *ChannelRepository) Create(s *models.Channel) error {
 	if err := r.ensureOrganization(s.Organization); err != nil {
 		return err
 	}
 	query := `
-		INSERT INTO singers (id, name, english_name, photo_url, organization, metadata_source)
+		INSERT INTO channels (id, name, english_name, photo_url, organization, metadata_source)
 		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING created_at, updated_at`
 
-	source := normalizeSingerMetadataSource(s.MetadataSource)
+	source := normalizeChannelMetadataSource(s.MetadataSource)
 	err := r.db.QueryRow(query, s.ID, s.Name, s.EnglishName, s.PhotoURL, s.Organization, source).
 		Scan(&s.CreatedAt, &s.UpdatedAt)
 	if err != nil {
@@ -392,17 +392,17 @@ func (r *SingerRepository) Create(s *models.Singer) error {
 }
 
 // Update は歌手を更新する。
-func (r *SingerRepository) Update(s *models.Singer) error {
+func (r *ChannelRepository) Update(s *models.Channel) error {
 	if err := r.ensureOrganization(s.Organization); err != nil {
 		return err
 	}
 	query := `
-		UPDATE singers
+		UPDATE channels
 		SET name = $2, english_name = $3, photo_url = $4, organization = $5, metadata_source = $6, updated_at = NOW()
 		WHERE id = $1
 		RETURNING updated_at`
 
-	source := normalizeSingerMetadataSource(s.MetadataSource)
+	source := normalizeChannelMetadataSource(s.MetadataSource)
 	err := r.db.QueryRow(query, s.ID, s.Name, s.EnglishName, s.PhotoURL, s.Organization, source).
 		Scan(&s.UpdatedAt)
 	if err != nil {
@@ -412,7 +412,7 @@ func (r *SingerRepository) Update(s *models.Singer) error {
 	return nil
 }
 
-// SingerOrigin は Upsert が**行を新規作成するとき**の既定の可視性を決める。
+// ChannelOrigin は Upsert が**行を新規作成するとき**の既定の可視性を決める。
 // 既存行には効かない（後述）。
 //
 // 同期は「人が名指ししたチャンネル」と「その副産物として流れ込んだチャンネル」の
@@ -422,29 +422,29 @@ func (r *SingerRepository) Update(s *models.Singer) error {
 // bool ではなく型にしてあるのは、呼び出し側で `Upsert(singer, true)` と書かれても
 // どちらの意味か読めないため。引数を必須にしているのは、
 // **新しい呼び出し元が origin を決めずにはコンパイルできないようにする**ため。
-type SingerOrigin int
+type ChannelOrigin int
 
 const (
-	// SingerRequested … 人がそのチャンネルを名指しで追加・同期した。既定で一覧に出す。
-	SingerRequested SingerOrigin = iota
-	// SingerDiscovered … 配信の同期に付随して見つかった（所有者・mention）。既定で非表示。
+	// ChannelRequested … 人がそのチャンネルを名指しで追加・同期した。既定で一覧に出す。
+	ChannelRequested ChannelOrigin = iota
+	// ChannelDiscovered … 配信の同期に付随して見つかった（所有者・mention）。既定で非表示。
 	// 編集者は一覧の include_hidden で見つけられる。
-	SingerDiscovered
+	ChannelDiscovered
 )
 
-func (o SingerOrigin) hiddenOnInsert() bool { return o == SingerDiscovered }
+func (o ChannelOrigin) hiddenOnInsert() bool { return o == ChannelDiscovered }
 
 // Upsert は歌手を作成または更新する（Holodex 同期用）。
 //
 // **is_hidden を書くのは INSERT のときだけで、既存行では意図的に触らない。**
 // 同期は繰り返し走るので、conflict 側で書き戻すと手動で非表示にしたチャンネルが
 // 次の同期で一覧に戻ってしまう。ON CONFLICT の SET に is_hidden を足さないこと。
-func (r *SingerRepository) Upsert(s *models.Singer, origin SingerOrigin) error {
+func (r *ChannelRepository) Upsert(s *models.Channel, origin ChannelOrigin) error {
 	if err := r.ensureOrganization(s.Organization); err != nil {
 		return err
 	}
 	query := `
-		INSERT INTO singers (id, name, english_name, photo_url, organization, metadata_source, is_hidden)
+		INSERT INTO channels (id, name, english_name, photo_url, organization, metadata_source, is_hidden)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		ON CONFLICT (id) DO UPDATE SET
 			name = EXCLUDED.name,
@@ -455,7 +455,7 @@ func (r *SingerRepository) Upsert(s *models.Singer, origin SingerOrigin) error {
 			updated_at = NOW()
 		RETURNING created_at, updated_at, is_hidden`
 
-	source := normalizeSingerMetadataSource(s.MetadataSource)
+	source := normalizeChannelMetadataSource(s.MetadataSource)
 	err := r.db.QueryRow(query, s.ID, s.Name, s.EnglishName, s.PhotoURL, s.Organization, source, origin.hiddenOnInsert()).
 		Scan(&s.CreatedAt, &s.UpdatedAt, &s.IsHidden)
 	if err != nil {
@@ -473,9 +473,9 @@ func (r *SingerRepository) Upsert(s *models.Singer, origin SingerOrigin) error {
 //
 // ここからも書けるようにすると、同じ列を 2 経路が別の意味で更新することになり、
 // 「同期で戻る値」と「戻らない値」が混ざって追えなくなる。
-func (r *SingerRepository) UpdateManualMetadata(s *models.Singer) error {
+func (r *ChannelRepository) UpdateManualMetadata(s *models.Channel) error {
 	query := `
-		UPDATE singers
+		UPDATE channels
 		SET name = $2, english_name = $3, photo_url = $4, updated_at = NOW()
 		WHERE id = $1
 		RETURNING created_at, updated_at`
@@ -489,8 +489,8 @@ func (r *SingerRepository) UpdateManualMetadata(s *models.Singer) error {
 }
 
 // Delete は歌手を削除する。
-func (r *SingerRepository) Delete(id string) error {
-	_, err := r.db.Exec("DELETE FROM singers WHERE id = $1", id)
+func (r *ChannelRepository) Delete(id string) error {
+	_, err := r.db.Exec("DELETE FROM channels WHERE id = $1", id)
 	if err != nil {
 		return fmt.Errorf("delete singer: %w", err)
 	}
@@ -498,14 +498,14 @@ func (r *SingerRepository) Delete(id string) error {
 }
 
 // GetStreamCount は歌手が参加した配信数を取得する（非表示でない配信だけを集計）。
-func (r *SingerRepository) GetStreamCount(singerID string) (int, error) {
+func (r *ChannelRepository) GetStreamCount(channelID string) (int, error) {
 	var count int
 	err := r.db.QueryRow(`
 		SELECT COUNT(DISTINCT ss.stream_id)
-		FROM stream_singers ss
+		FROM stream_channels ss
 		JOIN streams st ON ss.stream_id = st.id
-		WHERE ss.singer_id = $1 AND st.is_hidden = FALSE
-	`, singerID).Scan(&count)
+		WHERE ss.channel_id = $1 AND st.is_hidden = FALSE
+	`, channelID).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("count streams: %w", err)
 	}
@@ -514,7 +514,7 @@ func (r *SingerRepository) GetStreamCount(singerID string) (int, error) {
 
 // GetPerformanceCount は歌手の歌唱数を取得する（非表示・秘匿でない配信だけを集計）。
 // **件数も秘匿の対象**（一覧から落としても件数が合わなければ存在が漏れる）。
-func (r *SingerRepository) GetPerformanceCount(singerID string, access ViewerAccess) (int, error) {
+func (r *ChannelRepository) GetPerformanceCount(channelID string, access ViewerAccess) (int, error) {
 	var count int
 	err := r.db.QueryRow(`
 		SELECT COUNT(*)
@@ -522,7 +522,7 @@ func (r *SingerRepository) GetPerformanceCount(singerID string, access ViewerAcc
 		JOIN performances p ON ps.performance_id = p.id
 		JOIN streams st ON p.stream_id = st.id
 		WHERE ps.singer_id = $1 AND `+DiscoverableFor("st", access)+`
-	`, singerID).Scan(&count)
+	`, channelID).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("count performances: %w", err)
 	}
@@ -532,10 +532,10 @@ func (r *SingerRepository) GetPerformanceCount(singerID string, access ViewerAcc
 // Search は歌手を検索する。
 // 非表示チャンネルも返す：名前で探すのは「そのチャンネルを見に行く」意図の操作で、
 // 詳細ページ自体は非表示でも開けるため、ここで隠すと辿り着く手段だけを塞ぐことになる。
-func (r *SingerRepository) Search(query string, limit int) ([]models.Singer, error) {
+func (r *ChannelRepository) Search(query string, limit int) ([]models.Channel, error) {
 	sqlQuery := `
-		SELECT ` + singerColumns + `
-		` + singerFrom + `
+		SELECT ` + channelColumns + `
+		` + channelFrom + `
 		WHERE s.name ILIKE $1 OR s.english_name ILIKE $1
 		ORDER BY s.name ASC
 		LIMIT $2`
@@ -547,19 +547,19 @@ func (r *SingerRepository) Search(query string, limit int) ([]models.Singer, err
 	}
 	defer rows.Close()
 
-	var singers []models.Singer
+	var channels []models.Channel
 	for rows.Next() {
-		s, err := scanSinger(rows)
+		s, err := scanChannel(rows)
 		if err != nil {
 			return nil, fmt.Errorf("scan singer: %w", err)
 		}
-		singers = append(singers, s)
+		channels = append(channels, s)
 	}
 
-	return singers, nil
+	return channels, nil
 }
 
-func normalizeSingerMetadataSource(source string) string {
+func normalizeChannelMetadataSource(source string) string {
 	if source == "" {
 		return "holodex"
 	}

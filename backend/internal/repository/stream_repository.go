@@ -75,7 +75,7 @@ func (r *StreamRepository) FindAll(limit, offset int, includeHidden bool, sort, 
 //
 // 実効的な秘匿（EffectiveRestrictedExpr）は SELECT でしか計算されないので、
 // 列を書き並べる方式だと 1 か所書き忘れても**コンパイルは通り、Scan で初めて落ちる**
-// （実際 FindBySingerID がそうなっていて、歌手配下の一覧が 500 になっていた）。
+// （実際 FindByChannelID がそうなっていて、歌手配下の一覧が 500 になっていた）。
 // 定数と scanner を対にして、書き忘れる余地を無くしてある。
 func streamListColumns(alias string) string {
 	p := alias + "."
@@ -172,7 +172,7 @@ func (r *StreamRepository) CountByTagForList(tags []string) (map[string]int, err
 }
 
 // VisibleChannelExpr は「この配信が、一覧に出しているチャンネルのものか」を返す SQL 式。
-// 参加者に非表示でない singer が 1 人でも居れば true。
+// 参加者に非表示でない channel が 1 人でも居れば true。
 //
 // **なぜ要るか。** 同期は動画の所有者だけでなく description の mention からも
 // 参加者を作るので、この站が扱っていないチャンネルの配信が混ざる。実測
@@ -189,8 +189,8 @@ func (r *StreamRepository) CountByTagForList(tags []string) (map[string]int, err
 // **件数にも必ず通すこと。** 一覧から落としても件数が合わなければ、
 // 何件伏せたかが残る（秘匿の件数と同じ話）。
 func VisibleChannelExpr(alias string) string {
-	return "EXISTS (SELECT 1 FROM stream_singers ss" +
-		" JOIN singers si ON si.id = ss.singer_id" +
+	return "EXISTS (SELECT 1 FROM stream_channels ss" +
+		" JOIN channels si ON si.id = ss.channel_id" +
 		" WHERE ss.stream_id = " + alias + ".id AND si.is_hidden = FALSE)"
 }
 
@@ -494,19 +494,19 @@ func (r *StreamRepository) GetTagsForStreams(streamIDs []string) (map[string][]m
 	return result, rows.Err()
 }
 
-// GetSingersForStreams は複数の歌枠の参加者とチャンネル所有者を一括取得し、N+1 を避ける。
-func (r *StreamRepository) GetSingersForStreams(streamIDs []string) (participants map[string][]models.Singer, owners map[string]*models.Singer, err error) {
-	participants = make(map[string][]models.Singer, len(streamIDs))
-	owners = make(map[string]*models.Singer, len(streamIDs))
+// GetChannelsForStreams は複数の歌枠の参加者とチャンネル所有者を一括取得し、N+1 を避ける。
+func (r *StreamRepository) GetChannelsForStreams(streamIDs []string) (participants map[string][]models.Channel, owners map[string]*models.Channel, err error) {
+	participants = make(map[string][]models.Channel, len(streamIDs))
+	owners = make(map[string]*models.Channel, len(streamIDs))
 	if len(streamIDs) == 0 {
 		return participants, owners, nil
 	}
 
 	query := `
 		SELECT ss.stream_id, ss.is_owner, s.id, s.name, s.english_name, s.photo_url, COALESCE(s.organization_override, s.organization), o.display_name, COALESCE(o.is_unaffiliated, FALSE), s.metadata_source, s.created_at, s.updated_at
-		FROM singers s
+		FROM channels s
 		LEFT JOIN organizations o ON COALESCE(s.organization_override, s.organization) = o.key
-		JOIN stream_singers ss ON s.id = ss.singer_id
+		JOIN stream_channels ss ON s.id = ss.channel_id
 		WHERE ss.stream_id = ANY($1)`
 
 	rows, err := r.db.Query(query, pq.Array(streamIDs))
@@ -518,7 +518,7 @@ func (r *StreamRepository) GetSingersForStreams(streamIDs []string) (participant
 	for rows.Next() {
 		var streamID string
 		var isOwner bool
-		var sg models.Singer
+		var sg models.Channel
 		if err := rows.Scan(&streamID, &isOwner, &sg.ID, &sg.Name, &sg.EnglishName,
 			&sg.PhotoURL, &sg.Organization, &sg.OrganizationName, &sg.OrganizationUnaffil, &sg.MetadataSource, &sg.CreatedAt, &sg.UpdatedAt); err != nil {
 			return nil, nil, fmt.Errorf("scan stream singer: %w", err)
@@ -649,21 +649,21 @@ func (r *StreamRepository) FindByTagID(tagID string, limit, offset int) ([]model
 }
 
 // FindStreamsForBatch は一括分析の対象配信（id / title / is_hidden / is_processed）を mode と（任意の）歌手で
-// 絞り込んで古い順に返す。singerID が空なら全チャンネルが対象。
+// 絞り込んで古い順に返す。channelID が空なら全チャンネルが対象。
 //
 // mode 別の対象範囲（いずれも comment_raw あり）:
 //   - "unanalyzed"           : 分析結果（comment_songs）が一度も無い配信のみ
 //   - "unprocessed"/"refresh": 未処理（ユーザー未確認）の配信すべて
 //   - "reanalyze"            : comment_raw を持つ配信すべて（分析済みも対象。force で作り直す）
 //
-// singerID 指定時は stream_singers を EXISTS で絞る（owner / 参加者どちらでも一致）。
+// channelID 指定時は stream_channels を EXISTS で絞る（owner / 参加者どちらでも一致）。
 //
 // hidden は非表示配信の扱い。nil=両方 / false=非表示を除く（既定）/ true=非表示だけ。
 // **既定を「除く」に据え置くのは、通常の運用で雑談・ゲーム配信を毎回 AI にかけないため。**
 // 非表示を回すのは抽出規則を変えた後の棚卸しという別の作業で、そのときだけ明示的に選ぶ
 // ── 非表示に残っていた抽出結果は構造フィルタ（2026-08-05）と grouped 経路（2026-08-07）が
 // 入る前のもので、現在の規則なら落ちる行を大量に含んでいる。
-func (r *StreamRepository) FindStreamsForBatch(mode, singerID string, hidden *bool) ([]models.Stream, error) {
+func (r *StreamRepository) FindStreamsForBatch(mode, channelID string, hidden *bool) ([]models.Stream, error) {
 	// comment_raw に中身があるものだけを対象にする。
 	//
 	// `IS NOT NULL AND != 'null'` では**空配列 `[]` が通ってしまう**。migration 014 が
@@ -701,9 +701,9 @@ func (r *StreamRepository) FindStreamsForBatch(mode, singerID string, hidden *bo
 	}
 
 	args := []any{}
-	if singerID != "" {
-		args = append(args, singerID)
-		where += fmt.Sprintf(" AND EXISTS (SELECT 1 FROM stream_singers ss WHERE ss.stream_id = s.id AND ss.singer_id = $%d)", len(args))
+	if channelID != "" {
+		args = append(args, channelID)
+		where += fmt.Sprintf(" AND EXISTS (SELECT 1 FROM stream_channels ss WHERE ss.stream_id = s.id AND ss.channel_id = $%d)", len(args))
 	}
 
 	// **is_hidden と is_processed も引く。** 部分モデルにしていたので、
@@ -746,12 +746,12 @@ func (r *StreamRepository) SearchStreams(filters models.StreamSearchFilters, lim
 		i++
 	}
 	if filters.OwnerID != "" {
-		where += fmt.Sprintf(" AND EXISTS (SELECT 1 FROM stream_singers ss WHERE ss.stream_id = s.id AND ss.singer_id = $%d AND ss.is_owner = TRUE)", i)
+		where += fmt.Sprintf(" AND EXISTS (SELECT 1 FROM stream_channels ss WHERE ss.stream_id = s.id AND ss.channel_id = $%d AND ss.is_owner = TRUE)", i)
 		args = append(args, filters.OwnerID)
 		i++
 	}
 	if len(filters.ParticipantIDs) > 0 {
-		where += fmt.Sprintf(" AND s.id IN (SELECT ss.stream_id FROM stream_singers ss WHERE ss.singer_id = ANY($%d) GROUP BY ss.stream_id HAVING COUNT(DISTINCT ss.singer_id) = %d)", i, len(filters.ParticipantIDs))
+		where += fmt.Sprintf(" AND s.id IN (SELECT ss.stream_id FROM stream_channels ss WHERE ss.channel_id = ANY($%d) GROUP BY ss.stream_id HAVING COUNT(DISTINCT ss.channel_id) = %d)", i, len(filters.ParticipantIDs))
 		args = append(args, pq.Array(filters.ParticipantIDs))
 		i++
 	}
@@ -874,7 +874,7 @@ func (r *StreamRepository) ApplyTagRulesToAll() (int64, error) {
 //     「本当に全部消された」を反映できないと困る
 //
 // **引数を必須にしてあるのは、新しい呼び出し元がどちらか決めずに
-// コンパイルできないようにするため**（`SingerOrigin` / `ViewerAccess` と同じ）。
+// コンパイルできないようにするため**（`ChannelOrigin` / `ViewerAccess` と同じ）。
 type EmptyWritePolicy int
 
 const (
@@ -1082,15 +1082,15 @@ func (r *StreamRepository) SaveHolodexSongs(id string, normalized []byte, hash s
 	return nil
 }
 
-// ========== Stream Singers ==========
+// ========== Stream Channels ==========
 
-// GetSingers はこの配信に参加したすべての歌手を取得する。
-func (r *StreamRepository) GetSingers(streamID string) ([]models.Singer, error) {
+// GetChannels はこの配信に参加したすべての歌手を取得する。
+func (r *StreamRepository) GetChannels(streamID string) ([]models.Channel, error) {
 	query := `
 		SELECT s.id, s.name, s.english_name, s.photo_url, COALESCE(s.organization_override, s.organization), o.display_name, COALESCE(o.is_unaffiliated, FALSE), s.metadata_source, s.created_at, s.updated_at
-		FROM singers s
+		FROM channels s
 		LEFT JOIN organizations o ON COALESCE(s.organization_override, s.organization) = o.key
-		JOIN stream_singers ss ON s.id = ss.singer_id
+		JOIN stream_channels ss ON s.id = ss.channel_id
 		WHERE ss.stream_id = $1`
 
 	rows, err := r.db.Query(query, streamID)
@@ -1099,30 +1099,30 @@ func (r *StreamRepository) GetSingers(streamID string) ([]models.Singer, error) 
 	}
 	defer rows.Close()
 
-	var singers []models.Singer
+	var channels []models.Channel
 	for rows.Next() {
-		var s models.Singer
+		var s models.Channel
 		err := rows.Scan(&s.ID, &s.Name, &s.EnglishName, &s.PhotoURL, &s.Organization, &s.OrganizationName, &s.OrganizationUnaffil, &s.MetadataSource, &s.CreatedAt, &s.UpdatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("scan singer: %w", err)
 		}
-		singers = append(singers, s)
+		channels = append(channels, s)
 	}
 
-	return singers, nil
+	return channels, nil
 }
 
 // GetChannelOwner はこの配信のチャンネル所有者を取得する。
-func (r *StreamRepository) GetChannelOwner(streamID string) (*models.Singer, error) {
+func (r *StreamRepository) GetChannelOwner(streamID string) (*models.Channel, error) {
 	query := `
 		SELECT s.id, s.name, s.english_name, s.photo_url, COALESCE(s.organization_override, s.organization), o.display_name, COALESCE(o.is_unaffiliated, FALSE), s.metadata_source, s.created_at, s.updated_at
-		FROM singers s
+		FROM channels s
 		LEFT JOIN organizations o ON COALESCE(s.organization_override, s.organization) = o.key
-		JOIN stream_singers ss ON s.id = ss.singer_id
+		JOIN stream_channels ss ON s.id = ss.channel_id
 		WHERE ss.stream_id = $1 AND ss.is_owner = TRUE
 		LIMIT 1`
 
-	var s models.Singer
+	var s models.Channel
 	err := r.db.QueryRow(query, streamID).Scan(&s.ID, &s.Name, &s.EnglishName, &s.PhotoURL, &s.Organization, &s.OrganizationName, &s.OrganizationUnaffil, &s.MetadataSource, &s.CreatedAt, &s.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil // チャンネル所有者が設定されていない
@@ -1133,18 +1133,18 @@ func (r *StreamRepository) GetChannelOwner(streamID string) (*models.Singer, err
 	return &s, nil
 }
 
-// AddSinger は配信に参加者を追加する。
-func (r *StreamRepository) AddSinger(streamID, singerID string, isOwner bool) error {
-	query := `INSERT INTO stream_singers (stream_id, singer_id, is_owner) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`
-	_, err := r.db.Exec(query, streamID, singerID, isOwner)
+// AddChannel は配信に参加者を追加する。
+func (r *StreamRepository) AddChannel(streamID, channelID string, isOwner bool) error {
+	query := `INSERT INTO stream_channels (stream_id, channel_id, is_owner) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`
+	_, err := r.db.Exec(query, streamID, channelID, isOwner)
 	if err != nil {
 		return fmt.Errorf("add stream singer: %w", err)
 	}
 	return nil
 }
 
-// SetSingers は配信の参加者を設定する（既存値を置換）。
-func (r *StreamRepository) SetSingers(streamID string, singerIDs []string, ownerID string) error {
+// SetChannels は配信の参加者を設定する（既存値を置換）。
+func (r *StreamRepository) SetChannels(streamID string, channelIDs []string, ownerID string) error {
 	tx, err := r.db.Begin()
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
@@ -1152,17 +1152,17 @@ func (r *StreamRepository) SetSingers(streamID string, singerIDs []string, owner
 	defer tx.Rollback()
 
 	// 既存の参加者を削除する
-	_, err = tx.Exec("DELETE FROM stream_singers WHERE stream_id = $1", streamID)
+	_, err = tx.Exec("DELETE FROM stream_channels WHERE stream_id = $1", streamID)
 	if err != nil {
 		return fmt.Errorf("delete existing singers: %w", err)
 	}
 
 	// 新しい参加者を追加する
-	for _, singerID := range singerIDs {
-		isOwner := singerID == ownerID
+	for _, channelID := range channelIDs {
+		isOwner := channelID == ownerID
 		_, err = tx.Exec(
-			"INSERT INTO stream_singers (stream_id, singer_id, is_owner) VALUES ($1, $2, $3)",
-			streamID, singerID, isOwner,
+			"INSERT INTO stream_channels (stream_id, channel_id, is_owner) VALUES ($1, $2, $3)",
+			streamID, channelID, isOwner,
 		)
 		if err != nil {
 			return fmt.Errorf("insert singer: %w", err)
@@ -1214,11 +1214,11 @@ type StreamFilter struct {
 	HiddenFilter  *bool // nil=すべて, true=非表示のみ, false=非表示を除外（既定）
 }
 
-// FindBySingerID は歌手が参加した歌枠を取得する（ページングと絞り込み対応）。
-func (r *StreamRepository) FindBySingerID(singerID string, limit, offset int, filter *StreamFilter) ([]models.Stream, int, error) {
+// FindByChannelID は歌手が参加した歌枠を取得する（ページングと絞り込み対応）。
+func (r *StreamRepository) FindByChannelID(channelID string, limit, offset int, filter *StreamFilter) ([]models.Stream, int, error) {
 	// WHERE 条件を組み立てる
-	whereClause := "ss.singer_id = $1"
-	args := []interface{}{singerID}
+	whereClause := "ss.channel_id = $1"
+	args := []interface{}{channelID}
 	argIndex := 2
 
 	if filter != nil {
@@ -1245,7 +1245,7 @@ func (r *StreamRepository) FindBySingerID(singerID string, limit, offset int, fi
 	countQuery := fmt.Sprintf(`
 		SELECT COUNT(DISTINCT s.id)
 		FROM streams s
-		JOIN stream_singers ss ON s.id = ss.stream_id
+		JOIN stream_channels ss ON s.id = ss.stream_id
 		WHERE %s
 	`, whereClause)
 	err := r.db.QueryRow(countQuery, args...).Scan(&total)
@@ -1256,7 +1256,7 @@ func (r *StreamRepository) FindBySingerID(singerID string, limit, offset int, fi
 	query := fmt.Sprintf(`
 		SELECT s.id, s.title, s.stream_date, s.duration_seconds, s.thumbnail_url, s.holodex_data, s.holodex_hash, s.is_processed, s.is_hidden, s.restriction_override, s.created_at, s.updated_at, `+EffectiveRestrictedExpr("s")+`
 		FROM streams s
-		JOIN stream_singers ss ON s.id = ss.stream_id
+		JOIN stream_channels ss ON s.id = ss.stream_id
 		WHERE %s
 		ORDER BY s.stream_date DESC
 		LIMIT $%d OFFSET $%d`, whereClause, argIndex, argIndex+1)
@@ -1502,13 +1502,13 @@ func (r *StreamRepository) ClearCommentsUnavailable(id string) error {
 // 配信はこの実行の中で複数回取りに行くこともあるが、
 // **飛ばして取りこぼすよりは安い**という判断。
 //
-// singerIDs が空なら全チャンネル。既定は所有者だけで絞り、includeCollabs が
+// channelIDs が空なら全チャンネル。既定は所有者だけで絞り、includeCollabs が
 // true のときは参加者まで含む（FindStreamsForFill と同じ）。
 // justSynced はこの実行の同期で入ってきた配信。**それだけでは除外しない** ──
 // 同期のコメント取得は失敗してもログだけで、その配信は「新規」として返る。
 // 「新規だから取得済み」と決めつけると、取得に失敗した配信を黙って飛ばすことになる。
 // **実際にコメントが入っているものだけ**を除外する（＝取得できた証拠がある）。
-func (r *StreamRepository) FindStreamsNeedingCommentRefresh(singerIDs []string, days int, justSynced []string, includeCollabs bool) ([]string, error) {
+func (r *StreamRepository) FindStreamsNeedingCommentRefresh(channelIDs []string, days int, justSynced []string, includeCollabs bool) ([]string, error) {
 	if days < 1 {
 		days = 30
 	}
@@ -1540,7 +1540,7 @@ func (r *StreamRepository) FindStreamsNeedingCommentRefresh(singerIDs []string, 
 		  AND NOT ` + MembersOnlyDetectedExpr("s") + `
 		  AND NOT ` + CommentRefreshBackoffExpr("s")
 	args := []any{days}
-	if len(singerIDs) > 0 {
+	if len(channelIDs) > 0 {
 		// **既定は所有者だけ。** includeCollabs で参加しただけの配信（客串）まで広げる
 		// （issue #60）。一括作成（FindStreamsForFill）と同じ値を渡すこと ──
 		// 片方だけ広げると、取り直していない入力を一括が見続ける。
@@ -1549,9 +1549,9 @@ func (r *StreamRepository) FindStreamsNeedingCommentRefresh(singerIDs []string, 
 			ownerOnly = ""
 		}
 		query += `
-		  AND EXISTS (SELECT 1 FROM stream_singers ss
-		              WHERE ss.stream_id = s.id` + ownerOnly + ` AND ss.singer_id = ANY($2))`
-		args = append(args, pq.Array(singerIDs))
+		  AND EXISTS (SELECT 1 FROM stream_channels ss
+		              WHERE ss.stream_id = s.id` + ownerOnly + ` AND ss.channel_id = ANY($2))`
+		args = append(args, pq.Array(channelIDs))
 	}
 	if len(justSynced) > 0 {
 		// 同期で入ってきて、**かつ実際にコメントが入った**ものだけ除外する。
@@ -1648,22 +1648,22 @@ func fillTargetWhere(mode string) string {
 //	              既にあるものも、人が「処理した」と言ったものも触らない
 //	force       … 入力元を持つ配信すべて。既存と食い違う分は人の審査へ回す
 //
-// 範囲は singerIDs で絞る（空なら全チャンネル）。**既定はチャンネルの所有者**で、
+// 範囲は channelIDs で絞る（空なら全チャンネル）。**既定はチャンネルの所有者**で、
 // includeCollabs を立てたときだけ「参加した歌回」まで広がる。
 // 以前は参加者で絞っていたので、あるチャンネルを選んだつもりが、そのチャンネルが
 // ゲスト参加しただけの他人の配信まで対象になっていた。
-func (r *StreamRepository) FindStreamsForFill(mode string, singerIDs []string, includeCollabs bool) ([]models.Stream, error) {
+func (r *StreamRepository) FindStreamsForFill(mode string, channelIDs []string, includeCollabs bool) ([]models.Stream, error) {
 	where := fillTargetWhere(mode)
 
 	args := []any{}
-	if len(singerIDs) > 0 {
-		args = append(args, pq.Array(singerIDs))
+	if len(channelIDs) > 0 {
+		args = append(args, pq.Array(channelIDs))
 		ownerOnly := " AND ss.is_owner"
 		if includeCollabs {
 			ownerOnly = ""
 		}
 		where += fmt.Sprintf(
-			" AND EXISTS (SELECT 1 FROM stream_singers ss WHERE ss.stream_id = s.id AND ss.singer_id = ANY($%d)%s)",
+			" AND EXISTS (SELECT 1 FROM stream_channels ss WHERE ss.stream_id = s.id AND ss.channel_id = ANY($%d)%s)",
 			len(args), ownerOnly)
 	}
 

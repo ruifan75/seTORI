@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { onViewerChange } from '../queryClient';
-import type { ArtistReference, Singer } from '../api/types';
+import type { ArtistReference, Channel } from '../api/types';
 
 // 再生キューの1トラック＝1歌唱記録（配信内の start〜end 区間）
 export interface PlayerTrack {
@@ -28,7 +28,7 @@ export interface PerformanceLike {
   original_artist?: string;
   artists?: ArtistReference[];
   arts?: string;
-  singers?: Singer[];
+  singers?: Channel[];
   stream_title?: string;
   stream_date?: string;
   start_seconds: number;

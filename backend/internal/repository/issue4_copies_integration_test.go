@@ -25,7 +25,7 @@ func TestIssue4StoredCopiesPostgres(t *testing.T) {
  SELECT $1,'issue4-owner','unused',id FROM roles WHERE name='editor'`, owner)
 	exec(`INSERT INTO users(id,username,password_hash,role_id)
  SELECT $1,'issue4-other','unused',id FROM roles WHERE name='editor'`, otherUser)
-	exec(`INSERT INTO singers(id,name,is_hidden) VALUES('issue4-owner','fixture channel',FALSE)`)
+	exec(`INSERT INTO channels(id,name,is_hidden) VALUES('issue4-owner','fixture channel',FALSE)`)
 	exec(`INSERT INTO songs(id,name,original_artist) VALUES($1,'fixture song','fixture artist')`, song)
 	exec(`INSERT INTO playlists(id,user_id,name,visibility,share_slug) VALUES($1,$2,'fixture','public','issue4-slug')`, playlist, owner)
 	fixtures := []struct {
@@ -40,7 +40,7 @@ func TestIssue4StoredCopiesPostgres(t *testing.T) {
 	}
 	for i, f := range fixtures {
 		exec(`INSERT INTO streams(id,title,stream_date,is_hidden) VALUES($1,'fixture',NOW(),$2)`, f.stream, f.hidden)
-		exec(`INSERT INTO stream_singers(stream_id,singer_id,is_owner) VALUES($1,'issue4-owner',TRUE)`, f.stream)
+		exec(`INSERT INTO stream_channels(stream_id,channel_id,is_owner) VALUES($1,'issue4-owner',TRUE)`, f.stream)
 		if f.restricted {
 			exec(`INSERT INTO stream_stream_tags(stream_id,tag_id) VALUES($1,'members_only')`, f.stream)
 		}
@@ -64,9 +64,9 @@ func TestIssue4StoredCopiesPostgres(t *testing.T) {
 		public       []int
 	}{
 		{"default-deny", "", false, []int{0, 1}},
-		{"channel-allow", `UPDATE singers SET members_only_policy='allow' WHERE id='issue4-owner'`, false, []int{0, 1, 2, 3}},
+		{"channel-allow", `UPDATE channels SET members_only_policy='allow' WHERE id='issue4-owner'`, false, []int{0, 1, 2, 3}},
 		{"individual-deny-wins", `UPDATE streams SET restriction_override=TRUE WHERE id='secret00002'`, false, []int{0, 1, 2}},
-		{"channel-deny", `UPDATE singers SET members_only_policy='deny' WHERE id='issue4-owner'`, false, []int{0, 1}},
+		{"channel-deny", `UPDATE channels SET members_only_policy='deny' WHERE id='issue4-owner'`, false, []int{0, 1}},
 		{"unhide-does-not-allow", `UPDATE streams SET is_hidden=FALSE WHERE id='secret00002'`, false, []int{0, 1}},
 		{"delete-target-fails-closed", `DELETE FROM streams WHERE id='secret00002'`, true, []int{0, 1}},
 		{"individual-allow-wins", `UPDATE streams SET restriction_override=FALSE WHERE id='secret00001'`, true, []int{0, 1, 2}},

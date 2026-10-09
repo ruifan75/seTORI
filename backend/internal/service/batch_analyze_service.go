@@ -59,10 +59,10 @@ func NewBatchAnalyzeService(commentService *CommentService, streamRepo *reposito
 }
 
 // Start はジョブを開始する（実行中なら ErrBatchAlreadyRunning）。
-// singerID を指定するとそのチャンネルが参加した配信のみが対象（空なら全チャンネル）。
+// channelID を指定するとそのチャンネルが参加した配信のみが対象（空なら全チャンネル）。
 // Start は一括プレ分析を開始する。hidden は非表示配信の扱い
 // （nil=両方 / false=非表示を除く / true=非表示だけ）。
-func (s *BatchAnalyzeService) Start(mode, singerID string, hidden *bool) error {
+func (s *BatchAnalyzeService) Start(mode, channelID string, hidden *bool) error {
 	switch mode {
 	case BatchModeUnanalyzed, BatchModeUnprocessed, BatchModeRefresh, BatchModeReanalyze:
 	default:
@@ -76,9 +76,9 @@ func (s *BatchAnalyzeService) Start(mode, singerID string, hidden *bool) error {
 	}
 	s.running = true
 	s.cancelled = false
-	s.status = dto.BatchAnalyzeStatus{Running: true, Mode: mode, SingerID: singerID, Hidden: hiddenLabel(hidden)}
+	s.status = dto.BatchAnalyzeStatus{Running: true, Mode: mode, ChannelID: channelID, Hidden: hiddenLabel(hidden)}
 
-	go s.run(mode, singerID, hidden)
+	go s.run(mode, channelID, hidden)
 	return nil
 }
 
@@ -142,10 +142,10 @@ func (s *BatchAnalyzeService) RunPrepared(streams []models.Stream, task *TaskRun
 	hidden := false
 	return s.runStreams(BatchModeRefresh, "", &hidden, streams, task, eligible)
 }
-func (s *BatchAnalyzeService) run(mode, singerID string, hidden *bool) {
-	_ = s.runStreams(mode, singerID, hidden, nil, nil, nil)
+func (s *BatchAnalyzeService) run(mode, channelID string, hidden *bool) {
+	_ = s.runStreams(mode, channelID, hidden, nil, nil, nil)
 }
-func (s *BatchAnalyzeService) runStreams(mode, singerID string, hidden *bool, streams []models.Stream, task *TaskRun, eligible func(string) (bool, error)) error {
+func (s *BatchAnalyzeService) runStreams(mode, channelID string, hidden *bool, streams []models.Stream, task *TaskRun, eligible func(string) (bool, error)) error {
 	defer func() {
 		s.mu.Lock()
 		// 準備の予約は所有者が最後に解放する。ここで解くと完了記録前に別処理が始まる。
@@ -168,7 +168,7 @@ func (s *BatchAnalyzeService) runStreams(mode, singerID string, hidden *bool, st
 
 	var err error
 	if streams == nil {
-		streams, err = s.streamRepo.FindStreamsForBatch(mode, singerID, hidden)
+		streams, err = s.streamRepo.FindStreamsForBatch(mode, channelID, hidden)
 	}
 	if err != nil {
 		logger.Warnf("[batch-analyze] list streams failed: %v", err)
@@ -180,7 +180,7 @@ func (s *BatchAnalyzeService) runStreams(mode, singerID string, hidden *bool, st
 	forceStart := mode == BatchModeReanalyze
 
 	s.update(func(st *dto.BatchAnalyzeStatus) { st.Total = len(streams) })
-	logger.Infof("[batch-analyze] started: mode=%s singer=%q hidden=%s %d streams", mode, singerID, hiddenLabel(hidden), len(streams))
+	logger.Infof("[batch-analyze] started: mode=%s singer=%q hidden=%s %d streams", mode, channelID, hiddenLabel(hidden), len(streams))
 
 	for _, stream := range streams {
 		if s.isCancelled() {

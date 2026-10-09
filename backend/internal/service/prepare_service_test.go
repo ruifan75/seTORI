@@ -229,7 +229,7 @@ func TestPreparationExcludesBackfillsInBothDirections(t *testing.T) {
 		other.Finish("done", "")
 	}
 }
-func TestPrepareStartPersistsSingerAndRejectsSecondSinger(t *testing.T) {
+func TestPrepareStartPersistsChannelAndRejectsSecondChannel(t *testing.T) {
 	db, d := newTaskDB(t)
 	tasks := NewTaskRunService(repository.NewTaskRunRepository(db))
 	f := &prepareFixture{batchReserved: true, fillReserved: true, streams: []models.Stream{}, block: make(chan struct{}), released: make(chan struct{})}

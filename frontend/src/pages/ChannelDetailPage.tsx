@@ -3,7 +3,7 @@ import { invalidateChannelScopedQueries } from '../queryClient';
 import RestrictedBadge from '../components/RestrictedBadge';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
-import { singerApi, holodexApi, organizationApi } from '../api/client';
+import { channelApi, holodexApi, organizationApi } from '../api/client';
 import type { Organization } from '../api/types';
 import { useAuthStore, hasPermission, PERM } from '../store/auth';
 import { usePlayerStore, performanceToTrack } from '../store/player';
@@ -22,7 +22,7 @@ type TabType = 'streams' | 'performances';
 type ProcessedFilter = 'all' | 'true' | 'false';
 type HiddenFilter = 'all' | 'true' | 'false';
 
-export default function SingerDetailPage() {
+export default function ChannelDetailPage() {
   const { id } = useParams<{ id: string }>();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
@@ -80,7 +80,7 @@ export default function SingerDetailPage() {
   const hiddenFilter: HiddenFilter =
     hiddenParam === 'all' || hiddenParam === 'true' ? hiddenParam : 'false';
 
-  // Singer detail
+  // Channel detail
   //
   // **権限を query key に入れる。** 応答の中身が権限で変わる（会限の方針と本数は
   // content:edit のときだけ載る）ので、同じ鍵で共有すると片方が古いまま残る。
@@ -90,9 +90,9 @@ export default function SingerDetailPage() {
   //
   // enabled で loading 中を待つのは、その無駄な匿名リクエスト自体を省くため。
   // トークンが無ければ init() は即 anonymous を返すので、未ログインの表示は遅れない。
-  const { data: singer, isLoading: singerLoading } = useQuery({
+  const { data: channel, isLoading: channelLoading } = useQuery({
     queryKey: ['singer', id, canEdit],
-    queryFn: () => singerApi.get(id!),
+    queryFn: () => channelApi.get(id!),
     enabled: !!id && authStatus !== 'loading',
   });
 
@@ -112,14 +112,14 @@ export default function SingerDetailPage() {
     // トークンでのハードリロードで匿名の応答が 5 分残り、「未処理」で絞ったつもりが
     // 全件並ぶ・バッジも出ない、という状態になる。
     queryKey: ['singerStreams', id, streamPage, processedFilter, hiddenFilter, canEdit],
-    queryFn: () => singerApi.getStreams(id!, streamPage, 20, processedFilter, hiddenFilter),
+    queryFn: () => channelApi.getStreams(id!, streamPage, 20, processedFilter, hiddenFilter),
     enabled: !!id && activeTab === 'streams' && authStatus !== 'loading',
   });
 
   // Performances
   const { data: performances, isLoading: perfsLoading } = useQuery({
     queryKey: ['singerPerformances', id, perfPage, perfSort, perfDir],
-    queryFn: () => singerApi.getPerformances(id!, perfPage, 20, perfSort, perfDir),
+    queryFn: () => channelApi.getPerformances(id!, perfPage, 20, perfSort, perfDir),
     enabled: !!id && activeTab === 'performances',
   });
 
@@ -156,7 +156,7 @@ export default function SingerDetailPage() {
 
   // チャンネル一覧での表示/非表示。非表示にしてもこのページ自体は誰でも開ける。
   const visibilityMutation = useMutation({
-    mutationFn: (isHidden: boolean) => singerApi.setHidden(id!, isHidden),
+    mutationFn: (isHidden: boolean) => channelApi.setHidden(id!, isHidden),
     onSuccess: (_, isHidden) => {
       queryClient.invalidateQueries({ queryKey: ['singer', id] });
       invalidateChannelScopedQueries();
@@ -169,7 +169,7 @@ export default function SingerDetailPage() {
   });
 
   const updateMutation = useMutation({
-    mutationFn: () => singerApi.update(id!, {
+    mutationFn: () => channelApi.update(id!, {
       name: editForm.name,
       english_name: editForm.english_name,
       photo_url: editForm.photo_url,
@@ -182,17 +182,17 @@ export default function SingerDetailPage() {
   });
 
   const openEditModal = () => {
-    if (!singer) return;
+    if (!channel) return;
     updateMutation.reset();
     setEditForm({
-      name: singer.name,
-      english_name: singer.english_name || '',
-      photo_url: singer.photo_url || '',
+      name: channel.name,
+      english_name: channel.english_name || '',
+      photo_url: channel.photo_url || '',
     });
     setShowEditModal(true);
   };
 
-  const handleUpdateSinger = (e: React.FormEvent) => {
+  const handleUpdateChannel = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editForm.name.trim()) return;
     updateMutation.mutate();
@@ -208,11 +208,11 @@ export default function SingerDetailPage() {
     return `${m}:${s.toString().padStart(2, '0')}`;
   };
 
-  if (singerLoading) {
+  if (channelLoading) {
     return <Loading />;
   }
 
-  if (!singer) {
+  if (!channel) {
     return (
       <div className="text-center py-12 text-gray-500">
         チャンネルが見つかりません
@@ -225,14 +225,14 @@ export default function SingerDetailPage() {
       {/* Header */}
       <div className="bg-white rounded-lg shadow-sm border p-6">
         <div className="flex flex-wrap items-start gap-4 sm:gap-6">
-          {singer.photo_url ? (
+          {channel.photo_url ? (
             <img
-              src={singer.photo_url}
-              alt={singer.name}
+              src={channel.photo_url}
+              alt={channel.name}
               className="w-16 h-16 sm:w-24 sm:h-24 rounded-full object-cover"
               onError={(e) => {
                 e.currentTarget.onerror = null;
-                e.currentTarget.src = `https://holodex.net/statics/channelImg/${singer.id}/50.png`;
+                e.currentTarget.src = `https://holodex.net/statics/channelImg/${channel.id}/50.png`;
               }}
             />
           ) : (
@@ -243,27 +243,27 @@ export default function SingerDetailPage() {
             </div>
           )}
           <div className="flex-1 min-w-0">
-            <h1 className="text-2xl font-bold text-gray-900">{singer.name}</h1>
-            {singer.english_name && (
-              <p className="text-gray-500 mt-1">{singer.english_name}</p>
+            <h1 className="text-2xl font-bold text-gray-900">{channel.name}</h1>
+            {channel.english_name && (
+              <p className="text-gray-500 mt-1">{channel.english_name}</p>
             )}
             <div className="flex flex-wrap items-center gap-2 mt-2">
               {/* 「所属なし」を意味する分類（Independents など）は organization_name が空になり、
                   バッジも出ない。見出しが「所属なし」なのにバッジは別名、という矛盾を避けるため */}
-              {singer.organization_name && (
+              {channel.organization_name && (
                 <span className="inline-block px-3 py-1 bg-purple-100 text-purple-700 text-sm rounded-full">
-                  {singer.organization_name}
+                  {channel.organization_name}
                 </span>
               )}
-              {canEdit && <OrganizationPicker singer={singer} organizations={organizations} />}
+              {canEdit && <OrganizationPicker channel={channel} organizations={organizations} />}
               {/* 会限を持たないチャンネルには出さない。148 件すべてに「未確認」を出すと、
                   本当に訊くべき数件が埋もれる */}
-              {canEdit && (singer.members_only_stream_count ?? 0) > 0 && (
-                <MembersPolicyPicker singer={singer} />
+              {canEdit && (channel.members_only_stream_count ?? 0) > 0 && (
+                <MembersPolicyPicker channel={channel} />
               )}
-              {canEdit && <AutoFillToggle singer={singer} />}
+              {canEdit && <AutoFillToggle channel={channel} />}
               {/* 非表示でもこのページは誰でも開けるので、閲覧者にも状態を見せる */}
-              {singer.is_hidden && (
+              {channel.is_hidden && (
                 <span
                   className="inline-flex items-center gap-1 px-3 py-1 bg-gray-200 text-gray-600 text-sm rounded-full"
                   title="チャンネル一覧には表示されません（このページは閲覧できます）"
@@ -275,10 +275,10 @@ export default function SingerDetailPage() {
             </div>
             <div className="flex gap-4 mt-4 text-sm text-gray-600">
               <div>
-                <span className="font-medium text-gray-900">{singer.stream_count}</span> 歌枠
+                <span className="font-medium text-gray-900">{channel.stream_count}</span> 歌枠
               </div>
               <div>
-                <span className="font-medium text-gray-900">{singer.performance_count}</span> 曲
+                <span className="font-medium text-gray-900">{channel.performance_count}</span> 曲
               </div>
             </div>
           </div>
@@ -286,16 +286,16 @@ export default function SingerDetailPage() {
             {/* Holodex 管理チャンネルでも切り替えられる（メタデータではなく seTORI 側の都合なので） */}
             {canEdit && (
               <button
-                onClick={() => visibilityMutation.mutate(!singer.is_hidden)}
+                onClick={() => visibilityMutation.mutate(!channel.is_hidden)}
                 disabled={visibilityMutation.isPending}
-                title={singer.is_hidden ? 'チャンネル一覧に表示する' : 'チャンネル一覧から非表示にする'}
-                aria-label={singer.is_hidden ? 'チャンネル一覧に表示する' : 'チャンネル一覧から非表示にする'}
+                title={channel.is_hidden ? 'チャンネル一覧に表示する' : 'チャンネル一覧から非表示にする'}
+                aria-label={channel.is_hidden ? 'チャンネル一覧に表示する' : 'チャンネル一覧から非表示にする'}
                 className="px-3 py-2 bg-white border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50 hover:text-gray-900 transition-colors disabled:opacity-50"
               >
-                <VisibilityIcon hidden={singer.is_hidden} className="w-5 h-5" />
+                <VisibilityIcon hidden={channel.is_hidden} className="w-5 h-5" />
               </button>
             )}
-            {singer.can_edit_metadata && canEdit && (
+            {channel.can_edit_metadata && canEdit && (
               <button
                 onClick={openEditModal}
                 className="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors flex items-center gap-2"
@@ -307,7 +307,7 @@ export default function SingerDetailPage() {
               </button>
             )}
             <a
-              href={`https://www.youtube.com/channel/${singer.id}`}
+              href={`https://www.youtube.com/channel/${channel.id}`}
               target="_blank"
               rel="noopener noreferrer"
               className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors flex items-center gap-2"
@@ -353,7 +353,7 @@ export default function SingerDetailPage() {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-lg mx-4">
             <h2 className="text-xl font-bold text-gray-900 mb-4">チャンネル情報を編集</h2>
-            <form onSubmit={handleUpdateSinger} className="space-y-4">
+            <form onSubmit={handleUpdateChannel} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   チャンネル名
@@ -773,15 +773,15 @@ export default function SingerDetailPage() {
 //
 // 立てても**最後の確認（処理完了）は自動では付かない** ── 確信の無いものは
 // 審査へ回り、人が確かめてから処理完了にする。ボタンの説明でそう言う。
-function AutoFillToggle({ singer }: { singer: { id: string; auto_fill_enabled?: boolean } }) {
+function AutoFillToggle({ channel }: { channel: { id: string; auto_fill_enabled?: boolean } }) {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
-  const enabled = singer.auto_fill_enabled ?? false;
+  const enabled = channel.auto_fill_enabled ?? false;
 
   const mutation = useMutation({
-    mutationFn: (next: boolean) => singerApi.setAutoFill(singer.id, next),
+    mutationFn: (next: boolean) => channelApi.setAutoFill(channel.id, next),
     onSuccess: (_data, next) => {
-      queryClient.invalidateQueries({ queryKey: ['singer', singer.id] });
+      queryClient.invalidateQueries({ queryKey: ['singer', channel.id] });
       queryClient.invalidateQueries({ queryKey: ['autoFillTargets'] });
       showToast(next ? '自動処理の対象に登録しました' : '自動処理の対象から外しました', 'success');
     },
@@ -820,18 +820,18 @@ function AutoFillToggle({ singer }: { singer: { id: string; auto_fill_enabled?: 
 // 伏せる動きは同じだが、分けておかないと「どのチャンネルにまだ訊いていないか」を
 // 一覧できない（それが分からないと、この作業は永久に終わらない）。
 function MembersPolicyPicker({
-  singer,
+  channel,
 }: {
-  singer: { id: string; members_only_policy?: 'allow' | 'deny'; members_only_stream_count?: number };
+  channel: { id: string; members_only_policy?: 'allow' | 'deny'; members_only_stream_count?: number };
 }) {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const [open, setOpen] = useState(false);
 
   const mutation = useMutation({
-    mutationFn: (policy: 'allow' | 'deny' | '') => singerApi.setMembersPolicy(singer.id, policy),
+    mutationFn: (policy: 'allow' | 'deny' | '') => channelApi.setMembersPolicy(channel.id, policy),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['singer', singer.id] });
+      queryClient.invalidateQueries({ queryKey: ['singer', channel.id] });
       queryClient.invalidateQueries({ queryKey: ['singers'] });
       // 方針は自動判定の材料なので、裁定の見直し一覧（issue #26）の中身も変わる
       queryClient.invalidateQueries({ queryKey: ['restriction-review'] });
@@ -841,8 +841,8 @@ function MembersPolicyPicker({
     onError: (err: Error) => showToast(err.message, 'error'),
   });
 
-  const count = singer.members_only_stream_count ?? 0;
-  const policy = singer.members_only_policy;
+  const count = channel.members_only_stream_count ?? 0;
+  const policy = channel.members_only_policy;
 
   if (!open) {
     // 未確認は「まだ作業が残っている」ことなので目立たせる（amber）。
@@ -894,16 +894,16 @@ function MembersPolicyPicker({
 
 // OrganizationPicker は事務所の手動上書き。
 //
-// Holodex 同期は singers.organization を毎回上書きするので、分類を直しても残らなかった。
+// Holodex 同期は channels.organization を毎回上書きするので、分類を直しても残らなかった。
 // ここで書くのは organization_override のほうで、Holodex の値は触らない
 // （＝「Holodex に戻す」を選べば最新の同期結果に戻る）。
 // メタデータ編集モーダルの外に置いてあるのは、あちらが Holodex 管理チャンネルでは
 // 開けない一方、この上書きはどのチャンネルでも要るため。
 function OrganizationPicker({
-  singer,
+  channel,
   organizations,
 }: {
-  singer: { id: string; organization?: string; organization_override?: string; organization_holodex?: string };
+  channel: { id: string; organization?: string; organization_override?: string; organization_holodex?: string };
   organizations: Organization[];
 }) {
   const queryClient = useQueryClient();
@@ -911,9 +911,9 @@ function OrganizationPicker({
   const [open, setOpen] = useState(false);
 
   const mutation = useMutation({
-    mutationFn: (organization: string) => singerApi.setOrganization(singer.id, organization),
+    mutationFn: (organization: string) => channelApi.setOrganization(channel.id, organization),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['singer', singer.id] });
+      queryClient.invalidateQueries({ queryKey: ['singer', channel.id] });
       queryClient.invalidateQueries({ queryKey: ['singers'] });
       setOpen(false);
       showToast('所属を更新しました', 'success');
@@ -921,9 +921,9 @@ function OrganizationPicker({
     onError: (err: Error) => showToast(err.message, 'error'),
   });
 
-  const holodexName = singer.organization_holodex
-    ? organizations.find((o) => o.key === singer.organization_holodex)?.display_name ??
-      singer.organization_holodex
+  const holodexName = channel.organization_holodex
+    ? organizations.find((o) => o.key === channel.organization_holodex)?.display_name ??
+      channel.organization_holodex
     : '所属なし';
 
   if (!open) {
@@ -940,7 +940,7 @@ function OrganizationPicker({
         所属
         {/* 上書き中であることは常に見えるようにする。Holodex と違う値が出ている理由が
             分からないと、同期がおかしいのか人が変えたのか判別できない */}
-        {singer.organization_override && <span className="text-amber-600">（手動）</span>}
+        {channel.organization_override && <span className="text-amber-600">（手動）</span>}
       </button>
     );
   }
@@ -949,7 +949,7 @@ function OrganizationPicker({
     <span className="inline-flex items-center gap-2">
       <select
         autoFocus
-        defaultValue={singer.organization_override ?? ''}
+        defaultValue={channel.organization_override ?? ''}
         onChange={(e) => mutation.mutate(e.target.value)}
         disabled={mutation.isPending}
         className="px-2 py-1 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"

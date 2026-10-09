@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { singerApi } from '../api/client';
-import type { Singer } from '../api/types';
+import { channelApi } from '../api/client';
+import type { Channel } from '../api/types';
 import { useToast } from './ui/ToastContext';
 
 // チャンネルの検索入力。配信の参加チャンネル追加と、歌唱のボーカル選択で使う。
@@ -10,11 +10,11 @@ import { useToast } from './ui/ToastContext';
 // 並べていたが、22 人のコラボ配信では壁になって選びにくかった。
 
 // チャンネル検索入力コンポーネントの Props
-interface SingerSearchInputProps {
-  onSelectSinger: (singer: Singer) => void;
+interface ChannelSearchInputProps {
+  onSelectChannel: (channel: Channel) => void;
   excludeIds?: string[];
   placeholder?: string;
-  /** Channel ID / @handle / YouTube URL から新しい singer を登録できるようにする */
+  /** Channel ID / @handle / YouTube URL から新しい channel を登録できるようにする */
   allowCreate?: boolean;
 }
 
@@ -26,17 +26,17 @@ function isChannelInput(value: string): boolean {
 }
 
 // チャンネル検索入力コンポーネント（オートコンプリート付き）
-export default function SingerSearchInput({
-  onSelectSinger,
+export default function ChannelSearchInput({
+  onSelectChannel,
   excludeIds = [],
   placeholder,
   allowCreate = false,
-}: SingerSearchInputProps) {
+}: ChannelSearchInputProps) {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [suggestions, setSuggestions] = useState<Singer[]>([]);
+  const [suggestions, setSuggestions] = useState<Channel[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [createError, setCreateError] = useState('');
@@ -53,7 +53,7 @@ export default function SingerSearchInput({
     const timer = setTimeout(async () => {
       setIsLoading(true);
       try {
-        const results = await singerApi.search(searchQuery, 10);
+        const results = await channelApi.search(searchQuery, 10);
         // 選択済みを除外
         setSuggestions(results.filter((s) => !excludeIds.includes(s.id)));
       } catch {
@@ -89,26 +89,26 @@ export default function SingerSearchInput({
     setIsOpen(true);
   };
 
-  const handleSelectSinger = (singer: Singer) => {
-    onSelectSinger(singer);
+  const handleSelectChannel = (channel: Channel) => {
+    onSelectChannel(channel);
     setIsOpen(false);
     setSearchQuery('');
     setSuggestions([]);
     setCreateError('');
   };
 
-  const handleCreateSinger = async () => {
+  const handleCreateChannel = async () => {
     const channelInput = searchQuery.trim();
     if (!allowCreate || !isChannelInput(channelInput) || isCreating) return;
     setIsCreating(true);
     setCreateError('');
     try {
-      const created = await singerApi.create(channelInput);
-      const singer = await singerApi.get(created.id);
+      const created = await channelApi.create(channelInput);
+      const channel = await channelApi.get(created.id);
       queryClient.invalidateQueries({ queryKey: ['singers'] });
       queryClient.invalidateQueries({ queryKey: ['singer', created.id] });
-      showToast(`「${singer.name}」を追加しました`, 'success');
-      handleSelectSinger(singer);
+      showToast(`「${channel.name}」を追加しました`, 'success');
+      handleSelectChannel(channel);
     } catch (error) {
       setCreateError(`追加できませんでした: ${(error as Error).message}`);
     } finally {
@@ -142,22 +142,22 @@ export default function SingerSearchInput({
             <div className="px-4 py-3 text-sm text-gray-500">検索中...</div>
           ) : (
             <>
-              {suggestions.map((singer) => (
+              {suggestions.map((channel) => (
                 <button
-                  key={singer.id}
+                  key={channel.id}
                   type="button"
-                  onClick={() => handleSelectSinger(singer)}
+                  onClick={() => handleSelectChannel(channel)}
                   className="w-full px-4 py-3 text-left hover:bg-indigo-50 border-b border-gray-100 last:border-b-0 transition-colors"
                 >
                   <div className="flex items-center gap-3">
-                    {singer.photo_url ? (
+                    {channel.photo_url ? (
                       <img
-                        src={singer.photo_url}
-                        alt={singer.name}
+                        src={channel.photo_url}
+                        alt={channel.name}
                         className="w-8 h-8 rounded-full object-cover"
                         onError={(e) => {
                           e.currentTarget.onerror = null;
-                          e.currentTarget.src = `https://holodex.net/statics/channelImg/${singer.id}/50.png`;
+                          e.currentTarget.src = `https://holodex.net/statics/channelImg/${channel.id}/50.png`;
                         }}
                       />
                     ) : (
@@ -168,13 +168,13 @@ export default function SingerSearchInput({
                       </div>
                     )}
                     <div className="flex-1 min-w-0">
-                      <div className="font-medium text-gray-900 truncate">{singer.name}</div>
-                      {singer.english_name && (
-                        <div className="text-sm text-gray-500 truncate">{singer.english_name}</div>
+                      <div className="font-medium text-gray-900 truncate">{channel.name}</div>
+                      {channel.english_name && (
+                        <div className="text-sm text-gray-500 truncate">{channel.english_name}</div>
                       )}
                     </div>
-                    {singer.organization && (
-                      <span className="text-xs text-gray-400">{singer.organization}</span>
+                    {channel.organization && (
+                      <span className="text-xs text-gray-400">{channel.organization}</span>
                     )}
                   </div>
                 </button>
@@ -194,7 +194,7 @@ export default function SingerSearchInput({
               {canCreate && (
                 <button
                   type="button"
-                  onClick={handleCreateSinger}
+                  onClick={handleCreateChannel}
                   disabled={isCreating}
                   className="w-full px-4 py-3 text-left text-sm font-medium text-indigo-600 hover:bg-indigo-50 disabled:text-gray-400 transition-colors"
                 >

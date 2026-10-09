@@ -23,19 +23,19 @@ func TestAutoFillRunUsesOneCollabSnapshot(t *testing.T) {
 	for _, collabs := range []bool{false, true} {
 		t.Run(fmt.Sprint(collabs), func(t *testing.T) {
 			db := reviewTestDB(t)
-			if _, err := db.Exec(`INSERT INTO singers (id, name, auto_fill_enabled) VALUES ('UCtarget', 'target', true), ('UCowner', 'owner', false)`); err != nil {
+			if _, err := db.Exec(`INSERT INTO channels (id, name, auto_fill_enabled) VALUES ('UCtarget', 'target', true), ('UCowner', 'owner', false)`); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := db.Exec(`INSERT INTO streams (id, title, stream_date) VALUES ('guest123456', 'guest', NOW() - INTERVAL '1 day')`); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := db.Exec(`INSERT INTO stream_singers (stream_id, singer_id, is_owner) VALUES ('guest123456', 'UCtarget', false), ('guest123456', 'UCowner', true)`); err != nil {
+			if _, err := db.Exec(`INSERT INTO stream_channels (stream_id, channel_id, is_owner) VALUES ('guest123456', 'UCtarget', false), ('guest123456', 'UCowner', true)`); err != nil {
 				t.Fatal(err)
 			}
 			settings := repository.NewAppSettingsRepository(db)
 			streamRepo := repository.NewStreamRepository(db)
-			singerRepo := repository.NewSingerRepository(db)
-			h := NewHolodexService("test", "", "", streamRepo, singerRepo, "")
+			channelRepo := repository.NewChannelRepository(db)
+			h := NewHolodexService("test", "", "", streamRepo, channelRepo, "")
 			comments := &CommentService{streamRepo: streamRepo, holodexService: h}
 			songRepo := repository.NewSongRepository(db)
 			itunesRepo := repository.NewSongItunesRepository(db)
@@ -59,7 +59,7 @@ func TestAutoFillRunUsesOneCollabSnapshot(t *testing.T) {
 			if _, err := db.Exec(`UPDATE streams SET holodex_hash='fixture', holodex_data='{"songs":[{"name":"song0","original_artist":"artist","start":10,"end":100},{"name":"song1","original_artist":"artist","start":200,"end":300}]}', holodex_songs_hash='fixture', holodex_songs_normalized='[{"name":"song0","original_artist":"artist","start_seconds":10,"end_seconds":100},{"name":"song1","original_artist":"artist","start_seconds":200,"end_seconds":300}]' WHERE id='guest123456'`); err != nil {
 				t.Fatal(err)
 			}
-			svc := NewAutoFillService(settings, singerRepo, streamRepo, h, comments, batch)
+			svc := NewAutoFillService(settings, channelRepo, streamRepo, h, comments, batch)
 			if _, err := svc.UpdateSettings(false, 6, 30, collabs); err != nil {
 				t.Fatal(err)
 			}
@@ -154,7 +154,7 @@ func TestAutoFillRunUsesOneCollabSnapshot(t *testing.T) {
 			if svc.GetSettings().IncludeCollabs == collabs {
 				t.Fatal("実行途中の設定変更が発生していない")
 			}
-			if !batch.hasMultipleSingers("guest123456") {
+			if !batch.hasMultipleParticipants("guest123456") {
 				t.Fatal("客串の参加者が複数と認識されていない")
 			}
 		})
@@ -164,7 +164,7 @@ func TestAutoFillRunUsesOneCollabSnapshot(t *testing.T) {
 // SQL の参加者・所有者を取り違えず、無関係・非表示・会限を対象へ混ぜないこと。
 func TestAutoFillCollabTargetRows(t *testing.T) {
 	db := reviewTestDB(t)
-	if _, err := db.Exec(`INSERT INTO singers (id,name) VALUES ('UCtarget','target'),('UCother','other')`); err != nil {
+	if _, err := db.Exec(`INSERT INTO channels (id,name) VALUES ('UCtarget','target'),('UCother','other')`); err != nil {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct {
@@ -178,7 +178,7 @@ func TestAutoFillCollabTargetRows(t *testing.T) {
 		if _, err := db.Exec(`INSERT INTO streams(id,title,stream_date,is_hidden,comment_raw) VALUES ($1,$1,NOW()-INTERVAL '1 day',$2,'["test"]')`, tc.id, tc.hidden); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := db.Exec(`INSERT INTO stream_singers(stream_id,singer_id,is_owner) VALUES($1,$2,$3)`, tc.id, tc.singer, tc.owner); err != nil {
+		if _, err := db.Exec(`INSERT INTO stream_channels(stream_id,channel_id,is_owner) VALUES($1,$2,$3)`, tc.id, tc.singer, tc.owner); err != nil {
 			t.Fatal(err)
 		}
 		if tc.member {

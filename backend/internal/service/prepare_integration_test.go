@@ -8,14 +8,14 @@ import (
 
 func TestPreparationPostgresScopeAndSingleRun(t *testing.T) {
 	db := reviewTestDB(t)
-	if _, err := db.Exec(`INSERT INTO singers(id,name) VALUES ('owner','Owner'),('other','Other');
+	if _, err := db.Exec(`INSERT INTO channels(id,name) VALUES ('owner','Owner'),('other','Other');
  INSERT INTO streams(id,title,stream_date,is_hidden,is_processed) VALUES
  ('fresh','fresh',NOW(),FALSE,FALSE),('cached','cached',NOW(),FALSE,FALSE),
  ('hidden','hidden',NOW(),TRUE,FALSE),('processed','processed',NOW(),FALSE,TRUE),
  ('guest','guest',NOW(),FALSE,FALSE),
  ('member','member',NOW(),FALSE,FALSE),('permitted-member','permitted-member',NOW(),FALSE,FALSE),
  ('restricted','restricted',NOW(),FALSE,FALSE);
- INSERT INTO stream_singers(stream_id,singer_id,is_owner) VALUES
+ INSERT INTO stream_channels(stream_id,channel_id,is_owner) VALUES
  ('fresh','owner',TRUE),('cached','owner',TRUE),('hidden','owner',TRUE),('processed','owner',TRUE),
  ('guest','owner',FALSE),('guest','other',TRUE),
  ('member','owner',TRUE),('permitted-member','owner',TRUE),('restricted','owner',TRUE);

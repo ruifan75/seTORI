@@ -14,8 +14,8 @@ import SongsPage from './pages/SongsPage';
 import SongDetailPage from './pages/SongDetailPage';
 import StreamsPage from './pages/StreamsPage';
 import StreamDetailPage from './pages/StreamDetailPage';
-import SingersPage from './pages/SingersPage';
-import SingerDetailPage from './pages/SingerDetailPage';
+import ChannelsPage from './pages/ChannelsPage';
+import ChannelDetailPage from './pages/ChannelDetailPage';
 import TagPage from './pages/TagPage';
 import ArtistsPage from './pages/ArtistsPage';
 import ArtistDetailPage from './pages/ArtistDetailPage';
@@ -64,8 +64,8 @@ function App() {
               <Route path="songs/:id" element={<SongDetailPage />} />
               <Route path="streams" element={<StreamsPage />} />
               <Route path="streams/:id" element={<StreamDetailPage />} />
-              <Route path="channels" element={<SingersPage />} />
-              <Route path="channels/:id" element={<SingerDetailPage />} />
+              <Route path="channels" element={<ChannelsPage />} />
+              <Route path="channels/:id" element={<ChannelDetailPage />} />
               {/* 旧 URL も Layout 内で置換し、PlayerBar の iframe を保つ。 */}
               <Route path="singers" element={<LegacyChannelRedirect />} />
               <Route path="singers/:id" element={<LegacyChannelRedirect />} />

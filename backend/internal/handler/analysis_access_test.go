@@ -111,7 +111,7 @@ func auditTestDB(t *testing.T, c *auditSQLConnector, calls int) *sql.DB {
 // 所有者全員の許可を独立したリテラルで固定する。is_hidden は秘匿に使わない。
 func auditWantAutoRestricted(alias string) string {
 	return "EXISTS (SELECT 1 FROM stream_stream_tags mt WHERE mt.stream_id = " + alias + ".id AND mt.tag_id = 'members_only') AND NOT " +
-		"COALESCE((SELECT bool_and(COALESCE(eg.members_only_policy, '') = 'allow') FROM stream_singers eo JOIN singers eg ON eg.id = eo.singer_id WHERE eo.stream_id = " + alias + ".id AND eo.is_owner), FALSE)"
+		"COALESCE((SELECT bool_and(COALESCE(eg.members_only_policy, '') = 'allow') FROM stream_channels eo JOIN channels eg ON eg.id = eo.channel_id WHERE eo.stream_id = " + alias + ".id AND eo.is_owner), FALSE)"
 }
 func auditWantStreamQuery() string {
 	return `SELECT id, title, stream_date, duration_seconds, thumbnail_url, holodex_data, holodex_hash, comment_raw, comment_songs, comment_songs_analyzed_at, chapter_raw, chapter_songs, is_processed, is_hidden, restriction_override, holodex_uploaded_at, holodex_upload_unknown, availability, playable_in_embed, availability_checked_at, created_at, updated_at,

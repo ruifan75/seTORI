@@ -65,7 +65,7 @@ func TestSearchFilterDoesNotTouchIsHidden(t *testing.T) {
 func TestDiscoveryQueriesUseAccessAwareFilter(t *testing.T) {
 	for _, f := range []string{
 		"song_repository.go",
-		"singer_repository.go",
+		"channel_repository.go",
 		"artist_repository.go",
 		"tag_repository.go",
 		"song_match_repository.go",
@@ -201,7 +201,7 @@ func TestRestrictedExpressionsExact(t *testing.T) {
 	// （fail-closed）。`bool_or` にすると 1 人 allow で公開になる。
 	// **`COALESCE(…, FALSE)`** … 所有者が居ない／方針が無いときは「allow ではない」。
 	const allOwnersAllow = "COALESCE((SELECT bool_and(COALESCE(eg.members_only_policy, '') = 'allow')" +
-		" FROM stream_singers eo JOIN singers eg ON eg.id = eo.singer_id" +
+		" FROM stream_channels eo JOIN channels eg ON eg.id = eo.channel_id" +
 		" WHERE eo.stream_id = st.id AND eo.is_owner), FALSE)"
 
 	// **人の裁定（override）が自動判定に勝つ。** COALESCE の第 1 引数。

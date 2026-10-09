@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
 import { streamApi, performanceApi, aiApi, itunesApi, holodexApi, commentApi, tagApi } from '../../api/client';
-import type { Singer, Performance, CreatePerformanceItem, AINormalizationItem, UpdateStreamRequest, CommentSong, SongSuggestion } from '../../api/types';
+import type { Channel, Performance, CreatePerformanceItem, AINormalizationItem, UpdateStreamRequest, CommentSong, SongSuggestion } from '../../api/types';
 import { useToast } from '../../components/ui/ToastContext';
 import { useAuthStore, hasPermission, PERM } from '../../store/auth';
 import { onViewerChange, sameViewer, viewerID } from '../../queryClient';
@@ -89,8 +89,8 @@ export function useStreamDetail() {
   const [holodexTimelineSongs, setHolodexTimelineSongs] = useState<SongSuggestion[]>([]);
   const [commentTimelineSongs, setCommentTimelineSongs] = useState<CommentSong[]>([]);
   const [chapterTimelineSongs, setChapterTimelineSongs] = useState<CommentSong[]>([]);
-  const [channelOwner, setChannelOwner] = useState<Singer | null>(null);
-  const [participants, setParticipants] = useState<Singer[]>([]);
+  const [channelOwner, setChannelOwner] = useState<Channel | null>(null);
+  const [participants, setParticipants] = useState<Channel[]>([]);
   const [highlightedSongId, setHighlightedSongId] = useState<string | null>(null);
 
   const fetchTrackDurationByItunesId = async (itunesId: number): Promise<number | null> => {
@@ -104,7 +104,7 @@ export function useStreamDetail() {
     }
     return null;
   };
-  const [vocalistPopupSingers, setVocalistPopupSingers] = useState<Singer[] | null>(null);
+  const [vocalistPopupSingers, setVocalistPopupSingers] = useState<Channel[] | null>(null);
 
   // **権限を query key に入れる。** 応答の中身が権限で変わる（解析結果と処理状態は
   // content:edit のときだけ載る）ので、同じ鍵で共有すると片方が古いまま残る。

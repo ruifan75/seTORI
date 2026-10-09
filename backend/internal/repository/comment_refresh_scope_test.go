@@ -17,9 +17,9 @@ func TestCommentRefreshScopeFollowsIncludeCollabs(t *testing.T) {
 		want           string
 	}{
 		{"所有者だけ（既定）", false,
-			"AND EXISTS (SELECT 1 FROM stream_singers ss WHERE ss.stream_id = s.id AND ss.is_owner AND ss.singer_id = ANY($2))"},
+			"AND EXISTS (SELECT 1 FROM stream_channels ss WHERE ss.stream_id = s.id AND ss.is_owner AND ss.channel_id = ANY($2))"},
 		{"参加者まで", true,
-			"AND EXISTS (SELECT 1 FROM stream_singers ss WHERE ss.stream_id = s.id AND ss.singer_id = ANY($2))"},
+			"AND EXISTS (SELECT 1 FROM stream_channels ss WHERE ss.stream_id = s.id AND ss.channel_id = ANY($2))"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			db, rec := newRecordingDB(t)
@@ -32,7 +32,7 @@ func TestCommentRefreshScopeFollowsIncludeCollabs(t *testing.T) {
 			if !strings.Contains(norm, tc.want+" ORDER BY") {
 				t.Errorf("チャンネルの絞り方が期待と違う\n got: %s\nwant 含む: %s ORDER BY", norm, tc.want)
 			}
-			if strings.Count(norm, "stream_singers ss") != 1 {
+			if strings.Count(norm, "stream_channels ss") != 1 {
 				t.Errorf("チャンネルの条件が 1 つではない: %s", norm)
 			}
 		})
@@ -40,11 +40,11 @@ func TestCommentRefreshScopeFollowsIncludeCollabs(t *testing.T) {
 }
 
 // チャンネルを指定しないときは絞らない（両方の値で同じ）。
-func TestCommentRefreshWithoutSingersHasNoChannelClause(t *testing.T) {
+func TestCommentRefreshWithoutChannelsHasNoChannelClause(t *testing.T) {
 	for _, collabs := range []bool{false, true} {
 		db, rec := newRecordingDB(t)
 		NewStreamRepository(db).FindStreamsNeedingCommentRefresh(nil, 30, nil, collabs)
-		if q := rec.all()[0]; strings.Contains(q, "stream_singers ss") {
+		if q := rec.all()[0]; strings.Contains(q, "stream_channels ss") {
 			t.Errorf("チャンネル未指定なのに絞っている（collabs=%v）: %s", collabs, q)
 		}
 	}

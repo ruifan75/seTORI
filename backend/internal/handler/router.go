@@ -39,7 +39,7 @@ type Router struct {
 
 	songService          *service.SongService
 	streamService        *service.StreamService
-	singerService        *service.SingerService
+	channelService       *service.ChannelService
 	holodexService       *service.HolodexService
 	commentService       *service.CommentService
 	normalizationService *service.NormalizationService
@@ -78,7 +78,7 @@ type Router struct {
 func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	// repositories を作成
 	songRepo := repository.NewSongRepository(db)
-	singerRepo := repository.NewSingerRepository(db)
+	channelRepo := repository.NewChannelRepository(db)
 	streamRepo := repository.NewStreamRepository(db)
 	perfRepo := repository.NewPerformanceRepository(db)
 	songItunesRepo := repository.NewSongItunesRepository(db)
@@ -117,9 +117,9 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 	songService.SetMatchService(songMatchService)
 	artistService := service.NewArtistService(artistRepo, songRepo, aiService)
 	streamService := service.NewStreamService(streamRepo, perfRepo)
-	singerService := service.NewSingerService(singerRepo, streamRepo, perfRepo)
+	channelService := service.NewChannelService(channelRepo, streamRepo, perfRepo)
 	orgService := service.NewOrganizationService(orgRepo)
-	holodexService := service.NewHolodexService(cfg.HolodexAPIKey, cfg.YouTubeAPIKey, cfg.GroqAPIKey, streamRepo, singerRepo, cfg.HolodexEditorToken)
+	holodexService := service.NewHolodexService(cfg.HolodexAPIKey, cfg.YouTubeAPIKey, cfg.GroqAPIKey, streamRepo, channelRepo, cfg.HolodexEditorToken)
 	holodexService.SetRepositoriesWithSongItunes(perfRepo, songRepo, songItunesRepo) // SyncSetoriToHolodex に必要な repositories を提供
 	normalizationService := service.NewNormalizationService(aiService, songItunesRepo, songMatchService)
 	// 照合は保存せず読み取り時に計算する。配信詳細を返すときにここを通す。
@@ -150,7 +150,7 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 		commentService, holodexService, chapterService, normalizationService, performanceService, suggestionService)
 	driveClient := gdrive.NewClient(cfg.GoogleOAuthClientID, cfg.GoogleOAuthSecret)
 	backupService := service.NewBackupService(db, appSettingsRepo, driveClient, settingsCipher, cfg.DatabaseURL, cfg.BackupDir, cfg.BackupDockerContainer)
-	autoFillService := service.NewAutoFillService(appSettingsRepo, singerRepo, streamRepo,
+	autoFillService := service.NewAutoFillService(appSettingsRepo, channelRepo, streamRepo,
 		holodexService, commentService, batchFillService)
 	if migrated, err := backupService.EncryptPlaintextDriveToken(); err != nil {
 		logger.Warnf("Google Drive refresh token の暗号化移行に失敗しました: %v", err)
@@ -189,7 +189,7 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 		mux:                  http.NewServeMux(),
 		songService:          songService,
 		streamService:        streamService,
-		singerService:        singerService,
+		channelService:       channelService,
 		holodexService:       holodexService,
 		commentService:       commentService,
 		endTimeEstimate:      endTimeEstimateService,
@@ -392,34 +392,34 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("DELETE /api/presets/{key}/follow", r.handleUnfollowPreset)
 	r.mux.HandleFunc("POST /api/presets/{key}/add", r.handleAddPresetToPlaylist)
 
-	// API routes - Singers
-	r.mux.HandleFunc("GET /api/channels", r.handleListSingers)
-	r.mux.HandleFunc("GET /api/channels/search", r.handleSearchSingers)
-	r.mux.HandleFunc("GET /api/channels/{id}", r.handleGetSinger)
-	r.mux.HandleFunc("GET /api/channels/{id}/streams", r.handleGetSingerStreams)
-	r.mux.HandleFunc("GET /api/channels/{id}/performances", r.handleGetSingerPerformances)
-	r.mux.HandleFunc("POST /api/channels", r.handleCreateSinger)
-	r.mux.HandleFunc("PUT /api/channels/{id}", r.handleUpdateSinger)
-	r.mux.HandleFunc("PUT /api/channels/{id}/visibility", r.handleUpdateSingerVisibility)
-	r.mux.HandleFunc("PUT /api/channels/{id}/members-policy", r.handleUpdateSingerMembersPolicy)
-	r.mux.HandleFunc("PUT /api/channels/{id}/auto-fill", r.handleUpdateSingerAutoFill)
+	// API routes - Channels
+	r.mux.HandleFunc("GET /api/channels", r.handleListChannels)
+	r.mux.HandleFunc("GET /api/channels/search", r.handleSearchChannels)
+	r.mux.HandleFunc("GET /api/channels/{id}", r.handleGetChannel)
+	r.mux.HandleFunc("GET /api/channels/{id}/streams", r.handleGetChannelStreams)
+	r.mux.HandleFunc("GET /api/channels/{id}/performances", r.handleGetChannelPerformances)
+	r.mux.HandleFunc("POST /api/channels", r.handleCreateChannel)
+	r.mux.HandleFunc("PUT /api/channels/{id}", r.handleUpdateChannel)
+	r.mux.HandleFunc("PUT /api/channels/{id}/visibility", r.handleUpdateChannelVisibility)
+	r.mux.HandleFunc("PUT /api/channels/{id}/members-policy", r.handleUpdateChannelMembersPolicy)
+	r.mux.HandleFunc("PUT /api/channels/{id}/auto-fill", r.handleUpdateChannelAutoFill)
 	r.mux.HandleFunc("GET /api/channels/auto-fill", r.handleListAutoFillTargets)
-	r.mux.HandleFunc("PUT /api/channels/{id}/organization", r.handleUpdateSingerOrganization)
+	r.mux.HandleFunc("PUT /api/channels/{id}/organization", r.handleUpdateChannelOrganization)
 
 	// 旧 API は同じハンドラへの別名。初回デプロイから 1 リリース維持し、
 	// その次のリリースでこの登録と requiredPermission の別名変換を削除する（issue #62）。
-	r.mux.HandleFunc("GET /api/singers", r.handleListSingers)
-	r.mux.HandleFunc("GET /api/singers/search", r.handleSearchSingers)
-	r.mux.HandleFunc("GET /api/singers/{id}", r.handleGetSinger)
-	r.mux.HandleFunc("GET /api/singers/{id}/streams", r.handleGetSingerStreams)
-	r.mux.HandleFunc("GET /api/singers/{id}/performances", r.handleGetSingerPerformances)
-	r.mux.HandleFunc("POST /api/singers", r.handleCreateSinger)
-	r.mux.HandleFunc("PUT /api/singers/{id}", r.handleUpdateSinger)
-	r.mux.HandleFunc("PUT /api/singers/{id}/visibility", r.handleUpdateSingerVisibility)
-	r.mux.HandleFunc("PUT /api/singers/{id}/members-policy", r.handleUpdateSingerMembersPolicy)
-	r.mux.HandleFunc("PUT /api/singers/{id}/auto-fill", r.handleUpdateSingerAutoFill)
+	r.mux.HandleFunc("GET /api/singers", r.handleListChannels)
+	r.mux.HandleFunc("GET /api/singers/search", r.handleSearchChannels)
+	r.mux.HandleFunc("GET /api/singers/{id}", r.handleGetChannel)
+	r.mux.HandleFunc("GET /api/singers/{id}/streams", r.handleGetChannelStreams)
+	r.mux.HandleFunc("GET /api/singers/{id}/performances", r.handleGetChannelPerformances)
+	r.mux.HandleFunc("POST /api/singers", r.handleCreateChannel)
+	r.mux.HandleFunc("PUT /api/singers/{id}", r.handleUpdateChannel)
+	r.mux.HandleFunc("PUT /api/singers/{id}/visibility", r.handleUpdateChannelVisibility)
+	r.mux.HandleFunc("PUT /api/singers/{id}/members-policy", r.handleUpdateChannelMembersPolicy)
+	r.mux.HandleFunc("PUT /api/singers/{id}/auto-fill", r.handleUpdateChannelAutoFill)
 	r.mux.HandleFunc("GET /api/singers/auto-fill", r.handleListAutoFillTargets)
-	r.mux.HandleFunc("PUT /api/singers/{id}/organization", r.handleUpdateSingerOrganization)
+	r.mux.HandleFunc("PUT /api/singers/{id}/organization", r.handleUpdateChannelOrganization)
 
 	// 自動処理（定期実行）。設定・手動実行とも content:edit。
 	// 見直しが要る配信（非表示だが現行規則で曲が出た）。content:edit。
@@ -638,7 +638,7 @@ func (r *Router) handleGlobalSearch(w http.ResponseWriter, req *http.Request) {
 		Query:           query,
 		Songs:           []dto.SongResponse{},
 		Streams:         []dto.SearchStreamItem{},
-		Singers:         []dto.SingerResponse{},
+		Channels:        []dto.ChannelResponse{},
 		Artists:         []dto.ArtistResponse{},
 		StreamTags:      []dto.SearchTagItem{},
 		PerformanceTags: []dto.SearchTagItem{},
@@ -670,10 +670,10 @@ func (r *Router) handleGlobalSearch(w http.ResponseWriter, req *http.Request) {
 		resp.Streams = streams
 	}
 
-	if singers, err := r.singerService.Search(query, limit); err != nil {
+	if channels, err := r.channelService.Search(query, limit); err != nil {
 		logger.Warnf("global search singers failed: %v", err)
 	} else {
-		resp.Singers = singers
+		resp.Channels = channels
 	}
 
 	// 原曲アーティスト（名前・読みの部分一致、曲数の多い順＝関連度の代用）
@@ -795,26 +795,26 @@ func parseIDQueryParams(req *http.Request, multiKey string, legacyKeys ...string
 func (r *Router) handleStartBatchFill(w http.ResponseWriter, req *http.Request) {
 	var body struct {
 		Mode string `json:"mode"` // unprocessed / force
-		// SingerIDs は対象チャンネル（空なら全部）。既定はそのチャンネルが**所有する**配信で、
+		// ChannelIDs は対象チャンネル（空なら全部）。既定はそのチャンネルが**所有する**配信で、
 		// IncludeCollabs を立てるとゲスト参加した配信も含む。
-		SingerIDs      []string `json:"singer_ids"`
+		ChannelIDs     []string `json:"singer_ids"`
 		IncludeCollabs bool     `json:"include_collabs"`
-		// SingerID は 1 チャンネルだけ指定していた頃の互換。
-		SingerID string `json:"singer_id"`
+		// ChannelID は 1 チャンネルだけ指定していた頃の互換。
+		ChannelID string `json:"singer_id"`
 	}
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 		respondError(w, http.StatusBadRequest, "リクエストの形式が正しくありません")
 		return
 	}
-	if body.SingerID != "" {
-		body.SingerIDs = append(body.SingerIDs, body.SingerID)
+	if body.ChannelID != "" {
+		body.ChannelIDs = append(body.ChannelIDs, body.ChannelID)
 	}
 	var startedBy *uuid.UUID
 	if u := currentUser(req); u != nil {
 		id := u.ID
 		startedBy = &id
 	}
-	runID, err := r.batchFillService.Start(body.Mode, body.SingerIDs, body.IncludeCollabs, startedBy)
+	runID, err := r.batchFillService.Start(body.Mode, body.ChannelIDs, body.IncludeCollabs, startedBy)
 	if err != nil {
 		if errors.Is(err, service.ErrBatchFillAlreadyRunning) {
 			respondError(w, http.StatusConflict, err.Error())
@@ -979,11 +979,11 @@ func (r *Router) handleStartBatchAnalyze(w http.ResponseWriter, req *http.Reques
 		return
 	}
 
-	if err := r.batchAnalyzeService.Start(mode, body.SingerID, hidden); err != nil {
+	if err := r.batchAnalyzeService.Start(mode, body.ChannelID, hidden); err != nil {
 		respondError(w, http.StatusConflict, err.Error())
 		return
 	}
-	logger.Infof("batch analyze started: mode=%s singer=%q hidden=%s", mode, body.SingerID, hiddenParam)
+	logger.Infof("batch analyze started: mode=%s singer=%q hidden=%s", mode, body.ChannelID, hiddenParam)
 	respondJSON(w, http.StatusAccepted, map[string]string{"message": "一括分析を開始しました"})
 }
 
@@ -1978,9 +1978,9 @@ func (r *Router) handleUpdateStream(w http.ResponseWriter, req *http.Request) {
 	respondJSON(w, http.StatusOK, result)
 }
 
-// ========== Singer Handlers ==========
+// ========== Channel Handlers ==========
 
-func (r *Router) handleListSingers(w http.ResponseWriter, req *http.Request) {
+func (r *Router) handleListChannels(w http.ResponseWriter, req *http.Request) {
 	page, _ := strconv.Atoi(req.URL.Query().Get("page"))
 	limit, _ := strconv.Atoi(req.URL.Query().Get("limit"))
 	sort := req.URL.Query().Get("sort")
@@ -2001,7 +2001,7 @@ func (r *Router) handleListSingers(w http.ResponseWriter, req *http.Request) {
 
 	// group=organization は事務所別（ページングなし）。
 	if req.URL.Query().Get("group") == "organization" {
-		grouped, err := r.singerService.GetGrouped(includeHidden, canEditContent)
+		grouped, err := r.channelService.GetGrouped(includeHidden, canEditContent)
 		if err != nil {
 			respondError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -2010,7 +2010,7 @@ func (r *Router) handleListSingers(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	result, err := r.singerService.GetAll(page, limit, sort, dir, includeHidden, canEditContent)
+	result, err := r.channelService.GetAll(page, limit, sort, dir, includeHidden, canEditContent)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -2019,17 +2019,17 @@ func (r *Router) handleListSingers(w http.ResponseWriter, req *http.Request) {
 	respondJSON(w, http.StatusOK, result)
 }
 
-// handleUpdateSingerMembersPolicy は会限セットリストの公開可否をチャンネル単位で設定する。
+// handleUpdateChannelMembersPolicy は会限セットリストの公開可否をチャンネル単位で設定する。
 //
 // **配信単位ではないのが要点。** 配信主に訊けば答えは「全部いい」か「全部だめ」なので、
 // 会限が 60 本あるチャンネルで 60 回操作させないため（migration 056）。
-func (r *Router) handleUpdateSingerMembersPolicy(w http.ResponseWriter, req *http.Request) {
+func (r *Router) handleUpdateChannelMembersPolicy(w http.ResponseWriter, req *http.Request) {
 	id := req.PathValue("id")
 	if id == "" {
 		respondError(w, http.StatusBadRequest, "チャンネルIDは必須です")
 		return
 	}
-	var body dto.UpdateSingerMembersPolicyRequest
+	var body dto.UpdateChannelMembersPolicyRequest
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 		respondError(w, http.StatusBadRequest, "無効なリクエスト形式")
 		return
@@ -2041,7 +2041,7 @@ func (r *Router) handleUpdateSingerMembersPolicy(w http.ResponseWriter, req *htt
 		respondError(w, http.StatusBadRequest, "members_only_policy は必須です（未確認へ戻すなら空文字）")
 		return
 	}
-	found, err := r.singerService.SetMembersOnlyPolicy(id, *body.Policy)
+	found, err := r.channelService.SetMembersOnlyPolicy(id, *body.Policy)
 	if err != nil {
 		// 検証エラーと DB エラーを分ける。一律 400 だと、DB が落ちているときに
 		// operator が入力不正だと誤解する。
@@ -2060,18 +2060,18 @@ func (r *Router) handleUpdateSingerMembersPolicy(w http.ResponseWriter, req *htt
 	respondJSON(w, http.StatusOK, map[string]any{"id": id, "members_only_policy": *body.Policy})
 }
 
-// handleUpdateSingerAutoFill は自動処理の対象かを切り替える（content:edit）。
+// handleUpdateChannelAutoFill は自動処理の対象かを切り替える（content:edit）。
 //
 // 立てると自動処理（定期同期・コメント取り直し・歌単作成）の対象になる。
 // 実行するかどうかと間隔は `/api/auto-fill/settings` 側（既定は無効）。
 // 最後の確認（is_processed）は自動では付かない。
-func (r *Router) handleUpdateSingerAutoFill(w http.ResponseWriter, req *http.Request) {
+func (r *Router) handleUpdateChannelAutoFill(w http.ResponseWriter, req *http.Request) {
 	id := req.PathValue("id")
 	if id == "" {
 		respondError(w, http.StatusBadRequest, "チャンネルIDは必須です")
 		return
 	}
-	var body dto.UpdateSingerAutoFillRequest
+	var body dto.UpdateChannelAutoFillRequest
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 		respondError(w, http.StatusBadRequest, "無効なリクエスト形式")
 		return
@@ -2082,7 +2082,7 @@ func (r *Router) handleUpdateSingerAutoFill(w http.ResponseWriter, req *http.Req
 		respondError(w, http.StatusBadRequest, "auto_fill_enabled は必須です")
 		return
 	}
-	found, err := r.singerService.SetAutoFill(id, *body.Enabled)
+	found, err := r.channelService.SetAutoFill(id, *body.Enabled)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -2098,12 +2098,12 @@ func (r *Router) handleUpdateSingerAutoFill(w http.ResponseWriter, req *http.Req
 // handleListAutoFillTargets は自動処理に登録したチャンネルの一覧（content:edit）。
 // **どのチャンネルが登録されているかを 1 か所で見て、まとめて外せること**が目的。
 func (r *Router) handleListAutoFillTargets(w http.ResponseWriter, req *http.Request) {
-	singers, err := r.singerService.ListAutoFillTargets()
+	channels, err := r.channelService.ListAutoFillTargets()
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"singers": singers})
+	respondJSON(w, http.StatusOK, map[string]any{"singers": channels})
 }
 
 // handleListNonSingingCandidates は見直しが要る配信を返す（content:edit）。
@@ -2242,22 +2242,22 @@ func (r *Router) handleRunAutoFill(w http.ResponseWriter, req *http.Request) {
 	respondJSON(w, http.StatusOK, res)
 }
 
-// handleUpdateSingerVisibility はチャンネルの非表示を切り替える（content:edit）。
+// handleUpdateChannelVisibility はチャンネルの非表示を切り替える（content:edit）。
 // 非表示にしてもチャンネルページ自体は誰でも開ける。隠すのは一覧に載る場所だけ。
-func (r *Router) handleUpdateSingerVisibility(w http.ResponseWriter, req *http.Request) {
+func (r *Router) handleUpdateChannelVisibility(w http.ResponseWriter, req *http.Request) {
 	id := req.PathValue("id")
 	if id == "" {
 		respondError(w, http.StatusBadRequest, "チャンネルIDは必須です")
 		return
 	}
 
-	var body dto.UpdateSingerVisibilityRequest
+	var body dto.UpdateChannelVisibilityRequest
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 		respondError(w, http.StatusBadRequest, "無効なリクエスト形式")
 		return
 	}
 
-	found, err := r.singerService.SetHidden(id, body.IsHidden)
+	found, err := r.channelService.SetHidden(id, body.IsHidden)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -2271,23 +2271,23 @@ func (r *Router) handleUpdateSingerVisibility(w http.ResponseWriter, req *http.R
 	respondJSON(w, http.StatusOK, map[string]any{"id": id, "is_hidden": body.IsHidden})
 }
 
-// handleUpdateSingerOrganization は Holodex の分類を手動で上書きする（content:edit）。
+// handleUpdateChannelOrganization は Holodex の分類を手動で上書きする（content:edit）。
 // 空文字で上書きを解除し、Holodex の値に戻る。Holodex 管理チャンネルでも設定できる
 // （これは Holodex のメタデータではなく seTORI 側の判断のため）。
-func (r *Router) handleUpdateSingerOrganization(w http.ResponseWriter, req *http.Request) {
+func (r *Router) handleUpdateChannelOrganization(w http.ResponseWriter, req *http.Request) {
 	id := req.PathValue("id")
 	if id == "" {
 		respondError(w, http.StatusBadRequest, "チャンネルIDは必須です")
 		return
 	}
 
-	var body dto.UpdateSingerOrganizationRequest
+	var body dto.UpdateChannelOrganizationRequest
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 		respondError(w, http.StatusBadRequest, "無効なリクエスト形式")
 		return
 	}
 
-	found, err := r.singerService.SetOrganizationOverride(id, body.Organization)
+	found, err := r.channelService.SetOrganizationOverride(id, body.Organization)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -2301,7 +2301,7 @@ func (r *Router) handleUpdateSingerOrganization(w http.ResponseWriter, req *http
 	respondJSON(w, http.StatusOK, map[string]any{"id": id, "organization": body.Organization})
 }
 
-func (r *Router) handleSearchSingers(w http.ResponseWriter, req *http.Request) {
+func (r *Router) handleSearchChannels(w http.ResponseWriter, req *http.Request) {
 	query := req.URL.Query().Get("q")
 	if query == "" {
 		respondJSON(w, http.StatusOK, []interface{}{})
@@ -2313,7 +2313,7 @@ func (r *Router) handleSearchSingers(w http.ResponseWriter, req *http.Request) {
 		limit = 10
 	}
 
-	result, err := r.singerService.Search(query, limit)
+	result, err := r.channelService.Search(query, limit)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -2322,7 +2322,7 @@ func (r *Router) handleSearchSingers(w http.ResponseWriter, req *http.Request) {
 	respondJSON(w, http.StatusOK, result)
 }
 
-func (r *Router) handleGetSinger(w http.ResponseWriter, req *http.Request) {
+func (r *Router) handleGetChannel(w http.ResponseWriter, req *http.Request) {
 	id := req.PathValue("id")
 	if id == "" {
 		respondError(w, http.StatusBadRequest, "無効なチャンネルID")
@@ -2330,7 +2330,7 @@ func (r *Router) handleGetSinger(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// 会限の方針など運用の内部情報は content:edit のときだけ載せる。
-	result, err := r.singerService.GetByID(id, userHasPermission(req, auth.PermContentEdit), viewerAccess(req))
+	result, err := r.channelService.GetByID(id, userHasPermission(req, auth.PermContentEdit), viewerAccess(req))
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -2343,7 +2343,7 @@ func (r *Router) handleGetSinger(w http.ResponseWriter, req *http.Request) {
 	respondJSON(w, http.StatusOK, result)
 }
 
-func (r *Router) handleGetSingerStreams(w http.ResponseWriter, req *http.Request) {
+func (r *Router) handleGetChannelStreams(w http.ResponseWriter, req *http.Request) {
 	id := req.PathValue("id")
 	if id == "" {
 		respondError(w, http.StatusBadRequest, "無効なチャンネルID")
@@ -2404,7 +2404,7 @@ func (r *Router) handleGetSingerStreams(w http.ResponseWriter, req *http.Request
 	}
 	// hiddenStr == "all" の場合、hiddenFilter は nil のままにする
 
-	result, err := r.singerService.GetStreams(id, page, limit, processedFilter, hiddenFilter, canEditContent)
+	result, err := r.channelService.GetStreams(id, page, limit, processedFilter, hiddenFilter, canEditContent)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -2413,7 +2413,7 @@ func (r *Router) handleGetSingerStreams(w http.ResponseWriter, req *http.Request
 	respondJSON(w, http.StatusOK, result)
 }
 
-func (r *Router) handleGetSingerPerformances(w http.ResponseWriter, req *http.Request) {
+func (r *Router) handleGetChannelPerformances(w http.ResponseWriter, req *http.Request) {
 	id := req.PathValue("id")
 	if id == "" {
 		respondError(w, http.StatusBadRequest, "無効なチャンネルID")
@@ -2432,7 +2432,7 @@ func (r *Router) handleGetSingerPerformances(w http.ResponseWriter, req *http.Re
 		limit = 20
 	}
 
-	result, err := r.singerService.GetPerformances(id, page, limit, sort, dir, viewerAccess(req))
+	result, err := r.channelService.GetPerformances(id, page, limit, sort, dir, viewerAccess(req))
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -2445,54 +2445,54 @@ func (r *Router) handleGetSingerPerformances(w http.ResponseWriter, req *http.Re
 	respondJSON(w, http.StatusOK, result)
 }
 
-func (r *Router) handleCreateSinger(w http.ResponseWriter, req *http.Request) {
-	var singerReq dto.CreateSingerRequest
-	if err := json.NewDecoder(req.Body).Decode(&singerReq); err != nil {
+func (r *Router) handleCreateChannel(w http.ResponseWriter, req *http.Request) {
+	var channelReq dto.CreateChannelRequest
+	if err := json.NewDecoder(req.Body).Decode(&channelReq); err != nil {
 		respondError(w, http.StatusBadRequest, "無効なリクエスト形式")
 		return
 	}
-	singerReq.ID = strings.TrimSpace(singerReq.ID)
+	channelReq.ID = strings.TrimSpace(channelReq.ID)
 
-	if singerReq.ID == "" {
+	if channelReq.ID == "" {
 		respondError(w, http.StatusBadRequest, "チャンネルID、handle、またはURLは必須です")
 		return
 	}
 
 	// チャンネル情報だけを同期し、配信は同期しない
-	singer, err := r.holodexService.SyncChannelInfo(singerReq.ID)
+	channel, err := r.holodexService.SyncChannelInfo(channelReq.ID)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	// 成功メッセージを返す
-	respondJSON(w, http.StatusCreated, dto.CreateSingerResponse{
+	respondJSON(w, http.StatusCreated, dto.CreateChannelResponse{
 		Message: "チャンネルを追加しました",
-		ID:      singer.ID,
-		Name:    singer.Name,
+		ID:      channel.ID,
+		Name:    channel.Name,
 	})
 }
 
-func (r *Router) handleUpdateSinger(w http.ResponseWriter, req *http.Request) {
+func (r *Router) handleUpdateChannel(w http.ResponseWriter, req *http.Request) {
 	id := req.PathValue("id")
 	if id == "" {
 		respondError(w, http.StatusBadRequest, "チャンネルIDは必須です")
 		return
 	}
 
-	var singerReq dto.UpdateSingerRequest
-	if err := json.NewDecoder(req.Body).Decode(&singerReq); err != nil {
+	var channelReq dto.UpdateChannelRequest
+	if err := json.NewDecoder(req.Body).Decode(&channelReq); err != nil {
 		respondError(w, http.StatusBadRequest, "無効なリクエスト形式")
 		return
 	}
 
-	result, err := r.singerService.UpdateManualMetadata(id, &singerReq)
+	result, err := r.channelService.UpdateManualMetadata(id, &channelReq)
 	if err != nil {
-		if errors.Is(err, service.ErrSingerMetadataManagedByHolodex) {
+		if errors.Is(err, service.ErrChannelMetadataManagedByHolodex) {
 			respondError(w, http.StatusForbidden, err.Error())
 			return
 		}
-		if errors.Is(err, service.ErrSingerNameRequired) {
+		if errors.Is(err, service.ErrChannelNameRequired) {
 			respondError(w, http.StatusBadRequest, err.Error())
 			return
 		}

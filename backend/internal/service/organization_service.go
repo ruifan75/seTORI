@@ -32,7 +32,7 @@ func (s *OrganizationService) GetAll() (*dto.OrganizationListResponse, error) {
 	if err != nil {
 		return nil, fmt.Errorf("get organizations: %w", err)
 	}
-	counts, err := s.orgRepo.CountSingers()
+	counts, err := s.orgRepo.CountChannels()
 	if err != nil {
 		return nil, fmt.Errorf("count singers: %w", err)
 	}
@@ -87,7 +87,7 @@ func (s *OrganizationService) Update(key string, req *dto.UpdateOrganizationRequ
 		return nil, nil
 	}
 
-	counts, _ := s.orgRepo.CountSingers()
+	counts, _ := s.orgRepo.CountChannels()
 	resp := toOrganizationResponse(*updated, counts[updated.Key])
 	return &resp, nil
 }
@@ -110,13 +110,13 @@ func (s *OrganizationService) EnsureExists(key string) error {
 	return s.orgRepo.EnsureExists(key)
 }
 
-func toOrganizationResponse(o models.Organization, singerCount int) dto.OrganizationResponse {
+func toOrganizationResponse(o models.Organization, channelCount int) dto.OrganizationResponse {
 	return dto.OrganizationResponse{
 		Key:            o.Key,
 		DisplayName:    o.DisplayName,
 		SortOrder:      o.SortOrder,
 		IsUnaffiliated: o.IsUnaffiliated,
-		SingerCount:    singerCount,
+		ChannelCount:   channelCount,
 		CreatedAt:      o.CreatedAt,
 		UpdatedAt:      o.UpdatedAt,
 	}

@@ -33,11 +33,11 @@ Holodex の分類もタイトルキーワード規則も自動判定であり、
 ### 止めるもの — 「発見面」から消える
 
 一覧から外すだけではない。非表示配信の歌唱は**通常の発見面から消える**：
-曲ページ、歌手ページ、タグページ、ランダム再生、プリセット。
+曲ページ、チャンネルページ、タグページ、ランダム再生、プリセット。
 `performance_repository` に `is_hidden = FALSE` が 8 か所あり、これらはすべて
 「曲・タグ・歌手からの逆引き」「ランダム」「プリセット」を濾すもの。
 ほかに `song_repository` / `artist_repository` / `stream_repository` /
-`singer_repository`（配信数・歌唱数の統計）/ `tag_repository`（タグ件数）も見ている。
+`channel_repository`（配信数・歌唱数の統計）/ `tag_repository`（タグ件数）も見ている。
 
 ### 止めないもの — **認可境界ではない**
 
@@ -58,7 +58,7 @@ Holodex の分類もタイトルキーワード規則も自動判定であり、
 常に未ログインで読めるわけではない。）
 
 つまり **ID を知らなくても非表示配信を列挙でき、そこから歌唱 1 件も読める**。
-これは `singers.is_hidden` の「隠すのは一覧に載る場所だけ」と同じ設計思想で、それ自体は妥当。
+これは `channels.is_hidden` の「隠すのは一覧に載る場所だけ」と同じ設計思想で、それ自体は妥当。
 
 > ⚠️ **「非表示のまま作れば伏せられる」は成り立たない。**
 > 2026-08-22 時点で非表示配信の歌唱が 0 件なので今は見えないが、それはデータの偶然であって
@@ -99,7 +99,7 @@ Holodex の分類もタイトルキーワード規則も自動判定であり、
 画面では「登録されていない」と「見せていない」を**別の文言にする**
 ── 同じにすると「まだ誰も作っていない」に見え、二重に作業させることになる。
 
-### 公開可否は**チャンネル単位**の判断（`singers.members_only_policy`）
+### 公開可否は**チャンネル単位**の判断（`channels.members_only_policy`）
 
 配信主に「会限の歌単を公開してよいか」と訊くと、答えはほぼ
 **「全部いい」か「全部だめ」**のどちらかになる。配信ごとではない。
@@ -112,7 +112,7 @@ Holodex の分類もタイトルキーワード規則も自動判定であり、
 | | どこ | 意味 |
 |---|---|---|
 | 1 | `members_only` タグ | 会限だという**検出**（自動でも人でも付く） |
-| 2 | `singers.members_only_policy` | そのチャンネルの**方針**（配信主に訊いた結果） |
+| 2 | `channels.members_only_policy` | そのチャンネルの**方針**（配信主に訊いた結果） |
 | 3 | `streams.restriction_override` | その配信だけの**例外** |
 
 `members_only_policy` は `NULL`（未確認）／`allow`／`deny`。
@@ -120,7 +120,7 @@ Holodex の分類もタイトルキーワード規則も自動判定であり、
 「まだ訊いていない」と「訊いて断られた」を区別したいため
 （`organizations.is_unaffiliated` が「情報が無い」と「無所属と明示」を分けたのと同じ）。
 
-所有者は `stream_singers.is_owner` で引く。所有者が居ない配信では 2 は効かず、1 と 3 だけで決まる。
+所有者は `stream_channels.is_owner` で引く。所有者が居ない配信では 2 は効かず、1 と 3 だけで決まる。
 
 > ⚠️ **実効判定は SQL に 1 か所だけ持つ**（`repository.EffectiveRestrictedExpr`）。
 > Go 側に双子を置かない ── 最初はそうしていたが、材料（所有者の方針）を SELECT して
@@ -136,13 +136,13 @@ Holodex の分類もタイトルキーワード規則も自動判定であり、
 > **式を各 SELECT に載せる責務はまだ分散している。** `streamListColumns` と
 > `scanStreamRow` を対にして書き忘れを減らしたが、列の組み合わせが違うクエリは
 > 個別に書く。載せ忘れると **Scan の引数が合わずに 500** になる
-> （実際 `FindBySingerID` がそうなっていた）。`IsRestrictedEffective` のゼロ値は
+> （実際 `FindByChannelID`（当時は `FindBySingerID`）がそうなっていた）。`IsRestrictedEffective` のゼロ値は
 > 公開側なので、SELECT ごと省いた経路が DTO に届くと fail-open することに注意。
 >
 > **方針そのものは公開しない。** 「訊いたか」「断られたか」は運用の内部情報で、
-> Singer の GET は未認証で通る。載せると第三者が一覧をページングして
+> Channel の GET は未認証で通る。載せると第三者が一覧をページングして
 > 「どのチャンネルが断ったか」を集められる。`content:edit` のときだけ載せる
-> （`toSingerResponseForEditor`）。
+> （`toChannelResponseForEditor`）。
 
 ### 自動判定と人の裁定は別の列に持つ
 
@@ -161,7 +161,7 @@ Holodex の分類もタイトルキーワード規則も自動判定であり、
 | 列 | 誰が書くか | 意味 |
 |---|---|---|
 | `members_only` タグ | 自動（同期の候補判定）＋**人** | 会限だという**検出** |
-| `singers.members_only_policy` | 人だけ（`PUT /api/channels/{id}/members-policy`） | チャンネル単位の方針。NULL＝未確認 / `allow` / `deny` |
+| `channels.members_only_policy` | 人だけ（`PUT /api/channels/{id}/members-policy`） | チャンネル単位の方針。NULL＝未確認 / `allow` / `deny` |
 | `restriction_override` | 人だけ（`PUT /api/streams/{id}`） | NULL＝未裁定 / TRUE＝伏せる / FALSE＝公開してよい |
 
 読むときは 3 段（下ほど強い）：`members_only` タグ → チャンネルの方針 → `restriction_override`。
@@ -170,7 +170,7 @@ Go に双子は置かない ── 材料（所有者の方針）を SELECT し�
 評価され、「詳細は公開・一覧は秘匿」と食い違う。所有者が複数なら**1 人でも allow で
 なければ伏せる**（fail-closed）。
 
-**自動判定の側は凍結しない。** `singers.is_hidden` のように固めると、後から会限化した
+**自動判定の側は凍結しない。** `channels.is_hidden` のように固めると、後から会限化した
 配信を検出できなくなる。人の裁定が勝つので、検出が立ち続けていても表示は変わらない。
 
 ### 公開の裁定と会限判定の食い違いを知らせる（issue #26）
@@ -256,7 +256,7 @@ Holodex の `topic_id` は単値で `singing` と排他になるため取りこ�
 |---|---|
 | `SongRepository.GetPerformanceCount` / **`GetPerformanceCounts`**（複数形） | 曲詳細・曲一覧の件数 |
 | `SongRepository` の **`songListOrder`**（`sort=performances`） | 並び順から件数が推測できる |
-| `SingerRepository.GetPerformanceCount` | 歌手の歌唱数 |
+| `ChannelRepository.GetPerformanceCount` | チャンネルページの歌唱数 |
 | **`ArtistRepository.FindSongsByArtist`** | アーティスト詳細の各曲件数と既定順 |
 | `TagRepository.SearchPerformanceTags` | 歌唱タグの使用件数 |
 | `StreamRepository.SearchStreams` の vocalist / 歌唱タグのサブクエリ | 「この配信でこの人が歌った」 |
@@ -371,14 +371,14 @@ ORDER BY p.start_seconds AND NOT COALESCE(...)
 |---|---|---|
 | 配信詳細の `performances` | 出ない（配信自体は 200） | 出る |
 | `GET /api/performances/{id}` | **404** | 200 |
-| 曲ページ / 歌手ページ / ランダム | 出ない | 出ない（発見面なので編集者にも出さない） |
+| 曲ページ / チャンネルページ / ランダム | 出ない | 出ない（発見面なので編集者にも出さない） |
 | 公開プレイリスト / 共有リンク | 出ない | 出ない |
 | `PUT` で秘匿を外す | 401 | 外せる（外すと未ログインにも出る） |
 
 ### 秘匿を入れるなら route の列挙では足りない
 
 上の表は例示で、**これを route 単位で塞いでも漏れる**。実際この表は
-2 回のレビューを経てもまだ増えた（global search と歌手配下一覧は 2 巡目で見つかった）。
+2 回のレビューを経てもまだ増えた（global search とチャンネル配下一覧は 2 巡目で見つかった）。
 
 ただし **route 単位が正しい場所もある。** `/comments` `/chapters` `/holodex-songs` のように
 **endpoint 全体が編集者専用**なら、いまの `requiredPermission` が正しい。
@@ -391,11 +391,11 @@ route の列挙が不適切なのは、**同じ endpoint の中で行ごとに�
 
 - `StreamService.GetByID` は `toStreamResponse` を呼んだ**後**に
   `FindByStreamID` の結果を `Performances` へ詰める。変換層で落としても歌唱は残る
-- `GET /api/search` は `SearchStreamItem` を直接組み立て、歌手配下一覧は
-  `SingerService` の別の converter を使う。`StreamService.toStreamResponse` は共通点ではない
+- `GET /api/search` は `SearchStreamItem` を直接組み立て、チャンネル配下一覧は
+  `ChannelService` の別の converter を使う。`StreamService.toStreamResponse` は共通点ではない
 - `PerformanceRepository` も、`queryPerformanceDetails` を通るのは `FindByID` /
   overlap / playlist / random / preset だけ。`FindByStreamID` `FindBySongID`
-  `FindByTagID` `FindBySingerID` はそれぞれ独自の query を持つ
+  `FindByTagID` `FindBySingerID` はそれぞれ独自の query を持つ（歌った人の検索）
 - DTO 変換の時点で落とすと、**`total` とページングを計算した後**なので、
   件数から存在が漏れ、空行も残る
 
@@ -408,7 +408,7 @@ PR #6 が解析結果でやったのと同じ考え方だが、通す場所は�
 非表示配信に歌唱を作る機能を足すときは、次の両方を決めること。
 
 - **発見面に出したいなら** `is_hidden` の解除まで含める。解除しないと
-  曲ページ・歌手統計・プリセットに出ないので、「登録済みなのに探しても見つからない」になる
+  曲ページ・チャンネル統計・プリセットに出ないので、「登録済みなのに探しても見つからない」になる
 - **伏せたままにしたいなら** `is_hidden` では足りない。上の表の経路を塞ぐ別の仕組みが要る（issue #4）
 
 ### 解析結果は編集者向けなので載せない

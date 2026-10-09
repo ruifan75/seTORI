@@ -102,7 +102,7 @@ export interface ITunesQueryResult {
 
 // ========== チャンネル ==========
 
-export interface Singer {
+export interface Channel {
   id: string;
   name: string;
   english_name?: string;
@@ -169,48 +169,48 @@ export interface UpdateOrganizationRequest {
   is_unaffiliated: boolean;
 }
 
-export interface SingerListResponse {
-  singers: Singer[];
+export interface ChannelListResponse {
+  singers: Channel[];
   pagination: PaginationResponse;
   /** 非表示チャンネルの総数（content:edit で非表示を含めたときだけ）。並びは表示中が先 */
   hidden_total?: number;
 }
 
 // 事務所別のチャンネル一覧。organization が空文字の組は「所属なし」。
-export interface SingerGroup {
+export interface ChannelGroup {
   organization: string;
   display_name: string;
-  singers: Singer[];
+  singers: Channel[];
 }
 
-export interface SingerGroupListResponse {
+export interface ChannelGroupListResponse {
   /** 表示中のチャンネルを事務所ごとに */
-  groups: SingerGroup[];
+  groups: ChannelGroup[];
   /** 非表示チャンネルを名前順で（content:edit のときだけ。事務所の組には混ぜない） */
-  hidden?: Singer[];
+  hidden?: Channel[];
   /** groups と hidden の合計 */
   total: number;
 }
 
-export interface SingerDetailResponse extends Singer {
+export interface ChannelDetailResponse extends Channel {
   stream_count: number;
   performance_count: number;
 }
 
-export interface SingerPerformanceListResponse {
-  singer: Singer;
+export interface ChannelPerformanceListResponse {
+  singer: Channel;
   performances: SongPerformance[];
   pagination: PaginationResponse;
 }
 
-export interface CreateSingerResponse {
+export interface CreateChannelResponse {
   message: string;
   id: string;
   name: string;
 }
 
-// 事務所は含まない（singerApi.setOrganization が唯一の窓口）
-export interface UpdateSingerRequest {
+// 事務所は含まない（channelApi.setOrganization が唯一の窓口）
+export interface UpdateChannelRequest {
   name: string;
   english_name?: string;
   photo_url?: string;
@@ -231,8 +231,8 @@ export interface Stream {
   duration_seconds?: number;
   thumbnail_url?: string;
   tags: StreamTag[];
-  participants: Singer[];  // 参加チャンネル
-  channel_owner?: Singer;  // チャンネルオーナー
+  participants: Channel[];  // 参加チャンネル
+  channel_owner?: Channel;  // チャンネルオーナー
   /**
    * 処理済み（セットリストを作り終えたか）。**content:edit のときだけ返る**。
    * 閲覧者には意味が無く、編集者が「まだ手を付けていない配信」を見分けるための印。
@@ -316,7 +316,7 @@ export interface Performance {
   order_index: number;
   tags: PerformanceTag[];
   custom_tags: string[];
-  singers: Singer[];
+  singers: Channel[];
   youtube_url: string;
   created_at: string;
   /** 終了時間の由来 */
@@ -364,7 +364,7 @@ export interface SongPerformance {
   end_seconds: number;
   tags: PerformanceTag[];
   custom_tags: string[];
-  singers: Singer[];
+  singers: Channel[];
   youtube_url: string;
   created_at: string;
   // この歌唱が載っている配信が秘匿か。`restricted:view` を持つ人にだけ true が返る
@@ -626,8 +626,8 @@ export interface SongSuggestion {
 export interface LoadHolodexSongsResponse {
   stream_id: string;
   stream_title: string;
-  channel_owner: Singer;
-  participants: Singer[];  // すべての参加チャンネル（チャンネル所有者を含む）
+  channel_owner: Channel;
+  participants: Channel[];  // すべての参加チャンネル（チャンネル所有者を含む）
   songs: SongSuggestion[];
 }
 
@@ -970,7 +970,7 @@ export interface GlobalSearchResponse {
   video_registered: boolean;
   songs: Song[];
   streams: SearchStreamItem[];
-  singers: Singer[];
+  singers: Channel[];
   artists: Artist[];
   stream_tags: SearchTagItem[];
   performance_tags: SearchTagItem[];

@@ -2,8 +2,8 @@ import { useState } from 'react';
 import { invalidateChannelScopedQueries } from '../queryClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router-dom';
-import { singerApi } from '../api/client';
-import type { Singer } from '../api/types';
+import { channelApi } from '../api/client';
+import type { Channel } from '../api/types';
 import Loading from '../components/ui/Loading';
 import Pagination from '../components/ui/Pagination';
 import { SortControl, type SortDir, type SortState } from '../components/ui/Sort';
@@ -13,7 +13,7 @@ import { useAuthStore, hasPermission, PERM } from '../store/auth';
 
 type ViewMode = 'group' | 'list';
 
-export default function SingersPage() {
+export default function ChannelsPage() {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -34,13 +34,13 @@ export default function SingersPage() {
 
   const groupedQuery = useQuery({
     queryKey: ['singers', 'grouped', includeHidden],
-    queryFn: () => singerApi.listGrouped(includeHidden),
+    queryFn: () => channelApi.listGrouped(includeHidden),
     enabled: view === 'group',
   });
 
   const listQuery = useQuery({
     queryKey: ['singers', page, sort, dir, includeHidden],
-    queryFn: () => singerApi.list(page, 20, sort, dir, includeHidden),
+    queryFn: () => channelApi.list(page, 20, sort, dir, includeHidden),
     enabled: view === 'list',
   });
 
@@ -75,7 +75,7 @@ export default function SingersPage() {
   };
 
   const syncMutation = useMutation({
-    mutationFn: (channelId: string) => singerApi.create(channelId),
+    mutationFn: (channelId: string) => channelApi.create(channelId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['singers'] });
       setShowAddModal(false);
@@ -85,7 +85,7 @@ export default function SingersPage() {
 
   const visibilityMutation = useMutation({
     mutationFn: ({ id, isHidden }: { id: string; isHidden: boolean }) =>
-      singerApi.setHidden(id, isHidden),
+      channelApi.setHidden(id, isHidden),
     onSuccess: (_, { isHidden }) => {
       invalidateChannelScopedQueries();
       showToast(
@@ -96,7 +96,7 @@ export default function SingersPage() {
     onError: (err: Error) => showToast(err.message, 'error'),
   });
 
-  const handleAddSinger = (e: React.FormEvent) => {
+  const handleAddChannel = (e: React.FormEvent) => {
     e.preventDefault();
     if (!channelInput.trim()) return;
 
@@ -117,15 +117,15 @@ export default function SingersPage() {
     syncMutation.mutate(channelValue);
   };
 
-  const renderCard = (singer: Singer) => (
-    <SingerCard
-      key={singer.id}
-      singer={singer}
+  const renderCard = (channel: Channel) => (
+    <ChannelCard
+      key={channel.id}
+      channel={channel}
       canEdit={canEdit}
       onToggleHidden={() =>
-        visibilityMutation.mutate({ id: singer.id, isHidden: !singer.is_hidden })
+        visibilityMutation.mutate({ id: channel.id, isHidden: !channel.is_hidden })
       }
-      toggling={visibilityMutation.isPending && visibilityMutation.variables?.id === singer.id}
+      toggling={visibilityMutation.isPending && visibilityMutation.variables?.id === channel.id}
     />
   );
 
@@ -248,9 +248,9 @@ export default function SingersPage() {
                   {/* 並びは表示中が先（バックエンドが is_hidden を第 1 キーにしている）。
                       ページの中で非表示に切り替わる位置に見出しを入れる */}
                   {(() => {
-                    const singers = listQuery.data?.singers ?? [];
-                    const visible = singers.filter((s) => !s.is_hidden);
-                    const hidden = singers.filter((s) => s.is_hidden);
+                    const channels = listQuery.data?.singers ?? [];
+                    const visible = channels.filter((s) => !s.is_hidden);
+                    const hidden = channels.filter((s) => s.is_hidden);
                     return (
                       <>
                         {visible.length > 0 && (
@@ -286,12 +286,12 @@ export default function SingersPage() {
         </>
       )}
 
-      {/* Add Singer Modal */}
+      {/* Add Channel Modal */}
       {showAddModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md mx-4">
             <h2 className="text-xl font-bold text-gray-900 mb-4">チャンネルを追加</h2>
-            <form onSubmit={handleAddSinger}>
+            <form onSubmit={handleAddChannel}>
               <div className="mb-4">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   YouTube Channel ID / Handle
@@ -341,15 +341,15 @@ export default function SingersPage() {
   );
 }
 
-// SingerCard は一覧のカード1枚。非表示チャンネルは content:edit を持つ利用者にだけ
+// ChannelCard は一覧のカード1枚。非表示チャンネルは content:edit を持つ利用者にだけ
 // 薄く表示され、カード上のアイコンから表示/非表示を切り替えられる。
-function SingerCard({
-  singer,
+function ChannelCard({
+  channel,
   canEdit,
   onToggleHidden,
   toggling,
 }: {
-  singer: Singer;
+  channel: Channel;
   canEdit: boolean;
   onToggleHidden: () => void;
   toggling: boolean;
@@ -357,19 +357,19 @@ function SingerCard({
   return (
     <div className="relative">
       <Link
-        to={`/channels/${singer.id}`}
+        to={`/channels/${channel.id}`}
         className={`bg-white rounded-lg shadow-sm border p-4 hover:shadow-md transition-shadow flex items-center gap-4 ${
-          singer.is_hidden ? 'opacity-60' : ''
+          channel.is_hidden ? 'opacity-60' : ''
         }`}
       >
-        {singer.photo_url ? (
+        {channel.photo_url ? (
           <img
-            src={singer.photo_url}
-            alt={singer.name}
+            src={channel.photo_url}
+            alt={channel.name}
             className="w-16 h-16 rounded-full object-cover"
             onError={(e) => {
               e.currentTarget.onerror = null;
-              e.currentTarget.src = `https://holodex.net/statics/channelImg/${singer.id}/50.png`;
+              e.currentTarget.src = `https://holodex.net/statics/channelImg/${channel.id}/50.png`;
             }}
           />
         ) : (
@@ -380,19 +380,19 @@ function SingerCard({
           </div>
         )}
         <div className="flex-1 min-w-0">
-          <h3 className="font-medium text-gray-900 truncate">{singer.name}</h3>
-          {singer.english_name && (
-            <p className="text-sm text-gray-500 truncate">{singer.english_name}</p>
+          <h3 className="font-medium text-gray-900 truncate">{channel.name}</h3>
+          {channel.english_name && (
+            <p className="text-sm text-gray-500 truncate">{channel.english_name}</p>
           )}
           <div className="flex flex-wrap items-center gap-1 mt-1">
             {/* 「所属なし」を意味する分類（Independents など）は organization_name が空で、
                 バッジも出ない。見出しが「所属なし」なのにバッジは別名、という矛盾を避けるため */}
-            {singer.organization_name && (
+            {channel.organization_name && (
               <span className="inline-block px-2 py-0.5 bg-purple-100 text-purple-700 text-xs rounded-full">
-                {singer.organization_name}
+                {channel.organization_name}
               </span>
             )}
-            {singer.is_hidden && (
+            {channel.is_hidden && (
               <span className="inline-block px-2 py-0.5 bg-gray-200 text-gray-600 text-xs rounded-full">
                 非表示
               </span>
@@ -401,12 +401,12 @@ function SingerCard({
                 **これは作業一覧**なので、決着済み（公開可／非公開）は出さない ──
                 出すと「残っているのはどれか」が読み取れなくなる。
                 本数と方針は content:edit のときだけ返るので、権限判定は要らない */}
-            {(singer.members_only_stream_count ?? 0) > 0 && !singer.members_only_policy && (
+            {(channel.members_only_stream_count ?? 0) > 0 && !channel.members_only_policy && (
               <span
                 className="inline-block px-2 py-0.5 bg-amber-50 text-amber-700 border border-amber-300 text-xs rounded-full"
-                title={`会限配信 ${singer.members_only_stream_count} 本。セットリストを公開してよいか配信主に未確認（伏せたまま）`}
+                title={`会限配信 ${channel.members_only_stream_count} 本。セットリストを公開してよいか配信主に未確認（伏せたまま）`}
               >
-                会限 未確認（{singer.members_only_stream_count}）
+                会限 未確認（{channel.members_only_stream_count}）
               </span>
             )}
           </div>
@@ -420,11 +420,11 @@ function SingerCard({
         <button
           onClick={onToggleHidden}
           disabled={toggling}
-          title={singer.is_hidden ? '一覧に表示する' : '一覧から非表示にする'}
-          aria-label={singer.is_hidden ? '一覧に表示する' : '一覧から非表示にする'}
+          title={channel.is_hidden ? '一覧に表示する' : '一覧から非表示にする'}
+          aria-label={channel.is_hidden ? '一覧に表示する' : '一覧から非表示にする'}
           className="absolute top-2 right-2 p-1.5 rounded-full bg-white/90 border border-gray-200 text-gray-400 hover:text-gray-700 hover:border-gray-300 disabled:opacity-50"
         >
-          <VisibilityIcon hidden={singer.is_hidden} />
+          <VisibilityIcon hidden={channel.is_hidden} />
         </button>
       )}
     </div>

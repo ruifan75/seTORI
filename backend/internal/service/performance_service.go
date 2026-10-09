@@ -460,7 +460,7 @@ func (s *PerformanceService) songForMissing(p dto.MissingSongPayload) (*models.S
 // defaultSingerIDs は配信のオーナー（居なければ参加者が1人のときだけその人）を返す。
 // 複数人の配信では誰が歌ったか決められないので空を返す（推測しない）。
 func (s *PerformanceService) defaultSingerIDs(streamID string) []string {
-	participants, owners, err := s.streamRepo.GetSingersForStreams([]string{streamID})
+	participants, owners, err := s.streamRepo.GetChannelsForStreams([]string{streamID})
 	if err != nil {
 		logger.Warnf("default singers lookup failed (%s): %v", streamID, err)
 		return nil

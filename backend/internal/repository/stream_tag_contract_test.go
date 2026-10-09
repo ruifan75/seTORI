@@ -108,15 +108,15 @@ func streamTagContractDB(t *testing.T, steps ...streamTagSQLStep) *sql.DB {
 const streamTagWantAND = `(cardinality($1::text[]) = 0 OR streams.id IN (SELECT tf.stream_id FROM stream_stream_tags tf WHERE tf.tag_id = ANY($1::text[])
  GROUP BY tf.stream_id HAVING COUNT(DISTINCT tf.tag_id) = cardinality($1::text[])))`
 
-const streamTagWantVisible = `streams.is_hidden = FALSE AND EXISTS (SELECT 1 FROM stream_singers ss JOIN singers si ON si.id = ss.singer_id
+const streamTagWantVisible = `streams.is_hidden = FALSE AND EXISTS (SELECT 1 FROM stream_channels ss JOIN channels si ON si.id = ss.channel_id
  WHERE ss.stream_id = streams.id AND si.is_hidden = FALSE)`
 
 const streamTagWantColumns = `streams.id, streams.title, streams.stream_date, streams.duration_seconds,
  streams.thumbnail_url, streams.holodex_data, streams.holodex_hash, streams.comment_raw, streams.comment_songs,
  streams.is_processed, streams.is_hidden, streams.restriction_override, streams.created_at, streams.updated_at,
  COALESCE(streams.restriction_override, EXISTS (SELECT 1 FROM stream_stream_tags mt
- WHERE mt.stream_id = streams.id AND mt.tag_id = 'members_only') AND NOT COALESCE((SELECT bool_and(COALESCE(eg.members_only_policy, '') = 'allow') FROM stream_singers eo
- JOIN singers eg ON eg.id = eo.singer_id WHERE eo.stream_id = streams.id AND eo.is_owner), FALSE))`
+ WHERE mt.stream_id = streams.id AND mt.tag_id = 'members_only') AND NOT COALESCE((SELECT bool_and(COALESCE(eg.members_only_policy, '') = 'allow') FROM stream_channels eo
+ JOIN channels eg ON eg.id = eo.channel_id WHERE eo.stream_id = streams.id AND eo.is_owner), FALSE))`
 
 func TestStreamTagListIssuedSQLAndScan(t *testing.T) {
 	date := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)

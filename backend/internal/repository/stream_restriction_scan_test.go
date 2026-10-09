@@ -96,9 +96,9 @@ func TestFindByIDRestrictionReviewPostgres(t *testing.T) {
 				NOW() AS created_at, NOW() AS updated_at
 			), stream_stream_tags AS (
 				SELECT 'abc'::text AS stream_id, 'members_only'::text AS tag_id WHERE %t
-			), stream_singers AS (
-				SELECT 'abc'::text AS stream_id, 'owner'::text AS singer_id, TRUE AS is_owner
-			), singers AS (
+			), stream_channels AS (
+				SELECT 'abc'::text AS stream_id, 'owner'::text AS channel_id, TRUE AS is_owner
+			), channels AS (
 				SELECT 'owner'::text AS id, CASE WHEN %t THEN 'allow' ELSE NULL::text END AS members_only_policy
 			) `, restrictionFixtureBool(tc.override), restrictionFixtureBool(tc.basis), tc.detected, tc.ownerAllows)
 			db := openRestrictionTestDB(t, restrictionPostgresDriver{ctes: ctes}, u.String())

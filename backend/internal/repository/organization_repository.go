@@ -124,13 +124,13 @@ func (r *OrganizationRepository) Delete(key string) (deleted bool, inUse bool, e
 	return affected > 0, false, nil
 }
 
-// CountSingers は事務所に所属するチャンネル数を返す（管理画面の表示・削除前の確認用）。
-func (r *OrganizationRepository) CountSingers() (map[string]int, error) {
+// CountChannels は事務所に所属するチャンネル数を返す（管理画面の表示・削除前の確認用）。
+func (r *OrganizationRepository) CountChannels() (map[string]int, error) {
 	// 実効値（override 優先）で数える。override でしか参照されていない事務所を
 	// 「未使用」と誤判定すると、削除で FK に弾かれて理由が分からなくなる。
 	rows, err := r.db.Query(`
 		SELECT COALESCE(organization_override, organization) AS org, COUNT(*)
-		FROM singers
+		FROM channels
 		WHERE COALESCE(organization_override, organization) IS NOT NULL
 		GROUP BY 1`)
 	if err != nil {

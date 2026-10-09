@@ -114,14 +114,14 @@ func channelAssociationArray(ids []string) string { return "{\"" + strings.Join(
 
 // チャンネルの配信一覧も一括で補完する。配信 metadata は秘匿配信でも公開であり、
 // この経路に歌唱の可視条件を追加しない。固定 SQL で以前の WHERE と SELECT を維持する。
-func TestSingerStreamListBatchesAssociations(t *testing.T) {
+func TestChannelStreamListBatchesAssociations(t *testing.T) {
 	for _, n := range []int{0, 1, 80} {
 		for _, editor := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%d/editor=%v", n, editor), func(t *testing.T) {
 				q := channelAssociationQueries(t)
 				steps := channelAssociationScenario(q, n)
 				db := channelAssociationDB(t, steps)
-				s := NewSingerService(nil, repository.NewStreamRepository(db), nil)
+				s := NewChannelService(nil, repository.NewStreamRepository(db), nil)
 				got, err := s.GetStreams("owner", 1, 100, nil, nil, editor)
 				if err != nil {
 					t.Fatal(err)
@@ -144,7 +144,7 @@ func TestSingerStreamListBatchesAssociations(t *testing.T) {
 		}
 	}
 }
-func TestSingerStreamBatchErrorsAreReturned(t *testing.T) {
+func TestChannelStreamBatchErrorsAreReturned(t *testing.T) {
 	for _, which := range []string{"stream-tags", "stream-singers"} {
 		t.Run(which, func(t *testing.T) {
 			q := channelAssociationQueries(t)
@@ -157,7 +157,7 @@ func TestSingerStreamBatchErrorsAreReturned(t *testing.T) {
 					break
 				}
 			}
-			s := NewSingerService(nil, repository.NewStreamRepository(channelAssociationDB(t, steps)), nil)
+			s := NewChannelService(nil, repository.NewStreamRepository(channelAssociationDB(t, steps)), nil)
 			_, err := s.GetStreams("owner", 1, 100, nil, nil, false)
 			if !errors.Is(err, failure) {
 				t.Fatalf("err=%v want=%v", err, failure)
@@ -167,21 +167,21 @@ func TestSingerStreamBatchErrorsAreReturned(t *testing.T) {
 }
 func channelAssociationScenario(q map[string]string, n int) []channelAssociationStep {
 	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
-	var rows, tags, singers [][]driver.Value
+	var rows, tags, channels [][]driver.Value
 	var ids []string
 	for i := 0; i < n; i++ {
 		id := fmt.Sprintf("video%06d", i)
 		ids = append(ids, id)
 		rows = append(rows, []driver.Value{id, "配信", now, int64(1000), nil, nil, nil, true, false, nil, now, now, i%2 == 0})
 		tags = append(tags, []driver.Value{id, "singing", "歌枠", "blue", now})
-		singers = append(singers, []driver.Value{id, true, fmt.Sprintf("channel%d", i), "チャンネル", nil, nil, nil, nil, false, "manual", now, now})
+		channels = append(channels, []driver.Value{id, true, fmt.Sprintf("channel%d", i), "チャンネル", nil, nil, nil, nil, false, "manual", now, now})
 	}
 	steps := []channelAssociationStep{
 		{query: q["channel-stream-count"], args: []driver.Value{"owner"}, rows: [][]driver.Value{{int64(n)}}},
 		{query: q["channel-stream-list"], args: []driver.Value{"owner", int64(100), int64(0)}, rows: rows},
 	}
 	if n > 0 {
-		steps = append(steps, channelAssociationStep{query: q["stream-tags"], args: []driver.Value{channelAssociationArray(ids)}, rows: tags}, channelAssociationStep{query: q["stream-singers"], args: []driver.Value{channelAssociationArray(ids)}, rows: singers})
+		steps = append(steps, channelAssociationStep{query: q["stream-tags"], args: []driver.Value{channelAssociationArray(ids)}, rows: tags}, channelAssociationStep{query: q["stream-singers"], args: []driver.Value{channelAssociationArray(ids)}, rows: channels})
 	}
 	return steps
 }

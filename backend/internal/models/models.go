@@ -8,8 +8,8 @@ import (
 	"github.com/lib/pq"
 )
 
-// Singer 歌手/VTuber
-type Singer struct {
+// Channel YouTube チャンネル
+type Channel struct {
 	ID          string         `json:"id"`           // YouTube Channel ID
 	Name        string         `json:"name"`         // 表示名
 	EnglishName sql.NullString `json:"english_name"` // 英語名
@@ -51,7 +51,7 @@ type Organization struct {
 
 // EffectiveOrganization は表示・グループ分けに使う事務所キーを返す。
 // 手動指定があればそれを、無ければ Holodex の値を使う。
-func (s Singer) EffectiveOrganization() sql.NullString {
+func (s Channel) EffectiveOrganization() sql.NullString {
 	if s.OrganizationOverride.Valid && s.OrganizationOverride.String != "" {
 		return s.OrganizationOverride
 	}

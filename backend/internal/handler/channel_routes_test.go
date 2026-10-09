@@ -62,8 +62,8 @@ func TestChannelAPIAliases(t *testing.T) {
 					db := sql.OpenDB(fixture)
 					defer db.Close()
 					r := &Router{mux: http.NewServeMux(),
-						authService:   service.NewAuthService(repository.NewAuthRepository(db)),
-						singerService: service.NewSingerService(repository.NewSingerRepository(db), repository.NewStreamRepository(db), repository.NewPerformanceRepository(db)),
+						authService:    service.NewAuthService(repository.NewAuthRepository(db)),
+						channelService: service.NewChannelService(repository.NewChannelRepository(db), repository.NewStreamRepository(db), repository.NewPerformanceRepository(db)),
 					}
 					r.setupRoutes()
 					req := httptest.NewRequest(tc.method, prefix+tc.suffix, strings.NewReader(tc.body))
@@ -161,15 +161,15 @@ func (c *channelAliasConn) QueryContext(_ context.Context, query string, args []
 			break
 		}
 		return channelAliasRowsOf(13, []driver.Value{"00000000-0000-0000-0000-000000000001", "viewer", "Viewer", nil, false, "", "00000000-0000-0000-0000-000000000002", true, nil, now, now, "fixture", c.db.permissions}), nil
-	case strings.HasPrefix(q, "UPDATE singers SET name =") && strings.HasSuffix(q, "RETURNING created_at, updated_at"):
+	case strings.HasPrefix(q, "UPDATE channels SET name =") && strings.HasSuffix(q, "RETURNING created_at, updated_at"):
 		return channelAliasRowsOf(2, []driver.Value{now, now}), nil
 	case strings.HasPrefix(q, "SELECT COUNT(*), COUNT(*) FILTER"):
 		return channelAliasRowsOf(2, []driver.Value{int64(1), int64(0)}), nil
-	case strings.HasPrefix(q, "SELECT ss.singer_id, COUNT(*)"):
+	case strings.HasPrefix(q, "SELECT ss.channel_id, COUNT(*)"):
 		return channelAliasRowsOf(2), nil
 	case strings.HasPrefix(q, "SELECT COUNT("):
 		return channelAliasRowsOf(1, []driver.Value{int64(0)}), nil
-	case strings.HasPrefix(q, "SELECT s.id, s.name, s.english_name") && strings.Contains(q, "FROM singers s LEFT JOIN organizations o"):
+	case strings.HasPrefix(q, "SELECT s.id, s.name, s.english_name") && strings.Contains(q, "FROM channels s LEFT JOIN organizations o"):
 		return channelAliasRowsOf(14, []driver.Value{"channel", "channel", nil, nil, nil, nil, nil, false, "manual", false, "allow", true, now, now}), nil
 	case strings.Contains(q, "FROM streams s") || strings.Contains(q, "FROM performances p"):
 		return channelAliasRowsOf(1), nil
@@ -179,7 +179,7 @@ func (c *channelAliasConn) QueryContext(_ context.Context, query string, args []
 }
 func (c *channelAliasConn) ExecContext(_ context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
 	c.db.calls = append(c.db.calls, channelAliasCall{query, append([]driver.NamedValue(nil), args...)})
-	if strings.HasPrefix(strings.TrimSpace(query), "UPDATE singers SET ") {
+	if strings.HasPrefix(strings.TrimSpace(query), "UPDATE channels SET ") {
 		return driver.RowsAffected(1), nil
 	}
 	c.db.unexpected = "unexpected SQL: " + query
@@ -259,7 +259,7 @@ func TestChannelAPIAliasPathBoundaries(t *testing.T) {
 				defer db.Close()
 				r := &Router{mux: http.NewServeMux(),
 					authService: service.NewAuthService(repository.NewAuthRepository(db)),
-					singerService: service.NewSingerService(repository.NewSingerRepository(db),
+					channelService: service.NewChannelService(repository.NewChannelRepository(db),
 						repository.NewStreamRepository(db), repository.NewPerformanceRepository(db)),
 				}
 				r.setupRoutes()

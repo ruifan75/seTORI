@@ -14,8 +14,8 @@ import (
 // ここでは実際に発行する SQL 全体・引数を独立したリテラルで固定する。
 const issue4Restricted = `COALESCE(st.restriction_override,
  EXISTS (SELECT 1 FROM stream_stream_tags mt WHERE mt.stream_id = st.id AND mt.tag_id = 'members_only') AND NOT
- COALESCE((SELECT bool_and(COALESCE(eg.members_only_policy, '') = 'allow') FROM stream_singers eo
- JOIN singers eg ON eg.id = eo.singer_id WHERE eo.stream_id = st.id AND eo.is_owner), FALSE))`
+ COALESCE((SELECT bool_and(COALESCE(eg.members_only_policy, '') = 'allow') FROM stream_channels eo
+ JOIN channels eg ON eg.id = eo.channel_id WHERE eo.stream_id = st.id AND eo.is_owner), FALSE))`
 
 const issue4PerformanceSelect = `SELECT p.id, p.stream_id, p.song_id, p.start_seconds, p.end_seconds, p.order_index,
  p.holodex_song_id, p.custom_tags, p.created_at, p.end_source, p.end_confirmed,

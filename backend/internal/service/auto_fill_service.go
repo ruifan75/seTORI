@@ -47,7 +47,7 @@ type AutoFillSettings struct {
 	// 取り直しが所有者のままだと一括作成は空の入力を見続ける。
 	//
 	// 客串の配信は歌手が複数居るので、一括作成は**全行を審査へ回す**
-	// （`hasMultipleSingers`）。誰が歌ったかを機械が決めることは無い。
+	// （`hasMultipleParticipants`）。誰が歌ったかを機械が決めることは無い。
 	// mention されただけの告知・企画枠も入るが、そちらも審査で落とせる。
 	IncludeCollabs bool `json:"include_collabs"`
 }
@@ -79,7 +79,7 @@ type AutoFillLastRun struct {
 // `is_processed` は人が確かめてから付ける ── そこは設計上わざと残した関門。
 type AutoFillService struct {
 	settingsRepo *repository.AppSettingsRepository
-	singerRepo   *repository.SingerRepository
+	channelRepo  *repository.ChannelRepository
 	streamRepo   *repository.StreamRepository
 	holodex      *HolodexService
 	comments     *CommentService
@@ -91,7 +91,7 @@ type AutoFillService struct {
 
 func NewAutoFillService(
 	settingsRepo *repository.AppSettingsRepository,
-	singerRepo *repository.SingerRepository,
+	channelRepo *repository.ChannelRepository,
 	streamRepo *repository.StreamRepository,
 	holodex *HolodexService,
 	comments *CommentService,
@@ -99,7 +99,7 @@ func NewAutoFillService(
 ) *AutoFillService {
 	return &AutoFillService{
 		settingsRepo: settingsRepo,
-		singerRepo:   singerRepo,
+		channelRepo:  channelRepo,
 		streamRepo:   streamRepo,
 		holodex:      holodex,
 		comments:     comments,
@@ -110,7 +110,7 @@ func NewAutoFillService(
 // defaultAutoFillSettings は保存が無いときの値。
 //
 // **既定は無効。** 外部 API と AI を自動で叩く仕組みなので、入れただけで
-// 動き出してよいものではない（`singers.auto_fill_enabled` と同じ考え方）。
+// 動き出してよいものではない（`channels.auto_fill_enabled` と同じ考え方）。
 //
 // **nil の settingsRepo を許さない**ので、ここだけ切り出してある ── 「repo が
 // 無ければ既定」にすると、DI の配線漏れが「自動処理が静かに動かない」という
@@ -266,7 +266,7 @@ func (s *AutoFillService) RunOnce() (AutoFillResult, error) {
 	// 2 段がずれる（IncludeCollabs の注記）。
 	settings := s.GetSettings()
 
-	targets, err := s.singerRepo.FindAutoFillTargets()
+	targets, err := s.channelRepo.FindAutoFillTargets()
 	if err != nil {
 		return res, fmt.Errorf("対象チャンネルの取得に失敗: %w", err)
 	}
@@ -277,9 +277,9 @@ func (s *AutoFillService) RunOnce() (AutoFillResult, error) {
 		return res, nil // defer が予約を解放する
 	}
 
-	singerIDs := make([]string, 0, len(targets))
+	channelIDs := make([]string, 0, len(targets))
 	for _, sg := range targets {
-		singerIDs = append(singerIDs, sg.ID)
+		channelIDs = append(channelIDs, sg.ID)
 	}
 
 	// 1. 同期。**1 チャンネルの失敗で全体を止めない** ── 他のチャンネルは
@@ -317,7 +317,7 @@ func (s *AutoFillService) RunOnce() (AutoFillResult, error) {
 	for id := range justSynced {
 		syncedIDs = append(syncedIDs, id)
 	}
-	refreshed, refreshFailures := s.refreshComments(singerIDs, settings.RefreshDays, syncedIDs, settings.IncludeCollabs)
+	refreshed, refreshFailures := s.refreshComments(channelIDs, settings.RefreshDays, syncedIDs, settings.IncludeCollabs)
 	res.Refreshed = refreshed
 	res.Failures += refreshFailures
 
@@ -329,7 +329,7 @@ func (s *AutoFillService) RunOnce() (AutoFillResult, error) {
 		return res, nil // defer が予約を解放する
 	}
 
-	runID, err := s.batchFill.StartReserved(BatchFillModeUnprocessed, singerIDs, settings.IncludeCollabs, nil)
+	runID, err := s.batchFill.StartReserved(BatchFillModeUnprocessed, channelIDs, settings.IncludeCollabs, nil)
 	if err != nil {
 		// StartReserved は失敗時に自分で予約を解放する。
 		reserved = false
@@ -360,8 +360,8 @@ func (s *AutoFillService) RunOnce() (AutoFillResult, error) {
 // （自動処理は既存の歌単に触らない）、取り直しは外部 API を叩く。
 // justSynced はこの実行の同期で入ってきた配信。**除外の判断は SQL 側**で行う
 // （新規というだけでは取得できた証拠にならないため。repository の注記）。
-func (s *AutoFillService) refreshComments(singerIDs []string, days int, justSynced []string, includeCollabs bool) (refreshed, failures int) {
-	ids, err := s.streamRepo.FindStreamsNeedingCommentRefresh(singerIDs, days, justSynced, includeCollabs)
+func (s *AutoFillService) refreshComments(channelIDs []string, days int, justSynced []string, includeCollabs bool) (refreshed, failures int) {
+	ids, err := s.streamRepo.FindStreamsNeedingCommentRefresh(channelIDs, days, justSynced, includeCollabs)
 	if err != nil {
 		logger.Warnf("[auto-fill] コメント取り直しの対象取得に失敗: %v", err)
 		return 0, 1

@@ -1,8 +1,8 @@
 # チャンネルの整理（非表示と事務所）
 
-チャンネル一覧をどう見せるかの部分。実装は `internal/repository/singer_repository.go`、
+チャンネル一覧をどう見せるかの部分。実装は `internal/repository/channel_repository.go`、
 `internal/repository/organization_repository.go`、`internal/service/organization_service.go`、
-画面は `frontend/src/pages/SingersPage.tsx` と `frontend/src/pages/admin/OrganizationsPage.tsx`。
+画面は `frontend/src/pages/ChannelsPage.tsx` と `frontend/src/pages/admin/OrganizationsPage.tsx`。
 
 ## 何が問題だったか
 
@@ -13,7 +13,7 @@
    毎週の歌枠を追っているチャンネルと同列に並ぶ。Holodex 同期は mention された
    チャンネルも自動で登録するので、放っておくと増え続ける。
 
-2. **事務所が文字列でしか存在しない。** `singers.organization` に Holodex が返した
+2. **事務所が文字列でしか存在しない。** `channels.organization` に Holodex が返した
    `org` がそのまま入っているだけで、実体が無い。そのため事務所ごとにまとめて見ることも、
    並び順を決めることも、表示名を直すこともできなかった。
 
@@ -22,7 +22,7 @@
 Holodex は Re:AcT を `ReAcT`（コロン無し）で返すが、公式表記は `Re:AcT` である。
 表示を直そうとすると、取り込み時の値を書き換えるしか手が無かった。
 
-## 非表示（`singers.is_hidden`）
+## 非表示（`channels.is_hidden`）
 
 ### 隠すのは一覧に載る場所だけ
 
@@ -62,7 +62,7 @@ Holodex は Re:AcT を `ReAcT`（コロン無し）で返すが、公式表記�
 | | 誰から隠すか | 出し方 |
 |---|---|---|
 | `streams.is_hidden` | 誰からも隠さない | 誰でも `hidden=all` で見られる、ただのフィルタ |
-| `singers.is_hidden` | 閲覧者から隠す | `content:edit` を持つ場合のみ `include_hidden=true` が効く |
+| `channels.is_hidden` | 閲覧者から隠す | `content:edit` を持つ場合のみ `include_hidden=true` が効く |
 
 権限の無い相手が `include_hidden=true` を送っても**黙って無視する**（エラーにしない）。
 一覧の見え方の話なので、拒否して知らせる価値が無い。
@@ -75,14 +75,14 @@ mention 先）である。後者は追いたくて登録したわけではない
 既定が一律 `false` だった頃の本番は **148 件中 147 件を手で隠していた**。
 147 回同じ操作を繰り返しているなら、既定のほうが間違っている。
 
-そこで `Upsert` は `SingerOrigin` を必須の引数で受け取る。
+そこで `Upsert` は `ChannelOrigin` を必須の引数で受け取る。
 
 | origin | 経路 | 新規行の `is_hidden` |
 |---|---|---|
-| `SingerRequested` | `POST /api/channels`（人がチャンネルを追加）、`SyncChannel`（同期対象として名指し） | `false` |
-| `SingerDiscovered` | `syncVideo` の所有者・mention、`SyncVideo` の動画所有者 | `true` |
+| `ChannelRequested` | `POST /api/channels`（人がチャンネルを追加）、`SyncChannel`（同期対象として名指し） | `false` |
+| `ChannelDiscovered` | `syncVideo` の所有者・mention、`SyncVideo` の動画所有者 | `true` |
 
-bool ではなく型にしてあるのは、`Upsert(singer, true)` ではどちらの意味か読めないため。
+bool ではなく型にしてあるのは、`Upsert(channel, true)` ではどちらの意味か読めないため。
 引数を省略可能にしていないのは、**新しい呼び出し元が origin を決めずには
 コンパイルできないようにする**ため（`docs/STREAM_VISIBILITY.md` の access mode と同じ考え方）。
 
@@ -96,8 +96,8 @@ Holodex 同期は繰り返し走るので、ここで書き戻すと手動で非
 origin を足したあともこれは変わらない。既存行の `is_hidden` は**どちらの origin でも触らない**。
 実測（2026-08-22、149 件）：
 
-- 手動追加で表示にした行に `SingerDiscovered` の同期を当てても表示のまま
-- 手で非表示にした行に `SingerRequested` の手動追加を当てても非表示のまま
+- 手動追加で表示にした行に `ChannelDiscovered` の同期を当てても表示のまま
+- 手で非表示にした行に `ChannelRequested` の手動追加を当てても非表示のまま
 - 配信 1 本を同期し直しても、削除して作り直した 1 件以外の 148 行は変化なし
 
 **この非対称は意図的である。** 「一覧に出したい」は人が明示する操作
@@ -118,7 +118,7 @@ organizations
   sort_order        一覧の並び順（小さいほど先、同値なら display_name の五十音順）
 ```
 
-`singers.organization` はこの `key` への FK（`ON UPDATE CASCADE ON DELETE RESTRICT`）。
+`channels.organization` はこの `key` への FK（`ON UPDATE CASCADE ON DELETE RESTRICT`）。
 
 分けた理由は `song_match_keys` が計算元テキストを控えるのと同じで、
 **由来を消すと後から辿り直せなくなる**から。1 列で兼ねていると、
@@ -139,12 +139,12 @@ organizations
 ### 未知の事務所は自動で作る
 
 Holodex が今まで見たことのない org を返したとき、
-`display_name = key` で `organizations` に行を作ってから `singers` を書く。
+`display_name = key` で `organizations` に行を作ってから `channels` を書く。
 
 **「知らない事務所だから取り込まない」は選ばない。** `song_merge_candidates` と同じ態度で、
 人の確認が要るものは残しておくが、登録そのものは止めない。表示名は後から直せる。
 
-実装は `SingerRepository.ensureOrganization` で、事務所を書きうる 4 経路
+実装は `ChannelRepository.ensureOrganization` で、事務所を書きうる 4 経路
 （`Create` / `Update` / `Upsert` / `SetOrganizationOverride`）の先頭で呼ぶ。
 **service 層ではなく repository 側に置いてある**のは意図的で、呼び忘れた場合の
 壊れ方が悪いから ── ローカルでも CI でも通ってしまい、Holodex が新しい org を
@@ -153,8 +153,8 @@ Holodex が今まで見たことのない org を返したとき、
 FK が実際に効いていることは確認済み：
 
 ```sql
-UPDATE singers SET organization='BrandNewAgency' WHERE id=(SELECT id FROM singers LIMIT 1);
-ERROR:  insert or update on table "singers" violates foreign key constraint "singers_organization_fkey"
+UPDATE channels SET organization='BrandNewAgency' WHERE id=(SELECT id FROM channels LIMIT 1);
+ERROR:  insert or update on table "channels" violates foreign key constraint "channels_organization_fkey"
 ```
 
 ### Holodex の分類を上書きする（`organization_override`）
@@ -163,7 +163,7 @@ Holodex の分類が誤っていると思ったとき用。**`organization` は�
 読むときは `COALESCE(organization_override, organization)`。
 
 なぜ上書きが要るか：`Upsert` は `organization = EXCLUDED.organization` なので、
-`singers.organization` を直接直しても同期で戻る。しかも戻るのはチャンネル同期のときだけでなく、
+`channels.organization` を直接直しても同期で戻る。しかも戻るのはチャンネル同期のときだけでなく、
 **mention 経由でも起きる**（`holodex_service.go` の mentions ループ）。
 無関係な歌枠を同期した拍子に静かに戻るので、原因を突き止めるのがとても難しい。
 
@@ -249,15 +249,16 @@ mapping は**書き込み時**に効くので、設定を直しても既存行�
 
 ### migration の扱い
 
-`034` は一度 `UPDATE singers SET organization='Re:AcT'` を含んでいたが、
+`034` は一度 `UPDATE singers SET organization='Re:AcT'`（069 より前の表名）を含んでいたが、
 未リリースのうちに削除した。`035` に冪等な巻き戻しを入れてある。
+以下は `035` の SQL（069 より前に実行するため、表名は `singers`）。
 
 ```sql
 -- 034 を先に流した開発 DB のための行。新規構築では no-op
 UPDATE singers SET organization = 'ReAcT' WHERE organization = 'Re:AcT';
 ```
 
-`singers.organization` は Holodex の生の値を持つのが正しい状態で、
+`channels.organization` は Holodex の生の値を持つのが正しい状態で、
 `Re:AcT` は `organizations.display_name` にだけ存在する。
 
 ## API
@@ -317,3 +318,25 @@ UPDATE singers SET organization = 'ReAcT' WHERE organization = 'Re:AcT';
   正式名称があるので、`display_name === key` の行だけ引いて候補を出せる余地はある
 - **チャンネルの非表示は完全に手動。** 「1 年以上配信が無い」「歌枠が 0 件」など、
   非表示候補を提案する導線があると初期整理が楽になる
+
+
+## 内部名の改名（migration 069、issue #62 第 3 段）
+
+チャンネルは `channels`、配信の参加者は `stream_channels.channel_id` に保存する。
+一括処理の履歴の対象範囲は `batch_fill_runs.channel_id`。文字列の値（複数 ID の
+カンマ区切りも含む）は書き換えない。歌った人は引き続き
+`performance_singers.singer_id` で表し、FK の参照先は `channels(id)`。
+FK の削除・更新時の挙動は変えず、チャンネルに属する制約・索引・トリガーの名前も改める。
+チャンネル専用のシーケンスはない。
+
+Go / TypeScript の型・repository・service・API クライアントは Channel の名前を使う。
+外の契約と保存済み JSON は維持するので、API の `singers` / `singer` /
+`singer_count` / `singer_id` / `singer_ids` はそのまま。歌唱や提案の歌った人を
+表す内部名も Singer のまま。React Query の既存キーは再取得の対象を変えないため維持する。
+新旧 URL と API 別名の廃止時期は第 2 段の規則（`docs/API.md`）に従う。
+
+適用時はバックアップを取り、backend を停止してから 069 と新しいバイナリを入れる。
+旧バイナリは新しい表を読めない。戻す場合は DB もバックアップに戻すか、069 の改名を
+すべて逆に実行し、同じ Tx で 069 の適用記録を取り除く。実行器はファイルと適用記録を
+1 Tx で確定するため、途中で失敗した場合は部分的な改名を残さず、原因を除いて再試行できる。
+001〜068 は既存 DB の適用履歴を保つため変更していない。

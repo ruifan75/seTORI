@@ -140,7 +140,7 @@
 - **コード位置**：`pkg/youtube/client.go`。
   - `GET /youtube/v3/commentThreads?part=snippet&videoId=...` — 公開トップレベルコメントを `maxResults=100`、`textFormat=plainText` で全ページ取得。
   - `GET /youtube/v3/channels?part=snippet&id=` または `forHandle=` — チャンネル情報を取得（アバターは high → medium → default 優先）。
-- **用途**：一般動画コメントは YouTube を優先し、未設定・取得失敗・空の場合に Holodex へ fallback する。編集ページの手動同期は YouTube のみを使用し、Holodex へ fallback しない。空の `comment_raw` は有効な永続キャッシュと見なさず、次回アクセス時に再取得する。チャンネル/歌手同期では YouTube 高解像度アバターを優先し、Holodex 未登録チャンネルの追加にも利用する。
+- **用途**：一般動画コメントは YouTube を優先し、未設定・取得失敗・空の場合に Holodex へ fallback する。編集ページの手動同期は YouTube のみを使用し、Holodex へ fallback しない。空の `comment_raw` は有効な永続キャッシュと見なさず、次回アクセス時に再取得する。チャンネル同期では YouTube 高解像度アバターを優先し、Holodex 未登録チャンネルの追加にも利用する。
 - **呼び出しトリガー**：`POST /api/sync/holodex`、`POST /api/sync/holodex/video/{id}`、`GET /api/streams/{id}/comments`、`POST /api/streams/{id}/comments/sync-youtube`（YouTube 限定の手動同期）、`POST /api/streams/{id}/comments/analyze`、`POST /api/channels`。
 - **制限**：デフォルトでプロジェクトあたり 10,000 units/日。`commentThreads.list` と `channels.list` は 1 request あたり 1 unit（コメントは 100 件ごとに 1 request）。取得するのはトップレベルコメントのみで、live chat replay は従来どおり yt-dlp を使用する
 （拍手による終了時間の推定。BOT 判定を避けるための cookie 設定は `docs/DATA_COMPLETION.md`）。
@@ -214,7 +214,7 @@ Holodex の `topic_id = "membersonly"` は候補の絞り込みに使えるが�
 → 当時の結論は「**Holodex は候補抽出に、`availability` は判定に**」だったが、
 実測で `availability` は Holodex の取りこぼしを 1 件も拾えず、2026-09-14 に外した（PR #66）。
 判定は**3 段**（下ほど強い）── `members_only` タグ（検出）→
-`singers.members_only_policy`（チャンネル単位の方針）→ `restriction_override`
+`channels.members_only_policy`（チャンネル単位の方針）→ `restriction_override`
 （その配信だけの例外）。実装は `EffectiveRestrictedExpr` に 1 か所だけ置く
 （issue #4 / #32、`STREAM_VISIBILITY.md`）。
 

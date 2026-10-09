@@ -19,12 +19,12 @@ func TestListedDiscoverySurfacesPostgres(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	mustExec(`INSERT INTO singers(id,name,is_hidden) VALUES ('visible','表示',FALSE),('hidden','非表示',TRUE);
+	mustExec(`INSERT INTO channels(id,name,is_hidden) VALUES ('visible','表示',FALSE),('hidden','非表示',TRUE);
  INSERT INTO streams(id,title,stream_date,is_hidden,restriction_override) VALUES
  ('visible','表示のみ','2026-01-01',FALSE,NULL),('hidden','非表示のみ','2026-01-02',FALSE,NULL),
  ('mixed','非表示の所有者と表示のゲスト','2026-01-03',FALSE,NULL),('orphan','参加者なし','2026-01-04',FALSE,NULL),
  ('restricted','秘匿','2026-01-05',FALSE,TRUE),('hidden-stream','非表示配信','2026-01-06',TRUE,NULL);
- INSERT INTO stream_singers(stream_id,singer_id,is_owner) VALUES
+ INSERT INTO stream_channels(stream_id,channel_id,is_owner) VALUES
  ('visible','visible',TRUE),('hidden','hidden',TRUE),('mixed','hidden',TRUE),('mixed','visible',FALSE),
  ('restricted','visible',TRUE),('hidden-stream','visible',TRUE);`)
 	for i, id := range []uuid.UUID{a, b, empty} {
@@ -38,7 +38,7 @@ func TestListedDiscoverySurfacesPostgres(t *testing.T) {
 	add := func(song uuid.UUID, stream string, start int, public bool) {
 		id := uuid.New()
 		mustExec(`INSERT INTO performances(id,song_id,stream_id,start_seconds,end_seconds,order_index) VALUES($1,$2,$3,$4,$5,$6)`, id, song, stream, start, start+20, start)
-		// 歌った人を stream_singers と同一にはしない。発見面は参加チャンネルで決める。
+		// 歌った人を stream_channels と同一にはしない。発見面は参加チャンネルで決める。
 		mustExec(`INSERT INTO performance_singers(performance_id,singer_id) VALUES($1,'hidden')`, id)
 		mustExec(`INSERT INTO performance_performance_tags(performance_id,tag_id) VALUES($1,'acoustic')`, id)
 		if song == a {
@@ -130,14 +130,14 @@ func TestListedDiscoverySurfacesPostgres(t *testing.T) {
 				t.Fatalf("アーティスト songs=%d n=%d counts=%v want=%v err=%v", len(found), n, artistCounts, tc.counts, err)
 			}
 			// チャンネルページには参加チャンネルの表示判定を足さない。
-			singerCount, err := NewSingerRepository(db).GetPerformanceCount("hidden", tc.access)
-			if err != nil || singerCount != tc.singer {
-				t.Fatalf("チャンネル count=%d want=%d err=%v", singerCount, tc.singer, err)
+			channelCount, err := NewChannelRepository(db).GetPerformanceCount("hidden", tc.access)
+			if err != nil || channelCount != tc.singer {
+				t.Fatalf("チャンネル count=%d want=%d err=%v", channelCount, tc.singer, err)
 			}
 		})
 	}
 	// 表示に戻した場合も各集計・一覧が実データを読み直す。
-	mustExec(`UPDATE singers SET is_hidden=FALSE WHERE id='hidden'`)
+	mustExec(`UPDATE channels SET is_hidden=FALSE WHERE id='hidden'`)
 	got, err := songs.GetPerformanceCount(a, PublicAccess)
 	if err != nil || got != 4 {
 		t.Fatalf("表示へ戻した後 count=%d err=%v", got, err)
