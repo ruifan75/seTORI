@@ -113,7 +113,8 @@ func (r *VisibilityReviewRepository) Preview(ids []string, by *uuid.UUID) (uuid.
 
 const visibilityLockRunSQL = `SELECT status, item_count FROM visibility_review_runs WHERE id = $1 FOR UPDATE`
 
-// Apply は確認した前値・時刻・候補条件を全件確認し、1 件でも変わっていれば全体を取り消す。
+// Apply は表示の前値・候補条件を全件確認し、1 件でも違っていれば全体を取り消す。
+// 更新時刻は監査用に退避するが、同期・解析など対象外の変更は競合にしない。
 func (r *VisibilityReviewRepository) Apply(id uuid.UUID) (int, error) {
 	tx, err := r.db.Begin()
 	if err != nil {
@@ -130,7 +131,7 @@ func (r *VisibilityReviewRepository) Apply(id uuid.UUID) (int, error) {
 	}
 	rows, err := tx.Query(`SELECT s.id FROM streams s JOIN visibility_review_items i ON i.stream_id = s.id
  WHERE `+visibilityCandidateWhere("$1", "$2")+` AND i.run_id = $3
- AND s.is_hidden = i.before_hidden AND s.updated_at = i.before_updated_at
+ AND s.is_hidden = i.before_hidden
  ORDER BY s.id ASC FOR UPDATE OF s`, pq.Array(streamtag.MusicIDs()), streamtag.ShortFormMaxDurationSeconds, id)
 	if err != nil {
 		return 0, err
@@ -155,7 +156,7 @@ func (r *VisibilityReviewRepository) Apply(id uuid.UUID) (int, error) {
 	result, err := tx.Exec(`WITH changed AS (
  UPDATE streams s SET is_hidden = i.after_hidden, updated_at = NOW()
  FROM visibility_review_items i WHERE i.run_id = $1 AND i.stream_id = s.id
- AND s.is_hidden = i.before_hidden AND s.updated_at = i.before_updated_at
+ AND s.is_hidden = i.before_hidden
  AND `+visibilityCandidateWhere("$2", "$3")+`
  RETURNING s.id, s.updated_at)
  UPDATE visibility_review_items i SET after_updated_at = c.updated_at
@@ -176,7 +177,8 @@ func (r *VisibilityReviewRepository) Apply(id uuid.UUID) (int, error) {
 	return count, tx.Commit()
 }
 
-// Revert は後値と時刻が今も同じものだけを戻す。後の編集・同期・削除は巻き戻さない。
+// Revert は表示の後値が今も同じものだけを戻す。値が違う行・削除済みの行は見送る。
+// 同期・解析など対象外の変更は保ち、表示状態だけを戻す。
 // 戻せなかった件数も run の item_count - reverted_count として残す。再撤回は認めない。
 func (r *VisibilityReviewRepository) Revert(id uuid.UUID) (int, int, error) {
 	tx, err := r.db.Begin()
@@ -195,7 +197,7 @@ func (r *VisibilityReviewRepository) Revert(id uuid.UUID) (int, int, error) {
 	result, err := tx.Exec(`WITH restored AS (
  UPDATE streams s SET is_hidden = i.before_hidden, updated_at = NOW()
  FROM visibility_review_items i WHERE i.run_id = $1 AND i.stream_id = s.id
- AND s.is_hidden = i.after_hidden AND s.updated_at = i.after_updated_at
+ AND s.is_hidden = i.after_hidden
  AND i.reverted_at IS NULL
  RETURNING s.id)
  UPDATE visibility_review_items i SET reverted_at = NOW()

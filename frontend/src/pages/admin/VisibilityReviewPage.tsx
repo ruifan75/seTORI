@@ -18,7 +18,7 @@ export default function VisibilityReviewPage() {
   const invalidate = () => { qc.invalidateQueries({ queryKey: ['visibility-review'] }); qc.invalidateQueries({ queryKey: ['visibility-runs'] }); qc.invalidateQueries({ queryKey: ['non-singing-candidates'] }); };
   const check = useMutation({ mutationFn: () => visibilityReviewApi.preview(selected), onSuccess: (data) => { setPreview(data); invalidate(); }, onError: error });
   const apply = useMutation({ mutationFn: () => visibilityReviewApi.apply(preview!.run_id), onSuccess: (data) => { showToast(`${data.changed}件を表示に戻しました`, 'success'); setSelected([]); setPreview(null); invalidate(); invalidateStreamVisibilityQueries(qc); }, onError: (err: Error) => { setPreview(null); invalidate(); error(err); } });
-  const revert = useMutation({ mutationFn: visibilityReviewApi.revert, onSuccess: (data) => { showToast(`${data.reverted}件を非表示に戻しました。後の変更・削除で見送ったもの: ${data.skipped}件`, 'info'); invalidate(); invalidateStreamVisibilityQueries(qc); }, onError: error });
+  const revert = useMutation({ mutationFn: visibilityReviewApi.revert, onSuccess: (data) => { showToast(`${data.reverted}件を非表示に戻しました。後の表示状態の変更・削除で見送ったもの: ${data.skipped}件`, 'info'); invalidate(); invalidateStreamVisibilityQueries(qc); }, onError: error });
   const judgment = useMutation({ mutationFn: (id: string) => dismissed ? nonSingingApi.restore(id) : nonSingingApi.dismiss(id), onSuccess: () => { setSelected([]); setPreview(null); invalidate(); }, onError: error });
   const busy = check.isPending || apply.isPending || judgment.isPending;
   const candidates = list.data?.candidates ?? [];
@@ -44,7 +44,7 @@ export default function VisibilityReviewPage() {
     {preview && <div role="dialog" aria-label="表示変更の確認" className="border border-amber-400 rounded p-4 space-y-3">
       <p>{preview.count}件の「非表示」を「表示」に変更します。歌唱・処理済み・会限の公開可否は変更しません。</p>
       <ul className="list-disc pl-5">{candidates.filter((c) => selected.includes(c.id)).map((c) => <li key={c.id}>{c.title}</li>)}</ul>
-      <p className="text-sm">実行後に取り消せます。その後に編集・再同期された配信は、取り消し時に見送ります。</p>
+      <p className="text-sm">確認後に1件でも表示状態が確認時と違ったり、候補条件を満たさなくなったり、削除されたりしていたら全体を拒否します。実行後は、表示状態がこの実行の変更後の値と同じ配信だけを取り消せます。同期・解析による他の項目の更新は妨げになりません。</p>
       <button disabled={busy} onClick={() => apply.mutate()} className="bg-indigo-600 text-white px-4 py-2 rounded">表示に戻す</button>
       <button disabled={busy} onClick={() => setPreview(null)} className="ml-3">戻る</button>
     </div>}
@@ -52,7 +52,7 @@ export default function VisibilityReviewPage() {
       {runs.isError && <p className="text-red-600">履歴の取得に失敗しました。</p>}
       {runs.data?.map((run) => <div key={run.id} className="flex gap-3 flex-wrap text-sm">
         <span>{new Date(run.created_at).toLocaleString('ja-JP')} / {run.item_count}件 / {{ preview: '確認のみ', applied: '表示に戻しました', reverted: '取り消しました' }[run.status]}</span>
-        {run.status === 'applied' && <button disabled={revert.isPending} onClick={() => { if (window.confirm(`${run.item_count}件の表示変更を取り消します。後に変更された配信は見送ります。`)) revert.mutate(run.id); }} className="underline">取り消す</button>}
+        {run.status === 'applied' && <button disabled={revert.isPending} onClick={() => { if (window.confirm(`${run.item_count}件の表示変更を取り消します。表示状態が変更後の値と違う配信や、削除された配信は見送ります。`)) revert.mutate(run.id); }} className="underline">取り消す</button>}
         {run.status === 'reverted' && <span>戻した件数 {run.reverted_count} / 見送り {run.item_count - run.reverted_count}</span>}
       </div>)}
     </div>

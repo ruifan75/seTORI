@@ -9,13 +9,13 @@ import { QueryClient } from '@tanstack/react-query';
 const require = createRequire(import.meta.url);
 // 実際の TS/TSX を実行し、ページが登録する成功コールバックから実 QueryClient を更新する。
 // DOM と通信を使わないよう React の hooks と API だけを差し替える。
-function loadTS(url, dependencies) {
+function loadTS(url, dependencies, globals = {}) {
   const module = { exports: {} };
   const code = ts.transpileModule(readFileSync(url, 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
   }).outputText;
   vm.runInNewContext(code, {
-    module, exports: module.exports,
+    module, exports: module.exports, ...globals,
     require: (name) => dependencies[name] ?? require(name),
   }, { filename: url.pathname });
   return module.exports;
@@ -61,3 +61,42 @@ for (const action of ['apply', 'revert']) {
     }
   });
 }
+
+function elements(tree) {
+  if (!tree || typeof tree !== 'object') return [];
+  if (Array.isArray(tree)) return tree.flatMap(elements);
+  return [tree, ...elements(tree.props?.children)];
+}
+function text(tree) {
+  if (tree == null || typeof tree === 'boolean') return '';
+  if (typeof tree !== 'object') return String(tree);
+  if (Array.isArray(tree)) return tree.map(text).join('');
+  return text(tree.props?.children);
+}
+
+test('visibility review explains value-only undo in preview, confirmation and skipped notification', () => {
+  const state = [false, 0, ['one'], { run_id: 'run', count: 1 }];
+  let cursor = 0, queryCursor = 0;
+  const mutations = [], calls = [], toasts = [], confirmations = [];
+  const page = loadTS(new URL('../src/pages/admin/VisibilityReviewPage.tsx', import.meta.url), {
+    react: { useState: () => [state[cursor++], () => {}] },
+    'react-router-dom': { Link: () => null },
+    '@tanstack/react-query': {
+      useQueryClient: () => ({ invalidateQueries: () => {} }),
+      useQuery: () => queryCursor++ === 0 ? { data: { candidates: [], total: 0 } } : { data: [{ id: 'old', item_count: 2, status: 'applied', created_at: '2026-10-10' }] },
+      useMutation: (options) => { const i = mutations.push(options) - 1; return { mutate: (id) => calls.push([i, id]) }; },
+    },
+    '../../api/client': { visibilityReviewApi: {}, nonSingingApi: {} },
+    '../../components/ui/ToastContext': { useToast: () => ({ showToast: (...args) => toasts.push(args) }) },
+    '../../utils/streamVisibilityCache': { invalidateStreamVisibilityQueries: () => {} },
+  }, { window: { confirm: (message) => { confirmations.push(message); return true; } } });
+  const tree = page.default();
+  const dialog = elements(tree).find((e) => e.props?.role === 'dialog');
+  assert.match(text(dialog), /表示状態がこの実行の変更後の値と同じ配信だけ/);
+  assert.match(text(dialog), /同期・解析による他の項目の更新は妨げになりません/);
+  elements(tree).find((e) => e.type === 'button' && text(e) === '取り消す').props.onClick();
+  assert.deepEqual(confirmations, ['2件の表示変更を取り消します。表示状態が変更後の値と違う配信や、削除された配信は見送ります。']);
+  assert.deepEqual(calls, [[2, 'old']]);
+  mutations[2].onSuccess({ reverted: 1, skipped: 1 });
+  assert.deepEqual(toasts, [['1件を非表示に戻しました。後の表示状態の変更・削除で見送ったもの: 1件', 'info']]);
+});
