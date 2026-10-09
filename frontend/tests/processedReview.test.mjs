@@ -27,7 +27,9 @@ test('処理済み API は絞り込みと変更先・run ID を保持する', as
     requests.push({ method: config.method, url: config.url, body: config.data == null ? null : JSON.parse(config.data) });
     return { data: { runs: [], count: 2 }, status: 200, statusText: 'OK', headers: {}, config };
   } });
-  const { processedReviewApi: api } = load('src/api/client.ts', { axios: { ...axios, create: () => instance } });
+  const { processedReviewApi: api } = load('src/api/client.ts', { axios: { ...axios, create: () => instance },
+    '../queryClient': { viewerID: () => 'processed-api-fixture', sameViewer: (key) => key === 'processed-api-fixture' },
+  });
   await api.list({ is_processed: false, q: '歌枠', channel_id: 'guest', tags: ['singing', 'members_only'], hidden: 'true', has_performances: 'false', from: '2026-10-01T00:00:00Z', until: '2026-11-01T00:00:00Z' }, 100);
   await api.preview(['one', 'two'], false);
   await api.apply('run'); await api.revert('run'); await api.runs();
@@ -187,3 +189,22 @@ test('終了日を含める日付境界はタイムゾーンと夏時間を保�
     assert.equal(reviewDateBoundary('2026-03-08', true), '2026-03-09T04:00:00.000Z');
   } finally { if (prev === undefined) delete process.env.TZ; else process.env.TZ = prev; }
 });
+
+for (const [index, action] of ['preview', 'apply', 'revert'].entries()) for (const changed of [false, true]) {
+  test(`${action} は操作後・送信前の視点変更で書かず、同じ視点なら送信する (${changed})`, async () => {
+    const h = harness();
+    try {
+      h.render();
+      const args = action === 'preview' ? { ids: ['one'], after: true, startedAs: 'editor' } : { id: 'run', startedAs: 'editor' };
+      if (changed) h.changeViewer();
+      const invoke = async () => h.mutations[index].mutationFn(args);
+      if (changed) {
+        await assert.rejects(invoke, /利用者または権限が変わった/);
+        assert.deepEqual(h.requests, [], '古い操作を新しい資格情報で送信しない');
+      } else {
+        await invoke();
+        assert.deepEqual(h.requests, action === 'preview' ? [['preview', ['one'], true]] : [[action, 'run']]);
+      }
+    } finally { h.client.clear(); }
+  });
+}

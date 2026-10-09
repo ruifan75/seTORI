@@ -1,6 +1,8 @@
+import { sameViewer, viewerID } from '../../queryClient';
+import { useViewerState } from '../../hooks/useViewerState';
 import { useTaskProgress } from '../../hooks/useTaskProgress';
 import TaskProgress from '../../components/TaskProgress';
-import { useRef, useState } from 'react';
+import { useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { artistApi, readingApi } from '../../api/client';
 import type { ImportReadingsResult } from '../../api/types';
@@ -22,10 +24,10 @@ import { useToast } from '../../components/ui/ToastContext';
 export default function ReadingsPage() {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
-  const [taskId, setTaskId] = useState<string | null>(null);
+  const [taskId, setTaskId] = useViewerState<string | null>(null);
   const progress = useTaskProgress('readings_backfill', taskId);
   const fileRef = useRef<HTMLInputElement>(null);
-  const [importResult, setImportResult] = useState<ImportReadingsResult | null>(null);
+  const [importResult, setImportResult] = useViewerState<ImportReadingsResult | null>(null);
 
   const { data: stats, isLoading } = useQuery({
     queryKey: ['readings-stats'],
@@ -62,9 +64,13 @@ export default function ReadingsPage() {
   };
 
   const exportMutation = useMutation({
-    mutationFn: ({ filter, format }: { filter: 'all' | 'needs_fix'; format: 'json' | 'csv' }) =>
-      readingApi.exportBlob(filter, format).then((blob) => ({ blob, format })),
-    onSuccess: ({ blob, format }) => {
+    mutationFn: async ({ filter, format }: { filter: 'all' | 'needs_fix'; format: 'json' | 'csv' }) => {
+      const startedAs = viewerID();
+      const blob = await readingApi.exportBlob(filter, format);
+      return { blob, format, startedAs };
+    },
+    onSuccess: ({ blob, format, startedAs }) => {
+      if (!sameViewer(startedAs)) return;
       download(blob, `readings.${format === 'csv' ? 'csv' : 'json'}`);
       showToast('読みデータをエクスポートしました', 'success');
     },
@@ -73,11 +79,15 @@ export default function ReadingsPage() {
 
   const importMutation = useMutation({
     mutationFn: async (file: File) => {
+      const startedAs = viewerID();
       const text = await file.text();
-      if (file.name.toLowerCase().endsWith('.csv')) return readingApi.importCSV(text);
-      return readingApi.importJSON(JSON.parse(text));
+      if (!sameViewer(startedAs)) return undefined;
+      const result = file.name.toLowerCase().endsWith('.csv')
+        ? await readingApi.importCSV(text) : await readingApi.importJSON(JSON.parse(text));
+      return sameViewer(startedAs) ? result : undefined;
     },
-    onSuccess: (r: ImportReadingsResult) => {
+    onSuccess: (r: ImportReadingsResult | undefined) => {
+      if (!r) return;
       setImportResult(r);
       const parts = [`アーティスト${r.artists_updated}件`, `曲名${r.songs_updated}件`];
       if (r.skipped > 0) parts.push(`スキップ${r.skipped}件`);

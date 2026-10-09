@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { sameViewer, viewerID } from '../queryClient';
+import { useViewerState } from '../hooks/useViewerState';
+import { useEffect, useRef } from 'react';
 import { songApi, itunesApi } from '../api/client';
 import type { Song, ITunesSearchResult, ITunesQueryResult } from '../api/types';
 
@@ -41,11 +43,11 @@ const toSearchResult = (q: ITunesQueryResult): ITunesSearchResult => ({
 
 // 楽曲検索入力コンポーネント（オートコンプリート付き）
 export default function SongSearchInput({ value, onChange, onSelectSong, placeholder, showToast }: SongSearchInputProps) {
-  const [isOpen, setIsOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [dbSuggestions, setDbSuggestions] = useState<Song[]>([]);
-  const [itunesSuggestions, setItunesSuggestions] = useState<ITunesSearchResult[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isOpen, setIsOpen] = useViewerState(false);
+  const [searchQuery, setSearchQuery] = useViewerState('');
+  const [dbSuggestions, setDbSuggestions] = useViewerState<Song[]>([]);
+  const [itunesSuggestions, setItunesSuggestions] = useViewerState<ITunesSearchResult[]>([]);
+  const [isLoading, setIsLoading] = useViewerState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -57,7 +59,9 @@ export default function SongSearchInput({ value, onChange, onSelectSong, placeho
       return;
     }
 
+    const startedAs = viewerID();
     const timer = setTimeout(async () => {
+      if (!sameViewer(startedAs)) return;
       setIsLoading(true);
       try {
         // DB と iTunes を並行検索。数字だけなら iTunes ID の直引きも足す
@@ -82,7 +86,7 @@ export default function SongSearchInput({ value, onChange, onSelectSong, placeho
     }, 300);
 
     return () => clearTimeout(timer);
-  }, [searchQuery]);
+  }, [searchQuery, setDbSuggestions, setIsLoading, setItunesSuggestions]);
 
   // 外部クリックでドロップダウンを閉じる
   useEffect(() => {
@@ -99,7 +103,7 @@ export default function SongSearchInput({ value, onChange, onSelectSong, placeho
 
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+  }, [setIsOpen]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newValue = e.target.value;

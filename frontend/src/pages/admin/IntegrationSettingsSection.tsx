@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useViewerState } from '../../hooks/useViewerState';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { integrationSettingsApi } from '../../api/client';
 import type { SecretFieldStatus } from '../../api/types';
@@ -56,7 +56,7 @@ function StatusBadge({ status }: { status?: SecretFieldStatus }) {
 export default function IntegrationSettingsSection() {
   const { showToast } = useToast();
   const queryClient = useQueryClient();
-  const [inputs, setInputs] = useState<Record<string, string>>({});
+  const [inputs, setInputs] = useViewerState<Record<string, string>>({});
 
   const { data, isLoading } = useQuery({
     queryKey: ['settings', 'integrations'],

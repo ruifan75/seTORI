@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { sameViewer, viewerID } from '../queryClient';
+import { useViewerState } from '../hooks/useViewerState';
+import { useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { channelApi } from '../api/client';
 import type { Channel } from '../api/types';
@@ -34,12 +36,12 @@ export default function ChannelSearchInput({
 }: ChannelSearchInputProps) {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
-  const [isOpen, setIsOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [suggestions, setSuggestions] = useState<Channel[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [isCreating, setIsCreating] = useState(false);
-  const [createError, setCreateError] = useState('');
+  const [isOpen, setIsOpen] = useViewerState(false);
+  const [searchQuery, setSearchQuery] = useViewerState('');
+  const [suggestions, setSuggestions] = useViewerState<Channel[]>([]);
+  const [isLoading, setIsLoading] = useViewerState(false);
+  const [isCreating, setIsCreating] = useViewerState(false);
+  const [createError, setCreateError] = useViewerState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -50,7 +52,9 @@ export default function ChannelSearchInput({
       return;
     }
 
+    const startedAs = viewerID();
     const timer = setTimeout(async () => {
+      if (!sameViewer(startedAs)) return;
       setIsLoading(true);
       try {
         const results = await channelApi.search(searchQuery, 10);
@@ -64,7 +68,7 @@ export default function ChannelSearchInput({
     }, 300);
 
     return () => clearTimeout(timer);
-  }, [searchQuery, excludeIds]);
+  }, [searchQuery, excludeIds, setIsLoading, setSuggestions]);
 
   // 外部クリックでドロップダウンを閉じる
   useEffect(() => {
@@ -81,7 +85,7 @@ export default function ChannelSearchInput({
 
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+  }, [setIsOpen]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setSearchQuery(e.target.value);
@@ -100,11 +104,14 @@ export default function ChannelSearchInput({
   const handleCreateChannel = async () => {
     const channelInput = searchQuery.trim();
     if (!allowCreate || !isChannelInput(channelInput) || isCreating) return;
+    const startedAs = viewerID();
     setIsCreating(true);
     setCreateError('');
     try {
       const created = await channelApi.create(channelInput);
+      if (!sameViewer(startedAs)) return;
       const channel = await channelApi.get(created.id);
+      if (!sameViewer(startedAs)) return;
       queryClient.invalidateQueries({ queryKey: ['singers'] });
       queryClient.invalidateQueries({ queryKey: ['singer', created.id] });
       showToast(`「${channel.name}」を追加しました`, 'success');
