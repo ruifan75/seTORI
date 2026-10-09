@@ -486,7 +486,8 @@ DB ダンプの作成・復元と Drive 連携。リストアは DB 全体を置
 
 | メソッド | パス | 必要な権限 | 何をするか | 主な入力 | 応答の要点 |
 |---|---|---|---|---|---|
-| `GET` | `/health` | 未ログイン可 | サーバーの稼働を確認する | — | `{status:"ok"}` |
+| `GET` | `/health` | 未ログイン可 | バックエンド内部でプロセスの稼働を確認する（DB は確認しない） | — | `{status:"ok"}`。Caddy の公開経路では SPA に届くため外部監視には使わない |
+| `GET` | `/api/health` | 未ログイン可 | DB の疎通・版・起動からの時間を確認する | — | `{status,commit,uptime_seconds}`。`SELECT 1` を1秒まで実行し、正常は200 / `status:"ok"`、失敗・タイムアウトは503 / `status:"unavailable"`。秒数は整数。認証不要で Bearer は参照せず、接続文字列・設定・エラー詳細を返さない。`Cache-Control: no-store` |
 | `GET` | `/api/version` | 未ログイン可 | 稼働中のビルドを確認する | — | `{commit,built_at}` |
 | `GET` | `/api/search` | 未ログイン可 | 曲・配信・チャンネル・アーティスト・タグを横断検索する | Q: `q`（必須）、`limit`（既定 5、1〜20） | `{query,songs,streams,singers,artists,stream_tags,performance_tags,video_id?,video_registered?}`。動画 ID / URL は登録確認だけ。秘匿：曲の歌唱数・歌唱タグ件数を制限 |
 | `GET` | `/api/logs` | `logs:view` | 最近のサーバーログを見る | Q: `limit`（既定 100、最大 1000） | `{logs,level}` |

@@ -7,6 +7,13 @@
     "analysis": false
   },
   {
+    "pattern": "GET /api/health",
+    "handler": "handleAPIHealth",
+    "permission": "",
+    "login": false,
+    "analysis": false
+  },
+  {
     "pattern": "GET /api/version",
     "handler": "handleVersion",
     "permission": "",

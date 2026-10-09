@@ -262,6 +262,28 @@ curl https://＜DOMAIN＞/api/version     # {"commit":"3cca352","built_at":"..."
 手元ビルドと GHCR のイメージが混ざった場合に起きる。これが分からないと
 「直したはずの不具合が消えない」理由を追えない。出たら `./deploy.sh` で入れ直す。
 
+### 外部から稼働を監視する
+
+UptimeRobot などの HTTP 監視には **`https://＜DOMAIN＞/api/health`** を登録する。
+Caddy がバックエンドへ流すのは `/api/*` だけなので、`/health` は React の
+画面（SPA）へ届き、DB が落ちても200になる。この URL は外部監視に使わない。
+
+```bash
+curl --fail-with-body --max-time 5 https://＜DOMAIN＞/api/health
+# 正常: HTTP 200 / {"status":"ok","commit":"…","uptime_seconds":123}
+# DB の失敗・タイムアウト: HTTP 503 / {"status":"unavailable","commit":"…","uptime_seconds":123}
+```
+
+認証・Bearer は不要。DB へ `SELECT 1` を1秒の上限で実行し、応答はキャッシュしない。
+接続文字列・設定・エラー詳細は公開しない。`commit` は `/api/version` と同じ値、
+`uptime_seconds` はプロセス起動準備からの整数秒で、再起動すると戻る。
+
+監視サービスでは GET、期待するステータス200、応答待ち5秒以上、確認間隔1〜5分を
+目安に設定し、503・接続不能・応答待ち超過を障害として通知する。キーワード監視を
+併用するなら `"status":"ok"` を指定する。Cloudflare や監視側にキャッシュ規則を
+追加するときも `/api/health` は対象外にする。外部サービスへの登録と通知先の設定は
+運用者が行う。外部 API の疎通・背景処理の結果・スキーマの版はこの端点では確認しない。
+
 ### バックアップ
 
 `管理 → バックアップ` から手動作成・自動化・復元ができる。
