@@ -410,15 +410,16 @@ POST は素材の保存であり、歌唱を作る操作ではない。配信が
 
 visibility-review は非表示かつ音楽系タグあり・180 秒超・「歌回でない」の判断なしを候補にする。
 preview は前値・時刻の退避だけ、apply が `is_hidden` を false にする。
-書き込み直前に条件・前値・更新時刻を再検査し、変わっていれば全体を 409 にする。
-revert は後から編集・同期された行を飛ばす。秘匿の検出・裁定は変更しない。
+書き込み直前に候補条件・`is_hidden` の前値を再検査し、候補条件を満たさない行・前値が違う行・削除済みの行があれば全体を 409 にする。
+revert は `is_hidden` が変更後の値と同じ行だけを戻し、値が違う行・削除済みの行を飛ばす。
+更新時刻は監査用に残すが、同期・解析による他の項目の更新は照合に使わない。秘匿の検出・裁定は変更しない。
 
 | メソッド | パス | 必要な権限 | 何をするか | 主な入力 | 応答の要点 |
 |---|---|---|---|---|---|
 | `GET` | `/api/visibility-review` | `content:edit` | 表示に戻せる候補、または判断済み配信を見る | Q: `limit`（既定 100、最大 500）、`offset, dismissed=true` | `{candidates:[{id,title,stream_date,duration_seconds,tags}], total}`。配信メタデータだけ |
 | `POST` | `/api/visibility-review/preview` | `content:edit` | 選んだ配信の変更前の状態を退避する | B: `stream_ids[]`（1〜500、重複不可。body 上限 64 KiB） | `{run_id, count}`。候補条件を満たさなければ 409 |
-| `POST` | `/api/visibility-review/runs/{id}/apply` | `content:edit` | 選んだ候補を表示に戻す | — | `{changed}`。preview 後の変更・状態不正は 409 |
-| `POST` | `/api/visibility-review/runs/{id}/revert` | `content:edit` | この実行の表示変更を取り消す | — | `{reverted, skipped}`。後の編集・同期がある行は飛ばす |
+| `POST` | `/api/visibility-review/runs/{id}/apply` | `content:edit` | 選んだ候補を表示に戻す | — | `{changed}`。候補条件を満たさない行、表示の前値と違う行、削除済みの行、run 状態不正は 409 |
+| `POST` | `/api/visibility-review/runs/{id}/revert` | `content:edit` | この実行の表示変更を取り消す | — | `{reverted, skipped}`。表示の後値が違う行・削除済みの行は飛ばす |
 | `GET` | `/api/visibility-review/runs` | `content:edit` | 見直しの実行履歴を見る | — | `{runs:[{id,status,item_count,reverted_count,created_at,applied_at,reverted_at}]}` |
 | `GET` | `/api/non-singing-candidates` | `content:edit` | 非表示だが解析で曲が出た配信を見る | Q: `limit`（既定 100）、`dismissed=true` | `{candidates:[{id,title,stream_date,song_count,analyzed_at,tags}], total}`。秘匿：行・件数を制限 |
 | `POST` | `/api/non-singing-candidates/{id}/dismiss` | `content:edit` | 歌回ではないという判断を記録する | B: 任意の `note` | `{id, dismissed:true}` |
