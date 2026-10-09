@@ -1,3 +1,4 @@
+import QueryError from '../../components/ui/QueryError';
 import { invalidateTaskResults, TASK_LABELS, TASK_PHASE_LABELS } from '../../utils/taskResults';
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -47,7 +48,7 @@ export default function SyncPage() {
   // 選択用のチャンネル一覧（名前順）。
   // 一覧で非表示にしたチャンネルも同期対象には出す（隠したいのは一覧の場所だけで、
   // 配信の取り込みまで止めたいわけではないため）。
-  const { data: channelList } = useQuery({
+  const { data: channelList, isError: channelListFailed, error: channelListError, refetch: retryChannelList } = useQuery({
     queryKey: ['singers-for-batch'],
     queryFn: () => channelApi.list(1, 300, 'name', 'asc', true),
     staleTime: 5 * 60 * 1000,
@@ -66,7 +67,7 @@ export default function SyncPage() {
   const [openSkippedRun, setOpenSkippedRun] = useState<string | null>(null);
 
 
-  const { data: fillStatus } = useQuery({
+  const { data: fillStatus, isError: fillStatusFailed, error: fillStatusError, refetch: retryFillStatus } = useQuery({
     queryKey: ['batch-fill-status'],
     queryFn: async () => {
       const status = await batchFillApi.status();
@@ -82,7 +83,7 @@ export default function SyncPage() {
     },
     refetchInterval: (q) => (q.state.data?.running ? 3000 : false),
   });
-  const { data: fillRuns } = useQuery({
+  const { data: fillRuns, isError: fillRunsFailed, error: fillRunsError, refetch: retryFillRuns } = useQuery({
     queryKey: ['batch-fill-runs'],
     queryFn: () => batchFillApi.listRuns(10),
     refetchInterval: fillStatus?.running ? 5000 : false,
@@ -109,7 +110,7 @@ export default function SyncPage() {
     onError: (err: Error) => showToast(`撤回に失敗: ${err.message}`, 'error'),
   });
 
-  const { data: batchStatus } = useQuery({
+  const { data: batchStatus, isError: batchStatusFailed, error: batchStatusError, refetch: retryBatchStatus } = useQuery({
     queryKey: ['batch-analyze-status'],
     queryFn: batchAnalyzeApi.status,
     refetchInterval: (query) => (query.state.data?.running ? 3000 : false),
@@ -172,6 +173,11 @@ export default function SyncPage() {
 
   return (
     <div className="space-y-6">
+      {channelListFailed && <QueryError error={channelListError} onRetry={retryChannelList} />}
+      {fillStatusFailed && <QueryError error={fillStatusError} onRetry={retryFillStatus} />}
+      {fillRunsFailed && <QueryError error={fillRunsError} onRetry={retryFillRuns} />}
+      {batchStatusFailed && <QueryError error={batchStatusError} onRetry={retryBatchStatus} />}
+
       <h1 className="text-3xl font-bold text-gray-900">Holodex 同期</h1>
 
       <AutoFillTargets />
@@ -668,11 +674,12 @@ export default function SyncPage() {
 // しかも「入力元に無い」だけでは何をすべきか決まらない（消すべきとは限らない）。
 // 気付けるようにはしておきたいので、実行履歴から辿れる形にだけしてある。
 function GapList({ runId }: { runId: string }) {
-  const { data, isLoading } = useQuery({
+  const { data, isPending: isLoading, isError, error, refetch } = useQuery({
     queryKey: ['batch-fill-gaps', runId],
     queryFn: () => batchFillApi.gaps(runId),
   });
 
+  if (isError) return <QueryError error={error} onRetry={refetch} />;
   if (isLoading) return <p className="text-xs text-gray-400">読み込み中…</p>;
   const gaps = data?.gaps ?? [];
   if (gaps.length === 0) {
@@ -728,7 +735,7 @@ function AutoFillTargets() {
   const canEdit = hasPermission(useAuthStore((st) => st.user), PERM.CONTENT_EDIT);
   const authStatus = useAuthStore((st) => st.status);
 
-  const { data, isLoading, isError, error } = useQuery({
+  const { data, isPending: isLoading, isError, error } = useQuery({
     // **権限を鍵に入れる。** ログアウトしても QueryClient は消えないので、
     // 固定の鍵だと content:edit の利用者が取った一覧が、5 分以内に
     // ログインした sync:run だけの利用者に見えてしまう
@@ -813,7 +820,7 @@ function AutoFillSchedule() {
   const canEdit = hasPermission(useAuthStore((st) => st.user), PERM.CONTENT_EDIT);
   const authStatus = useAuthStore((st) => st.status);
 
-  const { data: settings, isError, isLoading } = useQuery({
+  const { data: settings, isError, isPending: isLoading } = useQuery({
     queryKey: ['autoFillSettings', canEdit],
     queryFn: autoFillApi.getSettings,
     enabled: canEdit && authStatus !== 'loading',
@@ -1032,7 +1039,7 @@ function BackgroundTasks() {
   });
   const cancel = useMutation({ mutationFn: taskApi.cancel, onSuccess: () => showToast('停止を要求しました。処理中の1件が終わると停止します', 'info'), onError: (err: Error) => showToast(err.message, 'error') });
 
-  const { data: tasks, isError } = useQuery({
+  const { data: tasks, isError, isPending: tasksPending } = useQuery({
     queryKey: ['tasks', canEdit],
     queryFn: () => taskApi.list(10),
     enabled: canEdit && authStatus !== 'loading',
@@ -1098,6 +1105,8 @@ function BackgroundTasks() {
 
       {isError ? (
         <p className="text-red-600 text-sm">記録の取得に失敗しました。</p>
+      ) : tasksPending ? (
+        <p className="text-gray-400 text-sm">読み込み中…</p>
       ) : (tasks?.length ?? 0) === 0 ? (
         <p className="text-gray-400 text-sm">まだ実行の記録がありません。</p>
       ) : (
@@ -1177,7 +1186,7 @@ function RestrictionReview() {
   const canEdit = hasPermission(useAuthStore((st) => st.user), PERM.CONTENT_EDIT);
   const authStatus = useAuthStore((st) => st.status);
 
-  const { data, isLoading, isError } = useQuery({
+  const { data, isPending: isLoading, isError } = useQuery({
     queryKey: ['restriction-review', canEdit],
     queryFn: () => restrictionReviewApi.list(100),
     enabled: canEdit && authStatus !== 'loading',
@@ -1270,7 +1279,7 @@ function NonSingingCandidates() {
   // 誤って却下した配信が二度と出てこない（CLAUDE.md §7.7）。
   const [showDismissed, setShowDismissed] = useState(false);
 
-  const { data, isLoading, isError } = useQuery({
+  const { data, isPending: isLoading, isError } = useQuery({
     queryKey: ['nonSingingCandidates', canEdit, showDismissed],
     queryFn: () => nonSingingApi.list(100, showDismissed),
     enabled: canEdit && authStatus !== 'loading',

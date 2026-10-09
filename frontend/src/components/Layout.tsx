@@ -64,7 +64,7 @@ export default function Layout() {
   };
 
   return (
-    <div className="h-screen-dynamic bg-gray-50 flex flex-col overflow-hidden">
+    <div className="h-full bg-gray-50 flex flex-col overflow-hidden">
       {/* Header */}
       <header className="relative z-30 bg-white shadow-sm border-b shrink-0">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">

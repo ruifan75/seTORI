@@ -1,4 +1,5 @@
 import ManualInputImport from '../../components/ManualInputImport';
+import QueryError from '../../components/ui/QueryError';
 import { playerSeekTo } from '../../components/youtubePlayerControl';
 import RawCommentsPanel from '../../components/RawCommentsPanel';
 import SourceSongList from '../../components/SourceSongList';
@@ -37,6 +38,7 @@ export default function StreamAnalysisTabs({ model }: { model: StreamDetailModel
   } = model;
   return (
     <div className="flex flex-col min-h-0">
+      {model.fetchError && <QueryError error={model.fetchError.error} onRetry={model.fetchError.refetch} />}
       {/* 狭い器ではタブを次の行へ送る。ラベル自体を縮めて縦に折り返さない。
           幅が足りるデスクトップでは従来と同じ一列の寸法になる。 */}
       <div className="flex flex-wrap border-b shrink-0 sticky top-0 bg-white z-10">

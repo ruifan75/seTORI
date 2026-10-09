@@ -1,3 +1,4 @@
+import QueryError from '../components/ui/QueryError';
 import { useQuery } from '@tanstack/react-query';
 import RestrictedBadge from '../components/RestrictedBadge';
 import { Link, useParams } from 'react-router-dom';
@@ -25,14 +26,12 @@ export default function PresetPlaylistPage() {
     queryKey: ['presets', 'detail', key],
     queryFn: () => presetPlaylistApi.get(key!),
     enabled: !!key,
-    retry: false,
   });
 
   const itemsQuery = useQuery({
     queryKey: ['preset-items', key, 'all'],
     queryFn: () => presetPlaylistApi.items(key!),
     enabled: !!key,
-    retry: false,
   });
 
   const preset = presetQuery.data;
@@ -51,9 +50,10 @@ export default function PresetPlaylistPage() {
     usePlayerStore.getState().playTracks(tracks, 0);
   };
 
-  if (presetQuery.isLoading) return <Loading />;
+  if (presetQuery.isError) return <QueryError error={presetQuery.error} onRetry={presetQuery.refetch} />;
+  if (presetQuery.isPending) return <Loading />;
 
-  if (presetQuery.isError || !preset) {
+  if (!preset) {
     return (
       <div className="text-center py-16 space-y-3">
         <p className="text-gray-900 font-medium">プレイリストが見つかりません</p>
@@ -101,7 +101,9 @@ export default function PresetPlaylistPage() {
       </div>
 
       {/* 収録曲 */}
-      {itemsQuery.isLoading ? (
+      {itemsQuery.isError ? (
+        <QueryError error={itemsQuery.error} onRetry={itemsQuery.refetch} />
+      ) : itemsQuery.isPending ? (
         <Loading />
       ) : items.length === 0 ? (
         <p className="text-gray-500 py-8 text-center">条件に合う歌唱がまだありません。</p>

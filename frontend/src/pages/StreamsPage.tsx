@@ -1,3 +1,4 @@
+import QueryError from '../components/ui/QueryError';
 import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
 import { Link, useSearchParams } from 'react-router-dom';
@@ -21,18 +22,18 @@ export default function StreamsPage() {
   // API と同じ条件をチップ・解除操作・キャッシュの鍵にも使う。
   const selectedTags = [...new Set(searchParams.getAll('tag').map((tag) => tag.trim()).filter(Boolean))];
 
-  const { data, isLoading, error } = useQuery({
+  const { data, isPending: isLoading, error } = useQuery({
     queryKey: ['streams', page, sort, dir, selectedTags],
     queryFn: () => streamApi.list(page, 20, sort, dir, selectedTags),
   });
 
   // チップの語彙と件数。件数は「今の絞り込みに足すと何件になるか」（一覧と同じ母集合）
-  const { data: allTags } = useQuery({
+  const { data: allTags, isError: tagsFailed, error: tagsError, refetch: retryTags } = useQuery({
     queryKey: ['stream-tags'],
     queryFn: tagApi.listStreamTags,
     staleTime: 1000 * 60 * 30,
   });
-  const { data: tagCounts } = useQuery({
+  const { data: tagCounts, isError: countsFailed, error: countsError, refetch: retryCounts } = useQuery({
     queryKey: ['streams', 'tag-counts', selectedTags],
     queryFn: () => streamApi.tagCounts(selectedTags),
   });
@@ -59,9 +60,9 @@ export default function StreamsPage() {
 
   // 件数のあるタグだけ、多い順に並べる。選んでいるものは件数が 0 でも残す（外せるように）。
   const chips = (allTags ?? [])
-    .map((t) => ({ ...t, count: tagCounts?.[t.id] ?? 0 }))
-    .filter((t) => t.count > 0 || selectedTags.includes(t.id))
-    .sort((a, b) => b.count - a.count);
+    .map((t) => ({ ...t, count: tagCounts && !countsFailed ? tagCounts[t.id] ?? 0 : undefined }))
+    .filter((t) => (t.count ?? 0) > 0 || selectedTags.includes(t.id))
+    .sort((a, b) => (b.count ?? 0) - (a.count ?? 0));
 
   const handlePageChange = (newPage: number) => {
     setSearchParams(buildParams({ page: newPage }));
@@ -75,6 +76,8 @@ export default function StreamsPage() {
     <div className="space-y-6">
       <h1 className="text-3xl font-bold text-gray-900">配信一覧</h1>
 
+      {tagsFailed && <QueryError error={tagsError} onRetry={retryTags} />}
+      {countsFailed && <QueryError error={countsError} onRetry={retryCounts} />}
       {/* 配信タグで絞る。複数選ぶと**全部を持つ**配信だけ（AND） */}
       {(chips.length > 0 || selectedTags.length > 0) && (
         <div className="flex flex-wrap items-center gap-2">
@@ -96,7 +99,7 @@ export default function StreamsPage() {
                 }
               >
                 {t.display_name}
-                <span className={on ? 'text-white/80' : 'text-gray-400'}>{t.count}</span>
+                <span className={on ? 'text-white/80' : 'text-gray-400'}>{t.count ?? (countsFailed ? '—' : '…')}</span>
               </button>
             );
           })}

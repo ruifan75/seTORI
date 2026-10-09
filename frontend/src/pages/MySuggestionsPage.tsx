@@ -1,3 +1,4 @@
+import QueryError from '../components/ui/QueryError';
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
@@ -38,7 +39,7 @@ export default function MySuggestionsPage() {
   const [status, setStatus] = useState<SuggestionStatus | ''>('');
   const [page, setPage] = useState(1);
 
-  const { data, isLoading } = useQuery({
+  const { data, isPending: isLoading, isError: queryFailed, error: queryError, refetch: retryFetch } = useQuery({
     queryKey: ['suggestions', 'mine', status, page],
     queryFn: () => suggestionApi.listMine(status, page, 20),
   });
@@ -84,7 +85,9 @@ export default function MySuggestionsPage() {
         ))}
       </div>
 
-      {isLoading ? (
+      {queryFailed ? (
+        <QueryError error={queryError} onRetry={retryFetch} />
+      ) : isLoading ? (
         <Loading />
       ) : !data || data.suggestions.length === 0 ? (
         <div className="text-center py-12 text-gray-500 bg-white rounded-lg border">

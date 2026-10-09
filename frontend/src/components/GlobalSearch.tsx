@@ -1,3 +1,4 @@
+import QueryError from './ui/QueryError';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
@@ -55,7 +56,7 @@ export default function GlobalSearch({
     if (expandable) onExpandedChange?.(expanded);
   }, [expandable, expanded, onExpandedChange]);
 
-  const { data, isFetching } = useQuery({
+  const { data, isFetching, isError, error, refetch } = useQuery({
     queryKey: ['global-search', debounced],
     queryFn: () => searchApi.global(debounced),
     enabled: debounced.length >= 1,
@@ -65,7 +66,7 @@ export default function GlobalSearch({
   const hasFilters = !!(
     titleQuery || owner || participants.length || vocalists.length || streamTags.length || performanceTags.length
   );
-  const { data: filteredResults, isFetching: filtersFetching } = useQuery({
+  const { data: filteredResults, isFetching: filtersFetching, isPending: filtersPending, isError: filtersFailed, error: filtersError, refetch: retryFilters } = useQuery({
     queryKey: [
       'global-filter-preview', titleQuery, owner?.id,
       participants.map((channel) => channel.id).join(','), vocalists.map((singer) => singer.id).join(','),
@@ -386,6 +387,7 @@ export default function GlobalSearch({
 
       {showPanel && (
         <div className="absolute left-0 top-full z-50 mt-1 max-h-[75vh] w-full overflow-y-auto border border-gray-200 bg-white shadow-xl rounded-lg">
+          {isError && <QueryError error={error} onRetry={refetch} />}
           {focusedToken && (
             <div className="flex items-center gap-3 border-b border-gray-200 bg-gray-50 px-3 py-2">
               <span className="shrink-0 text-xs font-medium text-gray-400">選択中</span>
@@ -487,9 +489,10 @@ export default function GlobalSearch({
             <div className="border-b py-1">
               <div className="flex items-center justify-between px-3 pb-1 pt-2">
                 <span className="text-xs font-medium text-gray-400">現在の条件</span>
-                <span className="text-xs text-gray-500">{filtersFetching ? '検索中...' : `${filteredResults?.pagination.total ?? 0}件`}</span>
+                <span className="text-xs text-gray-500">{filtersFailed ? '取得失敗' : filtersFetching || filtersPending ? '検索中...' : `${filteredResults?.pagination.total ?? 0}件`}</span>
               </div>
-              {filteredResults?.streams.map((stream) => (
+              {filtersFailed && <QueryError error={filtersError} onRetry={retryFilters} />}
+              {!filtersFailed && filteredResults?.streams.map((stream) => (
                 <button key={stream.id} type="button" onClick={() => go(`/streams/${stream.id}`)} className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-gray-50">
                   {stream.thumbnail_url && <img src={stream.thumbnail_url} alt="" className="h-7 w-12 shrink-0 object-cover rounded" />}
                   <span className="min-w-0">
@@ -504,7 +507,7 @@ export default function GlobalSearch({
             </div>
           )}
 
-          {debounced && !hasCandidates && !isFetching && (
+          {debounced && !isError && !hasCandidates && !isFetching && (
             <div className="px-3 py-4 text-center text-sm text-gray-400">タイトル条件として追加できます</div>
           )}
           {isFetching && !data && <div className="px-3 py-4 text-center text-sm text-gray-400">検索中...</div>}

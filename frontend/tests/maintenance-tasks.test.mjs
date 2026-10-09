@@ -10,6 +10,11 @@ import { QueryClient, QueryObserver } from '@tanstack/react-query';
 
 const require = createRequire(import.meta.url);
 function loadTS(path, dependencies = {}) {
+  dependencies = {
+    '../../components/ui/QueryError': { default: () => null },
+    './connectivity': { observeAPIConnection() {} },
+    ...dependencies,
+  };
   const module = { exports: {} };
   const url = new URL(path, import.meta.url);
   const code = ts.transpileModule(readFileSync(url, 'utf8').replaceAll('import.meta.env', '({})'), {

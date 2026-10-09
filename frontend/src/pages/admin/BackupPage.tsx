@@ -1,3 +1,4 @@
+import QueryError from '../../components/ui/QueryError';
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { backupApi } from '../../api/client';
@@ -162,7 +163,7 @@ function GoogleDriveSection({ onRestoreRequest }: {
   };
 
   // 連携済みのときだけ Drive 上のファイル一覧を取得
-  const { data: driveFiles = [], isLoading: driveLoading, error: driveError } = useQuery({
+  const { data: driveFiles = [], isPending: driveLoading, error: driveError } = useQuery({
     queryKey: ['backup-drive-files'],
     queryFn: backupApi.gdriveFiles,
     enabled: !!gdrive?.connected,
@@ -465,7 +466,7 @@ export default function BackupPage() {
   const { showToast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const { data: status, isLoading } = useQuery({ queryKey: ['backup-status'], queryFn: backupApi.status });
+  const { data: status, isPending: isLoading, isError, error, refetch } = useQuery({ queryKey: ['backup-status'], queryFn: backupApi.status });
 
   const [restoreTarget, setRestoreTarget] = useState<RestoreTarget | null>(null);
 
@@ -602,7 +603,9 @@ export default function BackupPage() {
           サーバー上（backend/backups/）に保存されたバックアップです。復元前には現在の状態が自動で安全バックアップされます。
         </p>
 
-        {isLoading ? (
+        {isError ? (
+          <QueryError error={error} onRetry={refetch} />
+        ) : isLoading ? (
           <p className="text-gray-400">読み込み中...</p>
         ) : !status?.backups.length ? (
           <p className="text-sm text-gray-400">バックアップがまだありません</p>

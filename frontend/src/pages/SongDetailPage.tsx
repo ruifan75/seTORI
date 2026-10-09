@@ -1,3 +1,4 @@
+import QueryError from '../components/ui/QueryError';
 import { useEffect, useRef, useState } from 'react';
 import RestrictedBadge from '../components/RestrictedBadge';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -171,7 +172,7 @@ export default function SongDetailPage() {
   const [directItunesId, setDirectItunesId] = useState('');
   const [isSearching, setIsSearching] = useState(false);
 
-  const { data, isLoading } = useQuery({
+  const { data, isPending: isLoading, isError: queryFailed, error: queryError, refetch: retryFetch } = useQuery({
     queryKey: ['song', id, 'performances', page],
     queryFn: () => songApi.getPerformances(id!, page, 20),
     enabled: !!id,
@@ -509,6 +510,7 @@ export default function SongDetailPage() {
     setSearchParams({ page: String(newPage) });
   };
 
+  if (queryFailed) return <QueryError error={queryError} onRetry={retryFetch} />;
   if (isLoading) {
     return <Loading />;
   }

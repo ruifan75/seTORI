@@ -24,7 +24,6 @@ export default function BuildVersion() {
     queryKey: ['version'],
     queryFn: versionApi.get,
     staleTime: 5 * 60 * 1000,
-    retry: false,
   });
 
   // どちらかが 'dev'（＝埋め込み無しのローカル実行）なら比較しても意味がない。

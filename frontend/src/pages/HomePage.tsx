@@ -1,3 +1,4 @@
+import QueryError from '../components/ui/QueryError';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
@@ -50,7 +51,7 @@ function PresetSection({ preset }: { preset: PresetPlaylist }) {
 
   // キーの先頭を 'presets' にしない：フォローの更新で invalidate する範囲に入り、
   // 押すたびに全プリセットの中身を取り直すことになる。
-  const { data, isLoading } = useQuery({
+  const { data, isPending: isLoading, isError, error, refetch } = useQuery({
     queryKey: ['preset-items', preset.key, PRESET_ROW_SIZE],
     queryFn: () => presetPlaylistApi.items(preset.key, PRESET_ROW_SIZE),
     staleTime: 5 * 60 * 1000,
@@ -86,6 +87,7 @@ function PresetSection({ preset }: { preset: PresetPlaylist }) {
     }
   };
 
+  if (isError) return <QueryError error={error} onRetry={refetch} />;
   if (!isLoading && performances.length === 0) return null;
 
   return (
@@ -111,7 +113,8 @@ export default function HomePage() {
   // おすすめは20曲ずつ追加する。pageParam に既出曲を渡し、API 側でも重複を除外する。
   const {
     data: recoData,
-    isLoading: recoLoading,
+    isPending: recoLoading,
+    isError: recoFailed, error: recoError, refetch: retryReco,
     fetchNextPage: fetchMoreRecommendations,
     hasNextPage: hasMoreRecommendations,
     isFetchingNextPage: isFetchingMoreRecommendations,
@@ -126,17 +129,17 @@ export default function HomePage() {
     staleTime: Infinity,
   });
 
-  const { data: singingData, isLoading: singingLoading } = useQuery({
+  const { data: singingData, isPending: singingLoading, isError: singingFailed, error: singingError, refetch: retrySinging } = useQuery({
     queryKey: ['tag-streams', 'singing', 'home'],
     queryFn: () => tagApi.getStreamsByTag('singing', 1, 6),
   });
 
-  const { data: songsData, isLoading: songsLoading } = useQuery({
+  const { data: songsData, isPending: songsLoading, isError: songsFailed, error: songsError, refetch: retrySongs } = useQuery({
     queryKey: ['songs', 'popular'],
     queryFn: () => songApi.list(1, 10, undefined, 'performances', 'desc'),
   });
 
-  const { data: presetData } = useQuery({
+  const { data: presetData, isError: presetFailed, error: presetError, refetch: retryPresets } = useQuery({
     queryKey: ['presets'],
     queryFn: () => presetPlaylistApi.list(),
   });
@@ -312,7 +315,9 @@ export default function HomePage() {
           )}
         </SectionHeader>
 
-        {recoLoading ? (
+        {recoFailed ? (
+          <QueryError error={recoError} onRetry={retryReco} />
+        ) : recoLoading ? (
           <Loading />
         ) : (
           <div className="relative -mx-1">
@@ -372,14 +377,17 @@ export default function HomePage() {
       </section>
 
       {/* プリセットプレイリスト（運営が用意した歌単） */}
-      {presetData?.presets.map((preset) => (
+      {presetFailed && <QueryError error={presetError} onRetry={retryPresets} />}
+      {!presetFailed && presetData?.presets.map((preset) => (
         <PresetSection key={preset.key} preset={preset} />
       ))}
 
       {/* 最近の歌枠（singing タグ付きのみ） */}
       <section>
         <SectionHeader title="最近の歌枠" linkTo="/tags/stream/singing" />
-        {singingLoading ? (
+        {singingFailed ? (
+          <QueryError error={singingError} onRetry={retrySinging} />
+        ) : singingLoading ? (
           <Loading />
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -425,7 +433,9 @@ export default function HomePage() {
       {/* 人気の楽曲（歌唱回数の多い順） */}
       <section>
         <SectionHeader title="人気の楽曲" linkTo="/songs" />
-        {songsLoading ? (
+        {songsFailed ? (
+          <QueryError error={songsError} onRetry={retrySongs} />
+        ) : songsLoading ? (
           <Loading />
         ) : (
           <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">

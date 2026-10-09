@@ -1,3 +1,4 @@
+import QueryError from '../../components/ui/QueryError';
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { organizationApi } from '../../api/client';
@@ -19,7 +20,7 @@ export default function OrganizationsPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [addForm, setAddForm] = useState({ key: '', display_name: '', sort_order: 0, is_unaffiliated: false });
 
-  const { data, isLoading } = useQuery({
+  const { data, isPending: isLoading, isError: queryFailed, error: queryError, refetch: retryFetch } = useQuery({
     queryKey: ['organizations'],
     queryFn: organizationApi.list,
   });
@@ -95,7 +96,9 @@ export default function OrganizationsPage() {
         </button>
       </div>
 
-      {isLoading ? (
+      {queryFailed ? (
+        <QueryError error={queryError} onRetry={retryFetch} />
+      ) : isLoading ? (
         <Loading />
       ) : organizations.length === 0 ? (
         <div className="text-center py-12 text-gray-500">事務所がありません。</div>

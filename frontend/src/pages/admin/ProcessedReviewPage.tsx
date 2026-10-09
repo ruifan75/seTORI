@@ -6,6 +6,7 @@ import { useToast } from '../../components/ui/ToastContext';
 import { onViewerChange, sameViewer, viewerID } from '../../queryClient';
 import { invalidateProcessedReviewQueries } from '../../utils/processedReviewCache';
 import { reviewDateBoundary } from '../../utils/processedReviewDate';
+import QueryError from '../../components/ui/QueryError';
 
 const initialFilters: ProcessedReviewFilters = {
   is_processed: true, q: '', channel_id: '', tags: [], hidden: 'all', has_performances: 'all', from: '', until: '',
@@ -61,10 +62,10 @@ export default function ProcessedReviewPage() {
       <label>配信日・開始<input type="date" className={inputClass} onChange={(e) => changeFilters({ from: reviewDateBoundary(e.target.value, false) })} /></label>
       <label>配信日・終了（含む）<input type="date" className={inputClass} onChange={(e) => changeFilters({ until: reviewDateBoundary(e.target.value, true) })} /></label>
     </fieldset>
-    {(channels.isError || tags.isError) && <p role="alert" className="text-red-600">絞り込みの選択肢を取得できませんでした。</p>}
-    <div className="flex flex-wrap gap-3"><span>{list.data?.total ?? 0}件</span><button disabled={locked || list.isFetching || !candidates.length} onClick={() => setSelected(selected.length === candidates.length ? [] : candidates.map((c) => c.id))} className="underline">{selected.length === candidates.length && candidates.length > 0 ? 'このページの選択を解除' : 'このページをすべて選択'}</button></div>
-    {list.isError && <p role="alert" className="text-red-600">一覧の取得に失敗しました。</p>}
-    {list.isPending ? <p>読み込み中…</p> : <div className="border rounded divide-y">
+    {channels.isError && <QueryError error={channels.error} onRetry={channels.refetch} />}
+    {tags.isError && <QueryError error={tags.error} onRetry={tags.refetch} />}
+    <div className="flex flex-wrap gap-3"><span>{list.isError ? '取得失敗' : list.isPending ? '読み込み中…' : `${list.data?.total ?? 0}件`}</span><button disabled={locked || list.isFetching || !candidates.length} onClick={() => setSelected(selected.length === candidates.length ? [] : candidates.map((c) => c.id))} className="underline">{selected.length === candidates.length && candidates.length > 0 ? 'このページの選択を解除' : 'このページをすべて選択'}</button></div>
+    {list.isError ? <QueryError error={list.error} onRetry={list.refetch} /> : list.isPending ? <p>読み込み中…</p> : <div className="border rounded divide-y">
       {candidates.length === 0 && <p className="p-4">該当する配信はありません。</p>}
       {candidates.map((c) => <div key={c.id} className="flex gap-3 p-3 items-center">
         <input aria-label={`${c.title}を選択`} type="checkbox" disabled={locked || list.isFetching} checked={selected.includes(c.id)} onChange={(e) => setSelected(e.target.checked ? [...selected, c.id] : selected.filter((id) => id !== c.id))} />
@@ -81,7 +82,7 @@ export default function ProcessedReviewPage() {
       <button disabled={busy} onClick={() => apply.mutate({ id: preview.run_id, startedAs: viewerID() })} className="bg-indigo-600 text-white px-4 py-2 rounded">{preview.is_processed ? '処理済みを付ける' : '処理済みを外す'}</button><button disabled={busy} onClick={() => setPreview(null)} className="ml-3">戻る</button>
     </div>}
     <div className="border rounded p-4 space-y-2"><h2 className="font-bold">変更の履歴（直近20件）</h2>
-      {runs.isError && <p role="alert" className="text-red-600">履歴の取得に失敗しました。</p>}
+      {runs.isError && <QueryError error={runs.error} onRetry={runs.refetch} />}
       {runs.data?.map((run) => <div key={run.id} className="flex gap-3 flex-wrap text-sm">
         <span>{new Date(run.created_at).toLocaleString('ja-JP')} / {run.item_count}件 / {run.after_processed ? '処理済みを付ける' : '処理済みを外す'} / {{ preview: '確認のみ', applied: '実行済み', reverted: '取り消しました' }[run.status]}</span>
         {run.status === 'applied' && <button disabled={locked} onClick={() => { if (window.confirm(`${run.item_count}件の処理済み変更を取り消します。処理済み状態が変更後の値と違う配信や、削除された配信は見送ります。自動処理の結果は戻しません。`)) revert.mutate({ id: run.id, startedAs: viewerID() }); }} className="underline">取り消す</button>}

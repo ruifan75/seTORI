@@ -1,3 +1,4 @@
+import QueryError from '../components/ui/QueryError';
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
@@ -146,7 +147,9 @@ export default function PlaylistsPage() {
             <Link to="/login" className="text-indigo-600 hover:underline">ログイン</Link>
             するとプレイリストを作成できます。
           </p>
-        ) : mine.isLoading ? (
+        ) : mine.isError ? (
+          <QueryError error={mine.error} onRetry={mine.refetch} />
+        ) : mine.isPending ? (
           <Loading />
         ) : (mine.data?.playlists.length ?? 0) === 0 ? (
           <p className="text-gray-500">まだプレイリストがありません。曲の「＋」ボタンから追加できます。</p>
@@ -197,10 +200,13 @@ export default function PlaylistsPage() {
         </section>
       )}
 
+      {presets.isError && <QueryError error={presets.error} onRetry={presets.refetch} />}
       {/* 公開プレイリスト */}
       <section className="space-y-3">
         <h2 className="text-xl font-semibold text-gray-900">公開プレイリスト</h2>
-        {publicLists.isLoading ? (
+        {publicLists.isError ? (
+          <QueryError error={publicLists.error} onRetry={publicLists.refetch} />
+        ) : publicLists.isPending ? (
           <Loading />
         ) : (publicLists.data?.playlists.length ?? 0) === 0 ? (
           <p className="text-gray-500">公開されているプレイリストはまだありません。</p>

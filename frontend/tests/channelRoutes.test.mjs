@@ -23,7 +23,7 @@ function load(relative, overrides = {}) {
   }, fileName: filename }).outputText;
   const module = { exports: {} };
   vm.runInNewContext(code, { module, exports: module.exports, URLSearchParams,
-    require: (id) => overrides[id] ?? require(id),
+    require: (id) => overrides[id] ?? (id === './connectivity' ? { observeAPIConnection() {} } : require(id)),
   }, { filename });
   return module.exports;
 }
