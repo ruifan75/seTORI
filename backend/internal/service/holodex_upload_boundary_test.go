@@ -75,7 +75,7 @@ func TestHolodexUploadRequiresRecordedPublicSource(t *testing.T) {
 	const id = "hVfDBfreYNI"
 	const perfID = "10000000-0000-0000-0000-000000000001"
 	const songID = "10000000-0000-0000-0000-000000000002"
-	const automatic = `EXISTS (SELECT 1 FROM stream_stream_tags mt WHERE mt.stream_id = streams.id AND mt.tag_id = 'members_only') AND NOT COALESCE((SELECT bool_and(COALESCE(eg.members_only_policy, '') = 'allow') FROM stream_singers eo JOIN singers eg ON eg.id = eo.singer_id WHERE eo.stream_id = streams.id AND eo.is_owner), FALSE)`
+	const automatic = `EXISTS (SELECT 1 FROM stream_stream_tags mt WHERE mt.stream_id = streams.id AND mt.tag_id = 'members_only') AND NOT COALESCE((SELECT bool_and(COALESCE(eg.members_only_policy, '') = 'allow') FROM stream_channels eo JOIN channels eg ON eg.id = eo.channel_id WHERE eo.stream_id = streams.id AND eo.is_owner), FALSE)`
 	const streamQuery = `SELECT id, title, stream_date, duration_seconds, thumbnail_url, holodex_data, holodex_hash, comment_raw, comment_songs, comment_songs_analyzed_at, chapter_raw, chapter_songs, is_processed, is_hidden, restriction_override, holodex_uploaded_at, holodex_upload_unknown, availability, playable_in_embed, availability_checked_at, created_at, updated_at,
  COALESCE(streams.restriction_override, ` + automatic + `) AS is_restricted_effective,
  streams.restriction_override IS FALSE AND ` + automatic + ` AND streams.restriction_override_auto IS DISTINCT FROM TRUE AS restriction_needs_review FROM streams WHERE id = $1`

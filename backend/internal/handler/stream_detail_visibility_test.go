@@ -34,8 +34,8 @@ func TestStreamDetailVisibilityBoundary(t *testing.T) {
 	now := time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)
 	singerSelect := `SELECT s.id, s.name, s.english_name, s.photo_url, COALESCE(s.organization_override, s.organization),
  o.display_name, COALESCE(o.is_unaffiliated, FALSE), s.metadata_source, s.created_at, s.updated_at
- FROM singers s LEFT JOIN organizations o ON COALESCE(s.organization_override, s.organization) = o.key
- JOIN stream_singers ss ON s.id = ss.singer_id WHERE ss.stream_id = $1`
+ FROM channels s LEFT JOIN organizations o ON COALESCE(s.organization_override, s.organization) = o.key
+ JOIN stream_channels ss ON s.id = ss.channel_id WHERE ss.stream_id = $1`
 	singerRow := []driver.Value{"owner", "公開のチャンネル名", nil, nil, nil, nil, false, "manual", now, now}
 	for _, user := range []struct {
 		name               string
