@@ -196,12 +196,12 @@ func TestVisibilityPreviewWritesOnlyAudit(t *testing.T) {
 const visibilityWantLock = `SELECT status, item_count FROM visibility_review_runs WHERE id = $1 FOR UPDATE`
 const visibilityWantApplyLock = `SELECT s.id FROM streams s JOIN visibility_review_items i ON i.stream_id = s.id
  WHERE ` + visibilityWantWhere + ` AND i.run_id = $3
- AND s.is_hidden = i.before_hidden AND s.updated_at = i.before_updated_at
+ AND s.is_hidden = i.before_hidden
  ORDER BY s.id ASC FOR UPDATE OF s`
 const visibilityWantApply = `WITH changed AS (
  UPDATE streams s SET is_hidden = i.after_hidden, updated_at = NOW()
  FROM visibility_review_items i WHERE i.run_id = $1 AND i.stream_id = s.id
- AND s.is_hidden = i.before_hidden AND s.updated_at = i.before_updated_at
+ AND s.is_hidden = i.before_hidden
  AND s.is_hidden = TRUE AND s.duration_seconds > $3
  AND EXISTS (SELECT 1 FROM stream_stream_tags t WHERE t.stream_id = s.id AND t.tag_id = ANY($2))
  AND NOT EXISTS (SELECT 1 FROM non_singing_checks c WHERE c.stream_id = s.id)
@@ -211,7 +211,7 @@ const visibilityWantApply = `WITH changed AS (
 const visibilityWantRevert = `WITH restored AS (
  UPDATE streams s SET is_hidden = i.before_hidden, updated_at = NOW()
  FROM visibility_review_items i WHERE i.run_id = $1 AND i.stream_id = s.id
- AND s.is_hidden = i.after_hidden AND s.updated_at = i.after_updated_at
+ AND s.is_hidden = i.after_hidden
  AND i.reverted_at IS NULL
  RETURNING s.id)
  UPDATE visibility_review_items i SET reverted_at = NOW()
