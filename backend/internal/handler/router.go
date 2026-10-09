@@ -56,6 +56,7 @@ type Router struct {
 	batchAnalyzeService  *service.BatchAnalyzeService
 	batchFillService     *service.BatchFillService
 	visibilityReview     *repository.VisibilityReviewRepository
+	processedReview      *repository.ProcessedReviewRepository
 	authService          *service.AuthService
 	// ログイン試行の絞り込み（総当たりと bcrypt による CPU 消費を止める）
 	loginLimiter      *loginLimiter
@@ -223,6 +224,7 @@ func NewRouter(db *sql.DB, cfg *config.Config) *Router {
 
 	r.prepareService = service.NewPrepareService(streamRepo, chapterService, batchAnalyzeService, batchFillService, r.taskRunService)
 	r.visibilityReview = repository.NewVisibilityReviewRepository(db)
+	r.processedReview = repository.NewProcessedReviewRepository(db)
 	r.setupRoutes()
 	return r
 }
@@ -414,6 +416,13 @@ func (r *Router) setupRoutes() {
 	r.mux.HandleFunc("POST /api/visibility-review/runs/{id}/apply", r.handleVisibilityApply)
 	r.mux.HandleFunc("POST /api/visibility-review/runs/{id}/revert", r.handleVisibilityRevert)
 	r.mux.HandleFunc("GET /api/visibility-review/runs", r.handleVisibilityRuns)
+
+	r.mux.HandleFunc("GET /api/processed-review", r.handleProcessedCandidates)
+	r.mux.HandleFunc("POST /api/processed-review/preview", r.handleProcessedPreview)
+	r.mux.HandleFunc("POST /api/processed-review/runs/{id}/apply", r.handleProcessedApply)
+	r.mux.HandleFunc("POST /api/processed-review/runs/{id}/revert", r.handleProcessedRevert)
+	r.mux.HandleFunc("GET /api/processed-review/runs", r.handleProcessedRuns)
+
 	r.mux.HandleFunc("GET /api/non-singing-candidates", r.handleListNonSingingCandidates)
 	r.mux.HandleFunc("GET /api/restriction-review", r.handleListRestrictionReview)
 	r.mux.HandleFunc("POST /api/non-singing-candidates/{id}/dismiss", r.handleDismissNonSingingCandidate)
@@ -3881,7 +3890,7 @@ func requiredPermission(method, path string) (perm string, needsAuth bool) {
 
 	// 見直しが要る配信の一覧も content:edit。**GET は既定で公開に落ちる**ので、
 	// 書かないと「非表示にしている配信の題名」が未ログインから読める。
-	if isRouteOrSubpath(path, "/api/non-singing-candidates") || isRouteOrSubpath(path, "/api/visibility-review") {
+	if isRouteOrSubpath(path, "/api/non-singing-candidates") || isRouteOrSubpath(path, "/api/visibility-review") || isRouteOrSubpath(path, "/api/processed-review") {
 		return auth.PermContentEdit, true
 	}
 

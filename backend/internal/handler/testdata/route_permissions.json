@@ -1412,5 +1412,40 @@
     "permission": "content:edit",
     "login": true,
     "analysis": false
+  },
+  {
+    "pattern": "GET /api/processed-review",
+    "handler": "handleProcessedCandidates",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/processed-review/preview",
+    "handler": "handleProcessedPreview",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/processed-review/runs/{id}/apply",
+    "handler": "handleProcessedApply",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "POST /api/processed-review/runs/{id}/revert",
+    "handler": "handleProcessedRevert",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
+  },
+  {
+    "pattern": "GET /api/processed-review/runs",
+    "handler": "handleProcessedRuns",
+    "permission": "content:edit",
+    "login": true,
+    "analysis": false
   }
 ]

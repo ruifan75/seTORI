@@ -18,6 +18,7 @@ const navItems = [
 const adminItems = [
   { path: '/admin/suggestions', label: '修正提案', permission: PERM.CONTENT_EDIT },
   { path: '/admin/merge-candidates', label: '重複候補', permission: PERM.CONTENT_EDIT },
+  { path: '/admin/processed-review', label: '処理済みの一括変更', permission: PERM.CONTENT_EDIT },
   { path: '/admin/visibility-review', label: '非表示の見直し', permission: PERM.CONTENT_EDIT },
   { path: '/admin/missing-tags', label: 'タグ漏れ', permission: PERM.CONTENT_EDIT },
   { path: '/admin/organizations', label: '事務所', permission: PERM.CONTENT_EDIT },
