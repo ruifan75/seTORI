@@ -1,3 +1,4 @@
+import { sameViewer, viewerID } from '../../queryClient';
 import { useCallback, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
@@ -94,16 +95,20 @@ export default function SuggestionsPage() {
   // （同じ項目に対する異なる値は両立しないため、残しても必ず衝突になる）。
   const adoptMutation = useMutation({
     mutationFn: async ({ pick, siblings }: { pick: Suggestion; siblings: Suggestion[] }) => {
+      const startedAs = viewerID();
       await suggestionApi.approve(pick.id, !!pick.conflicts && Object.keys(pick.conflicts).length > 0);
+      if (!sameViewer(startedAs)) return undefined;
       const supersededIDs = siblings.map((s) => s.id);
       if (supersededIDs.length > 0) {
         await suggestionApi.batchReview(supersededIDs, 'reject', {
           note: '同じ項目の別の提案を採用したため',
         });
       }
+      if (!sameViewer(startedAs)) return undefined;
       return supersededIDs.length;
     },
     onSuccess: (superseded) => {
+      if (superseded === undefined) return;
       showToast(
         superseded > 0 ? `提案を反映しました（重複する${superseded}件は却下）` : '提案を反映しました',
         'success'

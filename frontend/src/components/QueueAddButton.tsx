@@ -1,4 +1,5 @@
-import { useRef, useState } from 'react';
+import { useViewerState } from '../hooks/useViewerState';
+import { useRef } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { sameViewer, viewerID } from '../queryClient';
@@ -63,8 +64,8 @@ export default function QueueAddButton({
   const selectedTracks = tracks ?? (track ? [track] : []);
   const subject = description ?? (track ? `「${track.songName}」` : `${selectedTracks.length}曲`);
 
-  const [open, setOpen] = useState(false);
-  const [menuPos, setMenuPos] = useState<MenuPosition>({ top: 0, left: 0 });
+  const [open, setOpen] = useViewerState(false);
+  const [menuPos, setMenuPos] = useViewerState<MenuPosition>({ top: 0, left: 0 });
   const buttonRef = useRef<HTMLButtonElement>(null);
 
   const addToQueue = () => {
@@ -79,6 +80,7 @@ export default function QueueAddButton({
       // 待っている間に権限が変わると、破棄したあとに秘匿曲名が再び現れる。
       const startedAs = viewerID();
       const created = target.name ? await playlistApi.create({ name: target.name }) : undefined;
+      if (!sameViewer(startedAs)) return undefined;
       const playlistId = created?.id ?? target.playlistId!;
       const result = await playlistApi.addItems(playlistId, selectedTracks.map((item) => item.performanceId));
       return {
@@ -90,7 +92,7 @@ export default function QueueAddButton({
       };
     },
     onSuccess: (result) => {
-      if (!sameViewer(result.startedAs)) return;
+      if (!result || !sameViewer(result.startedAs)) return;
       queryClient.invalidateQueries({ queryKey: ['playlists'] });
       queryClient.invalidateQueries({ queryKey: ['playlist', result.playlistId] });
       showToast(

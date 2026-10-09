@@ -1,4 +1,5 @@
-import axios from 'axios';
+import axios, { AxiosError, AxiosHeaders, CanceledError } from 'axios';
+import { sameViewer, viewerID } from '../queryClient';
 import type {
   AutoFillSettings,
   NonSingingCandidate,
@@ -124,37 +125,54 @@ const api = axios.create({
   },
 });
 
-// 認証：ログイン中のセッショントークンを保持。無い場合は環境変数 VITE_API_TOKEN
-// （旧来の静的トークン）にフォールバックする。auth store が setAuthToken で更新する。
-const ENV_API_TOKEN = import.meta.env.VITE_API_TOKEN as string | undefined;
+// セッショントークンだけを使う。VITE_* に機密を入れると公開 JS に埋まってしまう。
 let authToken: string | null = null;
+const requestViewers = new WeakMap<object, string | null>();
 
 export function setAuthToken(token: string | null) {
   authToken = token;
 }
 
 api.interceptors.request.use((config) => {
-  const token = authToken || ENV_API_TOKEN;
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
+  // logout はローカルを先に消し、破棄したセッションを明示してサーバーで失効させる。
+  if (authToken && !config.headers.has('Authorization')) {
+    config.headers.Authorization = `Bearer ${authToken}`;
   }
+  requestViewers.set(config, viewerID());
   return config;
-});
+}, undefined, { synchronous: true });
 
 // セッション失効（401）時に呼ばれるハンドラ。auth store が登録する。
-let onUnauthorized: (() => void) | null = null;
-export function setUnauthorizedHandler(fn: (() => void) | null) {
+let onUnauthorized: ((token: string) => void) | null = null;
+export function setUnauthorizedHandler(fn: ((token: string) => void) | null) {
   onUnauthorized = fn;
+}
+
+// 認証の結果は auth store の操作世代と保存済み token で照合する。
+// 旧セッションの失効で視点が変わっても、新しい認証を成功させられる。
+// 認証済み情報を読む identities 等は、この例外に含めない。
+function isSessionAuthentication(config: { method?: string; url?: string }): boolean {
+  return (config.method === 'post' && (config.url === '/api/auth/login' || config.url === '/api/auth/oauth/exchange'))
+    || (config.method === 'get' && config.url === '/api/auth/me');
 }
 
 // エラーインターセプター：バックエンドのエラーメッセージを取り出す
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    if (!isSessionAuthentication(response.config) && !sameViewer(requestViewers.get(response.config) ?? null)) {
+      throw new CanceledError('利用者または権限が変わったため処理を中止しました');
+    }
+    return response;
+  },
   (error) => {
-    const url: string = error.config?.url ?? '';
-    // ログイン以外で 401 の場合はセッション失効とみなしてログアウト処理を促す
-    if (error.response?.status === 401 && !url.includes('/api/auth/login')) {
-      onUnauthorized?.();
+    if (error.config && !isSessionAuthentication(error.config) && !sameViewer(requestViewers.get(error.config) ?? null)) {
+      return Promise.reject(new CanceledError('利用者または権限が変わったため処理を中止しました'));
+    }
+    // 無効な password / OAuth code は、既存 Bearer の失効を意味しない。
+    // /me の 401 も auth store が検証の世代と token を照合してから扱う。
+    if (error.response?.status === 401 && !isSessionAuthentication(error.config ?? {})
+      && authToken && error.config?.headers.get('Authorization') === `Bearer ${authToken}`) {
+      onUnauthorized?.(authToken);
     }
     // バックエンドから返されたエラーメッセージを取り出す
     if (error.response?.data?.error) {
@@ -162,7 +180,16 @@ api.interceptors.response.use(
     } else if (!error.response) {
       error.message = 'サーバーに接続できません';
     }
-    return Promise.reject(error);
+    // console.error に渡されても Bearer・パスワード・cookie の入力を出さない。
+    // 呼び出し側が使う status/data と Axios の型判定は保ち、通信設定・request は持ち出さない。
+    const safeError = new AxiosError(error.message, error.code);
+    if (error.response) {
+      safeError.response = {
+        data: error.response.data, status: error.response.status, statusText: error.response.statusText,
+        headers: {}, config: { headers: new AxiosHeaders() },
+      };
+    }
+    return Promise.reject(safeError);
   }
 );
 
@@ -1257,8 +1284,8 @@ export const authApi = {
     return data;
   },
 
-  logout: async (): Promise<void> => {
-    await api.post('/api/auth/logout');
+  logout: async (token: string): Promise<void> => {
+    await api.post('/api/auth/logout', undefined, { headers: { Authorization: `Bearer ${token}` } });
   },
 
   me: async (): Promise<AuthUser> => {
