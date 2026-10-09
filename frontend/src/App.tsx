@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { ToastProvider } from './components/ui/Toast';
 import Layout from './components/Layout';
+import ConnectionStatus from './components/ConnectionStatus';
 import LegacyChannelRedirect from './components/LegacyChannelRedirect';
 import ActivityTracker from './components/ActivityTracker';
 import RequirePermission from './components/RequirePermission';
@@ -53,6 +54,9 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
+        <div className="h-screen-dynamic flex flex-col">
+          <ConnectionStatus />
+          <div className="flex-1 min-h-0 overflow-y-auto">
         <BrowserRouter>
           <ActivityTracker />
           <Routes>
@@ -147,6 +151,8 @@ function App() {
             </Route>
           </Routes>
         </BrowserRouter>
+          </div>
+        </div>
       </ToastProvider>
     </QueryClientProvider>
   );

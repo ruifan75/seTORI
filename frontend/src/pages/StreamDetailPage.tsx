@@ -1,3 +1,4 @@
+import QueryError from '../components/ui/QueryError';
 import Loading from '../components/ui/Loading';
 import { useStreamDetail } from './stream-detail/useStreamDetail';
 import StreamAnalysisTabs from './stream-detail/StreamAnalysisTabs';
@@ -10,6 +11,7 @@ import StreamVocalistPopup from './stream-detail/StreamVocalistPopup';
 
 export default function StreamDetailPage() {
   const model = useStreamDetail();
+  if (model.status === 'error') return <QueryError error={model.error} onRetry={model.refetch} />;
   if (model.status === 'loading') return <Loading />;
   if (model.status === 'missing') {
     return (

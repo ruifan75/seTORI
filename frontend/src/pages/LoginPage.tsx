@@ -1,3 +1,4 @@
+import QueryError from '../components/ui/QueryError';
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
@@ -15,7 +16,7 @@ export default function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
 
   // 設定済みの連携先だけボタンを出す（未設定の provider を押させない）
-  const { data: providers = [], isPending: providersPending } = useQuery({
+  const { data: providers = [], isPending: providersPending, isError: providersFailed, error: providersError, refetch: retryProviders } = useQuery({
     queryKey: ['oauth', 'providers'],
     queryFn: authApi.oauthProviders,
     staleTime: Infinity,
@@ -45,8 +46,9 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
+    <div className="min-h-full bg-gray-50 flex items-center justify-center px-4">
       <div className="w-full max-w-sm">
+        {providersFailed && <QueryError error={providersError} onRetry={retryProviders} />}
         <Link to="/" className="flex items-center justify-center gap-1 mb-8">
           <span className="text-3xl font-bold text-indigo-600 inline-flex items-center">
             seT

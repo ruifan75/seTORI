@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
 import { playlistApi } from '../api/client';
 import { menuPositionFor, type MenuPosition } from './menuPosition';
+import QueryError from './ui/QueryError';
 
 interface Props {
   /** 位置合わせの基準になるボタン */
@@ -115,7 +116,9 @@ export default function PlaylistPickerMenu({
         >
           {playlistUnavailableAction.label}
         </button>
-      ) : playlists.isLoading ? (
+      ) : playlists.isError ? (
+        <QueryError error={playlists.error} onRetry={() => void playlists.refetch()} />
+      ) : playlists.isPending ? (
         <p className="px-3 py-2 text-sm text-gray-400">読み込み中...</p>
       ) : (playlists.data?.playlists.length ?? 0) === 0 ? (
         <p className="px-3 py-2 text-sm text-gray-400">まだプレイリストがありません</p>

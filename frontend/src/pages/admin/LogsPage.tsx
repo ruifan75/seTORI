@@ -11,7 +11,7 @@ export default function LogsPage() {
   const [limit, setLimit] = useState(100);
   const logsRef = useRef<HTMLDivElement>(null);
 
-  const { data, isLoading, refetch, error } = useQuery({
+  const { data, isPending: isLoading, refetch, error } = useQuery({
     queryKey: ['logs', limit],
     queryFn: () => logsApi.list(limit),
     refetchInterval: 5000, // auto refresh every 5s

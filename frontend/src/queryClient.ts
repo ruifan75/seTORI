@@ -1,4 +1,5 @@
 import { QueryClient } from '@tanstack/react-query';
+import { isTransientFailure, queryRetryDelay, retryQuery } from './queryPolicy';
 
 // **QueryClient をモジュールとして持つ。** 認証状態が変わったときに
 // キャッシュを捨てる必要があり、その判断は React の木の外（Zustand の
@@ -7,8 +8,12 @@ export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 1000 * 60 * 5, // 5 minutes
-      retry: 1,
+      retry: retryQuery,
+      retryDelay: queryRetryDelay,
+      // Infinity のキャッシュでも失敗した取得は復帰時に再取得する。
+      refetchOnReconnect: (query) => query.state.error ? (isTransientFailure(query.state.error) ? 'always' : false) : true,
     },
+    mutations: { retry: false, networkMode: 'always' },
   },
 });
 

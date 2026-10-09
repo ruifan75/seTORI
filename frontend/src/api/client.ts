@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { observeAPIConnection } from './connectivity';
 import type {
   AutoFillSettings,
   NonSingingCandidate,
@@ -123,6 +124,7 @@ const api = axios.create({
     'Content-Type': 'application/json',
   },
 });
+observeAPIConnection(api);
 
 // 認証：ログイン中のセッショントークンを保持。無い場合は環境変数 VITE_API_TOKEN
 // （旧来の静的トークン）にフォールバックする。auth store が setAuthToken で更新する。

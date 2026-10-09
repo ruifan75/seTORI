@@ -1,3 +1,4 @@
+import QueryError from '../components/ui/QueryError';
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router-dom';
@@ -17,7 +18,7 @@ export default function SongsPage() {
   const [searchInput, setSearchInput] = useState(search);
   const canEdit = hasPermission(useAuthStore((s) => s.user), PERM.CONTENT_EDIT);
 
-  const { data, isLoading } = useQuery({
+  const { data, isPending: isLoading, isError: queryFailed, error: queryError, refetch: retryFetch } = useQuery({
     queryKey: ['songs', page, search, sort, dir],
     queryFn: () => songApi.list(page, 20, search || undefined, sort, dir),
   });
@@ -84,7 +85,9 @@ export default function SongsPage() {
         </div>
       </div>
 
-      {isLoading ? (
+      {queryFailed ? (
+        <QueryError error={queryError} onRetry={retryFetch} />
+      ) : isLoading ? (
         <Loading />
       ) : (
         <>

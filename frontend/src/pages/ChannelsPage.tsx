@@ -1,3 +1,4 @@
+import QueryError from '../components/ui/QueryError';
 import { useState } from 'react';
 import { invalidateChannelScopedQueries } from '../queryClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -44,7 +45,8 @@ export default function ChannelsPage() {
     enabled: view === 'list',
   });
 
-  const isLoading = view === 'group' ? groupedQuery.isLoading : listQuery.isLoading;
+  const currentQuery = view === 'group' ? groupedQuery : listQuery;
+  const isLoading = currentQuery.isPending;
   const total = view === 'group' ? groupedQuery.data?.total : listQuery.data?.pagination.total;
   // 非表示の件数（権限が無ければ undefined ── そもそも届かない）
   const hiddenTotal =
@@ -147,7 +149,9 @@ export default function ChannelsPage() {
         )}
       </div>
 
-      {isLoading ? (
+      {currentQuery.isError ? (
+        <QueryError error={currentQuery.error} onRetry={currentQuery.refetch} />
+      ) : isLoading ? (
         <Loading />
       ) : (
         <>

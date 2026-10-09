@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import QueryError from '../../components/ui/QueryError';
 import ChannelSearchInput from '../../components/ChannelSearchInput';
 import Tag from '../../components/ui/Tag';
 
@@ -18,6 +19,7 @@ export default function StreamInfoCard({ model }: { model: StreamDetailModel }) 
   } = model;
   return (
     <div className="p-6">
+      {model.fetchError && <QueryError error={model.fetchError.error} onRetry={model.fetchError.refetch} />}
       <>
         <h1 className="text-2xl font-bold text-gray-900">{stream.title}</h1>
         {/* 日時 + YouTube リンク */}

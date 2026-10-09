@@ -1,3 +1,4 @@
+import QueryError from '../components/ui/QueryError';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { authApi, startOAuth } from '../api/client';
@@ -23,13 +24,13 @@ export default function MyAccountPage() {
   const { showToast } = useToast();
   const queryClient = useQueryClient();
 
-  const { data: identities = [], isLoading } = useQuery({
+  const { data: identities = [], isPending: isLoading, isError: queryFailed, error: queryError, refetch: retryFetch } = useQuery({
     queryKey: ['oauth', 'identities'],
     queryFn: authApi.oauthIdentities,
   });
 
   // 設定済みの連携先だけを候補にする（未設定の provider を押させない）
-  const { data: providers = [] } = useQuery({
+  const { data: providers = [], isError: providersFailed, error: providersError, refetch: retryProviders } = useQuery({
     queryKey: ['oauth', 'providers'],
     queryFn: authApi.oauthProviders,
     staleTime: Infinity,
@@ -57,6 +58,7 @@ export default function MyAccountPage() {
   return (
     <div className="space-y-6">
       <h1 className="text-3xl font-bold text-gray-900">アカウント</h1>
+      {providersFailed && <QueryError error={providersError} onRetry={retryProviders} />}
 
       <div className="bg-white rounded-lg shadow-sm border p-6">
         <h2 className="text-xl font-bold text-gray-900 mb-4">利用者</h2>
@@ -88,7 +90,9 @@ export default function MyAccountPage() {
           ログイン手段が 1 つも無くなる解除はできません。
         </p>
 
-        {isLoading ? (
+        {queryFailed ? (
+          <QueryError error={queryError} onRetry={retryFetch} />
+        ) : isLoading ? (
           <Loading />
         ) : (
           <div className="space-y-3">
