@@ -13,7 +13,7 @@ const wait = (ms = 50) => new Promise((resolve) => setTimeout(resolve, ms));
 const button = (text) => [...document.querySelectorAll('main button')].find((el) => el.textContent.trim() === text);
 
 // API・YouTube は合成データで置き換え、ページ、子コンポーネント、CSS は実物を使う。
-export async function run(tc) {
+export async function run(tc, options = {}) {
   Date.now = () => 1788220800000;
   const calls = [];
   const frames = [];
@@ -40,11 +40,11 @@ export async function run(tc) {
       setVolume() {} mute() {} unMute() {}
     },
   };
-  const permissions = tc.role === 'editor' ? ['content:edit']
+  const permissions = tc.role === 'admin' ? ['*'] : tc.role === 'editor' ? ['content:edit']
     : tc.role === 'both' ? ['content:edit', 'restricted:view', 'holodex:upload']
       : tc.role === 'restricted' ? ['restricted:view'] : [];
-  const canEdit = permissions.includes('content:edit');
-  const canRead = !tc.restricted || permissions.includes('restricted:view');
+  const canEdit = permissions.includes('content:edit') || permissions.includes('*');
+  const canRead = !tc.restricted || permissions.includes('restricted:view') || permissions.includes('*');
   useAuthStore.setState({ user: tc.role === 'anonymous' ? null : { id: 'viewer', permissions },
     status: tc.role === 'anonymous' ? 'unauthenticated' : 'authenticated' });
   const photo = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
@@ -128,9 +128,37 @@ export async function run(tc) {
     document.querySelector('button[title="参加チャンネルを編集"]').click(); await wait(60);
     document.querySelector('button[title="セットリストを編集"]').click(); await wait(120);
     snapshot('edit-actions');
+    const geometry = () => {
+      const bar = button('操作').parentElement;
+      bar.scrollIntoView({ block: 'start' });
+      const rect = (el) => {
+        const r = el.getBoundingClientRect();
+        return { x: r.x, y: r.y, w: r.width, h: r.height };
+      };
+      return {
+        bar: rect(bar), scrollWidth: document.documentElement.scrollWidth,
+        tabs: [...bar.querySelectorAll('button')].map((el) => {
+          const r = rect(el);
+          const range = document.createRange(); range.selectNodeContents(el);
+          const textRect = range.getBoundingClientRect();
+          const hit = document.elementFromPoint(r.x + r.w / 2, r.y + r.h / 2);
+          return { label: el.textContent.trim(), ...r, lines: range.getClientRects().length,
+            textLeft: textRect.left, textRight: textRect.right,
+            hit: el === hit || el.contains(hit), active: el.classList.contains('border-indigo-600') };
+        }),
+      };
+    };
+    const measurements = options.layoutOnly ? [geometry()] : [];
     for (const text of ['Holodex', 'コメント', 'チャプター', '手動', '生コメント', '操作']) {
       const el = button(text); if (!el) throw new Error(`タブがありません: ${text}`);
       el.click(); await wait(90); snapshot(text);
+      if (options.layoutOnly) measurements.push(geometry());
+    }
+    if (options.layoutOnly) {
+      await wait(180); // スクリーンショットを採る前にタブの色の transition を完了させる。
+      return { measurements,
+        iframeSame: frames.length === originalFrames.length && originalFrames.every((f) => f.isConnected),
+        queueSame: initialQueue === queue(), calls };
     }
     for (const width of [1023, 1024, 390, 1440]) {
       window.frameElement.style.width = `${width}px`;

@@ -132,8 +132,11 @@ test('配信詳細の権限別 DOM・iframe・キューが分割前と一致す�
       row.value.snapshots = Object.fromEntries(Object.entries(row.value.snapshots).map(([name, dom]) => {
         assert.ok(!dom.includes('["href","/singers/'), '旧チャンネル URL が残っている');
         if (name === 'view') assert.ok(dom.includes('["href","/channels/channel"]'), '配信主への新リンクが無い');
-        // 分割前の固定 DOM は書き換えず、意図したリンク先変更だけを比較から除く。
-        const comparable = dom.replaceAll('["href","/channels/', '["href","/singers/');
+        // 分割前の固定 DOM は書き換えず、意図したリンク先・タブのクラス変更だけを比較から除く。
+        const comparable = dom.replaceAll('["href","/channels/', '["href","/singers/')
+          // #104 で意図して変えたタブのクラスだけを除く。寸法・可読性は別の実測試験で固定する。
+          .replaceAll('flex flex-wrap border-b shrink-0 sticky top-0 bg-white z-10', 'flex border-b shrink-0 sticky top-0 bg-white z-10')
+          .replaceAll('px-3.5 py-2.5 text-sm font-medium shrink-0 whitespace-nowrap border-b-2', 'px-3.5 py-2.5 text-sm font-medium border-b-2');
         return [name, createHash('sha256').update(comparable).digest('hex')];
       }));
     }
