@@ -121,6 +121,27 @@ system role の削除・使用中ロールの削除などは 400。組み込み�
 | `POST` | `/api/streams` | `content:edit` | 手動作成の未対応を知らせる | — | **501** / `{error}`。登録は Holodex 同期を使う |
 | `PUT` | `/api/streams/{id}` | `content:edit` | 配信メタデータ・状態・公開の裁定を更新する | B: `title, stream_date, tag_ids[], participant_ids[], is_processed, is_hidden, is_restricted`（部分更新） | 配信＋`performances`。秘匿：歌唱・解析素材を制限。`is_restricted` は人の裁定を書き、検出タグは消さない。日付は RFC3339 / YYYY-MM-DD |
 
+## 処理済みの一括変更（管理画面）
+
+`/admin/processed-review` は `content:edit`。付けるときは未処理、外すときは処理済みだけを
+候補にする。非表示やチャンネルの表示状態で自動的に除外しない。歌唱の有無は要求者が
+閲覧できる歌唱だけで判定する（`restricted:view` が無ければ秘匿歌唱は数えない）。
+処理済みは人の確認の印で、自動処理の停止条件。外すと再び対象になり得る。
+実行中の処理を止めたり、解析・歌唱作成の結果を巻き戻したりする機能ではない。
+実行・取り消しで照合するのは `is_processed` の値だけ。更新時刻は監査用に残すが、
+同期や解析による他の項目の更新では実行・取り消しを妨げない。
+
+| メソッド | パス | 必要な権限 | 何をするか | 主な入力 | 応答の要点 |
+|---|---|---|---|---|---|
+| `GET` | `/api/processed-review` | `content:edit` | 変更先と反対の処理済み状態の配信を一覧する | Q: `is_processed=true/false`（変更先。既定 true）, `q`（タイトルの部分一致、`%`・`_` は文字扱い）, `channel_id, tag[]`（タグはAND・重複を除く・20個まで）, `hidden=all/true/false`, `has_performances=all/true/false`, `from, until`（RFC3339、開始以上・終了未満）, `limit, offset` | `{candidates:[{id,title,stream_date,is_hidden,is_processed}], total}`。limit 既定100・最大500。未知の状態値・不正日時・逆転期間は400 |
+| `POST` | `/api/processed-review/preview` | `content:edit` | 変更前の値と更新時刻を退避して影響件数を確認する | B: `stream_ids[]`（1〜500件、重複不可）, `is_processed`（必須 bool） | `{run_id,count,is_processed}`。変更先と同じ状態・消えた対象が1件でもあれば409、入力不正400。配信はまだ変更しない |
+| `POST` | `/api/processed-review/runs/{id}/apply` | `content:edit` | 確認した一括変更を実行する | P: run UUID | `{changed}`。書くときにも処理済みの前値を照合し、1件でも違う・削除済みなら全体を409。未登録runは404・不正UUIDは400 |
+| `POST` | `/api/processed-review/runs/{id}/revert` | `content:edit` | 処理済みの変更後の値が一致する行だけ戻す | P: run UUID | `{reverted,skipped}`。処理済みの値が違う行・削除済みの行は見送る。取り消しは1回のみ、未実行・再取り消し409。未登録run404・不正UUID400 |
+| `GET` | `/api/processed-review/runs` | `content:edit` | 直近20件の確認・実行・取り消しを返す | — | `{runs:[{id,status,item_count,after_processed,reverted_count,created_at,applied_at,reverted_at}]}` |
+
+台帳は `processed_review_runs` / `processed_review_items`（migration 070）。何をどの前値から
+どの後値へ変えたかと両時刻を残し、配信が削除されても消さない。`is_hidden`・裁定・歌唱は変更しない。
+
 ## チャンネル・事務所
 
 チャンネルの API は `/api/channels`。JSON の `singers` / `singer_ids` などは変えない。

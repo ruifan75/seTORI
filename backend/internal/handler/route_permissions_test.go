@@ -186,7 +186,7 @@ func TestPermissionFamilyBoundaries(t *testing.T) {
 		path, permission string
 		login            bool
 	}{
-		{"/api/readings", "content:edit", true}, {"/api/filter-keywords", "content:edit", true},
+		{"/api/processed-review", "content:edit", true}, {"/api/readings", "content:edit", true}, {"/api/filter-keywords", "content:edit", true},
 		{"/api/tag-keyword-rules", "content:edit", true}, {"/api/songs/identity-checks", "content:edit", true},
 		{"/api/suggestions", "content:edit", true}, {"/api/aliases", "content:edit", true},
 		{"/api/tag-gaps", "content:edit", true}, {"/api/users", "users:manage", true},

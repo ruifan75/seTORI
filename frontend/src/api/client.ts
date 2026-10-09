@@ -1640,3 +1640,34 @@ export const visibilityReviewApi = {
   revert: async (id: string): Promise<{ reverted: number; skipped: number }> => { const { data } = await api.post(`/api/visibility-review/runs/${id}/revert`); return data; },
   runs: async (): Promise<VisibilityReviewRun[]> => { const { data } = await api.get('/api/visibility-review/runs'); return data.runs; },
 };
+
+export interface ProcessedCandidate {
+  id: string; title: string; stream_date: string; is_hidden: boolean; is_processed: boolean;
+}
+export interface ProcessedReviewFilters {
+  is_processed: boolean; q: string; channel_id: string; tags: string[];
+  hidden: 'all' | 'true' | 'false'; has_performances: 'all' | 'true' | 'false';
+  from: string; until: string;
+}
+export interface ProcessedPreview { run_id: string; count: number; is_processed: boolean }
+export interface ProcessedReviewRun {
+  id: string; status: 'preview' | 'applied' | 'reverted'; item_count: number;
+  after_processed: boolean; reverted_count: number; created_at: string;
+  applied_at: string | null; reverted_at: string | null;
+}
+export const processedReviewApi = {
+  list: async (filters: ProcessedReviewFilters, offset: number): Promise<{ candidates: ProcessedCandidate[]; total: number }> => {
+    const params = new URLSearchParams({ is_processed: String(filters.is_processed), offset: String(offset), limit: '100' });
+    for (const key of ['q', 'channel_id', 'hidden', 'has_performances', 'from', 'until'] as const) {
+      if (filters[key]) params.set(key, filters[key]);
+    }
+    for (const tag of filters.tags) params.append('tag', tag);
+    const { data } = await api.get(`/api/processed-review?${params}`); return data;
+  },
+  preview: async (ids: string[], after: boolean): Promise<ProcessedPreview> => {
+    const { data } = await api.post('/api/processed-review/preview', { stream_ids: ids, is_processed: after }); return data;
+  },
+  apply: async (id: string): Promise<{ changed: number }> => { const { data } = await api.post(`/api/processed-review/runs/${id}/apply`); return data; },
+  revert: async (id: string): Promise<{ reverted: number; skipped: number }> => { const { data } = await api.post(`/api/processed-review/runs/${id}/revert`); return data; },
+  runs: async (): Promise<ProcessedReviewRun[]> => { const { data } = await api.get('/api/processed-review/runs'); return data.runs; },
+};
