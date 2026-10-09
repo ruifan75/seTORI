@@ -255,6 +255,7 @@ func (r *Router) SongMatchService() *service.SongMatchService {
 func (r *Router) setupRoutes() {
 	// Health check
 	r.mux.HandleFunc("GET /health", r.handleHealth)
+	r.mux.HandleFunc("GET /api/health", r.handleAPIHealth)
 	r.mux.HandleFunc("GET /api/version", r.handleVersion)
 
 	// 認証
@@ -568,7 +569,11 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// 認証：Bearer トークンから現在のユーザーを解決（未ログインなら nil）
-	user, err := r.resolveUser(req)
+	var user *models.User
+	var err error
+	if !isPublicHealthRequest(req) {
+		user, err = r.resolveUser(req)
+	}
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "認証処理に失敗しました")
 		return
@@ -3814,7 +3819,7 @@ func requiredPermission(method, path string) (perm string, needsAuth bool) {
 
 	// 公開・認証のみ（特定権限不要）のエンドポイント
 	switch path {
-	case "/health", "/api/version", "/api/auth/login", "/api/activity/visit", "/api/activity/policy":
+	case "/health", "/api/health", "/api/version", "/api/auth/login", "/api/activity/visit", "/api/activity/policy":
 		return "", false
 	case "/api/auth/logout", "/api/auth/me":
 		return "", true
