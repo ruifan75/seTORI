@@ -575,15 +575,23 @@ var ErrStreamNotFound = errors.New("stream not found")
 // **「送信済み」ではない。** 呼ぶのは PUT の前で、実際に届いたかは分からない
 // （通信で失敗することも、Holodex 側が拒むこともある）。安全側に倒すための記録なので、
 // 過剰に残るぶんには構わない。
+// 読み取りの後に配信が削除された場合も、記録できていないので送信を止める。
 //
 // **最新の 1 回だけ持つ。** 履歴を持たないのは、この値を「いつ送ったか」ではなく
 // 「外部にコピーがあるかもしれない」の旗として使うため。
 // なお**再送しても向こうが最新になるとは限らない** ── 既に iTunes ID がある曲は
 // PUT せず飛ばし、削除の呼び出しも無いので、こちらで直した内容が向こうに古いまま残りうる。
 func (r *StreamRepository) MarkHolodexUploadAttempt(streamID string) error {
-	_, err := r.db.Exec(`UPDATE streams SET holodex_uploaded_at = NOW() WHERE id = $1`, streamID)
+	result, err := r.db.Exec(`UPDATE streams SET holodex_uploaded_at = NOW() WHERE id = $1`, streamID)
 	if err != nil {
 		return fmt.Errorf("mark holodex uploaded: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("count holodex upload records: %w", err)
+	}
+	if affected != 1 {
+		return fmt.Errorf("mark holodex uploaded: %w", sql.ErrNoRows)
 	}
 	return nil
 }
