@@ -20,7 +20,7 @@ type channelWireResponse struct {
 }
 
 // 改名前の Router を実行して採った固定の応答。新しい実装から期待値は作らない。
-// 権限別の省略、一覧/詳細/更新のキー・値と旧 API 別名を丸ごと比較する。
+// 権限別の省略と、新 API の一覧/詳細/更新のキー・値を丸ごと比較する。
 func TestChannelWireContract(t *testing.T) {
 	fixtures := map[string]channelWireResponse{}
 	data, err := os.ReadFile("testdata/channel_wire_contract.json")
@@ -47,7 +47,7 @@ func TestChannelWireContract(t *testing.T) {
 		for _, u := range users {
 			key := tc.method + " " + tc.suffix + " " + u.token
 			t.Run(key, func(t *testing.T) {
-				for _, prefix := range []string{"/api/channels", "/api/singers"} {
+				for _, prefix := range []string{"/api/channels"} {
 					fixture := &channelAliasDB{permissions: u.permissions}
 					db := sql.OpenDB(fixture)
 					defer db.Close()

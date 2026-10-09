@@ -770,83 +770,6 @@
     "analysis": false
   },
   {
-    "pattern": "GET /api/singers",
-    "handler": "handleListChannels",
-    "permission": "",
-    "login": false,
-    "analysis": false
-  },
-  {
-    "pattern": "GET /api/singers/search",
-    "handler": "handleSearchChannels",
-    "permission": "",
-    "login": false,
-    "analysis": false
-  },
-  {
-    "pattern": "GET /api/singers/{id}",
-    "handler": "handleGetChannel",
-    "permission": "",
-    "login": false,
-    "analysis": false
-  },
-  {
-    "pattern": "GET /api/singers/{id}/streams",
-    "handler": "handleGetChannelStreams",
-    "permission": "",
-    "login": false,
-    "analysis": false
-  },
-  {
-    "pattern": "GET /api/singers/{id}/performances",
-    "handler": "handleGetChannelPerformances",
-    "permission": "",
-    "login": false,
-    "analysis": false
-  },
-  {
-    "pattern": "POST /api/singers",
-    "handler": "handleCreateChannel",
-    "permission": "content:edit",
-    "login": true,
-    "analysis": false
-  },
-  {
-    "pattern": "PUT /api/singers/{id}",
-    "handler": "handleUpdateChannel",
-    "permission": "content:edit",
-    "login": true,
-    "analysis": false
-  },
-  {
-    "pattern": "PUT /api/singers/{id}/visibility",
-    "handler": "handleUpdateChannelVisibility",
-    "permission": "content:edit",
-    "login": true,
-    "analysis": false
-  },
-  {
-    "pattern": "PUT /api/singers/{id}/members-policy",
-    "handler": "handleUpdateChannelMembersPolicy",
-    "permission": "content:edit",
-    "login": true,
-    "analysis": false
-  },
-  {
-    "pattern": "PUT /api/singers/{id}/auto-fill",
-    "handler": "handleUpdateChannelAutoFill",
-    "permission": "content:edit",
-    "login": true,
-    "analysis": false
-  },
-  {
-    "pattern": "GET /api/singers/auto-fill",
-    "handler": "handleListAutoFillTargets",
-    "permission": "content:edit",
-    "login": true,
-    "analysis": false
-  },
-  {
     "pattern": "GET /api/non-singing-candidates",
     "handler": "handleListNonSingingCandidates",
     "permission": "content:edit",
@@ -891,13 +814,6 @@
   {
     "pattern": "POST /api/auto-fill/run",
     "handler": "handleRunAutoFill",
-    "permission": "content:edit",
-    "login": true,
-    "analysis": false
-  },
-  {
-    "pattern": "PUT /api/singers/{id}/organization",
-    "handler": "handleUpdateChannelOrganization",
     "permission": "content:edit",
     "login": true,
     "analysis": false
