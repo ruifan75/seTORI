@@ -980,8 +980,8 @@ func (a ViewerAccess) restrictClause() string {
 
 // promotedClause は**こちらから押し出す面**（おすすめ・プリセット）の追加条件。
 //
-// 発見面の 2 軸（`discoverClause`）に加えて、**一覧に出していないチャンネルの
-// 歌唱を出さない**。#59 で `/streams` とタグ別一覧に入れた判定を、歌唱を
+// 発見面の 2 軸（`discoverClause`）に加えて、**一覧に出していないチャンネルだけが
+// 参加する配信を出さない**。#59 で `/streams` とタグ別一覧に入れた判定を、歌唱を
 // 押し出す側にも通す ── 入れないと、チャンネル一覧に出していないチャンネルの
 // 歌枠の曲が**ホームのいちばん上**に出る（実測：おすすめの母集合 5563 件に対し
 // 非表示チャンネルだけのものが 23 件、うち 14 曲は他に歌唱が無いので
@@ -1065,6 +1065,8 @@ func (r *PerformanceRepository) queryPerformanceDetails(query string, args ...in
 }
 
 // randomWhere はおすすめ（FindRandom）の WHERE 条件。
+// 配信への参加とは別に、その曲を歌った人に表示中チャンネルが 1 人以上必要。
+// 権限によらず、曲ごとの抽選と LIMIT より前に絞る。
 //
 // **関数に切り出してあるのは、テストが「発行された WHERE 全体」を期待値と
 // 突き合わせられるようにするため。** 条件の存在と直前の `AND` だけを見る形では、
@@ -1073,6 +1075,11 @@ func (r *PerformanceRepository) queryPerformanceDetails(query string, args ...in
 func randomWhere(access ViewerAccess) string {
 	return `
 		WHERE TRUE` + access.discoverClause() + promotedClause() + `
+		  AND EXISTS (
+			SELECT 1 FROM performance_singers ps
+			JOIN channels c ON c.id = ps.singer_id
+			WHERE ps.performance_id = p.id AND c.is_hidden = FALSE
+		  )
 		  AND NOT (p.song_id = ANY($2::uuid[]))
 		  AND NOT EXISTS (
 			SELECT 1 FROM stream_stream_tags sst
@@ -1081,6 +1088,7 @@ func randomWhere(access ViewerAccess) string {
 }
 
 // FindRandom は曲単位で重複しないランダムな歌唱を返す。
+// その曲を歌った人に非表示でないチャンネルが 1 人以上いるものだけを選ぶ。
 // 非表示に加え、再生できない可能性が高い メン限・アーカイブなし の配信も除外する。
 func (r *PerformanceRepository) FindRandom(limit int, excludedSongIDs []string, access ViewerAccess) ([]PerformanceWithDetails, error) {
 	if excludedSongIDs == nil {
@@ -1113,7 +1121,7 @@ type PresetFilter struct {
 	MultiSinger bool     // その歌唱を 2 人以上で歌っている（コラボ）
 }
 
-// presetWhere は FindRandom と同じ可視性の除外（非表示・メン限・アーカイブなし）に
+// presetWhere は配信の可視性の除外（非表示・メン限・アーカイブなし・参加チャンネル）に
 // PresetFilter の条件を重ねた WHERE 句。$1〜$4 を使う。
 //
 // 条件の有無を SQL 文字列の組み立てではなく引数で表しているのは、プリセットが

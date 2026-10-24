@@ -84,7 +84,10 @@ func TestPromotedSurfacesApplyChannelScope(t *testing.T) {
 	}
 
 	wantRandom := func(a ViewerAccess) string {
-		return scope(a) + " AND NOT (p.song_id = ANY($2::uuid[]))" + excludeHidden("sst")
+		return scope(a) + " AND EXISTS ( SELECT 1 FROM performance_singers ps" +
+			" JOIN channels c ON c.id = ps.singer_id" +
+			" WHERE ps.performance_id = p.id AND c.is_hidden = FALSE )" +
+			" AND NOT (p.song_id = ANY($2::uuid[]))" + excludeHidden("sst")
 	}
 	wantPreset := func(a ViewerAccess) string {
 		return scope(a) + excludeHidden("hid") +

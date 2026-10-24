@@ -240,7 +240,7 @@ system role の削除・使用中ロールの削除などは 400。組み込み�
 | `PUT` | `/api/performances/{id}` | `content:edit` | 歌唱 1 件を部分更新する | B: `song_id, start_seconds, end_seconds, tags[], custom_tags[], singer_ids[]` | 歌唱の保存行＋関連情報（下記）。秘匿：権限が無ければ 404。重複 409、時刻不正 400 |
 | `POST` | `/api/streams/{id}/performances` | `content:edit` | セットリストを保存する | B: `performances[]`（下記。1 曲以上） | `{created_count}` |
 | `DELETE` | `/api/streams/{id}/performances` | `content:edit` | 配信の歌唱を全件削除する | — | `{success:true, message}` |
-| `GET` | `/api/performances/random` | 未ログイン可 | 曲を重複させず歌唱をランダムに返す | Q: `limit`（既定 50、最大 100）、`exclude_song_ids`（UUID の CSV） | `{performances}`。秘匿：歌唱を制限。通常は非表示配信も除くが、restricted:view ではその条件を外す。表示中チャンネルの参加がない配信と members_only / unarchived タグは常に除外 |
+| `GET` | `/api/performances/random` | 未ログイン可 | 曲を重複させず歌唱をランダムに返す | Q: `limit`（既定 50、最大 100）、`exclude_song_ids`（UUID の CSV） | `{performances}`。秘匿：歌唱を制限。通常は非表示配信も除くが、restricted:view ではその条件を外す。表示中チャンネルの参加がない配信と members_only / unarchived タグは常に除外。さらに各曲を歌った人（performance_singers）に表示中チャンネルが 1 人以上必要（権限でも緩めない、歌った人が未登録の歌唱も除外） |
 | `GET` | `/api/performance-tags/{id}/performances` | 未ログイン可 | 歌唱タグが付いた歌唱を見る | Q: `page, limit` | `{performances, pagination}`。秘匿：歌唱・件数を制限 |
 | `GET` | `/api/stream-tags/{id}/streams` | 未ログイン可 | 配信タグが付いた配信を見る | Q: `page, limit` | `{streams, pagination}`。通常の配信一覧と同じ表示範囲 |
 | `GET` | `/api/stream-tags` | 未ログイン可 | 配信タグの定義を見る | — | `[{id, display_name, color, …}]` |
