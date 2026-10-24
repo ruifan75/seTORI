@@ -78,6 +78,8 @@ function pageFixture(scenario) {
   const page = loadTS(`../src/pages/admin/${scenario.page}.tsx`, {
     react, '@tanstack/react-query': reactQuery,
     '../../api/client': api,
+    '../../queryClient': { sameViewer: () => true, viewerID: () => 'fixture' },
+    '../../hooks/useViewerState': { useViewerState: react.useState },
     '../../utils/taskResults': results,
     '../../store/auth': { useAuthStore: (select) => select({ user: { permissions: ['content:edit'] }, status: 'authenticated' }), hasPermission: (user, permission) => user.permissions.includes(permission), PERM: { CONTENT_EDIT: 'content:edit' } },
     '../../components/usePerformanceTiming': { formatSeconds: String },
@@ -169,7 +171,7 @@ test('API clients keep the original endpoints and return task IDs without synchr
     post: async (path) => { requests.push(['POST', path]); return { data: response }; },
     get: async (path) => { requests.push(['GET', path]); return { data: task('duplicate_scan', 'done') }; },
   };
-  const client = loadTS('../src/api/client.ts', { axios: { default: { create: () => fakeApi } }, '../utils/apiError': { apiErrorMessage() {} } });
+  const client = loadTS('../src/api/client.ts', { axios: { default: { create: () => fakeApi } }, '../utils/apiError': { apiErrorMessage() {} }, '../queryClient': { sameViewer: () => true, viewerID: () => 'fixture' } });
   assert.equal((await client.artistApi.backfillReadings()).task_id, 'task-one');
   assert.equal((await client.songApi.scanDuplicates()).task_id, 'task-one');
   assert.equal((await client.taskApi.get('task-one')).id, 'task-one');

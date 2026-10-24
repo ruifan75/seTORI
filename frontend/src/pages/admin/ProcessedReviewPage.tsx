@@ -1,3 +1,4 @@
+import { CanceledError } from 'axios';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -26,17 +27,26 @@ export default function ProcessedReviewPage() {
   const tags = useQuery({ queryKey: ['stream-tags'], queryFn: tagApi.listStreamTags });
   const invalidate = () => invalidateProcessedReviewQueries(qc);
   const check = useMutation({
-    mutationFn: (args: { ids: string[]; after: boolean; startedAs: string | null }) => processedReviewApi.preview(args.ids, args.after),
+    mutationFn: (args: { ids: string[]; after: boolean; startedAs: string | null }) => {
+      if (!sameViewer(args.startedAs)) throw new CanceledError('利用者または権限が変わったため処理を中止しました');
+      return processedReviewApi.preview(args.ids, args.after);
+    },
     onSuccess: (data, args) => { if (!sameViewer(args.startedAs)) return; setPreview(data); void qc.invalidateQueries({ queryKey: ['processed-runs'] }); },
     onError: (err: Error, args) => { if (sameViewer(args.startedAs)) showToast(err.message, 'error'); },
   });
   const apply = useMutation({
-    mutationFn: (args: Operation) => processedReviewApi.apply(args.id),
+    mutationFn: (args: Operation) => {
+      if (!sameViewer(args.startedAs)) throw new CanceledError('利用者または権限が変わったため処理を中止しました');
+      return processedReviewApi.apply(args.id);
+    },
     onSuccess: (data, args) => { if (!sameViewer(args.startedAs)) return; showToast(`${data.changed}件の処理済み状態を変更しました`, 'success'); setSelected([]); setPreview(null); invalidate(); },
     onError: (err: Error, args) => { if (!sameViewer(args.startedAs)) return; setPreview(null); invalidate(); showToast(err.message, 'error'); },
   });
   const revert = useMutation({
-    mutationFn: (args: Operation) => processedReviewApi.revert(args.id),
+    mutationFn: (args: Operation) => {
+      if (!sameViewer(args.startedAs)) throw new CanceledError('利用者または権限が変わったため処理を中止しました');
+      return processedReviewApi.revert(args.id);
+    },
     onSuccess: (data, args) => { if (!sameViewer(args.startedAs)) return; showToast(`${data.reverted}件を戻しました。後の処理済み状態の変更・削除で見送ったもの: ${data.skipped}件`, 'info'); setSelected([]); setPreview(null); invalidate(); },
     onError: (err: Error, args) => { if (sameViewer(args.startedAs)) showToast(err.message, 'error'); },
   });

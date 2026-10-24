@@ -331,3 +331,22 @@ test('配信更新と YouTube 同期は固定の対象を invalidate する', as
     ]);
   } finally { h.close(); }
 });
+
+for (const [method, api, key] of [
+  ['loadFromHolodex', 'holodexApi', 'analyzeSongs'],
+  ['loadFromComments', 'commentApi', 'analyze'],
+  ['loadFromChapters', 'chapterApi', 'analyze'],
+]) for (const changed of [false, true]) test(`${method}: 失敗の理由は開始時の視点だけへ返す (changed=${changed})`, async () => {
+  const h = harness(), response = deferred();
+  h.apis[api][key] = () => response.promise;
+  try {
+    const pending = h.model[method]();
+    if (changed) h.viewer.applyViewerChange('viewer|content:edit');
+    const after = h.writes.length;
+    response.reject(new (require('axios').AxiosError)(secret)); await pending;
+    if (changed) {
+      assertNoPrivateWrites(h, after);
+      assert.deepEqual(h.writes.slice(after), [], '後始末で新しい視点の loading も変えない');
+    } else assert.ok(h.toasts.some(([message]) => message.includes(secret)), '正当な失敗の理由を消さない');
+  } finally { h.close(); }
+});

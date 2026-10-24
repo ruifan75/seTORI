@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useViewerState } from '../../hooks/useViewerState';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { filterKeywordApi, tagApi, tagRuleApi, aiProviderApi } from '../../api/client';
 import { useToast } from '../../components/ui/ToastContext';
@@ -24,7 +24,7 @@ function KeywordSection({
   onDelete: (id: number) => void;
   isAdding: boolean;
 }) {
-  const [newKeyword, setNewKeyword] = useState('');
+  const [newKeyword, setNewKeyword] = useViewerState('');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -120,9 +120,9 @@ function TagSection({
   isAdding: boolean;
 }) {
   const usedColors = tags.map((t) => t.color);
-  const [newId, setNewId] = useState('');
-  const [newDisplayName, setNewDisplayName] = useState('');
-  const [newColor, setNewColor] = useState(() => pickUnusedColor(usedColors));
+  const [newId, setNewId] = useViewerState('');
+  const [newDisplayName, setNewDisplayName] = useViewerState('');
+  const [newColor, setNewColor] = useViewerState(() => pickUnusedColor(usedColors));
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -224,10 +224,10 @@ function ModelPicker({ fetcher, current, onSelect, disabled, disabledTitle }: {
   disabled?: boolean;
   disabledTitle?: string;
 }) {
-  const [open, setOpen] = useState(false);
-  const [models, setModels] = useState<AIModelInfo[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [open, setOpen] = useViewerState(false);
+  const [models, setModels] = useViewerState<AIModelInfo[]>([]);
+  const [loading, setLoading] = useViewerState(false);
+  const [error, setError] = useViewerState<string | null>(null);
 
   const toggle = async () => {
     if (open) { setOpen(false); return; }
@@ -303,8 +303,8 @@ function ProviderRow({ p, idx, total, onUpdate, onDelete, onMove }: {
   onDelete: (id: number) => void;
   onMove: (idx: number, dir: -1 | 1) => void;
 }) {
-  const [model, setModel] = useState(p.model);
-  const [timeoutSec, setTimeoutSec] = useState(p.timeout_seconds || 60);
+  const [model, setModel] = useViewerState(p.model);
+  const [timeoutSec, setTimeoutSec] = useViewerState(p.timeout_seconds || 60);
 
   const saveModel = (value?: string) => {
     const m = (value ?? model).trim();
@@ -408,11 +408,11 @@ function AIProviderSection() {
     onError: (err: Error) => showToast(`削除エラー: ${err.message}`, 'error'),
   });
 
-  const [name, setName] = useState('');
-  const [baseUrl, setBaseUrl] = useState('');
-  const [model, setModel] = useState('');
-  const [apiKey, setApiKey] = useState('');
-  const [timeoutSec, setTimeoutSec] = useState(60);
+  const [name, setName] = useViewerState('');
+  const [baseUrl, setBaseUrl] = useViewerState('');
+  const [model, setModel] = useViewerState('');
+  const [apiKey, setApiKey] = useViewerState('');
+  const [timeoutSec, setTimeoutSec] = useViewerState(60);
 
   // 優先度の並び替え：隣の provider と priority を入れ替える
   const move = (idx: number, dir: -1 | 1) => {
@@ -574,7 +574,7 @@ function TagRuleRow({ tag, rules, onAdd, onDelete, isAdding }: {
   onDelete: (id: number) => void;
   isAdding: boolean;
 }) {
-  const [kw, setKw] = useState('');
+  const [kw, setKw] = useViewerState('');
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const t = kw.trim();

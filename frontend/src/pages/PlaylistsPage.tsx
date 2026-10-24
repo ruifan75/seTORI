@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useViewerState } from '../hooks/useViewerState';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { playlistApi, presetPlaylistApi } from '../api/client';
@@ -39,9 +39,9 @@ export default function PlaylistsPage() {
   const { showToast } = useToast();
   const queryClient = useQueryClient();
 
-  const [creating, setCreating] = useState(false);
-  const [newName, setNewName] = useState('');
-  const [newVisibility, setNewVisibility] = useState<PlaylistVisibility>('private');
+  const [creating, setCreating] = useViewerState(false);
+  const [newName, setNewName] = useViewerState('');
+  const [newVisibility, setNewVisibility] = useViewerState<PlaylistVisibility>('private');
 
   const mine = useQuery({
     queryKey: ['playlists', 'mine'],

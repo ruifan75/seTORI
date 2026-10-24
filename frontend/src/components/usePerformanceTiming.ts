@@ -117,15 +117,18 @@ export function usePerformanceTiming() {
 
         // 直前の値へ戻せるようにする（誤タップの取り消し）
         const undo = async () => {
+          if (!sameViewer(startedAs)) return;
           const revert: TimingChange = {};
           if (change.start !== undefined) revert.start = target.start;
           if (change.end !== undefined) revert.end = target.end;
           try {
             await performanceApi.update(target.performanceId, toRequest(revert));
+            if (!sameViewer(startedAs)) return;
             updateTrackTiming(target.performanceId, revert);
             invalidate();
             showToast('元に戻しました', 'info');
           } catch (e) {
+            if (!sameViewer(startedAs)) return;
             showToast(`元に戻せませんでした: ${(e as Error).message}`, 'error');
           }
         };
@@ -140,15 +143,17 @@ export function usePerformanceTiming() {
           fields,
           note,
         });
+        if (!sameViewer(startedAs)) return false;
         // 提案はまだ反映されていないので「元に戻す」ではなく取り下げ。
         // 誤タップに気づいたその場で引っ込められるようにする。
         showToast('修正を提案しました。管理者の確認をお待ちください', 'success', {
           label: '取り消す',
-          onClick: () => withdrawSuggestion(created.id, showToast),
+          onClick: () => { if (sameViewer(startedAs)) return withdrawSuggestion(created.id, showToast); },
         });
       }
       return true;
     } catch (e) {
+      if (!sameViewer(startedAs)) return false;
       showToast(`送信できませんでした: ${(e as Error).message}`, 'error');
       return false;
     }
@@ -163,10 +168,13 @@ export async function withdrawSuggestion(
   id: string,
   showToast: (message: string, type?: 'success' | 'error' | 'info') => void
 ): Promise<void> {
+  const startedAs = viewerID();
   try {
     await suggestionApi.withdraw(id);
+    if (!sameViewer(startedAs)) return;
     showToast('提案を取り消しました', 'info');
   } catch (e) {
+    if (!sameViewer(startedAs)) return;
     showToast(`取り消せませんでした: ${(e as Error).message}`, 'error');
   }
 }

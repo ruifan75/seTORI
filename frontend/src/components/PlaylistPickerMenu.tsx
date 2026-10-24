@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useViewerState } from '../hooks/useViewerState';
+import { useCallback, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
 import { playlistApi } from '../api/client';
@@ -50,13 +51,13 @@ export default function PlaylistPickerMenu({
   defaultName = '',
 }: Props) {
   const menuRef = useRef<HTMLDivElement>(null);
-  const [name, setName] = useState(defaultName);
+  const [name, setName] = useViewerState(defaultName);
   // 以後はスクロールやリサイズのたびに測り直す（イベントの中なので ref を読んでよい）。
-  const [pos, setPos] = useState(initialPosition);
+  const [pos, setPos] = useViewerState(initialPosition);
 
   const updatePosition = useCallback(() => {
     setPos(menuPositionFor(anchorRef.current, MENU_WIDTH));
-  }, [anchorRef]);
+  }, [anchorRef, setPos]);
 
   // メニュー外クリック・Esc で閉じる。スクロールやリサイズでは位置を追従させる。
   useEffect(() => {

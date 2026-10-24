@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { onViewerChange, sameViewer, viewerID } from '../../queryClient';
+import { useViewerState } from '../../hooks/useViewerState';
+import { useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { backupApi } from '../../api/client';
 import { useToast } from '../../components/ui/ToastContext';
@@ -151,7 +153,7 @@ function GoogleDriveSection({ onRestoreRequest }: {
     return tag;
   };
 
-  const [deviceAuth, setDeviceAuth] = useState<DriveDeviceAuth | null>(null);
+  const [deviceAuth, setDeviceAuth] = useViewerState<DriveDeviceAuth | null>(null);
   const pollTimer = useRef<number | null>(null);
 
   const stopPolling = () => {
@@ -173,9 +175,11 @@ function GoogleDriveSection({ onRestoreRequest }: {
     onSuccess: (auth) => {
       setDeviceAuth(auth);
       // interval 秒ごとに承認状況を確認（expires_in で打ち切り）
+      const startedAs = viewerID();
       const startedAt = Date.now();
       stopPolling();
       pollTimer.current = window.setInterval(async () => {
+        if (!sameViewer(startedAs)) { stopPolling(); return; }
         if (Date.now() - startedAt > auth.expires_in * 1000) {
           stopPolling();
           setDeviceAuth(null);
@@ -184,6 +188,7 @@ function GoogleDriveSection({ onRestoreRequest }: {
         }
         try {
           const result = await backupApi.gdriveAuthPoll(auth.device_code);
+          if (!sameViewer(startedAs)) return;
           if (result.connected) {
             stopPolling();
             setDeviceAuth(null);
@@ -192,6 +197,7 @@ function GoogleDriveSection({ onRestoreRequest }: {
             queryClient.invalidateQueries({ queryKey: ['backup-drive-files'] });
           }
         } catch (e) {
+          if (!sameViewer(startedAs)) return;
           stopPolling();
           setDeviceAuth(null);
           showToast(`連携エラー: ${e instanceof Error ? e.message : String(e)}`, 'error');
@@ -220,7 +226,10 @@ function GoogleDriveSection({ onRestoreRequest }: {
   });
 
   // アンマウント時にポーリングを止める
-  useEffect(() => stopPolling, []);
+  useEffect(() => {
+    const unsubscribe = onViewerChange(stopPolling);
+    return () => { unsubscribe(); stopPolling(); };
+  }, []);
 
   return (
     <div className="bg-white rounded-lg shadow-sm border p-6">
@@ -374,11 +383,11 @@ function SettingsForm({ initial }: { initial: BackupSettings }) {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
 
-  const [autoEnabled, setAutoEnabled] = useState(initial.auto_enabled);
-  const [intervalHours, setIntervalHours] = useState(initial.interval_hours);
-  const [retentionLocal, setRetentionLocal] = useState(initial.retention_local);
-  const [retentionDrive, setRetentionDrive] = useState(initial.retention_drive);
-  const [driveUpload, setDriveUpload] = useState(initial.drive_upload);
+  const [autoEnabled, setAutoEnabled] = useViewerState(initial.auto_enabled);
+  const [intervalHours, setIntervalHours] = useViewerState(initial.interval_hours);
+  const [retentionLocal, setRetentionLocal] = useViewerState(initial.retention_local);
+  const [retentionDrive, setRetentionDrive] = useViewerState(initial.retention_drive);
+  const [driveUpload, setDriveUpload] = useViewerState(initial.drive_upload);
 
   const settingsMutation = useMutation({
     mutationFn: backupApi.updateSettings,
@@ -467,7 +476,7 @@ export default function BackupPage() {
 
   const { data: status, isLoading } = useQuery({ queryKey: ['backup-status'], queryFn: backupApi.status });
 
-  const [restoreTarget, setRestoreTarget] = useState<RestoreTarget | null>(null);
+  const [restoreTarget, setRestoreTarget] = useViewerState<RestoreTarget | null>(null);
 
   const invalidateStatus = () => queryClient.invalidateQueries({ queryKey: ['backup-status'] });
 
@@ -518,8 +527,10 @@ export default function BackupPage() {
   });
 
   const handleDownload = async (name: string) => {
+    const startedAs = viewerID();
     try {
       const blob = await backupApi.downloadBlob(name);
+      if (!sameViewer(startedAs)) return;
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;

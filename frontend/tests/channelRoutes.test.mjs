@@ -37,7 +37,9 @@ test('channelApi の全操作は新 API を使い、query/body と JSON のキ�
       body: config.data === undefined ? null : JSON.parse(config.data) });
     return { data: response, status: 200, statusText: 'OK', headers: {}, config };
   } });
-  const { channelApi } = load('src/api/client.ts', { axios: { ...axios, create: () => instance } });
+  const { channelApi } = load('src/api/client.ts', { axios: { ...axios, create: () => instance },
+    '../queryClient': { viewerID: () => 'channel-route-fixture', sameViewer: (key) => key === 'channel-route-fixture' },
+  });
   const cases = [
     ['list', [2, 30, 'name', 'desc', true], 'get', '/api/channels?page=2&limit=30&sort=name&dir=desc&include_hidden=true', null],
     ['listGrouped', [true], 'get', '/api/channels?group=organization&include_hidden=true', null],
@@ -264,7 +266,9 @@ test('チャンネル範囲の背景処理は既存の JSON/query キーを送�
       body: config.data == null ? null : JSON.parse(config.data) });
     return { data: { task_id: 'task' }, status: 200, statusText: 'OK', headers: {}, config };
   } });
-  const { taskApi, batchFillApi, batchAnalyzeApi, searchApi } = load('src/api/client.ts', { axios: { ...axios, create: () => instance } });
+  const { taskApi, batchFillApi, batchAnalyzeApi, searchApi } = load('src/api/client.ts', { axios: { ...axios, create: () => instance },
+    '../queryClient': { viewerID: () => 'channel-route-fixture', sameViewer: (key) => key === 'channel-route-fixture' },
+  });
   await taskApi.prepare('owner');
   await batchFillApi.start('force', ['owner', 'guest'], true);
   await batchAnalyzeApi.start('unprocessed', 'owner', 'false');

@@ -1,4 +1,6 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { sameViewer, viewerID } from '../queryClient';
+import { useViewerState } from '../hooks/useViewerState';
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { performanceApi, songApi, streamApi, suggestionApi } from '../api/client';
 import { usePlayerStore } from '../store/player';
@@ -128,14 +130,14 @@ export function usePerformanceReport() {
   // 対象の歌唱が無いので、差分ではなく内容そのものを送る（perf.missing）
   const missingMode = performanceId === null;
 
-  const [draft, setDraft] = useState<Draft>(emptyDraft);
-  const [note, setNote] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
+  const [draft, setDraft] = useViewerState<Draft>(emptyDraft);
+  const [note, setNote] = useViewerState('');
+  const [busy, setBusy] = useViewerState(false);
+  const [error, setError] = useViewerState('');
   // 対象が切り替わったらレンダー中に同期で入れ替える（effect 経由だと
   // 1 フレームだけ前の曲の時刻が見える）。React が勧める「レンダー中の状態調整」の形
-  const [loadedFor, setLoadedFor] = useState<string | null>(null);
-  const draftKey = target ? target.id : missingMode ? 'missing' : null;
+  const [loadedFor, setLoadedFor] = useViewerState<string | null>(null);
+  const draftKey = editing ? target?.id ?? (missingMode ? `missing:${streamId}` : null) : null;
   if (draftKey && loadedFor !== draftKey) {
     setLoadedFor(draftKey);
     // 抜けている曲は「今聴いているところ」から始める。曲名だけ入れれば送れる
@@ -147,7 +149,7 @@ export function usePerformanceReport() {
   const patch = (p: Partial<Draft>) => setDraft((d) => ({ ...d, ...p }));
 
   const currentTime = usePlayerTime('bar');
-  const [duration, setDuration] = useState<number | null>(null);
+  const [duration, setDuration] = useViewerState<number | null>(null);
   useEffect(() => {
     // 長さは読み込み完了まで 0 なので、取れるまで少し待つ
     const timer = setInterval(() => {
@@ -158,7 +160,7 @@ export function usePerformanceReport() {
       }
     }, 500);
     return () => clearInterval(timer);
-  }, [streamId]);
+  }, [streamId, setDuration]);
 
   // 歌枠編集ページには埋め込みプレイヤーが居る。開いたままだと同じ動画が
   // 二重に鳴るので黙らせる（この画面が使うのは再生バーの方）
@@ -242,6 +244,7 @@ export function usePerformanceReport() {
   // 送信は宛先ごとに分かれる。**1 つの API にまとめない** ── 影響範囲が違うものを
   // 1 件の提案にすると、レビューで「時間だけ採用、曲は却下」ができなくなる。
   const handleSubmit = async () => {
+    const startedAs = viewerID();
     if (draft.end !== 0 && draft.end <= draft.start) {
       setError(`終了（${formatSeconds(draft.end)}）は開始（${formatSeconds(draft.start)}）より後にしてください`);
       return;
@@ -271,6 +274,7 @@ export function usePerformanceReport() {
           },
           note,
         });
+        if (!sameViewer(startedAs)) return;
         showToast('抜けている曲として報告しました。管理者の確認をお待ちください', 'success');
         invalidate();
         close();
@@ -293,13 +297,14 @@ export function usePerformanceReport() {
           },
           note
         );
-        if (!ok) return; // トーストは submit 側が出している
+        if (!sameViewer(startedAs) || !ok) return; // トーストは submit 側が出している
       }
 
       // 2. 歌った人
       if (singersChanged) {
         if (canEdit) {
           await performanceApi.update(target.id, { singer_ids: draft.singerIds });
+          if (!sameViewer(startedAs)) return;
         } else {
           await suggestionApi.create({
             target_type: 'performance',
@@ -307,6 +312,7 @@ export function usePerformanceReport() {
             fields: { singer_ids: draft.singerIds.join(',') },
             note,
           });
+          if (!sameViewer(startedAs)) return;
         }
       }
 
@@ -323,6 +329,7 @@ export function usePerformanceReport() {
           // 既存の曲へ繋ぎ替えるだけなら単件更新で足りる。提案を作って自分で
           // 承認すると、承認済み一覧が自己承認で埋まる
           await performanceApi.update(target.id, { song_id: draft.songId });
+          if (!sameViewer(startedAs)) return;
         } else {
           const created = await suggestionApi.create({
             kind: 'perf.meta',
@@ -332,7 +339,11 @@ export function usePerformanceReport() {
           });
           // 未登録の曲名へ差し替える場合は曲の作成を伴うので、権限があっても
           // 承認経路（findOrCreateSong）を通す。曲を作る API が単独では無い
-          if (canEdit) await suggestionApi.approve(created.id);
+          if (!sameViewer(startedAs)) return;
+          if (canEdit) {
+            await suggestionApi.approve(created.id);
+            if (!sameViewer(startedAs)) return;
+          }
         }
       }
 
@@ -344,6 +355,7 @@ export function usePerformanceReport() {
             name: target.song_name,
             original_artist: draft.artist.trim(),
           });
+          if (!sameViewer(startedAs)) return;
         } else {
           await suggestionApi.create({
             target_type: 'song',
@@ -351,6 +363,7 @@ export function usePerformanceReport() {
             fields: { original_artist: draft.artist.trim() },
             note,
           });
+          if (!sameViewer(startedAs)) return;
         }
       }
 
@@ -361,9 +374,10 @@ export function usePerformanceReport() {
       invalidate();
       close();
     } catch (e) {
+      if (!sameViewer(startedAs)) return;
       setError(`送信できませんでした: ${(e as Error).message}`);
     } finally {
-      setBusy(false);
+      if (sameViewer(startedAs)) setBusy(false);
     }
   };
 

@@ -198,10 +198,11 @@ export function createStreamSourceActions(context: Context) {
       const mergeMsg = mergedCount > 0 ? `（${mergedCount}曲の重複を統合）` : '';
       showToast(`Holodexから${merged.length}曲を読み込みました${mergeMsg}`, 'success');
     } catch (error) {
+      if (!sameViewer(startedAs)) return;
       showToast(analysisFailureMessage('Holodex分析', error), 'error');
       console.error('Holodex analysis failed:', error);
     } finally {
-      setHolodexAnalyzeLoading(false);
+      if (sameViewer(startedAs)) setHolodexAnalyzeLoading(false);
     }
   };
 
@@ -229,10 +230,11 @@ export function createStreamSourceActions(context: Context) {
       const mergeMsg = mergedCount > 0 ? `（${mergedCount}曲の重複を統合）` : '';
       showToast(`コメントから${merged.length}曲を読み込みました${mergeMsg}`, 'success');
     } catch (error) {
+      if (!sameViewer(startedAs)) return;
       showToast(analysisFailureMessage('コメント分析', error), 'error');
       console.error('Comment analysis failed:', error);
     } finally {
-      setCommentAnalyzeLoading(false);
+      if (sameViewer(startedAs)) setCommentAnalyzeLoading(false);
     }
   };
 
@@ -263,10 +265,11 @@ export function createStreamSourceActions(context: Context) {
         showToast(`チャプターから${merged.length}曲を読み込みました`, 'success');
       }
     } catch (error) {
+      if (!sameViewer(startedAs)) return;
       showToast(analysisFailureMessage('チャプター分析', error), 'error');
       console.error('Chapter analysis failed:', error);
     } finally {
-      setChapterAnalyzeLoading(false);
+      if (sameViewer(startedAs)) setChapterAnalyzeLoading(false);
     }
   };
 

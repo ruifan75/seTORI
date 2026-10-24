@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useViewerState } from '../../hooks/useViewerState';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { userApi, roleApi, activityApi } from '../../api/client';
 import { useToast } from '../../components/ui/ToastContext';
@@ -31,8 +31,8 @@ function UserRow({
   onRevokeSessions: (id: string) => void;
   onDelete: (id: string) => void;
 }) {
-  const [pwOpen, setPwOpen] = useState(false);
-  const [newPw, setNewPw] = useState('');
+  const [pwOpen, setPwOpen] = useViewerState(false);
+  const [newPw, setNewPw] = useViewerState('');
 
   return (
     <div className="flex flex-wrap items-center gap-3 px-3 py-2 border rounded-lg">
@@ -183,11 +183,11 @@ function UsersSection() {
     onError: (err: Error) => showToast(`セッション失効エラー: ${err.message}`, 'error'),
   });
 
-  const [username, setUsername] = useState('');
-  const [displayName, setDisplayName] = useState('');
-  const [password, setPassword] = useState('');
-  const [roleId, setRoleId] = useState('');
-  const [showFullIP, setShowFullIP] = useState(false);
+  const [username, setUsername] = useViewerState('');
+  const [displayName, setDisplayName] = useViewerState('');
+  const [password, setPassword] = useViewerState('');
+  const [roleId, setRoleId] = useViewerState('');
+  const [showFullIP, setShowFullIP] = useViewerState(false);
 
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
@@ -290,8 +290,8 @@ function RoleCard({
   onDelete: (id: string) => void;
   isSaving: boolean;
 }) {
-  const [description, setDescription] = useState(role.description);
-  const [selected, setSelected] = useState<string[]>(role.permissions ?? []);
+  const [description, setDescription] = useViewerState(role.description);
+  const [selected, setSelected] = useViewerState<string[]>(role.permissions ?? []);
 
   const hasAll = selected.includes(ALL_PERM);
   const dirty =
@@ -388,7 +388,7 @@ function RolesSection() {
     onError: (err: Error) => showToast(`削除エラー: ${err.message}`, 'error'),
   });
 
-  const [newName, setNewName] = useState('');
+  const [newName, setNewName] = useViewerState('');
 
   return (
     <div className="bg-white rounded-lg shadow-sm border p-6">

@@ -1,4 +1,5 @@
-import { useRef, useState } from 'react';
+import { useViewerState } from '../hooks/useViewerState';
+import { useRef } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { presetPlaylistApi } from '../api/client';
@@ -40,8 +41,8 @@ export default function PresetActions({ preset, onPlayAll, playDisabled }: Props
   const location = useLocation();
   const isAuthenticated = useAuthStore((state) => state.status === 'authenticated');
 
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [pickerPos, setPickerPos] = useState<MenuPosition>({ top: 0, left: 0 });
+  const [pickerOpen, setPickerOpen] = useViewerState(false);
+  const [pickerPos, setPickerPos] = useViewerState<MenuPosition>({ top: 0, left: 0 });
   const addButtonRef = useRef<HTMLButtonElement>(null);
 
   const goToLogin = () => navigate('/login', { state: { from: `${location.pathname}${location.search}` } });

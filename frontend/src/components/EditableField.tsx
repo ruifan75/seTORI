@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useViewerState } from '../hooks/useViewerState';
 import { useAuthStore } from '../store/auth';
 import LoginToSuggest from './LoginToSuggest';
 
@@ -50,10 +50,10 @@ export default function EditableField({
   required = false,
   display,
 }: EditableFieldProps) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(value);
-  const [note, setNote] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useViewerState(false);
+  const [draft, setDraft] = useViewerState(value);
+  const [note, setNote] = useViewerState('');
+  const [busy, setBusy] = useViewerState(false);
   // 提案の投稿はログイン必須。編集権限があるユーザーは当然ログイン済み。
   const canSubmit = useAuthStore((s) => s.user) !== null;
 
