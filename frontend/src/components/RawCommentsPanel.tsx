@@ -99,7 +99,7 @@ export default function RawCommentsPanel({ videoId, onSeek, onAddSong }: Props) 
   const [tsOnly, setTsOnly] = useState(true);
 
   // DB キャッシュ優先（comment_raw）なので通常は軽い
-  const { data, isLoading, isError } = useQuery({
+  const { data, isPending: isLoading, isError } = useQuery({
     queryKey: ['raw-comments', videoId],
     queryFn: () => commentApi.getComments(videoId),
     staleTime: Infinity,

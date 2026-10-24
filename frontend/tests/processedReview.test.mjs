@@ -15,7 +15,7 @@ function load(relative, dependencies = {}, globals = {}) {
     module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true,
   }, fileName: filename.pathname }).outputText;
   vm.runInNewContext(code, { module, exports: module.exports, URLSearchParams,
-    require: (name) => dependencies[name] ?? require(name), ...globals }, { filename: filename.pathname });
+    require: (name) => dependencies[name] ?? ({ './connectivity': { observeAPIConnection() {} }, '../../components/ui/QueryError': { default: () => null } }[name] ?? require(name)), ...globals }, { filename: filename.pathname });
   return module.exports;
 }
 const plain = (value) => JSON.parse(JSON.stringify(value));

@@ -1,3 +1,4 @@
+import QueryError from '../components/ui/QueryError';
 import { useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router-dom';
@@ -39,7 +40,7 @@ function ChannelCondition({ label, channelIds, onSelect, onRemove, maxSelections
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
 
-  const { data: candidates = [] } = useQuery({
+  const { data: candidates = [], isError, error, refetch, isPending } = useQuery({
     queryKey: ['singer-search', query],
     queryFn: () => channelApi.search(query, 8),
     enabled: open && query.trim().length >= 1,
@@ -78,7 +79,9 @@ function ChannelCondition({ label, channelIds, onSelect, onRemove, maxSelections
         </div>
         {canAdd && open && query.trim() && (
           <div className="absolute left-0 right-0 top-full z-30 mt-1 max-h-64 overflow-y-auto border border-gray-200 bg-white shadow-lg rounded-lg">
-              {availableCandidates.map((channel) => (
+              {isError && <QueryError error={error} onRetry={refetch} />}
+              {isPending && <Loading />}
+              {!isError && availableCandidates.map((channel) => (
                 <button
                   key={channel.id}
                   type="button"
@@ -90,7 +93,7 @@ function ChannelCondition({ label, channelIds, onSelect, onRemove, maxSelections
                   <span className="truncate text-sm text-gray-900">{channel.name}</span>
                 </button>
               ))}
-            {availableCandidates.length === 0 && <div className="px-3 py-3 text-sm text-gray-400">該当なし</div>}
+            {!isError && !isPending && availableCandidates.length === 0 && <div className="px-3 py-3 text-sm text-gray-400">該当なし</div>}
           </div>
         )}
       </div>
@@ -171,7 +174,7 @@ export default function SearchPage() {
   const { data: streamTags = [] } = useQuery({ queryKey: ['stream-tags'], queryFn: tagApi.listStreamTags });
   const { data: performanceTags = [] } = useQuery({ queryKey: ['performance-tags'], queryFn: tagApi.listPerformanceTags });
 
-  const { data: globalResults } = useQuery({
+  const { data: globalResults, isError: globalFailed, error: globalError, refetch: retryGlobal } = useQuery({
     queryKey: ['global-search', q],
     queryFn: () => searchApi.global(q),
     enabled: q.length >= 1,
@@ -181,7 +184,7 @@ export default function SearchPage() {
   const hasCondition = !!(
     q || ownerId || participantIds.length || vocalistIds.length || selectedStreamTags.length || selectedPerformanceTags.length
   );
-  const { data: streamResults, isLoading: streamsLoading } = useQuery({
+  const { data: streamResults, isPending: streamsLoading, isError: streamsFailed, error: streamsError, refetch: retryStreams } = useQuery({
     queryKey: [
       'stream-search', q, ownerId, participantsParam, vocalistsParam, streamTagsParam, performanceTagsParam, page,
     ],
@@ -282,7 +285,8 @@ export default function SearchPage() {
         </div>
       </section>
 
-      {q && globalResults && (
+      {q && globalFailed && <QueryError error={globalError} onRetry={retryGlobal} />}
+      {q && !globalFailed && globalResults && (
         <div className="grid gap-4 md:grid-cols-3">
           {globalResults.songs.length > 0 && (
             <section className="border-l-2 border-indigo-200 px-4 py-2">
@@ -325,6 +329,8 @@ export default function SearchPage() {
 
       {!hasCondition ? (
         <div className="py-12 text-center text-gray-500">検索条件を指定してください</div>
+      ) : streamsFailed ? (
+        <QueryError error={streamsError} onRetry={retryStreams} />
       ) : streamsLoading ? (
         <Loading />
       ) : (

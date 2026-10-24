@@ -1,3 +1,4 @@
+import QueryError from '../../components/ui/QueryError';
 import { useTaskProgress } from '../../hooks/useTaskProgress';
 import TaskProgress from '../../components/TaskProgress';
 import { useState } from 'react';
@@ -63,7 +64,7 @@ function IdentityChecks() {
   const { showToast } = useToast();
   const [open, setOpen] = useState(false);
 
-  const { data } = useQuery({
+  const { data, isPending, isError, error, refetch } = useQuery({
     queryKey: ['song-identity-checks'],
     queryFn: () => songApi.identityChecks(200),
     enabled: open,
@@ -93,7 +94,7 @@ function IdentityChecks() {
       </p>
 
       {open && (
-        checks.length === 0 ? (
+        isError ? <QueryError error={error} onRetry={refetch} /> : isPending ? <Loading /> : checks.length === 0 ? (
           <p className="mt-3 text-sm text-gray-500">判定の記録はありません。</p>
         ) : (
           <ul className="mt-3 divide-y text-xs">
@@ -193,7 +194,7 @@ export default function MergeCandidatesPage() {
   const [taskId, setTaskId] = useState<string | null>(null);
   const progress = useTaskProgress('duplicate_scan', taskId);
 
-  const { data, isLoading } = useQuery({
+  const { data, isPending: isLoading, isError: queryFailed, error: queryError, refetch: retryFetch } = useQuery({
     queryKey: ['song-merge-candidates'],
     queryFn: () => songApi.mergeCandidates(100),
   });
@@ -260,6 +261,7 @@ export default function MergeCandidatesPage() {
     mergeMutation.mutate({ sourceId: source.id, targetId: target.id });
   };
 
+  if (queryFailed) return <QueryError error={queryError} onRetry={retryFetch} />;
   if (isLoading) return <Loading />;
 
   const candidates = data?.candidates ?? [];

@@ -1,3 +1,4 @@
+import QueryError from '../../components/ui/QueryError';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -27,11 +28,10 @@ export default function VisibilityReviewPage() {
     <p className="text-sm text-gray-600">非表示で、音楽系タグがあり、180秒を超える配信です。内容を確認してから表示に戻してください。会限の歌唱は公開可否の設定に従って引き続き伏せられます。</p>
     <div className="space-x-3">
       <button disabled={busy || !!preview} onClick={() => { setDismissed(!dismissed); setOffset(0); setSelected([]); }} className="underline">{dismissed ? '見直し候補へ' : '歌枠ではないと判断した配信'}</button>
-      <span>{list.data?.total ?? 0}件</span>
+      <span>{list.isError ? '取得失敗' : list.isPending ? '読み込み中…' : `${list.data?.total ?? 0}件`}</span>
       {!dismissed && <button disabled={busy || !!preview || candidates.length === 0} onClick={() => setSelected(selected.length === candidates.length ? [] : candidates.map((c) => c.id))} className="underline">{selected.length === candidates.length && candidates.length > 0 ? 'このページの選択を解除' : 'このページをすべて選択'}</button>}
     </div>
-    {list.isError && <p role="alert" className="text-red-600">一覧の取得に失敗しました。</p>}
-    {list.isPending ? <p>読み込み中…</p> : <div className="border rounded divide-y">
+    {list.isError ? <QueryError error={list.error} onRetry={list.refetch} /> : list.isPending ? <p>読み込み中…</p> : <div className="border rounded divide-y">
       {candidates.length === 0 && <p className="p-4">該当する配信はありません。</p>}
       {candidates.map((c) => <div key={c.id} className="flex gap-3 p-3 items-center">
         {!dismissed && <input aria-label={`${c.title}を選択`} type="checkbox" disabled={busy || !!preview} checked={selected.includes(c.id)} onChange={(e) => setSelected(e.target.checked ? [...selected, c.id] : selected.filter((id) => id !== c.id))} />}
@@ -49,7 +49,7 @@ export default function VisibilityReviewPage() {
       <button disabled={busy} onClick={() => setPreview(null)} className="ml-3">戻る</button>
     </div>}
     <div className="border rounded p-4 space-y-2"><h2 className="font-bold">変更の履歴（直近20件）</h2>
-      {runs.isError && <p className="text-red-600">履歴の取得に失敗しました。</p>}
+      {runs.isError && <QueryError error={runs.error} onRetry={runs.refetch} />}
       {runs.data?.map((run) => <div key={run.id} className="flex gap-3 flex-wrap text-sm">
         <span>{new Date(run.created_at).toLocaleString('ja-JP')} / {run.item_count}件 / {{ preview: '確認のみ', applied: '表示に戻しました', reverted: '取り消しました' }[run.status]}</span>
         {run.status === 'applied' && <button disabled={revert.isPending} onClick={() => { if (window.confirm(`${run.item_count}件の表示変更を取り消します。表示状態が変更後の値と違う配信や、削除された配信は見送ります。`)) revert.mutate(run.id); }} className="underline">取り消す</button>}

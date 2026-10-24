@@ -16,7 +16,7 @@ function loadTS(url, dependencies, globals = {}) {
   }).outputText;
   vm.runInNewContext(code, {
     module, exports: module.exports, ...globals,
-    require: (name) => dependencies[name] ?? require(name),
+    require: (name) => dependencies[name] ?? (name === '../../components/ui/QueryError' ? { default: () => null } : require(name)),
   }, { filename: url.pathname });
   return module.exports;
 }

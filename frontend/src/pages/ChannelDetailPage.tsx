@@ -1,3 +1,4 @@
+import QueryError from '../components/ui/QueryError';
 import { useState } from 'react';
 import { invalidateChannelScopedQueries } from '../queryClient';
 import RestrictedBadge from '../components/RestrictedBadge';
@@ -90,7 +91,7 @@ export default function ChannelDetailPage() {
   //
   // enabled で loading 中を待つのは、その無駄な匿名リクエスト自体を省くため。
   // トークンが無ければ init() は即 anonymous を返すので、未ログインの表示は遅れない。
-  const { data: channel, isLoading: channelLoading } = useQuery({
+  const { data: channel, isPending: channelLoading, isError: channelFailed, error: channelError, refetch: retryChannel } = useQuery({
     queryKey: ['singer', id, canEdit],
     queryFn: () => channelApi.get(id!),
     enabled: !!id && authStatus !== 'loading',
@@ -106,7 +107,7 @@ export default function ChannelDetailPage() {
   const organizations = orgList?.organizations ?? [];
 
   // Streams
-  const { data: streams, isLoading: streamsLoading } = useQuery({
+  const { data: streams, isPending: streamsLoading, isError: streamsFailed, error: streamsError, refetch: retryStreams } = useQuery({
     // 権限を鍵に入れる（処理状態は content:edit のときだけ載り、`processed=` の
     // 絞り込みも権限が無ければバックエンドが無視する）。入れないと、保存済み
     // トークンでのハードリロードで匿名の応答が 5 分残り、「未処理」で絞ったつもりが
@@ -117,7 +118,7 @@ export default function ChannelDetailPage() {
   });
 
   // Performances
-  const { data: performances, isLoading: perfsLoading } = useQuery({
+  const { data: performances, isPending: perfsLoading, isError: perfsFailed, error: perfsError, refetch: retryPerfs } = useQuery({
     queryKey: ['singerPerformances', id, perfPage, perfSort, perfDir],
     queryFn: () => channelApi.getPerformances(id!, perfPage, 20, perfSort, perfDir),
     enabled: !!id && activeTab === 'performances',
@@ -208,6 +209,7 @@ export default function ChannelDetailPage() {
     return `${m}:${s.toString().padStart(2, '0')}`;
   };
 
+  if (channelFailed) return <QueryError error={channelError} onRetry={retryChannel} />;
   if (channelLoading) {
     return <Loading />;
   }
@@ -490,7 +492,9 @@ export default function ChannelDetailPage() {
             </div>
           </div>
 
-          {streamsLoading ? (
+          {streamsFailed ? (
+              <QueryError error={streamsError} onRetry={retryStreams} />
+            ) : streamsLoading ? (
             <Loading />
           ) : streams?.streams.length === 0 ? (
             <div className="text-center py-12 text-gray-500">
@@ -580,7 +584,9 @@ export default function ChannelDetailPage() {
 
       {activeTab === 'performances' && (
         <div className="space-y-4">
-          {perfsLoading ? (
+          {perfsFailed ? (
+              <QueryError error={perfsError} onRetry={retryPerfs} />
+            ) : perfsLoading ? (
             <Loading />
           ) : performances?.performances.length === 0 ? (
             <div className="text-center py-12 text-gray-500">

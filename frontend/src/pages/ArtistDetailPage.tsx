@@ -1,3 +1,4 @@
+import QueryError from '../components/ui/QueryError';
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
@@ -28,7 +29,7 @@ export default function ArtistDetailPage() {
   const [mergeOpen, setMergeOpen] = useState(false);
   const [mergeQuery, setMergeQuery] = useState('');
 
-  const { data, isLoading } = useQuery({
+  const { data, isPending: isLoading, isError: queryFailed, error: queryError, refetch: retryFetch } = useQuery({
     queryKey: ['artist', id, page, sort, dir],
     queryFn: () => artistApi.get(id!, page, 20, sort, dir),
     enabled: !!id,
@@ -116,6 +117,7 @@ export default function ArtistDetailPage() {
     mergeMutation.mutate(target.id);
   };
 
+  if (queryFailed) return <QueryError error={queryError} onRetry={retryFetch} />;
   if (isLoading) return <Loading />;
   if (!data) {
     return <div className="text-center py-12 text-gray-500">アーティストが見つかりません</div>;

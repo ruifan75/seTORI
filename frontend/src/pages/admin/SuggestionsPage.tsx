@@ -1,3 +1,4 @@
+import QueryError from '../../components/ui/QueryError';
 import { useCallback, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
@@ -181,7 +182,8 @@ export default function SuggestionsPage() {
     resetView();
   };
 
-  const isLoading = grouped ? groupQuery.isLoading : listQuery.isLoading;
+  const currentQuery = grouped ? groupQuery : listQuery;
+  const isLoading = currentQuery.isPending;
   const pagination = grouped ? groupQuery.data?.pagination : listQuery.data?.pagination;
   const groups = groupQuery.data?.groups ?? [];
   const isEmpty = grouped ? groups.length === 0 : !listQuery.data || listQuery.data.suggestions.length === 0;
@@ -236,7 +238,9 @@ export default function SuggestionsPage() {
         </div>
       </div>
 
-      {isLoading ? (
+      {currentQuery.isError ? (
+        <QueryError error={currentQuery.error} onRetry={currentQuery.refetch} />
+      ) : isLoading ? (
         <Loading />
       ) : isEmpty ? (
         <div className="text-center py-12 text-gray-500 bg-white rounded-lg border">

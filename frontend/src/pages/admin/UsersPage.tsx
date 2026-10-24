@@ -1,3 +1,4 @@
+import QueryError from '../../components/ui/QueryError';
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { userApi, roleApi, activityApi } from '../../api/client';
@@ -143,8 +144,8 @@ function UsersSection() {
   const { showToast } = useToast();
   const me = useAuthStore((s) => s.user);
 
-  const { data: users = [], isLoading } = useQuery({ queryKey: ['users'], queryFn: userApi.list });
-  const { data: roles = [] } = useQuery({ queryKey: ['roles'], queryFn: roleApi.list });
+  const { data: users = [], isPending: isLoading, isError, error, refetch } = useQuery({ queryKey: ['users'], queryFn: userApi.list });
+  const { data: roles = [], isError: rolesFailed, error: rolesError, refetch: retryRoles } = useQuery({ queryKey: ['roles'], queryFn: roleApi.list });
   const { data: activityData } = useQuery({
     queryKey: ['activity', 'users', 30],
     queryFn: () => activityApi.userSummaries(30),
@@ -215,7 +216,9 @@ function UsersSection() {
         ログインアカウントを管理します。ロールで編集権限が決まります。未ログインのユーザーは閲覧のみ可能です。
       </p>
 
-      {isLoading ? (
+      {isError || rolesFailed ? (
+        <QueryError error={isError ? error : rolesError} onRetry={isError ? refetch : retryRoles} />
+      ) : isLoading ? (
         <p className="text-gray-400">読み込み中...</p>
       ) : (
         <div className="space-y-2 mb-6">
@@ -362,8 +365,8 @@ function RolesSection() {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
 
-  const { data: roles = [], isLoading } = useQuery({ queryKey: ['roles'], queryFn: roleApi.list });
-  const { data: permissions = [] } = useQuery({ queryKey: ['permissions'], queryFn: roleApi.listPermissions });
+  const { data: roles = [], isPending: isLoading, isError, error, refetch } = useQuery({ queryKey: ['roles'], queryFn: roleApi.list });
+  const { data: permissions = [], isError: permissionsFailed, error: permissionsError, refetch: retryPermissions } = useQuery({ queryKey: ['permissions'], queryFn: roleApi.listPermissions });
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['roles'] });
@@ -397,7 +400,9 @@ function RolesSection() {
         ロールごとに許可する操作（権限）を設定します。組み込みロール（admin / editor / viewer）は削除できませんが、権限は調整できます。
       </p>
 
-      {isLoading ? (
+      {isError || permissionsFailed ? (
+        <QueryError error={isError ? error : permissionsError} onRetry={isError ? refetch : retryPermissions} />
+      ) : isLoading ? (
         <p className="text-gray-400">読み込み中...</p>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 mb-6">

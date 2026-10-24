@@ -1,3 +1,4 @@
+import QueryError from '../../components/ui/QueryError';
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { filterKeywordApi, tagApi, tagRuleApi, aiProviderApi } from '../../api/client';
@@ -383,7 +384,7 @@ function AIProviderSection() {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
 
-  const { data: providers = [], isLoading } = useQuery({
+  const { data: providers = [], isPending: isLoading, isError, error, refetch } = useQuery({
     queryKey: ['ai-providers'],
     queryFn: aiProviderApi.list,
   });
@@ -466,7 +467,9 @@ function AIProviderSection() {
         API キーは保存後は表示されません（末尾のみ）。
       </p>
 
-      {isLoading ? (
+      {isError ? (
+        <QueryError error={error} onRetry={refetch} />
+      ) : isLoading ? (
         <p className="text-gray-400">読み込み中...</p>
       ) : (
         <div className="space-y-2 mb-6">
@@ -623,8 +626,8 @@ function TagRuleSection() {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
 
-  const { data: streamTags = [] } = useQuery({ queryKey: ['stream-tags'], queryFn: tagApi.listStreamTags });
-  const { data: rules = [], isLoading } = useQuery({ queryKey: ['tag-rules'], queryFn: tagRuleApi.list });
+  const { data: streamTags = [], isError: catalogFailed, error: catalogError, refetch: retryCatalog } = useQuery({ queryKey: ['stream-tags'], queryFn: tagApi.listStreamTags });
+  const { data: rules = [], isPending: isLoading, isError, error, refetch } = useQuery({ queryKey: ['tag-rules'], queryFn: tagRuleApi.list });
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['tag-rules'] });
 
@@ -673,8 +676,12 @@ function TagRuleSection() {
         新しい種別（雑談・ゲームなど）は先に「配信タグ管理」でタグを作ってからルールを追加してください。
       </p>
 
-      {isLoading ? (
+      {isError ? (
+        <QueryError error={error} onRetry={refetch} />
+      ) : isLoading ? (
         <p className="text-gray-400">読み込み中...</p>
+      ) : catalogFailed ? (
+        <QueryError error={catalogError} onRetry={retryCatalog} />
       ) : streamTags.length === 0 ? (
         <p className="text-sm text-gray-400">先に「配信タグ管理」でタグを作成してください。</p>
       ) : (
@@ -700,7 +707,7 @@ export default function SettingsPage() {
   const { showToast } = useToast();
 
   // Filter keywords
-  const { data: keywords = [], isLoading: isLoadingKeywords } = useQuery({
+  const { data: keywords = [], isPending: isLoadingKeywords, isError: failedKeywords, error: errorKeywords, refetch: retryKeywords } = useQuery({
     queryKey: ['filter-keywords'],
     queryFn: filterKeywordApi.list,
   });
@@ -729,7 +736,7 @@ export default function SettingsPage() {
   });
 
   // Stream tags
-  const { data: streamTags = [], isLoading: isLoadingStreamTags } = useQuery({
+  const { data: streamTags = [], isPending: isLoadingStreamTags, isError: failedStreamTags, error: errorStreamTags, refetch: retryStreamTags } = useQuery({
     queryKey: ['stream-tags'],
     queryFn: tagApi.listStreamTags,
   });
@@ -758,7 +765,7 @@ export default function SettingsPage() {
   });
 
   // Performance tags
-  const { data: performanceTags = [], isLoading: isLoadingPerfTags } = useQuery({
+  const { data: performanceTags = [], isPending: isLoadingPerfTags, isError: failedPerfTags, error: errorPerfTags, refetch: retryPerfTags } = useQuery({
     queryKey: ['performance-tags'],
     queryFn: tagApi.listPerformanceTags,
   });
@@ -818,7 +825,9 @@ export default function SettingsPage() {
           コメントから楽曲を読み込む際に、除外・保持するキーワードを管理します。
         </p>
 
-        {isLoadingKeywords ? (
+        {failedKeywords ? (
+          <QueryError error={errorKeywords} onRetry={retryKeywords} />
+        ) : isLoadingKeywords ? (
           <p className="text-gray-400">読み込み中...</p>
         ) : (
           <div className="space-y-8">
@@ -854,7 +863,9 @@ export default function SettingsPage() {
           配信に付けるタグを管理します（例: 歌枠、周年、誕生日）。
         </p>
 
-        {isLoadingStreamTags ? (
+        {failedStreamTags ? (
+          <QueryError error={errorStreamTags} onRetry={retryStreamTags} />
+        ) : isLoadingStreamTags ? (
           <p className="text-gray-400">読み込み中...</p>
         ) : (
           <TagSection
@@ -878,7 +889,9 @@ export default function SettingsPage() {
           演出（パフォーマンス）に付けるバージョンタグを管理します（例: Acoustic、弾き語り）。
         </p>
 
-        {isLoadingPerfTags ? (
+        {failedPerfTags ? (
+          <QueryError error={errorPerfTags} onRetry={retryPerfTags} />
+        ) : isLoadingPerfTags ? (
           <p className="text-gray-400">読み込み中...</p>
         ) : (
           <TagSection

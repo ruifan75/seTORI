@@ -1,3 +1,4 @@
+import QueryError from '../../components/ui/QueryError';
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { integrationSettingsApi } from '../../api/client';
@@ -58,7 +59,7 @@ export default function IntegrationSettingsSection() {
   const queryClient = useQueryClient();
   const [inputs, setInputs] = useState<Record<string, string>>({});
 
-  const { data, isLoading } = useQuery({
+  const { data, isPending: isLoading, isError: queryFailed, error: queryError, refetch: retryFetch } = useQuery({
     queryKey: ['settings', 'integrations'],
     queryFn: integrationSettingsApi.get,
   });
@@ -94,6 +95,7 @@ export default function IntegrationSettingsSection() {
     onError: (err: Error) => showToast(`削除に失敗しました: ${err.message}`, 'error'),
   });
 
+  if (queryFailed) return <QueryError error={queryError} onRetry={retryFetch} />;
   if (isLoading) return <Loading />;
 
   const hasInput = Object.values(inputs).some((v) => v?.trim());

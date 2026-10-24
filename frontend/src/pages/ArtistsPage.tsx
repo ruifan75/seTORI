@@ -1,3 +1,4 @@
+import QueryError from '../components/ui/QueryError';
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router-dom';
@@ -17,7 +18,7 @@ export default function ArtistsPage() {
   const [searchInput, setSearchInput] = useState(search);
   const canEdit = hasPermission(useAuthStore((s) => s.user), PERM.CONTENT_EDIT);
 
-  const { data, isLoading } = useQuery({
+  const { data, isPending: isLoading, isError: queryFailed, error: queryError, refetch: retryFetch } = useQuery({
     queryKey: ['artists', page, search, sort, dir],
     queryFn: () => artistApi.list(page, 50, search || undefined, sort, dir),
   });
@@ -83,7 +84,9 @@ export default function ArtistsPage() {
         </div>
       </div>
 
-      {isLoading ? (
+      {queryFailed ? (
+        <QueryError error={queryError} onRetry={retryFetch} />
+      ) : isLoading ? (
         <Loading />
       ) : data?.pagination.total === 0 ? (
         <div className="text-center py-12 text-gray-500">

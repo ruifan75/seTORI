@@ -112,7 +112,7 @@ export function useStreamDetail() {
   // 即座には引き直さないので、保存済みトークンでハードリロードすると
   // 「処理済みなのにチェックが外れて見える」（is_processed が応答に無いため）。
   // auth が loading のあいだ待つのは、その無駄な匿名リクエストを省くため。
-  const { data: stream, isLoading } = useQuery({
+  const { data: stream, isPending: isLoading, isError, error, refetch } = useQuery({
     queryKey: ['stream', id, canEdit],
     queryFn: () => streamApi.get(id!),
     enabled: !!id && authStatus !== 'loading',
@@ -409,6 +409,8 @@ export function useStreamDetail() {
     createPerformancesMutation,
   });
 
+  if (isError && !stream) return { status: 'error', error, refetch } as const;
+
   if (isLoading) {
     return { status: 'loading' } as const;
   }
@@ -536,6 +538,7 @@ export function useStreamDetail() {
   };
   return {
     status: 'ready',
+    fetchError: isError ? { error, refetch } : null,
     setEditTab,
     editTab,
     autoLoad,

@@ -1,3 +1,4 @@
+import QueryError from '../../components/ui/QueryError';
 import { useTaskProgress } from '../../hooks/useTaskProgress';
 import TaskProgress from '../../components/TaskProgress';
 import { useRef, useState } from 'react';
@@ -27,7 +28,7 @@ export default function ReadingsPage() {
   const fileRef = useRef<HTMLInputElement>(null);
   const [importResult, setImportResult] = useState<ImportReadingsResult | null>(null);
 
-  const { data: stats, isLoading } = useQuery({
+  const { data: stats, isPending: isLoading, isError: queryFailed, error: queryError, refetch: retryFetch } = useQuery({
     queryKey: ['readings-stats'],
     queryFn: readingApi.stats,
   });
@@ -114,7 +115,9 @@ export default function ReadingsPage() {
       </div>
 
       {/* 残件。判定はエクスポートの「未整備のみ」と同じ条件 */}
-      {isLoading ? (
+      {queryFailed ? (
+        <QueryError error={queryError} onRetry={retryFetch} />
+      ) : isLoading ? (
         <Loading />
       ) : stats ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

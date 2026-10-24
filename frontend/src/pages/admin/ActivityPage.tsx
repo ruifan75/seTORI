@@ -114,7 +114,7 @@ export default function ActivityPage() {
       </div>
 
       <div className="overflow-hidden rounded-lg border bg-white shadow-sm">
-        {listQuery.isLoading ? (
+        {listQuery.isPending ? (
           <p className="p-6 text-gray-400">読み込み中...</p>
         ) : listQuery.isError ? (
           <p className="p-6 text-red-600">活動記録を読み込めませんでした。</p>

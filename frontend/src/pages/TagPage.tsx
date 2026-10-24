@@ -1,3 +1,4 @@
+import QueryError from '../components/ui/QueryError';
 import { useQuery } from '@tanstack/react-query';
 import RestrictedBadge from '../components/RestrictedBadge';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
@@ -24,13 +25,13 @@ export default function TagPage() {
   });
   const tagInfo = catalog.find((t) => t.id === tagId);
 
-  const { data: streamData, isLoading: streamsLoading } = useQuery({
+  const { data: streamData, isPending: streamsLoading, isError: streamsFailed, error: streamsError, refetch: retryStreams } = useQuery({
     queryKey: ['tag-streams', tagId, page],
     queryFn: () => tagApi.getStreamsByTag(tagId, page, 20),
     enabled: isStream && !!tagId,
   });
 
-  const { data: perfData, isLoading: perfsLoading } = useQuery({
+  const { data: perfData, isPending: perfsLoading, isError: perfsFailed, error: perfsError, refetch: retryPerfs } = useQuery({
     queryKey: ['tag-performances', tagId, page],
     queryFn: () => tagApi.getPerformancesByTag(tagId, page, 20),
     enabled: !isStream && !!tagId,
@@ -96,7 +97,9 @@ export default function TagPage() {
         )}
       </div>
 
-      {isLoading ? (
+      {(isStream ? streamsFailed : perfsFailed) ? (
+        <QueryError error={isStream ? streamsError : perfsError} onRetry={isStream ? retryStreams : retryPerfs} />
+      ) : isLoading ? (
         <Loading />
       ) : total === 0 ? (
         <div className="text-center py-12 text-gray-500">

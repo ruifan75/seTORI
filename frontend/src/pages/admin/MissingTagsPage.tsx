@@ -1,3 +1,4 @@
+import QueryError from '../../components/ui/QueryError';
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
@@ -24,7 +25,7 @@ export default function MissingTagsPage() {
   const { showToast } = useToast();
   const [showDismissed, setShowDismissed] = useState(false);
 
-  const { data, isLoading } = useQuery({
+  const { data, isPending: isLoading, isError: queryFailed, error: queryError, refetch: retryFetch } = useQuery({
     queryKey: ['tag-gaps'],
     queryFn: () => tagGapApi.list(300),
   });
@@ -71,6 +72,7 @@ export default function MissingTagsPage() {
     onError: (e: Error) => showToast(`取り消せません: ${e.message}`, 'error'),
   });
 
+  if (queryFailed) return <QueryError error={queryError} onRetry={retryFetch} />;
   if (isLoading) return <Loading />;
 
   const gaps = data?.gaps ?? [];

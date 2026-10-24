@@ -3,6 +3,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { suggestionApi } from '../api/client';
 import type { AutoApplySettings } from '../api/types';
 import { useToast } from './ui/ToastContext';
+import QueryError from './ui/QueryError';
+import Loading from './ui/Loading';
 
 // timing 提案の自動適用条件を調整するパネル（レビュー画面の折りたたみ）。
 //
@@ -15,7 +17,7 @@ export default function AutoApplySettingsPanel() {
   // 触るまでは null。サーバーの値をそのまま見せ、編集したぶんだけ手元で持つ
   const [edited, setEdited] = useState<AutoApplySettings | null>(null);
 
-  const { data } = useQuery({
+  const { data, isPending, isError, error, refetch } = useQuery({
     queryKey: ['suggestions', 'settings'],
     queryFn: () => suggestionApi.getSettings(),
   });
@@ -32,6 +34,8 @@ export default function AutoApplySettingsPanel() {
   });
 
   const draft = edited ?? data;
+  if (isError) return <QueryError error={error} onRetry={() => void refetch()} />;
+  if (isPending) return <Loading />;
   if (!draft) return null;
   const setDraft = setEdited;
 

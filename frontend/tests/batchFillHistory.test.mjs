@@ -26,6 +26,7 @@ function statusQuery(client, fetchStatus, { mutations = [], toasts = [], cancelF
   const options = [];
   const module = { exports: {} };
   const dependencies = {
+    '../../components/ui/QueryError': { default: () => null },
     react: { useState: (value) => [value, () => {}] },
     'react-router-dom': { Link: () => null },
     '@tanstack/react-query': {

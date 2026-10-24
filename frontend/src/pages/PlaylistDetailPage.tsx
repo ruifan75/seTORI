@@ -1,3 +1,4 @@
+import QueryError from '../components/ui/QueryError';
 import { useState } from 'react';
 import RestrictedBadge from '../components/RestrictedBadge';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -37,14 +38,12 @@ export default function PlaylistDetailPage({ shared = false }: { shared?: boolea
     queryKey: ['playlist', key, shared],
     queryFn: () => (shared ? playlistApi.getShared(slug!) : playlistApi.get(id!)),
     enabled: !!key,
-    retry: false,
   });
 
   const itemsQuery = useQuery({
     queryKey: ['playlist', key, 'items', shared],
     queryFn: () => (shared ? playlistApi.sharedItems(slug!) : playlistApi.items(id!)),
     enabled: !!key,
-    retry: false,
   });
 
   const playlist = playlistQuery.data;
@@ -126,9 +125,10 @@ export default function PlaylistDetailPage({ shared = false }: { shared?: boolea
     }
   };
 
-  if (playlistQuery.isLoading) return <Loading />;
+  if (playlistQuery.isError) return <QueryError error={playlistQuery.error} onRetry={playlistQuery.refetch} />;
+  if (playlistQuery.isPending) return <Loading />;
 
-  if (playlistQuery.isError || !playlist) {
+  if (!playlist) {
     return (
       <div className="text-center py-16 space-y-3">
         <p className="text-gray-900 font-medium">プレイリストが見つかりません</p>
@@ -268,7 +268,9 @@ export default function PlaylistDetailPage({ shared = false }: { shared?: boolea
       </div>
 
       {/* 収録曲 */}
-      {itemsQuery.isLoading ? (
+      {itemsQuery.isError ? (
+        <QueryError error={itemsQuery.error} onRetry={itemsQuery.refetch} />
+      ) : itemsQuery.isPending ? (
         <Loading />
       ) : items.length === 0 ? (
         <p className="text-gray-500 py-8 text-center">
