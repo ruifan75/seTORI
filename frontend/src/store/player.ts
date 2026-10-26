@@ -36,7 +36,8 @@ export interface PerformanceLike {
 }
 
 // 配信横断の歌唱を再生トラックへ変換する。
-// ホーム・タグ・チャンネル・プレイリストで同じ形を使う（曲詳細だけは曲側の情報を優先するため独自）。
+// ホーム・タグ・チャンネル・プレイリスト・曲詳細で使う。
+// 曲詳細では toPerformanceListItem が親の曲情報を補完してからここへ渡す。
 export function performanceToTrack(p: PerformanceLike): PlayerTrack {
   return {
     performanceId: p.id,

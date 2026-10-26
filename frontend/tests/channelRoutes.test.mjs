@@ -136,6 +136,7 @@ test('既存のアプリ内チャンネルリンクをすべて新 URL にする
     'src/pages/ChannelsPage.tsx': ['/channels/${channel.id}'],
     'src/pages/admin/SyncPage.tsx': ['/channels/${sg.id}'],
     'src/pages/stream-detail/StreamInfoCard.tsx': ['/channels/${channel.id}'],
+    'src/components/PerformanceList.tsx': ['/channels/${singer.id}'],
     'src/pages/stream-detail/StreamPerformanceList.tsx': ['/channels/${singer.id}'],
     'src/pages/stream-detail/StreamVocalistPopup.tsx': ['/channels/${singer.id}'],
   };

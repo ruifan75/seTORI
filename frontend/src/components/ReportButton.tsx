@@ -11,9 +11,13 @@ import { useAuthStore, hasPermission, PERM } from '../store/auth';
 export default function ReportButton({
   track,
   className = 'inline-flex items-center justify-center w-8 h-8 rounded-full text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors',
+  showLabel = false,
+  onActivate,
 }: {
   track: PlayerTrack;
   className?: string;
+  showLabel?: boolean;
+  onActivate?: () => void;
 }) {
   const openReport = usePlayerStore((s) => s.openReport);
   const canEdit = hasPermission(
@@ -23,7 +27,7 @@ export default function ReportButton({
   const label = canEdit ? 'この曲の情報を直す' : 'この曲の情報の誤りを報告';
 
   return (
-    <button onClick={() => openReport(track)} className={className} title={label} aria-label={label}>
+    <button type={showLabel ? 'button' : undefined} onClick={() => { onActivate?.(); openReport(track); }} className={className} title={label} aria-label={label}>
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path
           strokeLinecap="round"
@@ -32,6 +36,7 @@ export default function ReportButton({
           d="M3 21v-4m0 0V5a2 2 0 012-2h6.5l1 1H21l-3 6 3 6h-8.5l-1-1H5a2 2 0 00-2 2zm9-13.5V9"
         />
       </svg>
+      {showLabel && <span>{label}</span>}
     </button>
   );
 }

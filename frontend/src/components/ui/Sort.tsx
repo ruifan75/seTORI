@@ -1,5 +1,6 @@
 // テーブル・カード一覧の共通並び替え UI。
 // SortableTh: 表頭クリックで昇順→降順をトグル。SortControl: カード一覧向けのドロップダウン。
+import { useId } from 'react';
 
 export type SortDir = 'asc' | 'desc';
 
@@ -92,11 +93,13 @@ interface SortControlProps {
 
 // カード一覧（表頭が無い）向けの並び替えコントロール：項目セレクト＋昇降トグル。
 export function SortControl({ options, sort, dir, onSort }: SortControlProps) {
+  const selectId = useId();
   const current = options.find((o) => o.value === sort) ?? options[0];
   return (
     <div className="inline-flex items-center gap-1.5 text-sm shrink-0">
-      <span className="text-gray-400">並び替え</span>
+      <label htmlFor={selectId} className="text-gray-400">並び替え</label>
       <select
+        id={selectId}
         value={sort}
         onChange={(e) => {
           const opt = options.find((o) => o.value === e.target.value);

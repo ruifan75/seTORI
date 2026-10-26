@@ -1,12 +1,12 @@
 import { useQuery } from '@tanstack/react-query';
-import RestrictedBadge from '../components/RestrictedBadge';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { tagApi } from '../api/client';
 import Loading from '../components/ui/Loading';
+import PerformanceList from '../components/PerformanceList';
+import PerformanceListToolbar from '../components/PerformanceListToolbar';
+import { toPerformanceListItem } from '../utils/performanceList';
 import Pagination from '../components/ui/Pagination';
 import Tag from '../components/ui/Tag';
-import ArtistLinks from '../components/ArtistLinks';
-import { usePlayerStore, performancesToTracks, type PlayerTrack } from '../store/player';
 
 // タグ検索結果ページ。/tags/stream/:id は配信一覧、/tags/performance/:id は演出一覧。
 export default function TagPage() {
@@ -30,7 +30,7 @@ export default function TagPage() {
     enabled: isStream && !!tagId,
   });
 
-  const { data: perfData, isLoading: perfsLoading } = useQuery({
+  const { data: perfData, isLoading: perfsLoading, isError: perfsError } = useQuery({
     queryKey: ['tag-performances', tagId, page],
     queryFn: () => tagApi.getPerformancesByTag(tagId, page, 20),
     enabled: !isStream && !!tagId,
@@ -44,11 +44,7 @@ export default function TagPage() {
     setSearchParams(newPage <= 1 ? {} : { page: String(newPage) }, { replace: true });
   };
 
-  // このページの歌唱一覧をキューに載せて startIndex から連続再生
-  const playFrom = (startIndex: number) => {
-    const tracks: PlayerTrack[] = performancesToTracks(perfData?.performances ?? []);
-    usePlayerStore.getState().playTracks(tracks, startIndex);
-  };
+  const listItems = (perfData?.performances ?? []).map((perf) => toPerformanceListItem(perf));
 
   return (
     <div className="space-y-6">
@@ -84,19 +80,12 @@ export default function TagPage() {
             配信一覧で絞り込む →
           </Link>
         )}
-        {!isStream && (perfData?.performances.length ?? 0) > 0 && (
-          <button
-            onClick={() => playFrom(0)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm bg-indigo-600 text-white font-medium rounded-full hover:bg-indigo-700 transition-colors"
-            title="このページの歌唱を連続再生"
-          >
-            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-            すべて再生
-          </button>
-        )}
+
       </div>
 
-      {isLoading ? (
+      {!isStream && perfsError ? (
+        <p role="alert" className="py-12 text-center text-red-700">歌唱リストを取得できませんでした</p>
+      ) : isLoading ? (
         <Loading />
       ) : total === 0 ? (
         <div className="text-center py-12 text-gray-500">
@@ -142,63 +131,9 @@ export default function TagPage() {
         </>
       ) : (
         <>
-          {/* 演出リスト */}
-          <div className="space-y-3">
-            {perfData?.performances.map((perf, perfIndex) => (
-              <div
-                key={perf.id}
-                className="bg-white rounded-lg shadow-sm border overflow-hidden hover:shadow-md transition-shadow flex"
-              >
-                <button
-                  onClick={() => playFrom(perfIndex)}
-                  className="relative w-28 sm:w-40 flex-shrink-0 group"
-                  title="この歌唱から連続再生"
-                >
-                  {perf.thumbnail_url ? (
-                    <img src={perf.thumbnail_url} alt="" className="w-full h-full object-cover" />
-                  ) : (
-                    <div className="w-full h-full bg-gray-200" />
-                  )}
-                  <span className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 flex items-center justify-center transition-all">
-                    <span className="w-9 h-9 rounded-full bg-indigo-600 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                      <svg className="w-5 h-5 text-white ml-0.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                    </span>
-                  </span>
-                </button>
-                <div className="p-3 sm:p-4 flex-1 min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Link
-                      to={`/songs/${perf.song_id}`}
-                      className="font-medium text-indigo-600 hover:text-indigo-800 truncate"
-                    >
-                      {perf.song_name}
-                    </Link>
-                    <ArtistLinks
-                      artists={perf.artists}
-                      fallback={perf.original_artist}
-                      className="text-sm text-gray-500 truncate"
-                      linkClassName="hover:text-indigo-600"
-                    />
-                    {perf.tags.map((tag) => (
-                      <Tag key={tag.id} label={tag.display_name} color={tag.color} />
-                    ))}
-                  </div>
-                  <div className="flex items-center gap-2 min-w-0 mt-1">
-                    <Link
-                      to={`/streams/${perf.stream_id}`}
-                      className="block text-sm text-gray-600 hover:text-gray-900 truncate"
-                    >
-                      {perf.stream_title}
-                    </Link>
-                    {perf.is_restricted && <RestrictedBadge />}
-                  </div>
-                  <p className="text-xs text-gray-400 mt-1">
-                    {perf.stream_date && new Date(perf.stream_date).toLocaleDateString('ja-JP')}
-                    {perf.singers.length > 0 && ` · ${perf.singers.map((s) => s.name).join('、')}`}
-                  </p>
-                </div>
-              </div>
-            ))}
+          <div className="space-y-4">
+            <PerformanceListToolbar items={listItems} scope="page" total={total} />
+            <PerformanceList items={listItems} />
           </div>
         </>
       )}
