@@ -65,6 +65,9 @@ export default function PresetPlaylistPage() {
           {/* 読み込み中に「先頭 0 曲」と出さないよう、件数が確定してから注記する */}
           {items.length > 0 && items.length < preset.item_count && `（表示は先頭 ${items.length} 曲）`}
         </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <PresetActions preset={preset} />
+        </div>
       </div>
 
       {itemsQuery.isError ? (
@@ -73,9 +76,7 @@ export default function PresetPlaylistPage() {
         <p className="rounded-xl border bg-white py-12 text-center text-gray-500">条件に合う歌唱がまだありません。</p>
       ) : (
         <section className="space-y-4" aria-label="収録曲">
-          <PerformanceListToolbar items={listItems} scope={items.length < preset.item_count ? 'shown' : 'all'} total={preset.item_count}>
-            <PresetActions preset={preset} />
-          </PerformanceListToolbar>
+          <PerformanceListToolbar items={listItems} scope={items.length < preset.item_count ? 'shown' : 'all'} total={preset.item_count} />
           <PerformanceList items={listItems} numbered />
         </section>
       )}

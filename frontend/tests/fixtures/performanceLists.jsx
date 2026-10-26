@@ -10,7 +10,7 @@ import TagPage from '/src/pages/TagPage';
 import { ToastProvider } from '/src/components/ui/Toast';
 import { useAuthStore } from '/src/store/auth';
 import { usePlayerStore } from '/src/store/player';
-import { channelApi, playlistApi } from '/src/api/client';
+import { channelApi, playlistApi, presetPlaylistApi } from '/src/api/client';
 
 const wait = () => new Promise((resolve) => setTimeout(resolve, 25));
 const cover = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120"><defs><linearGradient id="g" x2="1" y2="1"><stop stop-color="#8b5cf6"/><stop offset="1" stop-color="#c4b5fd"/></linearGradient></defs><rect width="120" height="120" fill="url(#g)"/><circle cx="60" cy="60" r="36" fill="none" stroke="white" stroke-opacity=".5" stroke-width="2"/><circle cx="60" cy="60" r="6" fill="white"/></svg>')}`;
@@ -24,8 +24,9 @@ function LocationProbe() {
 // 実際の5ページを合成データで開く。ネットワーク・本番の資料・実際の書き込みは使わない。
 export async function run(tc) {
   const editor = tc.role === 'editor';
-  useAuthStore.setState({ user: editor ? { id: 'editor', permissions: ['content:edit'], username: 'Editor' } : null,
-    status: editor ? 'authenticated' : 'anonymous' });
+  const authenticated = tc.role !== 'anonymous';
+  useAuthStore.setState({ user: authenticated ? { id: 'viewer', permissions: editor ? ['content:edit'] : [], username: 'Viewer' } : null,
+    status: authenticated ? 'authenticated' : 'anonymous' });
   usePlayerStore.setState({ queue: [], index: 0, playing: false, editing: null });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, retryOnMount: false, staleTime: Infinity } } });
   const channel = { id: 'channel', name: 'デモチャンネル', english_name: 'Demo Channel', photo_url: cover,
@@ -50,7 +51,8 @@ export async function run(tc) {
   let playlistItems = [...performances];
   const playlist = { id: 'playlist', name: '夜に聴きたい歌', description: '好きな歌唱を、ひとつのプレイリストに。', owner_name: 'Demo Listener',
     is_owner: editor && tc.page !== 'shared', item_count: 3, visibility: 'public' };
-  const preset = { key: 'collab', name: 'コラボ', description: 'ふたり以上で歌った曲を集めました。', item_count: 43, is_following: false };
+  let preset = { key: 'collab', name: 'コラボ', description: 'ふたり以上で歌った曲を集めました。',
+    item_count: tc.presetState === 'empty' ? 0 : 43, is_following: tc.following ?? false };
   // SongPerformance は arts を持たない。曲詳細は曲情報が親にあり、行の曲情報も欠け得る。
   const histories = performances.map(({ arts: _arts, ...p }) => p);
   client.setQueryData(['singer', 'channel', editor], channel);
@@ -79,7 +81,18 @@ export async function run(tc) {
     playlistItems = playlistItems.filter((p) => p.id !== performanceId);
   };
   client.setQueryData(['presets', 'detail', 'collab'], preset);
-  client.setQueryData(['preset-items', 'collab', 'all'], { performances });
+  presetPlaylistApi.get = async () => preset;
+  presetPlaylistApi.follow = async (key) => {
+    calls.push(['follow', key]);
+    preset = { ...preset, is_following: true };
+  };
+  presetPlaylistApi.unfollow = async (key) => {
+    calls.push(['unfollow', key]);
+    preset = { ...preset, is_following: false };
+  };
+  if (tc.presetState === 'loading') presetPlaylistApi.items = () => new Promise(() => {});
+  else if (tc.presetState === 'error') presetPlaylistApi.items = async () => { throw new Error('fixture items failure'); };
+  else client.setQueryData(['preset-items', 'collab', 'all'], { performances: tc.presetState === 'empty' ? [] : performances });
   client.setQueryData(['performance-tags'], [{ id: 'acoustic', display_name: 'Acoustic', color: '#7c3aed' }]);
   client.setQueryData(['tag-performances', 'acoustic', 2], { performances, pagination });
   const urls = { channel: '/channels/channel?tab=performances&ppage=2', song: '/songs/song?page=2',
@@ -98,6 +111,19 @@ export async function run(tc) {
       createElement(Route, { path: '/playlists/preset/:key', element: createElement(PresetPlaylistPage) }),
       createElement(Route, { path: '/tags/:kind/:id', element: createElement(TagPage) }),
       createElement(Route, { path: '*', element: createElement('p', null, 'リンク先') }))))));
+  if (tc.presetState) {
+    const followButton = () => document.querySelector('button[title^="フォロー"]');
+    for (let i = 0; i < 100 && (!document.querySelector('h1') || (tc.presetState === 'error' && !document.querySelector('[role="alert"]'))); i++) await wait();
+    const button = followButton();
+    const before = { present: !!button, enabled: !!button && !button.disabled, title: button?.title };
+    button?.click();
+    for (let i = 0; i < 100 && button && followButton()?.title === before.title; i++) await wait();
+    const result = { before, afterTitle: followButton()?.title, calls, text: host.textContent,
+      hasList: !!document.querySelector('[aria-label="歌唱リスト"]'),
+      pageOverflow: Math.max(0, document.documentElement.scrollWidth - innerWidth) };
+    root.unmount(); client.clear();
+    return result;
+  }
   for (let i = 0; i < 100 && !document.querySelector('[aria-label="歌唱リスト"]'); i++) await wait();
   const list = document.querySelector('[aria-label="歌唱リスト"]');
   if (!list) throw new Error(`一覧が描画されません: ${document.body.innerText}`);

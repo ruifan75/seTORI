@@ -33,6 +33,36 @@ test('歌唱リスト：実ページの表示・再生・報告・並び替え�
       window.fixtureReady=true;</script></body></html>`);
     browser = await openChrome(chrome, dir);
     await browser.send('Page.enable');
+    for (const width of [390, 1440]) {
+      await t.test(`Channel の並び替えに可及名がある (${width}px)`, async () => {
+        await browser.send('Emulation.setDeviceMetricsOverride', { width, height: 1000, deviceScaleFactor: 1, mobile: false });
+        await browser.send('Page.navigate', { url: pathToFileURL(file).href });
+        const result = await browser.send('Runtime.evaluate', { awaitPromise: true,
+          expression: `(async()=>{for(let i=0;i<100&&!window.fixtureReady;i++)await new Promise(r=>setTimeout(r,20));await ListsFixture.run({page:'channel',role:'anonymous',preview:true});})()` });
+        if (result.exceptionDetails) throw new Error(JSON.stringify(result.exceptionDetails));
+        const { nodes } = await browser.send('Accessibility.getFullAXTree');
+        const sorts = nodes.filter((node) => !node.ignored && node.role?.value === 'combobox');
+        assert.deepEqual(sorts.map((node) => node.name?.value), ['並び替え'], '並び替え select の可及名');
+      });
+      for (const presetState of ['empty', 'loading', 'error']) {
+        for (const following of [false, true]) await t.test(`Preset ${presetState} following=${following} (${width}px)`, async () => {
+          await browser.send('Emulation.setDeviceMetricsOverride', { width, height: 1000, deviceScaleFactor: 1, mobile: false });
+          await browser.send('Page.navigate', { url: pathToFileURL(file).href });
+          const result = await browser.send('Runtime.evaluate', { awaitPromise: true, returnByValue: true,
+            expression: `(async()=>{for(let i=0;i<100&&!window.fixtureReady;i++)await new Promise(r=>setTimeout(r,20));return ListsFixture.run(${JSON.stringify({ page: 'preset', role: 'listener', presetState, following })});})()` });
+          if (result.exceptionDetails) throw new Error(JSON.stringify(result.exceptionDetails));
+          const v = result.result.value;
+          assert.ok(v.before.present && v.before.enabled, '歌唱の取得状態にかかわらずフォロー操作を使える');
+          assert.equal(v.before.title.includes('解除'), following);
+          assert.deepEqual(v.calls, [[following ? 'unfollow' : 'follow', 'collab']], 'フォロー操作が対応する API を呼ぶ');
+          assert.equal(v.afterTitle.includes('解除'), !following, '更新後のフォロー状態を表示する');
+          assert.equal(v.hasList, false);
+          assert.equal(v.pageOverflow, 0);
+          if (presetState === 'empty') assert.match(v.text, /条件に合う歌唱がまだありません/);
+          if (presetState === 'error') assert.match(v.text, /歌唱リストを取得できませんでした/);
+        });
+      }
+    }
     const cases = [];
     for (const page of ['channel', 'song', 'playlist', 'shared', 'preset', 'tag']) {
       for (const role of ['anonymous', 'editor']) {
