@@ -1,20 +1,17 @@
 import { useState } from 'react';
 import { invalidateChannelScopedQueries } from '../queryClient';
-import RestrictedBadge from '../components/RestrictedBadge';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { channelApi, holodexApi, organizationApi } from '../api/client';
 import type { Organization } from '../api/types';
 import { useAuthStore, hasPermission, PERM } from '../store/auth';
-import { usePlayerStore, performanceToTrack } from '../store/player';
 import Loading from '../components/ui/Loading';
+import PerformanceList from '../components/PerformanceList';
+import PerformanceListToolbar from '../components/PerformanceListToolbar';
+import { toPerformanceListItem } from '../utils/performanceList';
 import Pagination from '../components/ui/Pagination';
 import Tag from '../components/ui/Tag';
-import ArtistLinks from '../components/ArtistLinks';
-import QueueAddButton from '../components/QueueAddButton';
-import PerformanceListRow from '../components/PerformanceListRow';
-import ReportButton from '../components/ReportButton';
-import { SortableTh, type SortDir, type SortState } from '../components/ui/Sort';
+import { SortControl, type SortDir, type SortState } from '../components/ui/Sort';
 import { useToast } from '../components/ui/ToastContext';
 import VisibilityIcon from '../components/ui/VisibilityIcon';
 
@@ -36,7 +33,7 @@ export default function ChannelDetailPage() {
   const activeTab: TabType = searchParams.get('tab') === 'performances' ? 'performances' : 'streams';
   const streamPage = Math.max(1, parseInt(searchParams.get('page') || '1') || 1);
   const perfPage = Math.max(1, parseInt(searchParams.get('ppage') || '1') || 1);
-  // 歌唱曲一覧テーブルの並び替え（既定は配信日の新しい順）
+  // 歌唱履歴の並び替え（既定は配信日の新しい順）
   const perfSort = searchParams.get('psort') || 'date';
   const perfDir: SortDir = searchParams.get('pdir')
     ? (searchParams.get('pdir') === 'asc' ? 'asc' : 'desc')
@@ -117,30 +114,13 @@ export default function ChannelDetailPage() {
   });
 
   // Performances
-  const { data: performances, isLoading: perfsLoading } = useQuery({
+  const { data: performances, isLoading: perfsLoading, isError: perfsError } = useQuery({
     queryKey: ['singerPerformances', id, perfPage, perfSort, perfDir],
     queryFn: () => channelApi.getPerformances(id!, perfPage, 20, perfSort, perfDir),
     enabled: !!id && activeTab === 'performances',
   });
 
-  // 歌唱記録1件を再生キューのトラックへ変換
-  const toTrack = performanceToTrack;
-
-  // 歌唱曲一覧（現在のページ）をキューに載せて startIndex から連続再生
-  const playPerformancesFrom = (startIndex: number) => {
-    const tracks = (performances?.performances ?? []).map(toTrack);
-    usePlayerStore.getState().playTracks(tracks, startIndex);
-  };
-
-  // 現在のページの歌唱曲をシャッフルして先頭から連続再生（Fisher–Yates）
-  const shufflePlay = () => {
-    const tracks = (performances?.performances ?? []).map(toTrack);
-    for (let i = tracks.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [tracks[i], tracks[j]] = [tracks[j], tracks[i]];
-    }
-    usePlayerStore.getState().playTracks(tracks, 0);
-  };
+  const listItems = (performances?.performances ?? []).map((perf) => toPerformanceListItem(perf));
 
   // Sync mutation
   const syncMutation = useMutation({
@@ -196,16 +176,6 @@ export default function ChannelDetailPage() {
     e.preventDefault();
     if (!editForm.name.trim()) return;
     updateMutation.mutate();
-  };
-
-  const formatTime = (seconds: number) => {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = seconds % 60;
-    if (h > 0) {
-      return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-    }
-    return `${m}:${s.toString().padStart(2, '0')}`;
   };
 
   if (channelLoading) {
@@ -278,7 +248,7 @@ export default function ChannelDetailPage() {
                 <span className="font-medium text-gray-900">{channel.stream_count}</span> 歌枠
               </div>
               <div>
-                <span className="font-medium text-gray-900">{channel.performance_count}</span> 曲
+                <span className="font-medium text-gray-900">{channel.performance_count}</span> 回の歌唱
               </div>
             </div>
           </div>
@@ -441,7 +411,7 @@ export default function ChannelDetailPage() {
                 : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
             }`}
           >
-            歌唱曲一覧
+            歌唱履歴
           </button>
         </nav>
       </div>
@@ -580,184 +550,24 @@ export default function ChannelDetailPage() {
 
       {activeTab === 'performances' && (
         <div className="space-y-4">
-          {perfsLoading ? (
-            <Loading />
-          ) : performances?.performances.length === 0 ? (
-            <div className="text-center py-12 text-gray-500">
-              まだ歌唱記録がありません
-            </div>
+          {perfsError ? (
+            <p role="alert" className="py-12 text-center text-red-700">歌唱履歴を取得できませんでした</p>
+          ) : perfsLoading ? <Loading /> : listItems.length === 0 ? (
+            <p className="rounded-xl border bg-white py-12 text-center text-gray-500">まだ歌唱記録がありません</p>
           ) : (
             <>
-              {/* 一覧全体の再生操作（このページの歌唱曲が対象） */}
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => playPerformancesFrom(0)}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 text-sm bg-indigo-600 text-white font-medium rounded-full hover:bg-indigo-700 transition-colors"
-                  title="このページの歌唱曲を上から連続再生"
-                >
-                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
-                  再生
-                </button>
-                <button
-                  onClick={shufflePlay}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 text-sm bg-white border border-gray-300 text-gray-700 font-medium rounded-full hover:bg-gray-50 transition-colors"
-                  title="このページの歌唱曲をシャッフル再生"
-                >
-                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z" /></svg>
-                  ランダム再生
-                </button>
-              </div>
-              <div className="bg-white rounded-lg shadow-sm border">
-              {/* 狭い画面は表をやめて縦積みの行にする（配信詳細のセットリストと同じ） */}
-              <ul className="divide-y divide-gray-100 md:hidden">
-                {performances?.performances.map((perf, perfIndex) => (
-                  <PerformanceListRow
-                    key={perf.id}
-                    track={toTrack(perf)}
-                    thumbnailUrl={perf.thumbnail_url}
-                    youtubeUrl={perf.youtube_url}
-                    playLabel={`${perf.song_name ?? '(不明)'} からこのページの歌唱を連続再生`}
-                    onPlay={() => playPerformancesFrom(perfIndex)}
-                    meta={
-                      // 日付と歌枠名を 1 行に並べると、狭い側（歌枠名）が数文字に潰れる。
-                      // どの歌枠かは曲を辿るときの手がかりなので、行を分けて幅を渡す
-                      <>
-                        <span className="block font-mono">
-                          {new Date(perf.stream_date).toLocaleDateString('ja-JP')}{' '}
-                          {formatTime(perf.start_seconds)}
-                        </span>
-                        {/* 歌枠へは行きたいのでリンクのまま拾わせる */}
-                        <span className="flex items-center gap-1.5 min-w-0">
-                          <Link
-                            to={`/streams/${perf.stream_id}`}
-                            className="pointer-events-auto block truncate hover:text-indigo-600"
-                          >
-                            {perf.stream_title}
-                          </Link>
-                          {perf.is_restricted && <RestrictedBadge />}
-                        </span>
-                      </>
-                    }
-                  />
-                ))}
-              </ul>
-
-              <div className="hidden md:block overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <SortableTh label="楽曲" sortKey="song" sort={perfSort} dir={perfDir} onSort={handlePerfSort} />
-                      <SortableTh label="歌枠" sortKey="stream" sort={perfSort} dir={perfDir} onSort={handlePerfSort} />
-                      <SortableTh label="日付" sortKey="date" sort={perfSort} dir={perfDir} onSort={handlePerfSort} firstDir="desc" />
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        時間
-                      </th>
-                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-32">
-                        操作
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {performances?.performances.map((perf, perfIndex) => (
-                      <tr key={perf.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-4">
-                          {perf.song_id ? (
-                            <div>
-                              <Link
-                                to={`/songs/${perf.song_id}`}
-                                className="text-indigo-600 hover:text-indigo-900 font-medium"
-                              >
-                                {perf.song_name}
-                              </Link>
-                              <ArtistLinks
-                                artists={perf.artists}
-                                fallback={perf.original_artist}
-                                className="block text-xs text-gray-500"
-                                linkClassName="hover:text-indigo-600"
-                              />
-                            </div>
-                          ) : (
-                            <div>
-                              <span className="text-gray-900">{perf.song_name}</span>
-                              <ArtistLinks
-                                artists={perf.artists}
-                                fallback={perf.original_artist}
-                                className="block text-xs text-gray-500"
-                                linkClassName="hover:text-indigo-600"
-                              />
-                            </div>
-                          )}
-                        </td>
-                        <td className="px-4 py-4">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <Link
-                              to={`/streams/${perf.stream_id}`}
-                              className="text-gray-600 hover:text-gray-900 text-sm line-clamp-1"
-                            >
-                              {perf.stream_title}
-                            </Link>
-                            {perf.is_restricted && <RestrictedBadge />}
-                          </div>
-                        </td>
-                        <td className="px-4 py-4 text-sm text-gray-500">
-                          {(() => {
-                            const streamDate = new Date(perf.stream_date);
-                            const singTime = new Date(streamDate.getTime() + perf.start_seconds * 1000);
-                            return singTime.toLocaleString('ja-JP', {
-                              year: 'numeric',
-                              month: '2-digit',
-                              day: '2-digit',
-                              hour: '2-digit',
-                              minute: '2-digit',
-                              second: '2-digit',
-                              hour12: false,
-                            });
-                          })()}
-                        </td>
-                        <td className="px-4 py-4 text-sm text-gray-500 font-mono">
-                          {formatTime(perf.start_seconds)}
-                        </td>
-                        <td className="px-4 py-4">
-                          <div className="flex items-center justify-end gap-1.5">
-                            <button
-                              onClick={() => playPerformancesFrom(perfIndex)}
-                              className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
-                              title="この歌唱から連続再生"
-                            >
-                              <svg className="w-4 h-4 ml-0.5" fill="currentColor" viewBox="0 0 24 24">
-                                <path d="M8 5v14l11-7z" />
-                              </svg>
-                            </button>
-                            <QueueAddButton track={toTrack(perf)} />
-                            {/* 曲・歌枠ページと同じ報告導線をここにも置く（右側の操作をそろえる） */}
-                            <ReportButton track={toTrack(perf)} />
-                            <a
-                              href={perf.youtube_url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center justify-center w-8 h-8 rounded-full text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
-                              title="YouTubeで開く"
-                            >
-                              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                                <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
-                              </svg>
-                            </a>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              </div>
-
-              {performances && (
-                <Pagination
-                  page={perfPage}
-                  totalPages={performances.pagination.total_pages}
-                  onPageChange={setPerfPage}
+              <PerformanceListToolbar items={listItems} scope="page" total={performances?.pagination.total}>
+                <SortControl
+                  options={[
+                    { value: 'date', label: '配信日', firstDir: 'desc' },
+                    { value: 'song', label: '楽曲名', firstDir: 'asc' },
+                    { value: 'stream', label: '配信名', firstDir: 'asc' },
+                  ]}
+                  sort={perfSort} dir={perfDir} onSort={handlePerfSort}
                 />
-              )}
+              </PerformanceListToolbar>
+              <PerformanceList items={listItems} channelId={id} />
+              {performances && <Pagination page={perfPage} totalPages={performances.pagination.total_pages} onPageChange={setPerfPage} />}
             </>
           )}
         </div>

@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import RestrictedBadge from '../components/RestrictedBadge';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiErrorMessage } from '../utils/apiError';
 import { useParams, useSearchParams, Link, useNavigate } from 'react-router-dom';
@@ -11,28 +10,16 @@ import type {
   ITunesQueryResult,
 } from '../api/types';
 import Loading from '../components/ui/Loading';
+import PerformanceList from '../components/PerformanceList';
+import PerformanceListToolbar from '../components/PerformanceListToolbar';
+import { toPerformanceListItem } from '../utils/performanceList';
 import Pagination from '../components/ui/Pagination';
-import Tag from '../components/ui/Tag';
 import EditableField from '../components/EditableField';
-import QueueAddButton from '../components/QueueAddButton';
-import ReportButton from '../components/ReportButton';
 import ArtistLinks from '../components/ArtistLinks';
 import ArtistSearchInput from '../components/ArtistSearchInput';
 import { withdrawSuggestion } from '../components/usePerformanceTiming';
 import { useToast } from '../components/ui/ToastContext';
 import { useAuthStore, hasPermission, PERM } from '../store/auth';
-import { usePlayerStore, type PlayerTrack } from '../store/player';
-
-function formatTime(seconds: number): string {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
-
-  if (h > 0) {
-    return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-  }
-  return `${m}:${s.toString().padStart(2, '0')}`;
-}
 
 // 楽曲検索入力コンポーネントの Props
 interface SongSearchInputProps {
@@ -554,37 +541,18 @@ export default function SongDetailPage() {
     }
   };
 
-  // 歌唱記録1件を再生キューのトラックへ変換する
-  const toTrack = (perf: (typeof performances)[number]): PlayerTrack => ({
-    performanceId: perf.id,
-    streamId: perf.stream_id,
-    songId: song.id,
-    songName: song.name,
-    artist: song.original_artist,
-    artists: song.artists ?? [],
-    artUrl: song.arts,
-    singers: perf.singers?.map((s) => ({ id: s.id, name: s.name })) ?? [],
-    streamTitle: perf.stream_title,
-    streamDate: perf.stream_date,
-    start: perf.start_seconds,
-    end: perf.end_seconds,
-  });
-
-  // この曲の歌唱記録をグローバルプレイヤーのキューに載せて startIndex から再生
-  const playAll = (startIndex: number) => {
-    usePlayerStore.getState().playTracks(performances.map(toTrack), startIndex);
-  };
+  const listItems = performances.map((perf) => toPerformanceListItem(perf, song));
 
   return (
     <div className="space-y-6">
       {/* Song Header */}
-      <div className="bg-white rounded-lg shadow-sm border p-6">
-        <div className="flex items-start gap-6">
+      <div className="bg-white rounded-xl shadow-sm border p-4 sm:p-6">
+        <div className="flex items-start gap-4 sm:gap-6">
           {!isEditing && song.arts && (
             <img
               src={song.arts}
               alt={song.name}
-              className="w-32 h-32 rounded-lg object-cover shadow-md"
+              className="w-16 h-16 shrink-0 sm:w-32 sm:h-32 rounded-lg object-cover shadow-md"
             />
           )}
           {/* min-w-0 が無いと、中の長い文字列（iTunes の歌手名など）に押されて
@@ -870,7 +838,7 @@ export default function SongDetailPage() {
             ) : (
               <>
                 {/* 曲名・読み・アーティストはホバーで鉛筆が出る。権限があれば即時保存、無ければ修正提案。 */}
-                <div className="flex items-start justify-between gap-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div className="min-w-0 space-y-1">
                     <EditableField
                       as="h1"
@@ -878,7 +846,7 @@ export default function SongDetailPage() {
                       value={song.name}
                       canEdit={canEdit}
                       required
-                      className="text-3xl font-bold text-gray-900 break-words"
+                      className="text-2xl sm:text-3xl font-bold text-gray-900 break-words"
                       onSave={(v) => saveSongField({ name: v })}
                       onSuggest={(v, n) => suggestSongField('name', v, n)}
                     />
@@ -1010,166 +978,18 @@ export default function SongDetailPage() {
         </div>
       )}
 
-      {/* Performances List */}
-      <div>
-        <div className="flex items-center gap-3 mb-4">
-          <h2 className="text-2xl font-bold text-gray-900">歌唱履歴</h2>
-          {performances.length > 0 && (
-            <button
-              onClick={() => playAll(0)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm bg-indigo-600 text-white font-medium rounded-full hover:bg-indigo-700 transition-colors"
-              title="この曲の歌唱をまとめて連続再生"
-            >
-              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-              すべて再生
-            </button>
-          )}
-        </div>
-
-        {performances.length === 0 ? (
-          <div className="text-center py-12 text-gray-500 bg-white rounded-lg border">
-            歌唱履歴がありません
-          </div>
+      <section className="space-y-4">
+        <h2 className="text-2xl font-bold text-gray-900">歌唱履歴</h2>
+        {listItems.length === 0 ? (
+          <p className="rounded-xl border bg-white py-12 text-center text-gray-500">歌唱履歴がありません</p>
         ) : (
           <>
-            <div className="space-y-4">
-              {performances.map((perf, perfIndex) => (
-                <div
-                  key={perf.id}
-                  className="bg-white rounded-lg shadow-sm border overflow-hidden hover:shadow-md transition-shadow"
-                >
-                  {/* モバイルはサムネイルを上に全幅表示、sm 以上で左右並び */}
-                  <div className="flex flex-col sm:flex-row">
-                    {/* Thumbnail：クリックでサイト内プレイヤー再生 */}
-                    <button
-                      onClick={() => playAll(perfIndex)}
-                      className="flex-shrink-0 relative group text-left"
-                      title="この歌唱から連続再生"
-                    >
-                      {perf.thumbnail_url ? (
-                        <img
-                          src={perf.thumbnail_url}
-                          alt={perf.stream_title}
-                          className="w-full aspect-video sm:w-48 sm:h-28 sm:aspect-auto object-cover"
-                        />
-                      ) : (
-                        <div className="w-full aspect-video sm:w-48 sm:h-28 sm:aspect-auto bg-gray-200 flex items-center justify-center">
-                          <span className="text-gray-400">No Image</span>
-                        </div>
-                      )}
-                      {/* Play overlay */}
-                      <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 flex items-center justify-center transition-all">
-                        <div className="w-12 h-12 rounded-full bg-indigo-600 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                          <svg className="w-6 h-6 text-white ml-1" fill="currentColor" viewBox="0 0 24 24">
-                            <path d="M8 5v14l11-7z" />
-                          </svg>
-                        </div>
-                      </div>
-                      {/* Timestamp badge */}
-                      <div className="absolute bottom-1 right-1 bg-black bg-opacity-80 text-white text-xs px-1.5 py-0.5 rounded">
-                        {formatTime(perf.start_seconds)}
-                      </div>
-                    </button>
-
-                    {/* Content */}
-                    <div className="flex-1 min-w-0 p-4">
-                      <div className="flex items-start justify-between">
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <Link
-                              to={`/streams/${perf.stream_id}`}
-                              className="font-medium text-gray-900 hover:text-indigo-600 line-clamp-1"
-                            >
-                              {perf.stream_title}
-                            </Link>
-                            {perf.is_restricted && <RestrictedBadge />}
-                          </div>
-                          <p className="text-sm text-gray-500 mt-1">
-                            {(() => {
-                              const streamDate = new Date(perf.stream_date);
-                              const singTime = new Date(streamDate.getTime() + perf.start_seconds * 1000);
-                              return singTime.toLocaleString('ja-JP', {
-                                year: 'numeric',
-                                month: '2-digit',
-                                day: '2-digit',
-                                hour: '2-digit',
-                                minute: '2-digit',
-                                second: '2-digit',
-                                hour12: false,
-                              });
-                            })()}
-                          </p>
-                        </div>
-                        <div className="flex-shrink-0 ml-4 flex items-center gap-1.5">
-                          <button
-                            onClick={() => playAll(perfIndex)}
-                            className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
-                            title="この歌唱から連続再生"
-                          >
-                            <svg className="w-4 h-4 ml-0.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
-                          </button>
-                          <QueueAddButton track={toTrack(perf)} />
-                          {/* 時間・曲・歌った人はすべて 1 つの報告画面で直す
-                              （行ごとにボタンを増やさない） */}
-                          <ReportButton track={toTrack(perf)} />
-                          <a
-                            href={perf.youtube_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center justify-center w-8 h-8 rounded-full text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
-                            title="YouTubeで開く"
-                          >
-                            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                              <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
-                            </svg>
-                          </a>
-                        </div>
-                      </div>
-
-                      {/* Tags */}
-                      {(perf.tags.length > 0 || (perf.custom_tags && perf.custom_tags.length > 0)) && (
-                        <div className="flex flex-wrap gap-1.5 mt-3">
-                          {perf.tags.map((tag) => (
-                            <Tag key={tag.id} label={tag.display_name} color={tag.color} />
-                          ))}
-                          {perf.custom_tags?.map((ct) => (
-                            <Tag key={ct} label={ct} color="#6B7280" />
-                          ))}
-                        </div>
-                      )}
-
-                      {/* Singers */}
-                      {perf.singers.length > 0 && (
-                        <div className="flex items-center gap-2 mt-3">
-                          <span className="text-xs text-gray-500">歌唱:</span>
-                          <div className="flex flex-wrap gap-1">
-                            {perf.singers.map((singer) => (
-                              <span
-                                key={singer.id}
-                                className="text-xs text-gray-700 bg-gray-100 px-2 py-0.5 rounded"
-                              >
-                                {singer.name}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div className="mt-6">
-              <Pagination
-                page={page}
-                totalPages={pagination.total_pages}
-                onPageChange={handlePageChange}
-              />
-            </div>
+            <PerformanceListToolbar items={listItems} scope="page" total={pagination.total} />
+            <PerformanceList items={listItems} emphasis="stream" />
+            <Pagination page={page} totalPages={pagination.total_pages} onPageChange={handlePageChange} />
           </>
         )}
-      </div>
+      </section>
 
     </div>
   );
